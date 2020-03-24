@@ -4,6 +4,7 @@ STRATUM_DIR=$(pwd)
 ASSIMP_DIR=$(pwd)/ThirdParty/assimp
 SHADERC_DIR=$(pwd)/ThirdParty/shaderc
 SPIRV_CROSS_DIR=$(pwd)/ThirdParty/shaderc/third_party/spirv-cross
+OPENXR_DIR=$(pwd)/ThirdParty/OpenXR-SDK
 
 echo Installing dependencies...
 wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
@@ -11,6 +12,7 @@ wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.2.131-bionic.list http://packag
 apt update -y
 apt install -y vulkan-sdk
 apt install -y python3 cmake libz-dev libx11-dev libxrandr-dev
+apt install -y build-essential libgl1-mesa-dev libvulkan-dev libx11-xcb-dev libxcb-dri2-0-dev libxcb-glx0-dev libxcb-icccm4-dev libxcb-keysyms1-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev mesa-common-dev
 echo Dependencies installed.
 
 echo Updating submodules...
@@ -41,5 +43,13 @@ echo Building SPIRV-cross...
 cd $SPIRV_CROSS_DIR
 make -j16
 echo SPIRV-cross built.
+
+cd "$OPENXR_DIR"
+echo Configuring OpenXR...
+cmake CMakeLists.txt -S "$OPENXR_DIR" -B "$OPENXR_DIR" -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OPENXR_DIR"
+echo OpenXR configured.
+echo Building OpenXR
+cmake --build . --config Release --target install
+echo OpenXR built.
 
 cd $STRATUM_DIR
