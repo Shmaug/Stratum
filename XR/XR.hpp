@@ -5,14 +5,14 @@
 #include <Input/MouseKeyboardInput.hpp>
 #include <Util/Profiler.hpp>
 
-#include <openxr/openxr.h>
+#include "XRRuntime.hpp"
 
 class XR : public EnginePlugin {
 private:
 	Scene* mScene;
 	std::vector<Object*> mObjects;
 
-	XrInstance mInstance;
+	XRRuntime* mRuntime;
 
 public:
 	PLUGIN_EXPORT XR();

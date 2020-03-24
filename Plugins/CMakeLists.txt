@@ -7,5 +7,5 @@ add_subdirectory("XR/")
 
 #add_subdirectory("CameraControl/")
 #add_subdirectory("BRDFView/")
-add_subdirectory("MeshView/")
+#add_subdirectory("MeshView/")
 #add_subdirectory("Raytracing/")

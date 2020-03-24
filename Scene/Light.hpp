@@ -62,7 +62,7 @@ public:
 		case LIGHT_TYPE_SUN:
 			return AABB(float3(-1e10f), float3(1e10f));
 		}
-		fprintf_color(COLOR_RED_BOLD, stderr, "Unknown light type!");
+		fprintf_color(COLOR_RED_BOLD, stderr, "%s", "Unknown light type!");
 		throw;
 	}
 

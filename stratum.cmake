@@ -20,7 +20,9 @@ endif()
 function(link_plugin TARGET_NAME)
 	target_include_directories(${TARGET_NAME} PUBLIC
 		"${STRATUM_HOME}"
-		"${STRATUM_HOME}/ThirdParty/assimp/include" )
+		"${STRATUM_HOME}/ThirdParty/assimp/include"
+		"${STRATUM_HOME}/ThirdParty/openvr/headers"
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/include" )
 
 	if(WIN32)
 		if(DEFINED ENV{VULKAN_SDK})

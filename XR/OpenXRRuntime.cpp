@@ -1,28 +1,11 @@
-#include "XR.hpp"
-#include <Scene/Scene.hpp>
-#include <Scene/GUI.hpp>
-#include <Content/Font.hpp>
+#include "OpenXRRuntime.hpp"
 
-using namespace std;
-
-ENGINE_PLUGIN(XR)
-
-XR::XR() : mScene(nullptr) {
-	mEnabled = true;
-}
-XR::~XR() {
-	for (Object* o : mObjects)
-		mScene->RemoveObject(o);
-}
-
-bool XR::Init(Scene* scene) {
-	mScene = scene;
-
+bool OpenXRRuntime::Init() {
 	uint32_t layerPropertyCount;
 	xrEnumerateApiLayerProperties(0, &layerPropertyCount, nullptr);
 
 	if (layerPropertyCount == 0) {
-		printf_color(COLOR_YELLOW, "No available XR layers!\n");
+		printf_color(COLOR_YELLOW, "%s", "No available XR layers!\n");
 		return false;
 	}
 
@@ -56,14 +39,4 @@ bool XR::Init(Scene* scene) {
 	info.enabledExtensionCount = 0;
 	info.enabledApiLayerCount = 0;
 	xrCreateInstance(&info, &mInstance);
-
-	return true;
-}
-
-void XR::Update(CommandBuffer* commandBuffer) {
-
-}
-
-void XR::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
-
 }

@@ -67,9 +67,9 @@ PluginManager::PluginHandle PluginManager::LoadPlugin(const string& filename, bo
 }
 void PluginManager::UnloadPlugin(PluginHandle handle){
 	#ifdef WINDOWS
-	if (!FreeLibrary(handle)) fprintf_color(COLOR_RED, stderr, "Failed to unload plugin module\n");
+	if (!FreeLibrary(handle)) fprintf_color(COLOR_RED, stderr, "%s", "Failed to unload plugin module\n");
 	#else
-	if (dlclose(handle) != 0) fprintf_color(COLOR_RED, stderr, "Failed to unload plugin library\n");
+	if (dlclose(handle) != 0) fprintf_color(COLOR_RED, stderr, "%s", "Failed to unload plugin library\n");
 	#endif
 }
 

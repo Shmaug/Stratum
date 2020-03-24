@@ -54,10 +54,14 @@ target_compile_definitions(Stratum PUBLIC -DENGINE_CORE)
 
 target_include_directories(Stratum PUBLIC
 	"${STRATUM_HOME}"
-	"${STRATUM_HOME}/ThirdParty/assimp/include" )
+	"${STRATUM_HOME}/ThirdParty/assimp/include"
+	"${STRATUM_HOME}/ThirdParty/openvr/headers"
+	"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/include")
 target_include_directories(Engine PUBLIC
 	"${STRATUM_HOME}"
-	"${STRATUM_HOME}/ThirdParty/assimp/include" )
+	"${STRATUM_HOME}/ThirdParty/assimp/include"
+	"${STRATUM_HOME}/ThirdParty/openvr/headers"
+	"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/include")
 target_include_directories(ShaderCompiler PUBLIC
 	"${STRATUM_HOME}"
 	"${STRATUM_HOME}/ThirdParty/shaderc/include"
@@ -83,7 +87,8 @@ if(WIN32)
 		"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib" )
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib"
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/openxr_loader.lib" )
 
 	target_link_libraries(Stratum
 		"Ws2_32.lib"
@@ -101,7 +106,7 @@ else()
 		stdc++fs
 		pthread
 		"libvulkan.so.1"
-		"${STRATUM_HOME}/ThirdParty/shaderc/lib64/libshaderc_combined.a"
+		"${STRATUM_HOME}/ThirdParty/shaderc/lib/libshaderc_combined.a"
 		"${STRATUM_HOME}/ThirdParty/shaderc/third_party/spirv-cross/libspirv-cross.a" )
 
 	target_link_libraries(Engine
@@ -113,12 +118,14 @@ else()
 		"libX11-xcb.so"
 		"libxcb-keysyms.so"
 		"libxcb-randr.so"
-		"libz.so"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/libassimp.a"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/libIrrXML.a" )
+		z
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/libIrrXML.a"
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/libopenxr_loader.so"
+		"${STRATUM_HOME}/ThirdParty/openvr/lib/linux64/libopenvr_api.so" )
 
 	target_link_libraries(Stratum "${PROJECT_BINARY_DIR}/bin/libEngine.so" "libvulkan.so.1")
-endif(WIN32)
+endif()
 
 if (${ENABLE_DEBUG_LAYERS})
 	target_compile_definitions(Stratum PUBLIC -DENABLE_DEBUG_LAYERS)

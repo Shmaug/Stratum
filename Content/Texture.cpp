@@ -374,7 +374,7 @@ inline void AccessFlags(VkImageLayout layout, VkAccessFlags& access, VkPipelineS
 		stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 		break;
 	default:
-		fprintf_color(COLOR_RED, stderr, "Unsupported layout transition (add it here pls)\n");
+		fprintf_color(COLOR_RED, stderr, "%s", "Unsupported layout transition (add it here pls)\n");
 		throw;
 	}
 }

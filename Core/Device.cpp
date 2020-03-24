@@ -261,7 +261,7 @@ void Device::PrintAllocations() {
 		}
 
 	if (used == 0) {
-		printf_color(COLOR_YELLOW, "Using 0 B");
+		printf_color(COLOR_YELLOW, "%s", "Using 0 B");
 		return;
 	}
 
@@ -379,7 +379,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 		}
 	}
 	if (memoryType == -1) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "Failed to find suitable memory type!");
+		fprintf_color(COLOR_RED_BOLD, stderr, "%s", "Failed to find suitable memory type!");
 		throw;
 	}
 
@@ -410,7 +410,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 		vkMapMemory(mDevice, allocation.mMemory, 0, allocation.mSize, 0, &allocation.mMapped);
 
 	if (!allocation.SubAllocate(requirements, alloc, tag)) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "Failed to allocate memory\n");
+		fprintf_color(COLOR_RED_BOLD, stderr, "%s", "Failed to allocate memory\n");
 		throw;
 	}
 

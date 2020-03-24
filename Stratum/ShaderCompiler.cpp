@@ -315,7 +315,7 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 					if (*it == "true") result->mDepthStencilState.depthWriteEnable = VK_TRUE;
 					else if (*it == "false") result->mDepthStencilState.depthWriteEnable = VK_FALSE;
 					else {
-						fprintf_color(COLOR_RED, stderr, "zwrite must be true or false.\n");
+						fprintf_color(COLOR_RED, stderr, "%s", "zwrite must be true or false.\n");
 						return nullptr;
 					}
 
@@ -326,7 +326,7 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 					else if (*it == "false")
 						result->mDepthStencilState.depthTestEnable = VK_FALSE;
 					else{
-						fprintf_color(COLOR_RED, stderr, "ztest must be true or false.\n");
+						fprintf_color(COLOR_RED, stderr, "%s", "ztest must be true or false.\n");
 						return nullptr;
 					}
 

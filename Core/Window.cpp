@@ -158,7 +158,7 @@ xcb_atom_t getReplyAtomFromCookie(xcb_connection_t* connection, xcb_intern_atom_
 	xcb_generic_error_t * error;
 	xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection, cookie, &error);
 	if (error) {
-		printf("Can't set the screen. Error Code: %s", error->error_code);
+		printf("Can't set the screen. Error Code: %d", error->error_code);
 		throw;
 	}
 	return reply->atom;
@@ -250,7 +250,7 @@ void Window::CreateSwapchain(::Device* device) {
 	}
 	uint32_t graphicsFamily, presentFamily;
 	if (!Device::FindQueueFamilies(mPhysicalDevice, mSurface, graphicsFamily, presentFamily)) {
-		fprintf_color(COLOR_RED, stderr, "Failed to find queue families\n");
+		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find queue families\n");
 		throw;
 	}
 	uint32_t queueFamilyIndices[] = { graphicsFamily, presentFamily };
@@ -315,7 +315,7 @@ void Window::CreateSwapchain(::Device* device) {
 	VkBool32 sfcSupport;
 	vkGetPhysicalDeviceSurfaceSupportKHR(mPhysicalDevice, presentFamily, mSurface, &sfcSupport);
 	if (!sfcSupport) {
-		fprintf_color(COLOR_RED, stderr, "Surface not supported by device!");
+		fprintf_color(COLOR_RED, stderr, "%s", "Surface not supported by device!");
 		throw;
 	}
 

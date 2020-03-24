@@ -5,3 +5,9 @@
 [submodule "ThirdParty/shaderc"]
 	path = ThirdParty/shaderc
 	url = https://github.com/google/shaderc
+[submodule "ThirdParty/OpenXR-SDK"]
+	path = ThirdParty/OpenXR-SDK
+	url = https://github.com/KhronosGroup/OpenXR-SDK
+[submodule "ThirdParty/openvr"]
+	path = ThirdParty/openvr
+	url = https://github.com/ValveSoftware/openvr

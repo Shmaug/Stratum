@@ -23,7 +23,7 @@ void Profiler::BeginSample(const string& label) {
 }
 void Profiler::EndSample() {
 	if (!mCurrentSample->mParent) {
-		fprintf_color(COLOR_RED, stderr, "Error: Attempt to end nonexistant Profiler sample!");
+		fprintf_color(COLOR_RED, stderr, "%s\n", "Error: Attempt to end nonexistant Profiler sample!");
 		throw;
 	}
 	mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
@@ -32,7 +32,7 @@ void Profiler::EndSample() {
 
 void Profiler::FrameStart() {
 	int i = mCurrentFrame % PROFILER_FRAME_COUNT;
-	sprintf(mFrames[i].mLabel, "Frame  %llu", mCurrentFrame);
+	sprintf(mFrames[i].mLabel, "Frame  %llu", (long long unsigned int)mCurrentFrame);
 	mFrames[i].mParent = nullptr;
 	mFrames[i].mStartTime = mTimer.now();
 	mFrames[i].mDuration = chrono::nanoseconds::zero();

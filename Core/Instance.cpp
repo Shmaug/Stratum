@@ -168,9 +168,9 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		printf("Creating debug messenger... ");
 		VkResult result = CreateDebugUtilsMessengerEXT(mInstance, &msgr, nullptr, &mDebugMessenger);
 		if (result == VK_SUCCESS)
-			fprintf_color(COLOR_GREEN, stdout, "Success.\n");
+			fprintf_color(COLOR_GREEN, stdout, "%s", "Success.\n");
 		else {
-			fprintf_color(COLOR_RED, stderr, "Failed.\n");
+			fprintf_color(COLOR_RED, stderr, "%s", "Failed.\n");
 			mDebugMessenger = VK_NULL_HANDLE;
 		}
 	}
@@ -264,7 +264,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		if (mWindow) break;
 	}
 	if (!mWindow) {
-		fprintf_color(COLOR_RED, stderr, "Failed to find a device with XCB presentation support!\n");
+		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find a device with XCB presentation support!\n");
 		throw;
 	}
 	#else
