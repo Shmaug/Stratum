@@ -444,55 +444,57 @@ Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const Ver
 		mShapeKeys.emplace(i.first, make_shared<Buffer>(name + i.first, device, i.second, vertexSize * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT));
 }
 
-Mesh* Mesh::CreatePlane(const string& name, Device* device, float s) {
+Mesh* Mesh::CreatePlane(const string& name, Device* device, float s, float v) {
+	float u = 1 / v;
 	const StdVertex verts[4]{
-		{ float3(-s, -s, 0), float3(0,0,1), float4(1,0,0,1), float2(0,0) },
-		{ float3( s, -s, 0), float3(0,0,1), float4(1,0,0,1), float2(1,0) },
-		{ float3(-s,  s, 0), float3(0,0,1), float4(1,0,0,1), float2(0,1) },
-		{ float3( s,  s, 0), float3(0,0,1), float4(1,0,0,1), float2(1,1) }
+		{ float3(-s, -s, 0), float3(0,0,1), float4(u,0,0,1), float2(0,0) },
+		{ float3( s, -s, 0), float3(0,0,1), float4(u,0,0,1), float2(v,0) },
+		{ float3(-s,  s, 0), float3(0,0,1), float4(u,0,0,1), float2(0,v) },
+		{ float3( s,  s, 0), float3(0,0,1), float4(u,0,0,1), float2(v,v) }
 	};
 	const uint16_t indices[6]{
 		0,2,1,2,3,1
 	};
 	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT16);
 }
-Mesh* Mesh::CreateCube(const string& name, Device* device, float r) {
+Mesh* Mesh::CreateCube(const string& name, Device* device, float r, float v) {
+	float u = 1 / v;
 	const StdVertex verts[24]{
 		// front
-		{ float3(-r, -r,  r), float3(0,0,1), float4(1,0,0,1), float2(0,0) },
-		{ float3( r, -r,  r), float3(0,0,1), float4(1,0,0,1), float2(1,0) },
-		{ float3(-r,  r,  r), float3(0,0,1), float4(1,0,0,1), float2(0,1) },
-		{ float3( r,  r,  r), float3(0,0,1), float4(1,0,0,1), float2(1,1) },
+		{ float3(-r, -r,  r), float3(0,0,1), float4(u,0,0,1), float2(0,0) },
+		{ float3( r, -r,  r), float3(0,0,1), float4(u,0,0,1), float2(v,0) },
+		{ float3(-r,  r,  r), float3(0,0,1), float4(u,0,0,1), float2(0,v) },
+		{ float3( r,  r,  r), float3(0,0,1), float4(u,0,0,1), float2(v,v) },
 		
 		// back
-		{ float3(-r, -r, -r), float3(0,0,-1), float4(1,0,0,1), float2(0,0) },
-		{ float3(-r,  r, -r), float3(0,0,-1), float4(1,0,0,1), float2(0,1) },
-		{ float3( r, -r, -r), float3(0,0,-1), float4(1,0,0,1), float2(1,0) },
-		{ float3( r,  r, -r), float3(0,0,-1), float4(1,0,0,1), float2(1,1) },
+		{ float3(-r, -r, -r), float3(0,0,-1), float4(u,0,0,1), float2(0,0) },
+		{ float3(-r,  r, -r), float3(0,0,-1), float4(u,0,0,1), float2(0,v) },
+		{ float3( r, -r, -r), float3(0,0,-1), float4(u,0,0,1), float2(v,0) },
+		{ float3( r,  r, -r), float3(0,0,-1), float4(u,0,0,1), float2(v,v) },
 
 		// right
-		{ float3(r, -r, -r), float3(1,0,0), float4(0,0,1,1), float2(0,0) },
-		{ float3(r,  r, -r), float3(1,0,0), float4(0,0,1,1), float2(1,0) },
-		{ float3(r, -r,  r), float3(1,0,0), float4(0,0,1,1), float2(0,1) },
-		{ float3(r,  r,  r), float3(1,0,0), float4(0,0,1,1), float2(1,1) },
+		{ float3(r, -r, -r), float3(1,0,0), float4(0,0,u,1), float2(0,0) },
+		{ float3(r,  r, -r), float3(1,0,0), float4(0,0,u,1), float2(v,0) },
+		{ float3(r, -r,  r), float3(1,0,0), float4(0,0,u,1), float2(0,v) },
+		{ float3(r,  r,  r), float3(1,0,0), float4(0,0,u,1), float2(v,v) },
 
 		// left
-		{ float3(-r, -r, -r), float3(-1,0,0), float4(0,0,-1,1), float2(0,0) },
-		{ float3(-r, -r,  r), float3(-1,0,0), float4(0,0,-1,1), float2(0,1) },
-		{ float3(-r,  r, -r), float3(-1,0,0), float4(0,0,-1,1), float2(1,0) },
-		{ float3(-r,  r,  r), float3(-1,0,0), float4(0,0,-1,1), float2(1,1) },
+		{ float3(-r, -r, -r), float3(-1,0,0), float4(0,0,-u,1), float2(0,0) },
+		{ float3(-r, -r,  r), float3(-1,0,0), float4(0,0,-u,1), float2(0,v) },
+		{ float3(-r,  r, -r), float3(-1,0,0), float4(0,0,-u,1), float2(v,0) },
+		{ float3(-r,  r,  r), float3(-1,0,0), float4(0,0,-u,1), float2(v,v) },
 
 		// top
-		{ float3(-r, r, -r), float3(0,1,0), float4(1,0,0,1), float2(0,0) },
-		{ float3(-r, r,  r), float3(0,1,0), float4(1,0,0,1), float2(0,1) },
-		{ float3( r, r, -r), float3(0,1,0), float4(1,0,0,1), float2(1,0) },
-		{ float3( r, r,  r), float3(0,1,0), float4(1,0,0,1), float2(1,1) },
+		{ float3(-r, r, -r), float3(0,1,0), float4(u,0,0,1), float2(0,0) },
+		{ float3(-r, r,  r), float3(0,1,0), float4(u,0,0,1), float2(0,v) },
+		{ float3( r, r, -r), float3(0,1,0), float4(u,0,0,1), float2(v,0) },
+		{ float3( r, r,  r), float3(0,1,0), float4(u,0,0,1), float2(v,v) },
 
 		// bottom
-		{ float3(-r, -r, -r), float3(0,-1,0), float4(1,0,0,1), float2(0,0) },
-		{ float3( r, -r, -r), float3(0,-1,0), float4(1,0,0,1), float2(1,0) },
-		{ float3(-r, -r,  r), float3(0,-1,0), float4(1,0,0,1), float2(0,1) },
-		{ float3( r, -r,  r), float3(0,-1,0), float4(1,0,0,1), float2(1,1) }
+		{ float3(-r, -r, -r), float3(0,-1,0), float4(u,0,0,1), float2(0,0) },
+		{ float3( r, -r, -r), float3(0,-1,0), float4(u,0,0,1), float2(v,0) },
+		{ float3(-r, -r,  r), float3(0,-1,0), float4(u,0,0,1), float2(0,v) },
+		{ float3( r, -r,  r), float3(0,-1,0), float4(u,0,0,1), float2(v,v) }
 	};
 	const uint16_t indices[36]{
 		0 , 2,  1,  2,  3,  1,

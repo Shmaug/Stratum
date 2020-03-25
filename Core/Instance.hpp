@@ -14,6 +14,7 @@ namespace x11{
 
 #include <Input/MouseKeyboardInput.hpp>
 #include <Util/Util.hpp>
+#include <XR/XRRuntime.hpp>
 
 class Window;
 class Device;
@@ -23,6 +24,7 @@ class Instance {
 public:
 	ENGINE_EXPORT ~Instance();
 
+	inline XRRuntime* XR() const { return mXRRuntime; }
 	inline ::Device* Device() const { return mDevice; }
 	inline ::Window* Window() const { return mWindow; }
 
@@ -55,6 +57,8 @@ private:
 	uint64_t mFrameCount;
 
 	VkInstance mInstance;
+
+	XRRuntime* mXRRuntime;
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	VkDebugUtilsMessengerEXT mDebugMessenger;

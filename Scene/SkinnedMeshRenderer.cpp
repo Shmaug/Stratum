@@ -134,17 +134,12 @@ void SkinnedMeshRenderer::DrawInstanced(CommandBuffer* commandBuffer, Camera* ca
 	if (!layout) return;
 	auto shader = mMaterial->GetShader(pass);
 
-	for (const auto& kp : mPushConstants)
-		commandBuffer->PushConstant(shader, kp.first, &kp.second);
-
 	uint32_t lc = (uint32_t)Scene()->ActiveLights().size();
 	float2 s = Scene()->ShadowTexelSize();
 	float t = Scene()->TotalTime();
 	commandBuffer->PushConstant(shader, "Time", &t);
 	commandBuffer->PushConstant(shader, "LightCount", &lc);
 	commandBuffer->PushConstant(shader, "ShadowTexelSize", &s);
-	for (const auto& kp : mPushConstants)
-		commandBuffer->PushConstant(shader, kp.first, &kp.second);
 	
 	if (instanceDS != VK_NULL_HANDLE)
 		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, &instanceDS, 0, nullptr);

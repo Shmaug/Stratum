@@ -134,7 +134,7 @@ void fsmain(v2f i,
 	float4 bump = NormalTextures[TextureIndex].Sample(Sampler, i.texcoord);
 	bump.xyz = bump.xyz * 2 - 1;
 	float3 tangent = normalize(i.tangent);
-	float3 bitangent = normalize(cross(normal, tangent));// * (ff ? 1 : -1);
+	float3 bitangent = normalize(cross(normal, tangent));
 	bump.xy *= BumpStrength;
 	normal = normalize(tangent * bump.x + bitangent * bump.y + normal * bump.z);
 	#endif
@@ -157,7 +157,7 @@ void fsmain(v2f i,
 	#ifdef ENABLE_SCATTERING
 	ApplyScattering(eval, i.screenPos.xy / i.screenPos.w, i.worldPos.w);
 	#endif
-
+	
 	color = float4(eval, col.a);
 	depthNormal.a = col.a;
 }

@@ -40,7 +40,9 @@ add_library(Engine SHARED
 	"Scene/TriangleBvh2.cpp"
 	"ThirdParty/imp.cpp"
 	"Util/Tokenizer.cpp"
-	"Util/Profiler.cpp" )
+	"Util/Profiler.cpp"
+	"XR/OpenVR.cpp"
+	"XR/OpenXR.cpp" )
 add_executable(ShaderCompiler "Stratum/ShaderCompiler.cpp")
 add_executable(Stratum "Stratum/Stratum.cpp" "ThirdParty/json11.cpp" "stratum.rc")
 
@@ -101,6 +103,8 @@ if(WIN32)
 	if (${ENABLE_DEBUG_LAYERS})
 		target_link_libraries(Engine "$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")
 	endif()
+
+	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/win64/openvr_api.dll" "${PROJECT_BINARY_DIR}/bin/vrclient.dll")
 else()
 	target_link_libraries(ShaderCompiler
 		stdc++fs
@@ -125,6 +129,8 @@ else()
 		"${STRATUM_HOME}/ThirdParty/openvr/lib/linux64/libopenvr_api.so" )
 
 	target_link_libraries(Stratum "${PROJECT_BINARY_DIR}/bin/libEngine.so" "libvulkan.so.1")
+
+	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/linux64/libopenvr_api.so" "${PROJECT_BINARY_DIR}/bin/vrclient.so")
 endif()
 
 if (${ENABLE_DEBUG_LAYERS})

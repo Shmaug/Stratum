@@ -41,7 +41,7 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
-#define STRATUM_VERSION 1
+#define STRATUM_VERSION VK_MAKE_VERSION(1,0,0)
 
 #ifdef WINDOWS
 #ifdef ENGINE_CORE

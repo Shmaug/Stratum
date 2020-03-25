@@ -114,7 +114,7 @@ void CameraControl::PreRenderScene(CommandBuffer* commandBuffer, Camera* camera,
 		Font* reg14 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-Regular.ttf", 14);
 		Font* bld16 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-Bold.ttf", 16);
 
-		char tmpText[64];
+		char tmpText[128];
 
 		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
 
@@ -137,12 +137,12 @@ void CameraControl::PreRenderScene(CommandBuffer* commandBuffer, Camera* camera,
 		GUI::Rect(fRect2D(0, 0, s.x, graphHeight), float4(.1f, .1f, .1f, 1));
 		GUI::Rect(fRect2D(0, graphHeight - 1, s.x, 2), float4(.2f, .2f, .2f, 1));
 
-		snprintf(tmpText, 64, "%.1fms", m);
+		snprintf(tmpText, 128, "%.1fms", m);
 		GUI::DrawString(sem11, tmpText, float4(.6f, .6f, .6f, 1.f), float2(2, graphHeight - 10), 11.f);
 
 		for (float i = 1; i < 3; i++) {
 			float x = m * i / 3.f;
-			snprintf(tmpText, 32, "%.1fms", x);
+			snprintf(tmpText, 128, "%.1fms", x);
 			GUI::Rect(fRect2D(0, graphHeight * (i / 3.f) - 1, s.x, 1), float4(.2f, .2f, .2f, 1));
 			GUI::DrawString(sem11, tmpText, float4(.6f, .6f, .6f, 1.f), float2(2, graphHeight * (i / 3.f) + 2), 11.f);
 		}
@@ -192,7 +192,7 @@ void CameraControl::PreRenderScene(CommandBuffer* commandBuffer, Camera* camera,
 				}
 
 				if (selected) {
-					snprintf(tmpText, 64, "%s: %.2fms\n", selected->mLabel, selected->mDuration.count() * 1e-6f);
+					snprintf(tmpText, 128, "%s: %.2fms\n", selected->mLabel, selected->mDuration.count() * 1e-6f);
 					GUI::DrawString(reg14, tmpText, 1, c + 8, 14.f, TEXT_ANCHOR_MAX, TEXT_ANCHOR_MAX);
 				}
 			}
@@ -200,7 +200,7 @@ void CameraControl::PreRenderScene(CommandBuffer* commandBuffer, Camera* camera,
 		}
 		#endif
 
-		snprintf(tmpText, 64, "%.2fms\n%d DescriptorSets", mScene->FPS(), commandBuffer->Device()->DescriptorSetCount());
+		snprintf(tmpText, 128, "%.2fms\n%d DescriptorSets", mScene->FPS(), commandBuffer->Device()->DescriptorSetCount());
 		GUI::DrawString(sem16, tmpText, 1.f, float2(5, camera->FramebufferHeight() - 30), 18.f);
 	}
 }

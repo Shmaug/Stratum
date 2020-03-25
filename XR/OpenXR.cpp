@@ -1,6 +1,12 @@
-#include "OpenXRRuntime.hpp"
+#include "OpenXR.hpp"
 
-bool OpenXRRuntime::Init() {
+using namespace std;
+
+OpenXR::~OpenXR() {
+
+}
+
+bool OpenXR::Init() {
 	uint32_t layerPropertyCount;
 	xrEnumerateApiLayerProperties(0, &layerPropertyCount, nullptr);
 
@@ -22,9 +28,8 @@ bool OpenXRRuntime::Init() {
 		
 		printf("\t%s\t%u extensions\n", layerProperties[i].layerName, extensionCount);
 
-		for (uint32_t j = 0; j < extensionCount; j++) {
+		for (uint32_t j = 0; j < extensionCount; j++)
 			printf("\t%s\n", extensions[j].extensionName);
-		}
 	}
 
 	XrInstanceCreateInfo info = {};
@@ -39,4 +44,6 @@ bool OpenXRRuntime::Init() {
 	info.enabledExtensionCount = 0;
 	info.enabledApiLayerCount = 0;
 	xrCreateInstance(&info, &mInstance);
+
+	return true;
 }

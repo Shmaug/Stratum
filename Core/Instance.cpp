@@ -4,6 +4,8 @@
 #include <Scene/Camera.hpp>
 #include <Util/Profiler.hpp>
 #include <Core/PluginManager.hpp>
+#include <XR/OpenVR.hpp>
+#include <XR/OpenXR.hpp>
 
 using namespace std;
 
@@ -61,31 +63,55 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 #endif
 
 Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
-	: mInstance(VK_NULL_HANDLE), mFrameCount(0), mMaxFramesInFlight(0), mWindow(nullptr), mWindowInput(nullptr), mDestroyPending(false)
+	: mInstance(VK_NULL_HANDLE), mFrameCount(0), mMaxFramesInFlight(0), mWindow(nullptr), mWindowInput(nullptr), mDestroyPending(false), mXRRuntime(nullptr)
 	#ifdef ENABLE_DEBUG_LAYERS
 	, mDebugMessenger(VK_NULL_HANDLE)
 	#endif
 	{
-
+	memset(const_cast<ProfilerSample*>(Profiler::Frames()), 0, sizeof(ProfilerSample) * PROFILER_FRAME_COUNT);
+	
 	for (int i = 0; i < argc; i++)
 		mCmdArguments.push_back(argv[i]);
 
+	bool enableXR = false;
 	bool debugMessenger = true;
 	uint32_t deviceIndex = 0;
 	VkRect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
 	bool fullscreen = false;
 	for (int i = 0; i < argc; i++) {
 		if (mCmdArguments[i] == "--device") {
-			i++;
-			if (i < argc) deviceIndex = atoi(argv[i]);
+			if (++i < argc) deviceIndex = atoi(argv[i]);
 		} else if (mCmdArguments[i] == "--fullscreen")
 			fullscreen = true;
+		else if (mCmdArguments[i] == "--width") {
+			if (++i < argc) windowPosition.extent.width = atoi(argv[i]);
+		}
+		else if (mCmdArguments[i] == "--height") {
+			if (++i < argc) windowPosition.extent.height = atoi(argv[i]);
+		}
 		else if (mCmdArguments[i] == "--nodebug")
 			debugMessenger = false;
+		else if (mCmdArguments[i] == "--xr")
+			enableXR = true;
 	}
 
-
-	memset(const_cast<ProfilerSample*>(Profiler::Frames()), 0, sizeof(ProfilerSample)* PROFILER_FRAME_COUNT);
+	if (enableXR) {
+		// Try to find an XR runtime that successfully initializes
+		vector<XRRuntime*> runtimes {
+			new OpenXR(),
+			new OpenVR()
+		};
+		for (uint32_t i = 0; i < runtimes.size(); i++) {
+			if (runtimes[i]->Init()) {
+				mXRRuntime = runtimes[i];
+				runtimes[i] = nullptr;
+				break;
+			} else
+				safe_delete(runtimes[i]);
+		}
+		for (uint32_t i = 0; i < runtimes.size(); i++)
+			safe_delete(runtimes[i]);
+	}
 
 	mInstanceExtensions  = { VK_KHR_SURFACE_EXTENSION_NAME };
 	mDeviceExtensions = {
@@ -225,7 +251,6 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	vector<VkPhysicalDevice> devices(deviceCount);
 	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
 
-	#pragma region Create Windows
 	if (deviceIndex >= devices.size()){
 		fprintf_color(COLOR_RED, stderr, "Device index out of bounds: %u\n", deviceIndex);
 		throw;
@@ -235,6 +260,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	for (EnginePlugin* p : pluginManager->Plugins())
 		p->PreDeviceInit(this, physicalDevice);
 
+	#pragma region Create Windows
 	#ifdef __linux
 	// create xcb connection
 	mXCBConnection = xcb_connect(nullptr, nullptr);
@@ -285,6 +311,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		mDevice->mFrameContexts[i].mDevice = mDevice;
 }
 Instance::~Instance() {
+	safe_delete(mXRRuntime);
 	safe_delete(mWindow);
 
 	#ifdef __linux

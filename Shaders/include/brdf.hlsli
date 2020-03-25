@@ -135,15 +135,15 @@ float3 EvaluateLighting(MaterialInfo material, float3 worldPos, float3 normal, f
 
 	eval.rgb += material.emission;
 
-	float3 env_spec = AmbientLight * lerp(.5, 1, normal.y * .5 + .5);
-	float3 env_diff = AmbientLight * lerp(.5, 1, normal.y * .5 + .5);
+	float3 env_spec = AmbientLight * (saturate(normal.y) * .5 + .5);
+	float3 env_diff = AmbientLight * (saturate(normal.y) * .5 + .5);
 
 	#ifdef ENVIRONMENT_TEXTURE
 	uint texWidth, texHeight, numMips;
 	EnvironmentTexture.GetDimensions(0, texWidth, texHeight, numMips);
 	float3 reflection = normalize(reflect(-view, normal));
 	float2 envuv = float2(atan2(reflection.z, reflection.x) * INV_PI * .5 + .5, acos(reflection.y) * INV_PI);
-	env_spec *= EnvironmentTexture.SampleLevel(Sampler, envuv, saturate(material.perceptualRoughness) * numMips).rgb;
+	env_spec *= EnvironmentTexture.SampleLevel(Sampler, envuv, saturate(material.perceptualRoughness) * (numMips-1)).rgb;
 	env_diff *= EnvironmentTexture.SampleLevel(Sampler, envuv, .75 * numMips).rgb;
 	#endif
 

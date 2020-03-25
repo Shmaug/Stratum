@@ -38,19 +38,19 @@ public:
 		auto gridMat = make_shared<Material>("Plane", mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
 		gridMat->EnableKeyword("TEXTURED");
 		gridMat->SetParameter("MainTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/grid.png"));
-		gridMat->SetParameter("NormalTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/bump.png"));
-		gridMat->SetParameter("MaskTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/mask.png"));
+		gridMat->SetParameter("NormalTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/bump.png", false));
+		gridMat->SetParameter("MaskTextures", 0, mScene->AssetManager()->LoadTexture("Assets/Textures/mask.png", false));
 		gridMat->SetParameter("Color", float4(1));
 		gridMat->SetParameter("Metallic", 0.f);
 		gridMat->SetParameter("Roughness", .5f);
 		gridMat->SetParameter("BumpStrength", 1.f);
 		gridMat->SetParameter("Emission", float3(0));
+		gridMat->SetParameter("TextureST", float4(1, 1, 0, 0));
+		gridMat->SetParameter("TextureIndex", 0u);
 
 		auto plane = make_shared<MeshRenderer>("Plane");
-		plane->Mesh(shared_ptr<Mesh>(Mesh::CreatePlane("Plane", mScene->Instance()->Device(), 128.f)));
+		plane->Mesh(shared_ptr<Mesh>(Mesh::CreatePlane("Plane", mScene->Instance()->Device(), 128.f, 256.f)));
 		plane->Material(gridMat);
-		plane->PushConstant("TextureST", float4(256, 256, 1, 1));
-		plane->PushConstant("TextureIndex", 0u);
 		plane->LocalRotation(quaternion(float3(-PI / 2, 0, 0)));
 		mScene->AddObject(plane);
 		mObjects.push_back(plane.get());
@@ -61,8 +61,6 @@ public:
 		auto box = make_shared<MeshRenderer>("Box");
 		box->Mesh(boxmesh);
 		box->Material(gridMat);
-		box->PushConstant("TextureST", float4(1, 1, 1, 1));
-		box->PushConstant("TextureIndex", 0u);
 		box->LocalPosition(-1, 1, -1);
 		box->LocalScale(1, 2, 1);
 		box->LocalRotation(quaternion(float3(0, PI / 4, 0)));
@@ -73,8 +71,6 @@ public:
 		auto box2 = make_shared<MeshRenderer>("Box 2");
 		box2->Mesh(boxmesh);
 		box2->Material(gridMat);
-		box2->PushConstant("TextureST", float4(1, 1, 1, 1));
-		box2->PushConstant("TextureIndex", 0u);
 		box2->LocalPosition(1.15f, .25f, .5f);
 		box2->LocalScale(1, .5f, 1);
 		box2->LocalRotation(quaternion(float3(0, PI / 4, PI / 4)));
@@ -85,10 +81,6 @@ public:
 		return true;
 	}
 
-	PLUGIN_EXPORT void Update(CommandBuffer* commandBuffer) override {
-
-	}
-
 	PLUGIN_EXPORT void PreRenderScene(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override {
 		if (pass != PASS_MAIN || camera != mScene->Cameras()[0]) return;
 		Font* sem11 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-SemiBold.ttf", 11);
@@ -96,7 +88,6 @@ public:
 		Font* reg14 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-Regular.ttf", 14);
 		Font* bld24 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-Bold.ttf", 24);
 	
-		/*
 		GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, camera->FramebufferHeight()/2 - 300, 250, 600), float4(.2f, .2f, .2f, 1), 10);
 
 		GUI::LayoutLabel(bld24, "MeshView", 24, 20, 0, 1, 4);
@@ -122,7 +113,6 @@ public:
 		}
 		GUI::EndLayout();
 		GUI::EndLayout();
-		*/
 	}
 	
 	PLUGIN_EXPORT void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
