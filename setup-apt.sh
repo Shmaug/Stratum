@@ -11,7 +11,7 @@ wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key 
 wget -qO /etc/apt/sources.list.d/lunarg-vulkan-1.2.131-bionic.list http://packages.lunarg.com/vulkan/1.2.131/lunarg-vulkan-1.2.131-bionic.list
 apt update -y
 apt install -y vulkan-sdk
-apt install -y python3 cmake libz-dev libx11-dev libxrandr-dev
+apt install -y python3 libz-dev libx11-dev libxrandr-dev
 apt install -y build-essential libgl1-mesa-dev libvulkan-dev libx11-xcb-dev libxcb-dri2-0-dev libxcb-glx0-dev libxcb-icccm4-dev libxcb-keysyms1-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev mesa-common-dev
 echo Dependencies installed.
 
@@ -46,7 +46,7 @@ echo SPIRV-cross built.
 
 cd "$OPENXR_DIR"
 echo Configuring OpenXR...
-cmake CMakeLists.txt -S "$OPENXR_DIR" -B "$OPENXR_DIR" -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OPENXR_DIR"
+cmake CMakeLists.txt -S "$OPENXR_DIR" -B "$OPENXR_DIR" -Wno-dev -DDYNAMIC_LOADER=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OPENXR_DIR"
 echo OpenXR configured.
 echo Building OpenXR
 cmake --build . --config Release --target install

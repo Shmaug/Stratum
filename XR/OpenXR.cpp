@@ -7,43 +7,47 @@ OpenXR::~OpenXR() {
 }
 
 bool OpenXR::Init() {
-	uint32_t layerPropertyCount;
-	xrEnumerateApiLayerProperties(0, &layerPropertyCount, nullptr);
+	uint32_t tmp;
 
-	if (layerPropertyCount == 0) {
-		printf_color(COLOR_YELLOW, "%s", "No available XR layers!\n");
-		return false;
+	uint32_t extensionCount;
+	xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionCount, nullptr);
+	vector<XrExtensionProperties> extensions(extensionCount);
+	if (extensionCount)
+		xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &tmp, extensions.data());
+	
+	uint32_t apiLayerCount;
+	xrEnumerateApiLayerProperties(0, &apiLayerCount, NULL);
+	vector<XrApiLayerProperties> apiLayerProperties(apiLayerCount);
+	if (apiLayerCount) {
+		for (uint32_t i = 0; i < apiLayerCount; i++)
+			apiLayerProperties[i].type = XR_TYPE_API_LAYER_PROPERTIES;
+		xrEnumerateApiLayerProperties(apiLayerCount, &tmp, apiLayerProperties.data());
 	}
 
-	vector<XrApiLayerProperties> layerProperties;
-	xrEnumerateApiLayerProperties(layerPropertyCount, &layerPropertyCount, layerProperties.data());
+	printf("OpenXR: Found %u extensions:\n", extensionCount);
+	for (uint32_t i = 0; i < extensionCount; i++)
+		printf("\t%s\n", extensions[i].extensionName);
 
-	printf("Available XR layers: \n");
+	printf("OpenXR: Found %u API layers:\n", apiLayerCount);
+	for (uint32_t i = 0; i < apiLayerCount; i++)
+		printf("\t%s\n", apiLayerProperties[i].layerName);
+	
 
-	for (uint32_t i = 0; i < layerPropertyCount; i++) {
-		uint32_t extensionCount;
-		xrEnumerateInstanceExtensionProperties(layerProperties[i].layerName, 0, &extensionCount, nullptr);
-		vector<XrExtensionProperties> extensions;
-		xrEnumerateInstanceExtensionProperties(layerProperties[i].layerName, extensionCount, &extensionCount, extensions.data());
+	vector<const char*> enabledExtensions {
 		
-		printf("\t%s\t%u extensions\n", layerProperties[i].layerName, extensionCount);
-
-		for (uint32_t j = 0; j < extensionCount; j++)
-			printf("\t%s\n", extensions[j].extensionName);
-	}
+	};
 
 	XrInstanceCreateInfo info = {};
 	info.type = XR_TYPE_INSTANCE_CREATE_INFO;
-
-	info.applicationInfo.apiVersion = XR_VERSION_1_0;
+	info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
 	memcpy(info.applicationInfo.engineName, "Stratum", strlen("Stratum"));
 	info.applicationInfo.engineVersion = STRATUM_VERSION;
 	memcpy(info.applicationInfo.applicationName, "Stratum", strlen("Stratum"));
 	info.applicationInfo.applicationVersion = STRATUM_VERSION;
-
-	info.enabledExtensionCount = 0;
+	info.enabledExtensionCount = enabledExtensions.size();
+	info.enabledExtensionNames = enabledExtensions.data();
 	info.enabledApiLayerCount = 0;
-	xrCreateInstance(&info, &mInstance);
+	if (XR_FAILED(xrCreateInstance(&info, &mInstance))) return false;
 
 	return true;
 }

@@ -125,7 +125,7 @@ else()
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/libassimp.a"
 		z
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/libIrrXML.a"
-		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/libopenxr_loader.so"
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/libopenxr_loader.a"
 		"${STRATUM_HOME}/ThirdParty/openvr/lib/linux64/libopenvr_api.so" )
 
 	target_link_libraries(Stratum "${PROJECT_BINARY_DIR}/bin/libEngine.so" "libvulkan.so.1")
