@@ -13,12 +13,12 @@ using namespace std;
 #ifdef ENABLE_DEBUG_LAYERS
 VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 		//throw;
 	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
 		if (strcmp("UNASSIGNED-CoreValidation-Shader-OutputNotConsumed", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
 		if (strcmp("UNASSIGNED-CoreValidation-DrawState-ClearCmdBeforeDraw", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
-		fprintf_color(COLOR_YELLOW_BOLD, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		fprintf_color(COLOR_YELLOW, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 	} else
 		printf("%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 
@@ -99,7 +99,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		// Try to find an XR runtime that successfully initializes
 		vector<XRRuntime*> runtimes {
 			new OpenXR(),
-			new OpenVR()
+			//new OpenVR()
 		};
 		for (uint32_t i = 0; i < runtimes.size(); i++) {
 			if (runtimes[i]->Init()) {
@@ -137,6 +137,8 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	for (EnginePlugin* p : pluginManager->Plugins())
 		p->PreInstanceInit(this);
 
+	if (mXRRuntime) mXRRuntime->PreInstanceInit(this);
+
 	#pragma region Create Vulkan Instance
 
 	if (validationLayers.size()) {
@@ -153,7 +155,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 			if (availableLayerSet.count(*it))
 				it++;
 			else {
-				printf("Removing unsupported layer: %s\n", *it);
+				fprintf_color(COLOR_YELLOW, stderr, "Removing unsupported layer: %s\n", *it);
 				it = validationLayers.erase(it);
 			}
 		}
@@ -180,7 +182,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	createInfo.ppEnabledLayerNames = validationLayers.data();
 	printf("Creating vulkan instance... ");
 	ThrowIfFailed(vkCreateInstance(&createInfo, nullptr, &mInstance), "vkCreateInstance failed");
-	printf("Done.\n");
+	printf_color(COLOR_GREEN, "%s", "Done.\n");
 
 	#pragma endregion
 
@@ -194,9 +196,9 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		printf("Creating debug messenger... ");
 		VkResult result = CreateDebugUtilsMessengerEXT(mInstance, &msgr, nullptr, &mDebugMessenger);
 		if (result == VK_SUCCESS)
-			fprintf_color(COLOR_GREEN, stdout, "%s", "Success.\n");
+			printf_color(COLOR_GREEN, "%s", "Success.\n");
 		else {
-			fprintf_color(COLOR_RED, stderr, "%s", "Failed.\n");
+			printf_color(COLOR_RED, "%s", "Failed.\n");
 			mDebugMessenger = VK_NULL_HANDLE;
 		}
 	}
@@ -243,9 +245,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	mWindowInput = new MouseKeyboardInput();
 
 	mMaxFramesInFlight = 0xFFFF;
-
-	printf("Creating devices and windows\n");
-
+	
 	uint32_t deviceCount;
 	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices failed");
 	vector<VkPhysicalDevice> devices(deviceCount);
@@ -260,6 +260,8 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	for (EnginePlugin* p : pluginManager->Plugins())
 		p->PreDeviceInit(this, physicalDevice);
 
+	if (mXRRuntime) mXRRuntime->PreDeviceInit(this, physicalDevice);
+
 	#pragma region Create Windows
 	#ifdef __linux
 	// create xcb connection
@@ -268,7 +270,6 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		fprintf_color(COLOR_RED, stderr, "Failed to connect to xcb: %d\n", err);
 		throw;
 	}
-	printf("XCB connection established.\n");
 	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
 
 	// find xcb screen
@@ -444,6 +445,8 @@ xcb_generic_event_t* Instance::PollEvent() {
 #endif
 
 bool Instance::PollEvents() {
+	if (mXRRuntime) mXRRuntime->PollEvents();
+
 	#ifdef __linux
 	xcb_generic_event_t* event;
 	while (event = PollEvent()){

@@ -40,9 +40,9 @@ public:
 		ENGINE_EXPORT void Reset();
 	};
 
-	ENGINE_EXPORT static bool FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily);
-
 	ENGINE_EXPORT ~Device();
+
+	ENGINE_EXPORT static bool FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily);
 
 	ENGINE_EXPORT DeviceMemoryAllocation AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const std::string& tag);
 	ENGINE_EXPORT void FreeMemory(const DeviceMemoryAllocation& allocation);
@@ -60,10 +60,14 @@ public:
 
 	inline VkPhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
 	inline uint32_t PhysicalDeviceIndex() const { return mPhysicalDeviceIndex; }
+	
 	inline VkQueue GraphicsQueue() const { return mGraphicsQueue; };
 	inline VkQueue PresentQueue() const { return mPresentQueue; };
-	inline uint32_t GraphicsQueueFamily() const { return mGraphicsQueueFamily; };
-	inline uint32_t PresentQueueFamily() const { return mPresentQueueFamily; };
+	inline uint32_t GraphicsQueueIndex() const { return mGraphicsQueueIndex; };
+	inline uint32_t PresentQueueIndex() const { return mPresentQueueIndex; };
+	inline uint32_t GraphicsQueueFamilyIndex() const { return mGraphicsQueueFamilyIndex; };
+	inline uint32_t PresentQueueFamilyIndex() const { return mPresentQueueFamilyIndex; };
+
 	inline uint32_t DescriptorSetCount() const { return mDescriptorSetCount; };
 
 	inline uint32_t MaxFramesInFlight() const { return mInstance->MaxFramesInFlight(); }
@@ -110,8 +114,10 @@ private:
 	VkDevice mDevice;
 	VkPipelineCache mPipelineCache;
 
-	uint32_t mGraphicsQueueFamily;
-	uint32_t mPresentQueueFamily;
+	uint32_t mGraphicsQueueIndex;
+	uint32_t mPresentQueueIndex;
+	uint32_t mGraphicsQueueFamilyIndex;
+	uint32_t mPresentQueueFamilyIndex;
 
 	VkQueue mGraphicsQueue;
 	VkQueue mPresentQueue;

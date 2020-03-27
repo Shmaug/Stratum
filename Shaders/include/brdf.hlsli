@@ -99,7 +99,7 @@ float3 BRDFIndirect(MaterialInfo material, float3 N, float3 V, float nv, float3 
 	return material.diffuse * diffuseLight + surfaceReduction * specularLight * FresnelLerp(material.specular, grazingTerm, nv);
 }
 
-float3 EvaluateLighting(MaterialInfo material, float3 worldPos, float3 normal, float3 view, float depth){
+float3 ShadeSurface(MaterialInfo material, float3 worldPos, float3 normal, float3 view, float depth, float2 screenUV){
 	#ifdef SHOW_CASCADE_SPLITS
 	static const float4 CascadeSplitColors[4] = {
 		float4(.5,  1, .5, 1),
@@ -116,7 +116,7 @@ float3 EvaluateLighting(MaterialInfo material, float3 worldPos, float3 normal, f
 
 	for (uint l = 0; l < LightCount; l++) {
 		float3 L;
-		float attenuation = LightAttenuation(l, Camera.Position, worldPos, normal, depth, L);
+		float attenuation = LightAttenuation(l, STRATUM_CAMERA_POSITION, worldPos, normal, depth, L);
 
 		#ifdef SHOW_CASCADE_SPLITS
 		if (Lights[l].Type == LIGHT_SUN) {

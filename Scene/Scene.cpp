@@ -606,15 +606,6 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 
 }
 
-void Scene::PrePresent() {
-	PROFILER_BEGIN("PrePresent");
-	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled)
-			p->PrePresent();
-	PROFILER_END;
-
-}
-
 void Scene::AddObject(shared_ptr<Object> object) {
 	mObjects.push_back(object);
 	object->mScene = this;
@@ -900,7 +891,6 @@ void Scene::PreFrame(CommandBuffer* commandBuffer) {
 		END_CMD_REGION(commandBuffer);
 		PROFILER_END;
 	}
-	mEnvironment->Update();
 	PROFILER_END;
 
 	Gizmos::PreFrame(this);
@@ -969,11 +959,11 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 		VkPipelineLayout layout = commandBuffer->BindMaterial(mEnvironment->mSkyboxMaterial.get(), pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
 		commandBuffer->BindVertexBuffer(mSkyboxCube->VertexBuffer().get(), 0, 0);
 		commandBuffer->BindIndexBuffer(mSkyboxCube->IndexBuffer().get(), 0, mSkyboxCube->IndexType());
-		camera->SetStereo(commandBuffer, shader, EYE_LEFT);
+		camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
 		vkCmdDrawIndexed(*commandBuffer, mSkyboxCube->IndexCount(), 1, mSkyboxCube->BaseIndex(), mSkyboxCube->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += mSkyboxCube->IndexCount() / 3;
 		if (camera->StereoMode() != STEREO_NONE) {
-			camera->SetStereo(commandBuffer, shader, EYE_RIGHT);
+			camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
 			vkCmdDrawIndexed(*commandBuffer, mSkyboxCube->IndexCount(), 1, mSkyboxCube->BaseIndex(), mSkyboxCube->BaseVertex(), 0);
 			commandBuffer->mTriangleCount += mSkyboxCube->IndexCount() / 3;
 		}

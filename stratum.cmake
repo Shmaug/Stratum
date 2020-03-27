@@ -52,6 +52,7 @@ function(link_plugin TARGET_NAME)
 	if (${ENABLE_DEBUG_LAYERS})
 		target_compile_definitions(${TARGET_NAME} PUBLIC -DENABLE_DEBUG_LAYERS)
 	endif()
+	target_compile_definitions(${TARGET_NAME} PUBLIC -DXR_USE_GRAPHICS_API_VULKAN)
 	
 	set_target_properties(${TARGET_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/Plugins")
 	set_target_properties(${TARGET_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/Plugins")

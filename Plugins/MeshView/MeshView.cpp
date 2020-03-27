@@ -30,8 +30,6 @@ public:
 		mScene = scene;
 		mInput = mScene->InputManager()->GetFirst<MouseKeyboardInput>();
 
-		mScene->Environment()->EnableCelestials(false);
-		mScene->Environment()->EnableScattering(false);
 		mScene->Environment()->AmbientLight(.6f);
 		mScene->Environment()->EnvironmentTexture(mScene->AssetManager()->LoadTexture("Assets/Textures/photo_studio_01_2k.hdr"));
 

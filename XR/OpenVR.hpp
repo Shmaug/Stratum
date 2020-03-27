@@ -9,7 +9,8 @@ public:
     ENGINE_EXPORT OpenVR();
     ENGINE_EXPORT ~OpenVR();
 
-    ENGINE_EXPORT virtual bool Init() override;
+    ENGINE_EXPORT bool Init() override;
+    ENGINE_EXPORT bool InitScene(Scene* scene) override;
 
 private:
     vr::IVRSystem* mSystem;

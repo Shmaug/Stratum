@@ -44,6 +44,7 @@ private:
 	ENGINE_EXPORT Instance(int argc, char** argv, PluginManager* pluginManager);
 
 	ENGINE_EXPORT bool PollEvents();
+	// Present the frame, advance the FrameContext
 	ENGINE_EXPORT void AdvanceFrame();
 
 	MouseKeyboardInput* mWindowInput;

@@ -18,7 +18,7 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 	: mName(name), mDevice(device), mViewportState({}), mRasterizationState({}), mDynamicState({}), mBlendMode(BLEND_MODE_OPAQUE), mDepthStencilState({}), mPassMask(PASS_MAIN) {
 	ifstream file(filename, ios::binary);
 	if (!file.is_open()) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "Could not load shader: %s\n", filename.c_str());
+		fprintf_color(COLOR_RED, stderr, "Could not load shader: %s\n", filename.c_str());
 		throw;
 	}
 
@@ -26,7 +26,7 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 
 	// create shader modules
 	uint32_t mc = 1;
-	fprintf_color(COLOR_GREEN, stderr, "%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
+	printf("%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
 	vector<VkShaderModule> modules;
 	for (SpirvModule& sm : compiled.mModules) {
 		VkShaderModuleCreateInfo module = {};
@@ -37,16 +37,16 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 		vkCreateShaderModule(*mDevice, &module, nullptr, &m);
 		modules.push_back(m);
 		mc++;
-		fprintf_color(COLOR_GREEN, stderr, "\r%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
+		printf("\r%s: Compiling shader modules  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mModules.size());
 	}
-	fprintf_color(COLOR_GREEN, stderr, "\r%s: Compiled %d shader modules                \n", filename.c_str(), (uint32_t)compiled.mModules.size());
+	printf_color(COLOR_GREEN, "\r%s: Compiled %d shader modules                \n", filename.c_str(), (uint32_t)compiled.mModules.size());
 
 	mPassMask = (PassType)0;
 
 	// Read shader variants
 	// A variant is a shader compiled with a unique set of keywords
 	mc = 1;
-	fprintf_color(COLOR_GREEN, stderr, "%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
+	printf("%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
 	for (uint32_t v = 0; v < compiled.mVariants.size(); v++) {
 		set<string> keywords;
 
@@ -189,9 +189,9 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 		
 
 		mc++;
-		fprintf_color(COLOR_GREEN, stderr, "\r%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
+		printf("\r%s: Reading variants  %d/%d", filename.c_str(), mc, (uint32_t)compiled.mVariants.size());
 	}
-	fprintf_color(COLOR_GREEN, stderr, "\r%s: Read %d variants                  \n", filename.c_str(), (uint32_t)compiled.mVariants.size());
+	printf_color(COLOR_GREEN, "\r%s: Read %d variants                  \n", filename.c_str(), (uint32_t)compiled.mVariants.size());
 
 	mViewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 	mViewportState.viewportCount = 1;

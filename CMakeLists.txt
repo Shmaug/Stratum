@@ -1,5 +1,9 @@
 cmake_minimum_required (VERSION 2.8)
 
+project(Stratum)
+
+cmake_policy(SET CMP0053 NEW)
+
 option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 set(STRATUM_HOME ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Directory of Stratum")
 
@@ -137,6 +141,9 @@ if (${ENABLE_DEBUG_LAYERS})
 	target_compile_definitions(Stratum PUBLIC -DENABLE_DEBUG_LAYERS)
 	target_compile_definitions(Engine PUBLIC -DENABLE_DEBUG_LAYERS)
 endif()
+
+target_compile_definitions(Stratum PUBLIC -DXR_USE_GRAPHICS_API_VULKAN)
+target_compile_definitions(Engine PUBLIC -DXR_USE_GRAPHICS_API_VULKAN)
 
 # Create symbolic link to Assets folder so the executable can find assets
 add_custom_command(

@@ -14,7 +14,6 @@
 [[vk::binding(CAMERA_BUFFER_BINDING, PER_CAMERA)]] ConstantBuffer<CameraBuffer> Camera : register(b0);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
-	float4 StereoClipTransform;
 	float4 Color;
 	float4 ScaleTranslate;
 	float4 Bounds;
@@ -40,10 +39,12 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	o.position = float4((p / ScreenSize) * 2 - 1, Depth, 1);
 	o.position.y = -o.position.y;
 #else
-	float4x4 ct = float4x4(1, 0, 0, -Camera.Position.x, 0, 1, 0, -Camera.Position.y, 0, 0, 1, -Camera.Position.z, 0, 0, 0, 1);
-	float4 worldPos = mul(mul(ct, Transforms[instance]), float4(p, 0, 1.0));
+	float4x4 o2w = Transforms[instance];
+	o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
+	o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
+	o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
+	float4 worldPos = mul(o2w, float4(p, 0, 1.0));
 	o.position = mul(STRATUM_MATRIX_VP, worldPos);
-	StratumOffsetClipPosStereo(o.position);
 	o.worldPos = float4(worldPos.xyz, o.position.z);
 #endif
 	o.canvasPos = (p - Bounds.xy) / Bounds.zw;

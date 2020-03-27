@@ -29,7 +29,7 @@ uint8_t* load(const string& filename, bool srgb, uint32_t& pixelSize, int32_t& x
 		pixelSize = sizeof(uint8_t);
 	}
 	if (!pixels) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "Failed to load image: %s\n", filename.c_str());
+		fprintf_color(COLOR_RED, stderr, "Failed to load image: %s\n", filename.c_str());
 		throw;
 	}
 	if (desiredChannels > 0) channels = desiredChannels;

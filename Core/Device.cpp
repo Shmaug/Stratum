@@ -92,7 +92,7 @@ Device::FrameContext::~FrameContext() {
 }
 
 Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mInstance(instance), mFrameContexts(nullptr), mGraphicsQueueFamily(graphicsQueueFamily), mPresentQueueFamily(presentQueueFamily), mFrameContextIndex(0), mDescriptorSetCount(0) {
+	: mInstance(instance), mFrameContexts(nullptr), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily), mFrameContextIndex(0), mDescriptorSetCount(0) {
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(*instance, "vkSetDebugUtilsObjectNameEXT");
@@ -109,7 +109,7 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 		deviceExts.push_back(s.c_str());
 
 	#pragma region get queue info
-	set<uint32_t> uniqueQueueFamilies{ mGraphicsQueueFamily, mPresentQueueFamily };
+	set<uint32_t> uniqueQueueFamilies{ mGraphicsQueueFamilyIndex, mPresentQueueFamilyIndex };
 	vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 	float queuePriority = 1.0f;
 	for (uint32_t queueFamily : uniqueQueueFamilies) {
@@ -155,8 +155,11 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	SetObjectName(mDevice, name, VK_OBJECT_TYPE_DEVICE);
 	mLimits = properties.limits;
 
-	vkGetDeviceQueue(mDevice, mGraphicsQueueFamily, 0, &mGraphicsQueue);
-	vkGetDeviceQueue(mDevice, mPresentQueueFamily, 0, &mPresentQueue);
+	mGraphicsQueueIndex = 0;
+	mPresentQueueIndex = 0;
+
+	vkGetDeviceQueue(mDevice, mGraphicsQueueFamilyIndex, mGraphicsQueueIndex, &mGraphicsQueue);
+	vkGetDeviceQueue(mDevice, mPresentQueueFamilyIndex, mPresentQueueIndex, &mPresentQueue);
 	SetObjectName(mGraphicsQueue, name + " Graphics Queue", VK_OBJECT_TYPE_QUEUE);
 	SetObjectName(mPresentQueue, name + " Present Queue", VK_OBJECT_TYPE_QUEUE);
 	#pragma endregion
@@ -196,7 +199,7 @@ Device::~Device() {
 	for (auto kp : mMemoryAllocations) {
 		for (uint32_t i = 0; i < kp.second.size(); i++) {
 			for (auto it = kp.second[i].mAllocations.begin(); it != kp.second[i].mAllocations.begin(); it++)
-				fprintf_color(COLOR_RED_BOLD, stderr, "Device memory leak detected. Tag: %s\n", it->mTag.c_str());
+				fprintf_color(COLOR_RED, stderr, "Device memory leak detected. Tag: %s\n", it->mTag.c_str());
 			vkFreeMemory(mDevice, kp.second[i].mMemory, nullptr);
 		}
 	}
@@ -379,7 +382,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 		}
 	}
 	if (memoryType == -1) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "%s", "Failed to find suitable memory type!");
+		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find suitable memory type!");
 		throw;
 	}
 
@@ -410,7 +413,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 		vkMapMemory(mDevice, allocation.mMemory, 0, allocation.mSize, 0, &allocation.mMapped);
 
 	if (!allocation.SubAllocate(requirements, alloc, tag)) {
-		fprintf_color(COLOR_RED_BOLD, stderr, "%s", "Failed to allocate memory\n");
+		fprintf_color(COLOR_RED, stderr, "%s", "Failed to allocate memory\n");
 		throw;
 	}
 
@@ -465,7 +468,7 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name) {
 	if (!commandPool) {
 		VkCommandPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		poolInfo.queueFamilyIndex = mGraphicsQueueFamily;
+		poolInfo.queueFamilyIndex = mGraphicsQueueFamilyIndex;
 		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 		ThrowIfFailed(vkCreateCommandPool(mDevice, &poolInfo, nullptr, &commandPool), "vkCreateCommandPool failed");
 		SetObjectName(commandPool, name + " Graphics Command Pool", VK_OBJECT_TYPE_COMMAND_POOL);

@@ -64,6 +64,13 @@ Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFo
 	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
 	mFramebuffer = new ::Framebuffer(name, mDevice, 1600, 900, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
 
+	VkClearValue c = {};
+	c.color.float32[0] = 1.f;
+	c.color.float32[1] = 1.f;
+	c.color.float32[2] = 1.f;
+	c.color.float32[3] = 1.f;
+	mFramebuffer->ClearValue(1, c);
+
 	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
 	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
 
@@ -213,37 +220,35 @@ void Camera::Set(CommandBuffer* commandBuffer) {
 	buf.ViewProjection[1] = mViewProjection[1];
 	buf.InvProjection[0] = mInvProjection[0];
 	buf.InvProjection[1] = mInvProjection[1];
-	buf.Viewport = float4(mViewport.width, mViewport.height, mNear, mFar);
-	buf.ProjParams = float4(Aspect(), mOrthographicSize, mFieldOfView, mOrthographic ? 1.f : 0.f);
-	buf.Position = WorldPosition();
+	buf.Position[0] = WorldPosition();
+	buf.Position[1] = WorldPosition();
+	buf.Near = mNear;
+	buf.Far = mFar;
 	buf.Right = WorldRotation() * float3(1, 0, 0);
 	buf.Up = WorldRotation() * float3(0, 1, 0);
+	buf.AspectRatio = Aspect();
+	buf.OrthographicSize = mOrthographic ? mOrthographicSize : 0;
 	
-	VkRect2D scissor{ { 0, 0 }, { mFramebuffer->Width(), mFramebuffer->Height() } };
+	VkRect2D scissor{ { 0, 0 }, { FramebufferWidth(), FramebufferHeight() } };
 	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
 	vkCmdSetViewport(*commandBuffer, 0, 1, &mViewport);
 }
 
-void Camera::SetStereo(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye) {
-	if (!shader) return;
-	uint32_t eyec = eye;
-	commandBuffer->PushConstant(shader, "StereoEye", &eyec);
-
-	float4 clipst(1, 1, 0, 0);
-	VkRect2D scissor{ { 0, 0 }, { mFramebuffer->Width(), mFramebuffer->Height() } };
+void Camera::SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye) {
+	VkViewport vp = mViewport;
 	if (mStereoMode == STEREO_SBS_HORIZONTAL) {
-		clipst = float4(.5f, 1, eye == EYE_LEFT ? -.25f : .25f, 0);
-		scissor.extent.width /= 2;
-		scissor.offset.x = eye == EYE_LEFT ? 0 : scissor.extent.width;
+		vp.width /= 2;
+		vp.x = eye == EYE_LEFT ? 0 : vp.width;
 	} else if (mStereoMode == STEREO_SBS_VERTICAL) {
-		clipst = float4(1, .5f, 0, eye == EYE_LEFT ? -.25f : .25f);
-		scissor.extent.height /= 2;
-		scissor.offset.y = eye == EYE_LEFT ? 0 : scissor.extent.height;
+		vp.height /= 2;
+		vp.y = eye == EYE_LEFT ? 0 : vp.height;
 	}
 
-	commandBuffer->PushConstant(shader, "StereoClipTransform", &clipst);
+	vkCmdSetViewport(*commandBuffer, 0, 1, &vp);
+	uint32_t eyec = eye;
 
-	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
+	if (!shader) return;
+	commandBuffer->PushConstant(shader, "StereoEye", &eyec);
 }
 
 bool Camera::UpdateTransform() {
@@ -257,6 +262,8 @@ bool Camera::UpdateTransform() {
 			mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
 		else if (mFieldOfView)
 			mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
+		// else Projection is set manually
+
 		break;
 
 	case STEREO_SBS_HORIZONTAL:
@@ -269,6 +276,8 @@ bool Camera::UpdateTransform() {
 			mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
 		else if (mFieldOfView)
 			mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
+		// else Projection is set manually
+
 		break;
 	}
 

@@ -90,6 +90,7 @@ public:
 
 	Stratum* Loop() {
 		mPluginManager->InitPlugins(mScene);
+		if (mInstance->mXRRuntime) mInstance->mXRRuntime->InitScene(mScene);
 
 		while (true) {
 			#ifdef PROFILER_ENABLE
@@ -117,10 +118,12 @@ public:
 			PROFILER_BEGIN("Execute CommandBuffer");
 			mInstance->Device()->Execute(commandBuffer);
 			PROFILER_END;
-
-
-			mScene->PrePresent();
-
+			
+			PROFILER_BEGIN("PrePresent");
+			for (const auto& p : mPluginManager->Plugins())
+				if (p->mEnabled)
+					p->PrePresent();
+			PROFILER_END;
 			mInstance->AdvanceFrame();
 
 			#ifdef PROFILER_ENABLE
@@ -129,7 +132,6 @@ public:
 		}
 
 		mInstance->Device()->Flush();
-
 		mPluginManager->UnloadPlugins();
 
 		return this;

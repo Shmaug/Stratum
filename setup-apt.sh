@@ -35,7 +35,8 @@ echo Configuring Shaderc...
 cmake CMakeLists.txt -S "$SHADERC_DIR" -B "$SHADERC_DIR" -Wno-dev -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DSHADERC_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX="$SHADERC_DIR"
 echo Shaderc configured.
 echo Building Shaderc...
-cmake --build . --config Release --target add-copyright
+make add-copyright
+make -j16
 make install -j16
 echo Shaderc built.
 
@@ -49,7 +50,8 @@ echo Configuring OpenXR...
 cmake CMakeLists.txt -S "$OPENXR_DIR" -B "$OPENXR_DIR" -Wno-dev -DDYNAMIC_LOADER=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OPENXR_DIR"
 echo OpenXR configured.
 echo Building OpenXR
-cmake --build . --config Release --target install
+make -j16
+make install
 echo OpenXR built.
 
 cd $STRATUM_DIR

@@ -1,5 +1,7 @@
 #include "OpenVR.hpp"
 
+#include <Scene/Scene.hpp>
+
 using namespace std;
 using namespace vr;
 
@@ -20,6 +22,10 @@ bool OpenVR::Init() {
         printf_color(COLOR_YELLOW, "%s: %s\n", "Failed to initialize OpenVR", VR_GetVRInitErrorAsEnglishDescription(err));
         return false;
     }
+
+    return true;
+}
+bool OpenVR::InitScene(Scene* scene) {
 
     return true;
 }

@@ -36,7 +36,7 @@ public:
 	// Updates the uniform buffer and sets the non-stereo viewport
 	ENGINE_EXPORT virtual void Set(CommandBuffer* commandBuffer);
 	// Sets the viewport and StereoEye push constant
-	ENGINE_EXPORT virtual void SetStereo(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye);
+	ENGINE_EXPORT virtual void SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye);
 
 	ENGINE_EXPORT virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = EYE_NONE);
 	ENGINE_EXPORT virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = EYE_NONE);

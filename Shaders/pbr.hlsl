@@ -2,7 +2,7 @@
 #pragma fragment fsmain main
 #pragma fragment fsdepth depth
 
-#pragma multi_compile ENABLE_SCATTERING ENVIRONMENT_TEXTURE
+#pragma multi_compile ENVIRONMENT_TEXTURE
 
 #pragma multi_compile ALPHA_CLIP
 #pragma multi_compile TEXTURED
@@ -15,7 +15,6 @@
 
 #pragma static_sampler Sampler
 #pragma static_sampler ShadowSampler maxAnisotropy=0 maxLod=0 addressMode=clamp_border borderColor=float_opaque_white compareOp=less
-#pragma static_sampler AtmosphereSampler maxAnisotropy=0 addressMode=clamp_edge
 
 #include <include/shadercompat.h>
 
@@ -29,17 +28,12 @@
 // per-material
 [[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> MainTextures[8]		: register(t4);
 [[vk::binding(BINDING_START + 1, PER_MATERIAL)]] Texture2D<float4> NormalTextures[8]	: register(t12);
-[[vk::binding(BINDING_START + 2, PER_MATERIAL)]] Texture2D<float4> MaskTextures[8]		: register(t20); // rgba ->ao, rough, metallic (glTF spec.)
+[[vk::binding(BINDING_START + 2, PER_MATERIAL)]] Texture2D<float4> MaskTextures[8]		: register(t20); // rgba ->ao, rough, metallic (glTF specification)
 
-[[vk::binding(BINDING_START + 3, PER_MATERIAL)]] Texture3D<float3> InscatteringLUT		: register(t29);
-[[vk::binding(BINDING_START + 4, PER_MATERIAL)]] Texture3D<float3> ExtinctionLUT		: register(t30);
-[[vk::binding(BINDING_START + 5, PER_MATERIAL)]] Texture2D<float>  LightShaftLUT		: register(t31);
-
-[[vk::binding(BINDING_START + 6, PER_MATERIAL)]] Texture2D<float4> EnvironmentTexture	: register(t32);
+[[vk::binding(BINDING_START + 6, PER_MATERIAL)]] Texture2D<float4> EnvironmentTexture	: register(t28);
 
 [[vk::binding(BINDING_START + 7, PER_MATERIAL)]] SamplerState Sampler : register(s0);
 [[vk::binding(BINDING_START + 8, PER_MATERIAL)]] SamplerComparisonState ShadowSampler : register(s1);
-[[vk::binding(BINDING_START + 9, PER_MATERIAL)]] SamplerState AtmosphereSampler : register(s2);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
 	STRATUM_PUSH_CONSTANTS
@@ -54,12 +48,9 @@
 	float4 TextureST;
 };
 
-//#define SHOW_CASCADE_SPLITS
-
 #include <include/util.hlsli>
 #include <include/shadow.hlsli>
 #include <include/brdf.hlsli>
-#include <include/scatter.hlsli>
 
 struct v2f {
 	float4 position : SV_Position;
@@ -82,17 +73,14 @@ v2f vsmain(
 	uint instance : SV_InstanceID ) {
 	v2f o;
 	
-	float4x4 ct = float4x4(
-		1,0,0,-Camera.Position.x,
-		0,1,0,-Camera.Position.y,
-		0,0,1,-Camera.Position.z,
-		0,0,0,1);
-	float4 worldPos = mul(mul(ct, Instances[instance].ObjectToWorld), float4(vertex, 1.0));
+	float4x4 o2w = Instances[instance].ObjectToWorld;
+	o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
+	o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
+	o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
+	float4 worldPos = mul(o2w, float4(vertex, 1.0));
 
 	o.position = mul(STRATUM_MATRIX_VP, worldPos);
-	StratumOffsetClipPosStereo(o.position);
 	o.worldPos = float4(worldPos.xyz, o.position.z);
-	
 	o.screenPos = ComputeScreenPos(o.position);
 	o.normal = mul(float4(normal, 1), Instances[instance].WorldToObject).xyz;
 	
@@ -152,11 +140,7 @@ void fsmain(v2f i,
 	material.occlusion = mask.r;
 	material.emission = Emission;
 
-	float3 eval = EvaluateLighting(material, i.worldPos.xyz, normal, view, i.worldPos.w);
-
-	#ifdef ENABLE_SCATTERING
-	ApplyScattering(eval, i.screenPos.xy / i.screenPos.w, i.worldPos.w);
-	#endif
+	float3 eval = ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w);
 	
 	color = float4(eval, col.a);
 	depthNormal.a = col.a;

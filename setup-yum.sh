@@ -4,7 +4,7 @@ STRATUM_DIR=$(pwd)
 ASSIMP_DIR=$(pwd)/ThirdParty/assimp
 SHADERC_DIR=$(pwd)/ThirdParty/shaderc
 SPIRV_CROSS_DIR=$(pwd)/ThirdParty/shaderc/third_party/spirv-cross
-
+OPENXR_DIR=$(pwd)/ThirdParty/OpenXR-SDK
 
 echo Installing dependencies...
 yum install vulkan-devel zlib-devel libX11-devel libXrandr-devel
@@ -30,7 +30,7 @@ echo Configuring Shaderc...
 cmake CMakeLists.txt -S "$SHADERC_DIR" -B "$SHADERC_DIR" -Wno-dev -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DSHADERC_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX="$SHADERC_DIR"
 echo Shaderc configured.
 echo Building Shaderc...
-cmake --build . --config Release --target add-copyright
+make add-copyright
 make install -j16
 echo Shaderc built.
 
@@ -38,5 +38,14 @@ echo Building SPIRV-cross...
 cd $SPIRV_CROSS_DIR
 make -j16
 echo SPIRV-cross built.
+
+cd "$OPENXR_DIR"
+echo Configuring OpenXR...
+cmake CMakeLists.txt -S "$OPENXR_DIR" -B "$OPENXR_DIR" -Wno-dev -DDYNAMIC_LOADER=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$OPENXR_DIR"
+echo OpenXR configured.
+echo Building OpenXR
+make -j16
+make install
+echo OpenXR built.
 
 cd $STRATUM_DIR

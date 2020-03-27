@@ -18,9 +18,9 @@
 #define LIGHT_POINT 1
 #define LIGHT_SPOT 2
 
+#ifndef __cplusplus
 #define STRATUM_PUSH_CONSTANTS \
 uint StereoEye; \
-float4 StereoClipTransform; \
 float3 AmbientLight; \
 uint LightCount; \
 float2 ShadowTexelSize;
@@ -28,7 +28,8 @@ float2 ShadowTexelSize;
 #define STRATUM_MATRIX_V Camera.View[StereoEye]
 #define STRATUM_MATRIX_P Camera.Projection[StereoEye]
 #define STRATUM_MATRIX_VP Camera.ViewProjection[StereoEye]
-#define StratumOffsetClipPosStereo(clipPos) clipPos.xy = clipPos.xy * StereoClipTransform.xy + StereoClipTransform.zw
+#define STRATUM_CAMERA_POSITION Camera.Position[StereoEye].xyz
+#endif
 
 struct InstanceBuffer {
 	float4x4 ObjectToWorld;
@@ -40,34 +41,13 @@ struct CameraBuffer {
 	float4x4 Projection[2];
 	float4x4 ViewProjection[2];
 	float4x4 InvProjection[2];
-	float4 Viewport;
-	float4 ProjParams;
+	float4 Position[2];
 	float3 Up;
-	float _pad0;
+	float Near;
 	float3 Right;
-	float _pad1;
-	float3 Position;
-};
-
-struct ScatteringParameters {
-	float4 MoonRotation;
-	float MoonSize;
-
-	float3 IncomingLight;
-
-	float3 SunDir;
-
-	float PlanetRadius;
-	float AtmosphereHeight;
-
-	float SunIntensity;
-	float MieG;
-
-	float3 ScatteringR;
-	float3 ScatteringM;
-
-	float4 StarRotation;
-	float StarFade;
+	float Far;
+	float AspectRatio;
+	float OrthographicSize;
 };
 
 struct GPULight {

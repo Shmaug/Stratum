@@ -95,7 +95,7 @@ void PluginManager::LoadPlugins() {
 			}
 			mPluginModules.push_back(handle);
 			mPlugins.push_back(plugin);
-			printf_color(COLOR_YELLOW, "Loaded %s\n", p.path().string().c_str());
+			printf_color(COLOR_BLUE, "Loaded %s\n", p.path().string().c_str());
 		}
 	}
 
@@ -114,7 +114,7 @@ void PluginManager::LoadPlugins() {
 			}
 			mPluginModules.push_back(handle);
 			mPlugins.push_back(plugin);
-			printf_color(COLOR_YELLOW, "Loaded %s\n", it->c_str());
+			printf_color(COLOR_BLUE, "Loaded %s\n", it->c_str());
 			it = failed.erase(it);
 			c = true;
 		}
@@ -129,7 +129,7 @@ void PluginManager::LoadPlugins() {
 			continue;
 		}
 		// if the plugin sucsessfully loads here then WTF
-		printf_color(COLOR_YELLOW, "Loaded %s\n", p.c_str());
+		printf_color(COLOR_BLUE, "Loaded %s\n", p.c_str());
 		mPluginModules.push_back(handle);
 		mPlugins.push_back(plugin);
 	}
