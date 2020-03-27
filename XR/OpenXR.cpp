@@ -1,6 +1,4 @@
 #include "OpenXR.hpp"
-#include <Core/Device.hpp>
-#include <Scene/Scene.hpp>
 #include <Util/Tokenizer.hpp>
 
 #include <openxr/openxr_platform.h>
@@ -18,7 +16,10 @@ inline bool XR_FAILED_MSG(XrResult result, const string& errmsg) {
 OpenXR::OpenXR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mScene(nullptr), mHmdCamera(nullptr) {}
 OpenXR::~OpenXR() {
 	if (mHmdCamera) mScene->RemoveObject(mHmdCamera);
-	if (mSession) xrDestroySession(mSession);
+	if (mSession) {
+		xrEndSession(mSession);
+		xrDestroySession(mSession);
+	}
 	if (mInstance) xrDestroyInstance(mInstance);
 }
 
@@ -66,7 +67,6 @@ bool OpenXR::Init() {
 	instanceProperties.type = XR_TYPE_INSTANCE_PROPERTIES;
 	if (XR_FAILED_MSG(xrGetInstanceProperties(mInstance, &instanceProperties), "xrGetInstanceProperties failed")) return false;
 	printf_color(COLOR_GREEN, "OpenXR Instance created: %s.\n", instanceProperties.runtimeName);
-
 
 	XrSystemGetInfo systeminfo = {};
 	systeminfo.type = XR_TYPE_SYSTEM_GET_INFO;
@@ -133,26 +133,11 @@ bool OpenXR::InitScene(Scene* scene) {
 	if (viewCount != 2 ||
 		views[0].recommendedSwapchainSampleCount != views[1].recommendedSwapchainSampleCount ||
 		views[0].recommendedImageRectWidth != views[1].recommendedImageRectWidth || views[0].recommendedImageRectHeight != views[1].recommendedImageRectHeight) {
-		fprintf_color(COLOR_RED, stderr, "Unsupported OpenXR view configuration.\n");
+		fprintf_color(COLOR_RED, stderr, "%s", "Unsupported OpenXR view configuration.\n");
 		return false;
 	}
 
-	XrGraphicsBindingVulkanKHR binding = {};
-	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = *mScene->Instance();
-	binding.physicalDevice = mScene->Instance()->Device()->PhysicalDevice();
-	binding.device = *mScene->Instance()->Device();
-	binding.queueFamilyIndex = mScene->Instance()->Device()->PresentQueueFamilyIndex();
-	binding.queueIndex = mScene->Instance()->Device()->PresentQueueIndex();
-
-	XrSessionCreateInfo sessioninfo = {};
-	sessioninfo.type = XR_TYPE_SESSION_CREATE_INFO;
-	sessioninfo.systemId = mSystem;
-	sessioninfo.next = &binding;
-	if (XR_FAILED_MSG(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return false;
-	printf_color(COLOR_GREEN, "%s", "OpenXR Session created.\n");
-
-	VkSampleCountFlags sampleCount = VK_SAMPLE_COUNT_1_BIT;
+	VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
 	switch (views[0].recommendedSwapchainSampleCount) {
 		case 1:
 			sampleCount = VK_SAMPLE_COUNT_1_BIT;
@@ -180,35 +165,74 @@ bool OpenXR::InitScene(Scene* scene) {
 			break;
 	}
 
+	CreateSession();
+	if (!mSession) return false;
+	
 	auto camera = make_shared<Camera>(mSystemProperties.systemName, mScene->Instance()->Device(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, sampleCount);
 	camera->FramebufferWidth(views[0].recommendedImageRectWidth);
 	camera->FramebufferHeight(views[0].recommendedImageRectHeight * 2);
+	camera->StereoMode(STEREO_SBS_VERTICAL);
 	mScene->AddObject(camera);
 	mHmdCamera = camera.get();
 
-
-	// TODO: Create action sets, reference spaces, action spaces, and swapchain
-	
 	return true;
 }
 
+void OpenXR::CreateSession() {
+	XrGraphicsBindingVulkanKHR binding = {};
+	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
+	binding.instance = *mScene->Instance();
+	binding.physicalDevice = mScene->Instance()->Device()->PhysicalDevice();
+	binding.device = *mScene->Instance()->Device();
+	binding.queueFamilyIndex = mScene->Instance()->Device()->PresentQueueFamilyIndex();
+	binding.queueIndex = mScene->Instance()->Device()->PresentQueueIndex();
+
+	XrSessionCreateInfo sessioninfo = {};
+	sessioninfo.type = XR_TYPE_SESSION_CREATE_INFO;
+	sessioninfo.systemId = mSystem;
+	sessioninfo.next = &binding;
+	if (XR_FAILED_MSG(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return;
+	printf_color(COLOR_GREEN, "%s", "OpenXR Session created.\n");
+
+	XrSessionBeginInfo begin = {};
+	begin.type = XR_TYPE_SESSION_BEGIN_INFO;
+	begin.primaryViewConfigurationType = mViewConfiguration;
+	if (XR_FAILED_MSG(xrBeginSession(mSession, &begin), "xrBeginSession failed")) {
+		xrDestroySession(mSession);
+		mSession = XR_NULL_HANDLE;
+		return;
+	}
+
+	// TODO: Create action sets, reference spaces, action spaces, and swapchain
+}
+
 void OpenXR::PollEvents() {
+	if (!mInstance || !mSession) return;
+
 	XrEventDataBuffer event = {};
 	event.type = XR_TYPE_EVENT_DATA_BUFFER;
 	XrResult result;
 	if (XR_FAILED_MSG(result = xrPollEvent(mInstance, &event), "xrPollEvent failed")) return;
 
 	if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
-		printf_color(COLOR_YELLOW, "%s", "xrInstance loss pending\n");
+		printf_color(COLOR_YELLOW, "%s", "xrInstance lost\n");
+		xrEndSession(mSession);
+		xrDestroySession(mSession);
+		mSession = XR_NULL_HANDLE;
+		xrDestroyInstance(mInstance);
+		mInstance = XR_NULL_HANDLE;
 		return;
 	}
 	if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
 		printf_color(COLOR_YELLOW, "%s", "xrSession state changed\n");
+		xrEndSession(mSession);
+		xrDestroySession(mSession);
+		mSession = XR_NULL_HANDLE;
+		CreateSession();
 		return;
 	}
 
 	XrActionsSyncInfo sync = {};
 	sync.type = XR_TYPE_ACTIONS_SYNC_INFO;
 	if (XR_FAILED_MSG(xrSyncActions(mSession, &sync), "xrSyncActions failed")) return;
-
 }

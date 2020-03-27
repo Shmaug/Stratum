@@ -2,6 +2,8 @@
 
 #include "XRRuntime.hpp"
 
+#include <Scene/Scene.hpp>
+
 #include <openxr/openxr.h>
 
 class OpenXR : public XRRuntime {
@@ -27,4 +29,6 @@ private:
     Scene* mScene;
     Framebuffer* mHmdFramebuffer;
     Camera* mHmdCamera;
+
+    ENGINE_EXPORT void CreateSession();
 };
