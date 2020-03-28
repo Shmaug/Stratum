@@ -98,8 +98,8 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	if (enableXR) {
 		// Try to find an XR runtime that successfully initializes
 		vector<XRRuntime*> runtimes {
+			new OpenVR(),
 			new OpenXR(),
-			//new OpenVR()
 		};
 		for (uint32_t i = 0; i < runtimes.size(); i++) {
 			if (runtimes[i]->Init()) {

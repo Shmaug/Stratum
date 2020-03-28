@@ -23,7 +23,7 @@ bool OpenVR::Init() {
         return false;
     }
 
-    return true;
+    return false;
 }
 bool OpenVR::InitScene(Scene* scene) {
 
