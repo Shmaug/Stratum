@@ -228,7 +228,7 @@ void Window::CreateSwapchain(::Device* device) {
 	mDevice = device;
 	mDevice->SetObjectName(mSurface, mTitle + " Surface", VK_OBJECT_TYPE_SURFACE_KHR);
 	if (!mPhysicalDevice) mPhysicalDevice = mDevice->PhysicalDevice();
-
+	
 	#pragma region create swapchain
 	// query support
 	VkSurfaceCapabilitiesKHR capabilities;
@@ -253,6 +253,14 @@ void Window::CreateSwapchain(::Device* device) {
 		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find queue families\n");
 		throw;
 	}
+	
+	VkBool32 sfcSupport;
+	vkGetPhysicalDeviceSurfaceSupportKHR(mPhysicalDevice, presentFamily, mSurface, &sfcSupport);
+	if (!sfcSupport) {
+		fprintf_color(COLOR_RED, stderr, "%s", "Surface not supported by device!");
+		throw;
+	}
+
 	uint32_t queueFamilyIndices[] = { graphicsFamily, presentFamily };
 
 	// get the size of the swapchain
@@ -311,14 +319,6 @@ void Window::CreateSwapchain(::Device* device) {
 	}
 	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE;
-	
-	VkBool32 sfcSupport;
-	vkGetPhysicalDeviceSurfaceSupportKHR(mPhysicalDevice, presentFamily, mSurface, &sfcSupport);
-	if (!sfcSupport) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Surface not supported by device!");
-		throw;
-	}
-
 	ThrowIfFailed(vkCreateSwapchainKHR(*mDevice, &createInfo, nullptr, &mSwapchain), "vkCreateSwapchainKHR failed");
 	mDevice->SetObjectName(mSwapchain, mTitle + " Swapchain", VK_OBJECT_TYPE_SWAPCHAIN_KHR);
 	#pragma endregion

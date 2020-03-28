@@ -61,6 +61,11 @@ Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFo
 	mNear(.03f), mFar(500.f),
 	mRenderPriority(100), mStereoMode(STEREO_NONE) {
 
+	mEyeOffsetTranslate[0] = 0;
+	mEyeOffsetTranslate[1] = 0;
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+
 	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
 	mFramebuffer = new ::Framebuffer(name, mDevice, 1600, 900, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
 
@@ -84,6 +89,11 @@ Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, V
 	mFieldOfView(PI/4),
 	mNear(.03f), mFar(500.f),
 	mRenderPriority(100), mStereoMode(STEREO_NONE) {
+
+	mEyeOffsetTranslate[0] = 0;
+	mEyeOffsetTranslate[1] = 0;
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
 
 	mTargetWindow->mTargetCamera = this;
 
@@ -113,6 +123,11 @@ Camera::Camera(const string& name, ::Framebuffer* framebuffer)
 	mNear(.03f), mFar(500.f),
 	mRenderPriority(100), mStereoMode(STEREO_NONE) {
 
+	mEyeOffsetTranslate[0] = 0;
+	mEyeOffsetTranslate[1] = 0;
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	
 	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
 	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
 	CreateDescriptorSet();
@@ -151,7 +166,7 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	if (mOrthographic) {
 		clip.x *= Aspect();
 		ray.mOrigin = WorldPosition() + WorldRotation() * float3(clip * mOrthographicSize, mNear);
-		ray.mDirection = WorldRotation().forward();
+		ray.mDirection = WorldRotation() * float3(0, 0, 1);
 	} else {
 		float4 p1 = mInvViewProjection[eye] * float4(clip, .1f, 1);
 		ray.mDirection = normalize(p1.xyz / p1.w);
@@ -209,9 +224,9 @@ void Camera::PostRender(CommandBuffer* commandBuffer) {
 			mFramebuffer->ColorBuffer(i)->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, commandBuffer);
 }
 
-void Camera::Set(CommandBuffer* commandBuffer) {
+void Camera::SetUniforms() {
 	UpdateTransform();
-	CameraBuffer& buf = *(CameraBuffer*)mUniformBufferPtrs[commandBuffer->Device()->FrameContextIndex()];
+	CameraBuffer& buf = *(CameraBuffer*)mUniformBufferPtrs[mDevice->FrameContextIndex()];
 	buf.View[0] = mView[0];
 	buf.View[1] = mView[1];
 	buf.Projection[0] = mProjection[0];
@@ -220,15 +235,15 @@ void Camera::Set(CommandBuffer* commandBuffer) {
 	buf.ViewProjection[1] = mViewProjection[1];
 	buf.InvProjection[0] = mInvProjection[0];
 	buf.InvProjection[1] = mInvProjection[1];
-	buf.Position[0] = WorldPosition();
-	buf.Position[1] = WorldPosition();
+	buf.Position[0] = ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1);
+	buf.Position[1] = ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1);
 	buf.Near = mNear;
 	buf.Far = mFar;
-	buf.Right = WorldRotation() * float3(1, 0, 0);
-	buf.Up = WorldRotation() * float3(0, 1, 0);
 	buf.AspectRatio = Aspect();
 	buf.OrthographicSize = mOrthographic ? mOrthographicSize : 0;
-	
+}
+void Camera::Set(CommandBuffer* commandBuffer) {
+	SetUniforms();
 	VkRect2D scissor{ { 0, 0 }, { FramebufferWidth(), FramebufferHeight() } };
 	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
 	vkCmdSetViewport(*commandBuffer, 0, 1, &mViewport);
@@ -245,41 +260,25 @@ void Camera::SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shad
 	}
 
 	vkCmdSetViewport(*commandBuffer, 0, 1, &vp);
-	uint32_t eyec = eye;
 
-	if (!shader) return;
-	commandBuffer->PushConstant(shader, "StereoEye", &eyec);
+	uint32_t eyec = eye;
+	if (shader) commandBuffer->PushConstant(shader, "StereoEye", &eyec);
 }
 
 bool Camera::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
 
-	switch (mStereoMode) {
-	case STEREO_NONE:
-		mView[0] = mView[1] = float4x4::Look(0, WorldRotation().forward(), WorldRotation() * float3(0, 1, 0));
+	quaternion q0 = WorldRotation() * mEyeOffsetRotate[0];
+	quaternion q1 = WorldRotation() * mEyeOffsetRotate[1];
 
-		if (mOrthographic)
-			mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
-		else if (mFieldOfView)
-			mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
-		// else Projection is set manually
+	mView[0] = float4x4::Look(0, q0 * float3(0, 0, 1), q0 * float3(0, 1, 0));
+	mView[1] = float4x4::Look(0, q1 * float3(0, 0, 1), q1 * float3(0, 1, 0));
 
-		break;
-
-	case STEREO_SBS_HORIZONTAL:
-	case STEREO_SBS_VERTICAL:
-		mView[0] = mView[1] = float4x4::Look(0, WorldRotation().forward(), WorldRotation() * float3(0, 1, 0));
-		mView[0] = mHeadToEye[0] * mView[0];
-		mView[1] = mHeadToEye[1] * mView[1];
-
-		if (mOrthographic)
-			mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
-		else if (mFieldOfView)
-			mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
-		// else Projection is set manually
-
-		break;
-	}
+	if (mOrthographic)
+		mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
+	else if (mFieldOfView)
+		mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
+	// else Projection has been set manually
 
 	mViewProjection[0] = mProjection[0] * mView[0];
 	mViewProjection[1] = mProjection[1] * mView[1];

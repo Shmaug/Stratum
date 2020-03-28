@@ -2079,11 +2079,7 @@ struct quaternion {
 			return r;
 		}
 	}
-
-
-	inline float3 forward() const {
-		return 2 * z * xyz + float3(0, 0, w * w - dot(xyz, xyz)) + 2 * w * float3(y, -x, 0);
-	}
+	
 	inline float3 toEuler() const {
 		float4 sq = xyzw * xyzw;
 		float unit = sq.x + sq.y + sq.z + sq.w;

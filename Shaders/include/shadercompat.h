@@ -42,9 +42,7 @@ struct CameraBuffer {
 	float4x4 ViewProjection[2];
 	float4x4 InvProjection[2];
 	float4 Position[2];
-	float3 Up;
 	float Near;
-	float3 Right;
 	float Far;
 	float AspectRatio;
 	float OrthographicSize;

@@ -33,6 +33,8 @@ public:
 	ENGINE_EXPORT virtual void PreRender();
 	ENGINE_EXPORT virtual void PostRender(CommandBuffer* commandBuffer);
 
+	// Updates the uniform buffer
+	ENGINE_EXPORT virtual void SetUniforms();
 	// Updates the uniform buffer and sets the non-stereo viewport
 	ENGINE_EXPORT virtual void Set(CommandBuffer* commandBuffer);
 	// Sets the viewport and StereoEye push constant
@@ -75,9 +77,9 @@ public:
 	inline virtual void FramebufferHeight(uint32_t h) { mFramebuffer->Height(h);  Dirty(); }
 	inline virtual void SampleCount(VkSampleCountFlagBits s) { mFramebuffer->SampleCount(s); }
 
-	inline virtual void HeadToEye(const float4x4& transform, StereoEye eye = EYE_NONE) { mHeadToEye[eye] = transform; Dirty(); }
+	inline virtual void EyeOffsetTranslate(const float3& translate, StereoEye eye = EYE_NONE) { mEyeOffsetTranslate[eye] = translate; Dirty(); }
+	inline virtual void EyeOffsetRotate(const quaternion& rotate, StereoEye eye = EYE_NONE) { mEyeOffsetRotate[eye] = rotate; Dirty(); }
 	inline virtual void Projection(const float4x4& projection, StereoEye eye = EYE_NONE) { mFieldOfView = 0; mOrthographic = false; mProjection[eye] = projection; Dirty(); }
-
 
 	// Getters
 
@@ -117,8 +119,6 @@ public:
 	inline virtual float4x4 ViewProjection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mViewProjection[eye]; }
 	inline virtual float4x4 InverseViewProjection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mInvViewProjection[eye]; }
 
-	inline virtual float4x4 HeadToEye(StereoEye eye = EYE_NONE) { return mHeadToEye[eye]; }
-
 	inline virtual const float4* Frustum() { UpdateTransform(); return mFrustum; }
 
 private:
@@ -139,7 +139,9 @@ private:
 	float4x4 mInvProjection[2];
 	float4x4 mInvView[2];
 	float4x4 mInvViewProjection[2];
-	float4x4 mHeadToEye[2];
+
+	float3 mEyeOffsetTranslate[2];
+	quaternion mEyeOffsetRotate[2];
 
 	float4 mFrustum[6];
 

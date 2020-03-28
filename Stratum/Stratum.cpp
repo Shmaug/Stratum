@@ -106,6 +106,8 @@ public:
 			}
 			PROFILER_END;
 
+			if (mInstance->mXRRuntime) mInstance->mXRRuntime->BeginFrame();
+
 			PROFILER_BEGIN("Acquire Image");
 			mInstance->Window()->AcquireNextImage();
 			PROFILER_END;
@@ -113,17 +115,20 @@ public:
 			PROFILER_BEGIN("Get CommandBuffer");
 			shared_ptr<CommandBuffer> commandBuffer = mScene->Instance()->Device()->GetCommandBuffer();
 			PROFILER_END;
+
 			mScene->Update(commandBuffer.get());
 			Render(commandBuffer.get());
+
+			if (mInstance->mXRRuntime) mInstance->mXRRuntime->PostRender(commandBuffer.get());
+
 			PROFILER_BEGIN("Execute CommandBuffer");
 			mInstance->Device()->Execute(commandBuffer);
 			PROFILER_END;
 			
 			PROFILER_BEGIN("PrePresent");
-			for (const auto& p : mPluginManager->Plugins())
-				if (p->mEnabled)
-					p->PrePresent();
+			for (const auto& p : mPluginManager->Plugins()) if (p->mEnabled) p->PrePresent();
 			PROFILER_END;
+			if (mInstance->mXRRuntime) mInstance->mXRRuntime->EndFrame();
 			mInstance->AdvanceFrame();
 
 			#ifdef PROFILER_ENABLE

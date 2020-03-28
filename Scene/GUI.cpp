@@ -184,126 +184,126 @@ void GUI::Draw(CommandBuffer* commandBuffer, PassType pass, Camera* camera) {
 		}
 	}
 
-	camera->Set(commandBuffer);
+	if (camera->StereoMode() == STEREO_NONE){
+		camera->Set(commandBuffer);
+		if (mScreenRects.size()) {
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "SCREEN_SPACE" });
+			if (!shader) return;
+			VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
+			if (!layout) return;
 
-	if (mScreenRects.size()) {
-		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "SCREEN_SPACE" });
-		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
-		if (!layout) return;
+			Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("ScreenRects", mScreenRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(screenRects->MappedData(), mScreenRects.data(), mScreenRects.size() * sizeof(GuiRect));
 
-		Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("ScreenRects", mScreenRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-		memcpy(screenRects->MappedData(), mScreenRects.data(), mScreenRects.size() * sizeof(GuiRect));
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("ScreenRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(screenRects, 0, mScreenRects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
+			ds->FlushWrites();
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
 
-		DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("ScreenRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
-		ds->CreateStorageBufferDescriptor(screenRects, 0, mScreenRects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
-		ds->FlushWrites();
-		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
+			float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
+			commandBuffer->PushConstant(shader, "ScreenSize", &s);
 
-		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
-		commandBuffer->PushConstant(shader, "ScreenSize", &s);
+			vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenRects.size(), 0, 0);
+		}
+		if (mScreenTextureRects.size()) {
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "TEXTURED" });
+			if (!shader) return;
+			VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
+			if (!layout) return;
 
-		vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenRects.size(), 0, 0);
-	}
-	if (mScreenTextureRects.size()) {
-		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/ui.stm")->GetGraphics(pass, { "TEXTURED" });
-		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr);
-		if (!layout) return;
+			Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", mScreenTextureRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(screenRects->MappedData(), mScreenTextureRects.data(), mScreenTextureRects.size() * sizeof(GuiRect));
 
-		Buffer* screenRects = commandBuffer->Device()->GetTempBuffer("WorldRects", mScreenTextureRects.size() * sizeof(GuiRect), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-		memcpy(screenRects->MappedData(), mScreenTextureRects.data(), mScreenTextureRects.size() * sizeof(GuiRect));
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("WorldRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(screenRects, 0, mScreenTextureRects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
+			for (uint32_t i = 0; i < mTextureArray.size(); i++)
+				ds->CreateSampledTextureDescriptor(mTextureArray[i], i, shader->mDescriptorBindings.at("Textures").second.binding);
+			ds->FlushWrites();
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
 
-		DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("WorldRects", shader->mDescriptorSetLayouts[PER_OBJECT]);
-		ds->CreateStorageBufferDescriptor(screenRects, 0, mScreenTextureRects.size() * sizeof(GuiRect), shader->mDescriptorBindings.at("Rects").second.binding);
-		for (uint32_t i = 0; i < mTextureArray.size(); i++)
-			ds->CreateSampledTextureDescriptor(mTextureArray[i], i, shader->mDescriptorBindings.at("Textures").second.binding);
-		ds->FlushWrites();
-		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
+			vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenTextureRects.size(), 0, 0);
+		}
+		if (mScreenStrings.size()) {
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
+			if (!shader) return;
+			VkPipelineLayout layout = commandBuffer->BindShader(shader, PASS_MAIN, nullptr);
+			if (!layout) return;
+			float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
+			commandBuffer->PushConstant(shader, "ScreenSize", &s);
 
-		vkCmdDraw(*commandBuffer, 6, (uint32_t)mScreenTextureRects.size(), 0, 0);
-	}
-	if (mScreenStrings.size()) {
-		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/font.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
-		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, PASS_MAIN, nullptr);
-		if (!layout) return;
-		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
-		commandBuffer->PushConstant(shader, "ScreenSize", &s);
+			for (const GuiString& s : mScreenStrings) {
+				Buffer* glyphBuffer = nullptr;
+				char hashstr[256];
+				sprintf(hashstr, "%s%f%d%d", s.mString.c_str(), s.mScale, s.mHorizontalAnchor, s.mVerticalAnchor);
+				size_t key = 0;
+				hash_combine(key, s.mFont);
+				hash_combine(key, string(hashstr));
+				if (bc.mGlyphCache.count(key)) {
+					auto& b = bc.mGlyphCache.at(key);
+					b.second = 8u;
+					glyphBuffer = b.first;
+				} else {
+					vector<TextGlyph> glyphs(s.mString.length());
+					uint32_t glyphCount = s.mFont->GenerateGlyphs(s.mString, s.mScale, nullptr, glyphs, s.mHorizontalAnchor, s.mVerticalAnchor);
+					if (glyphCount == 0) return;
 
-		for (const GuiString& s : mScreenStrings) {
-			Buffer* glyphBuffer = nullptr;
-			char hashstr[256];
-			sprintf(hashstr, "%s%f%d%d", s.mString.c_str(), s.mScale, s.mHorizontalAnchor, s.mVerticalAnchor);
-			size_t key = 0;
-			hash_combine(key, s.mFont);
-			hash_combine(key, string(hashstr));
-			if (bc.mGlyphCache.count(key)) {
-				auto& b = bc.mGlyphCache.at(key);
-				b.second = 8u;
-				glyphBuffer = b.first;
-			} else {
-				vector<TextGlyph> glyphs(s.mString.length());
-				uint32_t glyphCount = s.mFont->GenerateGlyphs(s.mString, s.mScale, nullptr, glyphs, s.mHorizontalAnchor, s.mVerticalAnchor);
-				if (glyphCount == 0) return;
-
-				for (auto it = bc.mGlyphBufferCache.begin(); it != bc.mGlyphBufferCache.end();) {
-					if (it->first->Size() == glyphCount * sizeof(TextGlyph)) {
-						glyphBuffer = it->first;
-						bc.mGlyphBufferCache.erase(it);
-						break;
+					for (auto it = bc.mGlyphBufferCache.begin(); it != bc.mGlyphBufferCache.end();) {
+						if (it->first->Size() == glyphCount * sizeof(TextGlyph)) {
+							glyphBuffer = it->first;
+							bc.mGlyphBufferCache.erase(it);
+							break;
+						}
+						it++;
 					}
-					it++;
+					if (!glyphBuffer)
+						glyphBuffer = new Buffer("Glyph Buffer", commandBuffer->Device(), glyphCount * sizeof(TextGlyph), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+					
+					glyphBuffer->Upload(glyphs.data(), glyphCount * sizeof(TextGlyph));
+					bc.mGlyphCache.emplace(key, make_pair(glyphBuffer, 8u));
 				}
-				if (!glyphBuffer)
-					glyphBuffer = new Buffer("Glyph Buffer", commandBuffer->Device(), glyphCount * sizeof(TextGlyph), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-				
-				glyphBuffer->Upload(glyphs.data(), glyphCount * sizeof(TextGlyph));
-				bc.mGlyphCache.emplace(key, make_pair(glyphBuffer, 8u));
+
+				DescriptorSet* descriptorSet = commandBuffer->Device()->GetTempDescriptorSet(s.mFont->mName + " DescriptorSet", shader->mDescriptorSetLayouts[PER_OBJECT]);
+				descriptorSet->CreateSampledTextureDescriptor(s.mFont->Texture(), BINDING_START + 0);
+				descriptorSet->CreateStorageBufferDescriptor(glyphBuffer, 0, glyphBuffer->Size(), BINDING_START + 2);
+				descriptorSet->FlushWrites();
+				vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *descriptorSet, 0, nullptr);
+
+				commandBuffer->PushConstant(shader, "Color", &s.mColor);
+				commandBuffer->PushConstant(shader, "Offset", &s.mOffset);
+				commandBuffer->PushConstant(shader, "Bounds", &s.mBounds);
+				commandBuffer->PushConstant(shader, "Depth", &s.mDepth);
+				vkCmdDraw(*commandBuffer, (glyphBuffer->Size() / sizeof(TextGlyph)) * 6, 1, 0, 0);
 			}
+		}
 
-			DescriptorSet* descriptorSet = commandBuffer->Device()->GetTempDescriptorSet(s.mFont->mName + " DescriptorSet", shader->mDescriptorSetLayouts[PER_OBJECT]);
-			descriptorSet->CreateSampledTextureDescriptor(s.mFont->Texture(), BINDING_START + 0);
-			descriptorSet->CreateStorageBufferDescriptor(glyphBuffer, 0, glyphBuffer->Size(), BINDING_START + 2);
-			descriptorSet->FlushWrites();
-			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *descriptorSet, 0, nullptr);
+		if (mScreenLines.size()) {
+			GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/line.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
+			if (!shader) return;
+			VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, nullptr, VK_PRIMITIVE_TOPOLOGY_LINE_STRIP);
+			if (!layout) return;
 
-			commandBuffer->PushConstant(shader, "Color", &s.mColor);
-			commandBuffer->PushConstant(shader, "Offset", &s.mOffset);
-			commandBuffer->PushConstant(shader, "Bounds", &s.mBounds);
-			commandBuffer->PushConstant(shader, "Depth", &s.mDepth);
-			vkCmdDraw(*commandBuffer, (glyphBuffer->Size() / sizeof(TextGlyph)) * 6, 1, 0, 0);
+			Buffer* b = commandBuffer->Device()->GetTempBuffer("Perf Graph Pts", sizeof(float2) * mLinePoints.size(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+			memcpy(b->MappedData(), mLinePoints.data(), sizeof(float2) * mLinePoints.size());
+			
+			DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("Perf Graph DS", shader->mDescriptorSetLayouts[PER_OBJECT]);
+			ds->CreateStorageBufferDescriptor(b, 0, sizeof(float2) * mLinePoints.size(), INSTANCE_BUFFER_BINDING);
+			ds->FlushWrites();
+
+			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
+
+			float4 sz(0, 0, camera->FramebufferWidth(), camera->FramebufferHeight());
+			commandBuffer->PushConstant(shader, "ScreenSize", &sz.z);
+
+			for (const GuiLine& l : mScreenLines) {
+				vkCmdSetLineWidth(*commandBuffer, l.mThickness);
+				commandBuffer->PushConstant(shader, "Color", &l.mColor);
+				commandBuffer->PushConstant(shader, "ScaleTranslate", &l.mScaleTranslate);
+				commandBuffer->PushConstant(shader, "Bounds", &l.mBounds);
+				commandBuffer->PushConstant(shader, "Depth", &l.mDepth);
+				vkCmdDraw(*commandBuffer, l.mCount, 1, l.mIndex, 0);
+			}
 		}
 	}
-
-	if (mScreenLines.size()) {
-		GraphicsShader* shader = camera->Scene()->AssetManager()->LoadShader("Shaders/line.stm")->GetGraphics(PASS_MAIN, { "SCREEN_SPACE" });
-		if (!shader) return;
-		VkPipelineLayout layout = commandBuffer->BindShader(shader, pass, nullptr, nullptr, VK_PRIMITIVE_TOPOLOGY_LINE_STRIP);
-		if (!layout) return;
-
-		Buffer* b = commandBuffer->Device()->GetTempBuffer("Perf Graph Pts", sizeof(float2) * mLinePoints.size(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-		memcpy(b->MappedData(), mLinePoints.data(), sizeof(float2) * mLinePoints.size());
-		
-		DescriptorSet* ds = commandBuffer->Device()->GetTempDescriptorSet("Perf Graph DS", shader->mDescriptorSetLayouts[PER_OBJECT]);
-		ds->CreateStorageBufferDescriptor(b, 0, sizeof(float2) * mLinePoints.size(), INSTANCE_BUFFER_BINDING);
-		ds->FlushWrites();
-
-		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *ds, 0, nullptr);
-
-		float4 sz(0, 0, camera->FramebufferWidth(), camera->FramebufferHeight());
-		commandBuffer->PushConstant(shader, "ScreenSize", &sz.z);
-
-		for (const GuiLine& l : mScreenLines) {
-			vkCmdSetLineWidth(*commandBuffer, l.mThickness);
-			commandBuffer->PushConstant(shader, "Color", &l.mColor);
-			commandBuffer->PushConstant(shader, "ScaleTranslate", &l.mScaleTranslate);
-			commandBuffer->PushConstant(shader, "Bounds", &l.mBounds);
-			commandBuffer->PushConstant(shader, "Depth", &l.mDepth);
-			vkCmdDraw(*commandBuffer, l.mCount, 1, l.mIndex, 0);
-		}
-	}
-
 	mTextureArray.clear();
 	mTextureMap.clear();
 }

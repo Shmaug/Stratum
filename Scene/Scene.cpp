@@ -740,7 +740,7 @@ void Scene::PreFrame(CommandBuffer* commandBuffer) {
 
 		float ct = tanf(mainCamera->FieldOfView() * .5f) * max(1.f, mainCamera->Aspect());
 		float3 cp = mainCamera->WorldPosition();
-		float3 fwd = mainCamera->WorldRotation().forward();
+		float3 fwd = mainCamera->WorldRotation() * float3(0, 0, 1);
 
 		Ray rays[4] {
 			mainCamera->ScreenToWorldRay(float2(0, 0)),
@@ -762,7 +762,7 @@ void Scene::PreFrame(CommandBuffer* commandBuffer) {
 			lights[li].Color = l->Color() * l->Intensity();
 			lights[li].SpotAngleScale = 1.f / fmaxf(.001f, cosInner - cosOuter);
 			lights[li].SpotAngleOffset = -cosOuter * lights[li].SpotAngleScale;
-			lights[li].Direction = -l->WorldRotation().forward();
+			lights[li].Direction = -(l->WorldRotation() * float3(0, 0, 1));
 			lights[li].Type = l->Type();
 			lights[li].ShadowIndex = -1;
 			lights[li].CascadeSplits = -1.f;

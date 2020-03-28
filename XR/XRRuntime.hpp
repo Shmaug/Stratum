@@ -2,6 +2,7 @@
 
 #include <Util/Util.hpp>
 
+class CommandBuffer;
 class Instance;
 class Scene;
 
@@ -21,5 +22,7 @@ public:
     // Called after the Vulkan instance and device are created, before the scene loop starts
     virtual bool InitScene(Scene* scene) = 0;
 
-    inline virtual void PollEvents() {}
+    inline virtual void BeginFrame() {}
+    inline virtual void PostRender(CommandBuffer* commandBuffer) {}
+    inline virtual void EndFrame() {}
 };

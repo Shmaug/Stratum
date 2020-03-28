@@ -445,8 +445,6 @@ xcb_generic_event_t* Instance::PollEvent() {
 #endif
 
 bool Instance::PollEvents() {
-	if (mXRRuntime) mXRRuntime->PollEvents();
-	
 	#ifdef __linux
 	xcb_generic_event_t* event;
 	while (event = PollEvent()){
