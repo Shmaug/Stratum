@@ -2192,16 +2192,13 @@ struct float4x4 {
 		}
 		if (rotation) {
 			float trace = 1.f + v[0].x + v[1].y + v[2].z;
-			if (trace > 0)
-			{
+			if (trace > 0) {
 				rotation->x = v[2].y - v[1].z;
 				rotation->y = v[0].z - v[2].x;
 				rotation->z = v[1].x - v[0].y;
 				rotation->w = sqrtf(1.f + v[0].x + v[1].y + v[2].z) * .5f;
 				rotation->xyz /= 4.f * rotation->w;
-			}
-			else if (v[0][0] > v[1][1] && v[0][0] > v[2][2])
-			{
+			} else if (v[0][0] > v[1][1] && v[0][0] > v[2][2]) {
 				rotation->w = v[2].y - v[1].z;
 				rotation->z = v[0].z + v[2].x;
 				rotation->y = v[1].x + v[0].y;
@@ -2209,9 +2206,7 @@ struct float4x4 {
 				rotation->y /= 4.f * rotation->x;
 				rotation->z /= 4.f * rotation->x;
 				rotation->w /= 4.f * rotation->x;
-			}
-			else if (v[1][1] > v[2][2])
-			{
+			} else if (v[1][1] > v[2][2]) {
 				rotation->z = v[2].y + v[1].z;
 				rotation->w = v[0].z - v[2].x;
 				rotation->x = v[1].x + v[0].y;
@@ -2219,9 +2214,7 @@ struct float4x4 {
 				rotation->x /= 4.f * rotation->y;
 				rotation->z /= 4.f * rotation->y;
 				rotation->w /= 4.f * rotation->y;
-			}
-			else
-			{
+			} else {
 				rotation->y = v[2].y + v[1].z;
 				rotation->x = v[0].z + v[2].x;
 				rotation->w = v[1].x - v[0].y;

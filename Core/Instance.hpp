@@ -22,6 +22,8 @@ class PluginManager;
 
 class Instance {
 public:
+	static bool sDisableDebugCallback;
+
 	ENGINE_EXPORT ~Instance();
 
 	inline XRRuntime* XR() const { return mXRRuntime; }

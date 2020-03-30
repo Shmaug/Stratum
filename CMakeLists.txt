@@ -94,6 +94,7 @@ if(WIN32)
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib"
+		"${STRATUM_HOME}/ThirdParty/openvr/lib/win64/openvr_api.lib"
 		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/openxr_loader.lib" )
 
 	target_link_libraries(Stratum
@@ -102,13 +103,15 @@ if(WIN32)
 		"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
 		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib" )
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib"
+		"${STRATUM_HOME}/ThirdParty/openvr/lib/win64/openvr_api.lib"
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/openxr_loader.lib" )
 
 	if (${ENABLE_DEBUG_LAYERS})
 		target_link_libraries(Engine "$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")
 	endif()
 
-	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/win64/openvr_api.dll" "${PROJECT_BINARY_DIR}/bin/vrclient.dll")
+	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/win64/openvr_api.dll" "${PROJECT_BINARY_DIR}/bin/openvr_api.dll" COPYONLY)
 else()
 	target_link_libraries(ShaderCompiler
 		stdc++fs
@@ -134,7 +137,7 @@ else()
 
 	target_link_libraries(Stratum "${PROJECT_BINARY_DIR}/bin/libEngine.so" "libvulkan.so.1")
 
-	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/linux64/libopenvr_api.so" "${PROJECT_BINARY_DIR}/bin/vrclient.so")
+	configure_file("${STRATUM_HOME}/ThirdParty/openvr/bin/linux64/libopenvr_api.so" "${PROJECT_BINARY_DIR}/bin/vrclient.so" COPYONLY)
 endif()
 
 if (${ENABLE_DEBUG_LAYERS})

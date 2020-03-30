@@ -15,7 +15,10 @@ MeshRenderer::~MeshRenderer() {}
 
 bool MeshRenderer::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
-	mAABB = Mesh()->Bounds() * ObjectToWorld();
+	if (!Mesh())
+		mAABB = AABB(WorldPosition(), WorldPosition());
+	else
+		mAABB = Mesh()->Bounds() * ObjectToWorld();
 	return true;
 }
 

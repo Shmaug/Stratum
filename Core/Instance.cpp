@@ -9,9 +9,13 @@
 
 using namespace std;
 
+bool Instance::sDisableDebugCallback = false;
+
 // Debug messenger functions
 #ifdef ENABLE_DEBUG_LAYERS
 VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
+	if (Instance::sDisableDebugCallback) return VK_FALSE;
+
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 		fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 		//throw;

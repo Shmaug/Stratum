@@ -4,6 +4,7 @@ set "STRATUM_DIR=%cd%"
 set "ASSIMP_DIR=%cd%/ThirdParty/assimp"
 set "SHADERC_DIR=%cd%/ThirdParty/shaderc"
 set "SPIRV_CROSS_DIR=%cd%/ThirdParty/shaderc/third_party/spirv-cross"
+set "OPENXR_DIR=%cd%/ThirdParty/OpenXR-SDK"
 
 echo Updating submodules...
 git submodule update --init
@@ -36,5 +37,13 @@ echo SPIRV-cross configured.
 echo Building SPIRV-cross...
 cmake --build . --config Release --target install
 echo SPIRV-cross built.
+
+cd "%OPENXR_DIR%"
+echo Configuring OpenXR...
+cmake CMakeLists.txt -S "%OPENXR_DIR%" -B "%OPENXR_DIR%" -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="%OPENXR_DIR%"
+echo OpenXR configured.
+echo Building OpenXR
+cmake --build . --config Release --target install
+echo OpenXR built.
 
 cd %STRATUM_DIR%

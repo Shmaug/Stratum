@@ -5,7 +5,7 @@
 #pragma multi_compile ENVIRONMENT_TEXTURE
 
 #pragma multi_compile ALPHA_CLIP
-#pragma multi_compile TEXTURED
+#pragma multi_compile TEXTURED TEXTURED_COLORONLY
 
 #pragma render_queue 1000
 
@@ -15,6 +15,17 @@
 
 #pragma static_sampler Sampler
 #pragma static_sampler ShadowSampler maxAnisotropy=0 maxLod=0 addressMode=clamp_border borderColor=float_opaque_white compareOp=less
+
+#if defined(TEXTURED_COLORONLY)
+#define NEED_TEXCOORD
+#elif defined(TEXTURED)
+#define NEED_TEXCOORD
+#define NEED_TANGENT
+#endif
+
+#ifdef ALPHA_CLIP
+#define NEED_TEXCOORD
+#endif
 
 #include <include/shadercompat.h>
 
@@ -57,17 +68,21 @@ struct v2f {
 	float4 worldPos : TEXCOORD0;
 	float4 screenPos : TEXCOORD1;
 	float3 normal : NORMAL;
-	#ifdef TEXTURED
-	float3 tangent : TANGENT;
+	#ifdef NEED_TEXCOORD
 	float2 texcoord : TEXCOORD2;
+	#endif
+	#ifdef NEED_TANGENT
+	float3 tangent : TANGENT;
 	#endif
 };
 
 v2f vsmain(
 	[[vk::location(0)]] float3 vertex : POSITION,
 	[[vk::location(1)]] float3 normal : NORMAL,
-	#ifdef TEXTURED
+	#ifdef NEED_TANGENT
 	[[vk::location(2)]] float4 tangent : TANGENT,
+	#endif
+	#ifdef NEED_TEXCOORD
 	[[vk::location(3)]] float2 texcoord : TEXCOORD0,
 	#endif
 	uint instance : SV_InstanceID ) {
@@ -84,9 +99,11 @@ v2f vsmain(
 	o.screenPos = ComputeScreenPos(o.position);
 	o.normal = mul(float4(normal, 1), Instances[instance].WorldToObject).xyz;
 	
-	#ifdef TEXTURED
-	o.tangent = mul(tangent, Instances[instance].WorldToObject).xyz * tangent.w;
+	#ifdef NEED_TEXCOORD
 	o.texcoord = texcoord * TextureST.xy + TextureST.zw;
+	#endif
+	#ifdef NEED_TANGENT
+	o.tangent = mul(tangent, Instances[instance].WorldToObject).xyz * tangent.w;
 	#endif
 
 	return o;
@@ -108,7 +125,7 @@ void fsmain(v2f i,
 
 	float3 view = ComputeView(i.worldPos.xyz, i.screenPos);
 
-	#ifdef TEXTURED
+	#if defined(TEXTURED) || defined(TEXTURED_COLORONLY)
 	float4 col = MainTextures[TextureIndex].Sample(Sampler, i.texcoord) * Color;
 	#else
 	float4 col = Color;
