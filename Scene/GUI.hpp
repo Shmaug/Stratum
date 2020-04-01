@@ -81,8 +81,8 @@ private:
 
 	static std::unordered_map<uint32_t, std::variant<float, std::string>> mControlData;
 
-	static uint32_t mHotControl;
-	static uint32_t mLastHotControl;
+	static std::unordered_map<const InputPointer*, uint32_t> mHotControl;
+	static std::unordered_map<const InputPointer*, uint32_t> mLastHotControl;
 	static uint32_t mNextControlId;
 	static float mCurrentDepth;
 

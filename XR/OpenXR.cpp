@@ -594,10 +594,8 @@ void OpenXR::PostRender(CommandBuffer* commandBuffer) {
 	mHmdCamera->LocalPosition(center);
 	mHmdCamera->LocalRotation(rotations[0]);
 
-	mHmdCamera->EyeOffsetTranslate(iq * (positions[0] - center), eyes[0]);
-	mHmdCamera->EyeOffsetTranslate(iq * (positions[1] - center), eyes[1]);
-	mHmdCamera->EyeOffsetRotate(quaternion(0,0,0,1), eyes[0]);
-	mHmdCamera->EyeOffsetRotate(iq * rotations[1], eyes[1]);
+	mHmdCamera->EyeOffset(iq * (positions[0] - center), quaternion(0,0,0,1), eyes[0]);
+	mHmdCamera->EyeOffset(iq * (positions[1] - center), iq * rotations[1], eyes[1]);
 
 	mHmdCamera->SetUniforms();
 

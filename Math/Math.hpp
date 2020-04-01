@@ -2184,47 +2184,91 @@ struct float4x4 {
 	}
 
 	inline void Decompose(float3* position, quaternion* rotation, float3* scale) {
-		if (position) *position = v[3].xyz;
-		if (scale) {
-			scale->x = length(v[0].xyz);
-			scale->y = length(v[1].xyz);
-			scale->z = length(v[2].xyz);
+		float4x4 tmp = *this;
+
+		// tmp scale (if scale is not provided)
+		float3 sc;
+		if (!scale) scale = &sc;
+
+		// Normalization
+		if (tmp[3][3] == 0) return;
+		for (uint32_t i = 0; i < 4; i++)
+			for (uint32_t j = 0; j < 4; j++)
+				tmp.v[i][j] /= tmp.v[3][3];
+
+		if (tmp[0][3] != 0.f ||
+			tmp[1][3] != 0.f ||
+			tmp[2][3] != 0.f) { // Clear perspective
+			tmp[0][3] = tmp[1][3] = tmp[2][3] = 0;
+			tmp[3][3] = 1.f;
 		}
-		if (rotation) {
-			float trace = 1.f + v[0].x + v[1].y + v[2].z;
-			if (trace > 0) {
-				rotation->x = v[2].y - v[1].z;
-				rotation->y = v[0].z - v[2].x;
-				rotation->z = v[1].x - v[0].y;
-				rotation->w = sqrtf(1.f + v[0].x + v[1].y + v[2].z) * .5f;
-				rotation->xyz /= 4.f * rotation->w;
-			} else if (v[0][0] > v[1][1] && v[0][0] > v[2][2]) {
-				rotation->w = v[2].y - v[1].z;
-				rotation->z = v[0].z + v[2].x;
-				rotation->y = v[1].x + v[0].y;
-				rotation->x = sqrtf(1.f + v[0].x - v[1].y - v[2].z) * .5f;
-				rotation->y /= 4.f * rotation->x;
-				rotation->z /= 4.f * rotation->x;
-				rotation->w /= 4.f * rotation->x;
-			} else if (v[1][1] > v[2][2]) {
-				rotation->z = v[2].y + v[1].z;
-				rotation->w = v[0].z - v[2].x;
-				rotation->x = v[1].x + v[0].y;
-				rotation->y = sqrtf(1.f - v[0].x + v[1].y - v[2].z) * .5f;
-				rotation->x /= 4.f * rotation->y;
-				rotation->z /= 4.f * rotation->y;
-				rotation->w /= 4.f * rotation->y;
-			} else {
-				rotation->y = v[2].y + v[1].z;
-				rotation->x = v[0].z + v[2].x;
-				rotation->w = v[1].x - v[0].y;
-				rotation->z = sqrtf(1.f - v[0].x - v[1].y + v[2].z) * .5f;
-				rotation->x /= 4.f * rotation->z;
-				rotation->y /= 4.f * rotation->z;
-				rotation->w /= 4.f * rotation->z;
+
+
+		if (position) *position = tmp.v[3].xyz;
+		tmp.v[3].xyz = 0;
+
+		// scale/shear
+		float3 rows[3];
+		for (uint32_t i = 0; i < 3; ++i)
+			for (uint32_t j = 0; j < 3; ++j)
+				rows[i][j] = tmp.v[i][j];
+
+		scale->x = length(rows[0]);
+
+		rows[0] = normalize(rows[0]);
+
+		float3 skew;
+		skew.z = dot(rows[0], rows[1]);
+		rows[1] += -skew.z * rows[0];
+
+		scale->y = length(rows[1]);
+		rows[1] = normalize(rows[1]);
+		skew.z /= scale->y;
+
+		skew.y = dot(rows[0], rows[2]);
+		rows[2] += rows[0] * -skew.y;
+		skew.x = dot(rows[1], rows[2]);
+		rows[2] += rows[1] * -skew.x;
+
+		scale->z = length(rows[2]);
+		rows[2] = normalize(rows[2]);
+		skew.y /= scale->z;
+		skew.x /= scale->z;
+
+		if (dot(rows[0], cross(rows[1], rows[2])) < 0) {
+			for (uint32_t i = 0; i < 3; i++) {
+				scale->v[i] = -scale->v[i];
+				rows[i] = -rows[i];
 			}
 		}
 
+		if (!rotation) return;
+
+		uint32_t i, j, k = 0;
+		float root, trace = rows[0].x + rows[1].y + rows[2].z;
+		if (trace > 0) {
+			root = sqrt(trace + 1.f);
+			rotation->w = .5f * root;
+			root = .5f / root;
+			rotation->x = root * (rows[1].z - rows[2].y);
+			rotation->y = root * (rows[2].x - rows[0].z);
+			rotation->z = root * (rows[0].y - rows[1].x);
+		} else {
+			static const uint32_t next[3] { 1, 2, 0 };
+			i = 0;
+			if (rows[1].y > rows[0].x) i = 1;
+			if (rows[2].z > rows[i][i]) i = 2;
+			j = next[i];
+			k = next[j];
+
+			root = sqrtf(rows[i][i] - rows[j][j] - rows[k][k] + 1.f);
+
+			rotation->v[i] = .5f * root;
+			root = .5f / root;
+			rotation->v[j] = root * (rows[i][j] + rows[j][i]);
+			rotation->v[k] = root * (rows[i][k] + rows[k][i]);
+			rotation->w = root * (rows[j][k] - rows[k][j]);
+		}
 	}
 
 	inline static float4x4 Look(const float3& p, const float3& fwd, const float3& up) {

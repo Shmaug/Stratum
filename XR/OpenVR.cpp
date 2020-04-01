@@ -6,13 +6,11 @@ using namespace vr;
 
 void ConvertMatrix(const HmdMatrix34_t& mat, float3& pos, quaternion& rot) {
     float4x4(
-        mat.m[0][0], mat.m[0][1], mat.m[0][2], mat.m[0][3],
-        mat.m[1][0], mat.m[1][1], mat.m[1][2], mat.m[1][3],
-        mat.m[2][0], mat.m[2][1], mat.m[2][2], mat.m[2][3],
-        0,0,0,1).Decompose(&pos, &rot, nullptr);
-    pos.z = -pos.z;
-    rot.x = -rot.x;
-    rot.y = -rot.y;
+        mat.m[0][0], mat.m[0][1], -mat.m[0][2], mat.m[0][3],
+        mat.m[1][0], mat.m[1][1], -mat.m[1][2], mat.m[1][3],
+        -mat.m[2][0], -mat.m[2][1], mat.m[2][2], -mat.m[2][3],
+        0, 0, 0, 1).Decompose(&pos, &rot, nullptr);
+    rot = normalize(rot);
 }
 
 VertexInput RenderModelVertexInput = {
@@ -57,7 +55,9 @@ OpenVR::~OpenVR() {
 
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
         if (mTrackedObjects[i]) mScene->RemoveObject(mTrackedObjects[i]);
-    
+
+    for (auto p : mInputPointers)
+        safe_delete(p);
     for (auto kp : mRenderModels)
         safe_delete(kp.second.first);
     for (auto kp : mRenderModelMaterials)
@@ -115,6 +115,7 @@ void OpenVR::PreDeviceInit(Instance* instance, VkPhysicalDevice device) {
 
 bool OpenVR::InitScene(Scene* scene) {
     mScene = scene;
+    scene->InputManager()->RegisterInputDevice(this);
 
     auto mat = make_shared<Material>("Untextured", mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
     mat->SetParameter("Color", float4(1));
@@ -134,41 +135,49 @@ bool OpenVR::InitScene(Scene* scene) {
     camera->ViewportWidth(w * 2);
     camera->ViewportHeight(h);
     camera->StereoMode(STEREO_SBS_HORIZONTAL);
+    camera->Near(.01f);
+    camera->Far(1024.f);
     mScene->AddObject(camera);
     mHmdCamera = camera.get();
 
-    float l, r, t, b;
-
-    mSystem->GetProjectionRaw(Eye_Left, &l, &r, &t, &b);
-    l *= mHmdCamera->Near();
-    r *= mHmdCamera->Near();
-    t *= mHmdCamera->Near();
-    b *= mHmdCamera->Near();
-    mHmdCamera->Projection(float4x4::Perspective(l, r, b, t, mHmdCamera->Near(), mHmdCamera->Far()), EYE_LEFT);
-
-    mSystem->GetProjectionRaw(Eye_Right, &l, &r, &t, &b);
-    l *= mHmdCamera->Near();
-    r *= mHmdCamera->Near();
-    t *= mHmdCamera->Near();
-    b *= mHmdCamera->Near();
-    mHmdCamera->Projection(float4x4::Perspective(l, r, b, t, mHmdCamera->Near(), mHmdCamera->Far()), EYE_RIGHT);
-
+    float n = mHmdCamera->Near();
     float3 pos;
     quaternion rot;
-    ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Left), pos, rot);
-    mHmdCamera->EyeOffsetTranslate(pos, EYE_LEFT);
-    mHmdCamera->EyeOffsetRotate(rot, EYE_LEFT);
+    float l, r, t, b;
 
+    mSystem->GetProjectionRaw(Eye_Right, &l, &r, &t, &b);
+    ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Left), pos, rot);
+    mHmdCamera->Projection(float4x4::Perspective(l * n, r * n, t * n, b * n, mHmdCamera->Near(), mHmdCamera->Far()), EYE_LEFT);
+    mHmdCamera->EyeOffset(pos, rot, EYE_LEFT);
+
+    mSystem->GetProjectionRaw(Eye_Left, &l, &r, &t, &b);
+    mHmdCamera->Projection(float4x4::Perspective(l * n, r * n, t * n, b * n, mHmdCamera->Near(), mHmdCamera->Far()), EYE_RIGHT);
     ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Right), pos, rot);
-    mHmdCamera->EyeOffsetTranslate(pos, EYE_RIGHT);
-    mHmdCamera->EyeOffsetRotate(rot, EYE_RIGHT);
+    mHmdCamera->EyeOffset(pos, rot, EYE_RIGHT);
 
     return true;
 }
 
 void OpenVR::BeginFrame() {
     VREvent_t event;
-    while (mSystem->PollNextEvent(&event, sizeof(event))) {}
+    while (mSystem->PollNextEvent(&event, sizeof(event))) {
+        if (event.eventType == VREvent_IpdChanged) {
+            float n = mHmdCamera->Near();
+            float3 pos;
+            quaternion rot;
+            float l, r, t, b;
+
+            mSystem->GetProjectionRaw(Eye_Left, &l, &r, &t, &b);
+            ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Left), pos, rot);
+            mHmdCamera->Projection(float4x4::Perspective(l * n, r * n, t * n, b * n, mHmdCamera->Near(), mHmdCamera->Far()), EYE_LEFT);
+            mHmdCamera->EyeOffset(pos, rot, EYE_LEFT);
+
+            mSystem->GetProjectionRaw(Eye_Right, &l, &r, &t, &b);
+            mHmdCamera->Projection(float4x4::Perspective(l * n, r * n, t * n, b * n, mHmdCamera->Near(), mHmdCamera->Far()), EYE_RIGHT);
+            ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Right), pos, rot);
+            mHmdCamera->EyeOffset(pos, rot, EYE_RIGHT);
+        }
+    }
 
     bool controllersVisible = !mSystem->IsSteamVRDrawingControllers();
 
@@ -188,6 +197,8 @@ void OpenVR::BeginFrame() {
         // Update controller models and visibility
         
         if (deviceClass != TrackedDeviceClass_Controller) continue;
+
+        // TODO: Create InputPointers for tracked controllers
 
         // only enable the scene object if its pose is valid
         if (mTrackedObjects[i]) mTrackedObjects[i]->mEnabled = mTrackedDevicesPredicted[i].bPoseIsValid;
@@ -309,11 +320,10 @@ void OpenVR::EndFrame() {
     VRTextureBounds_t leftBounds = {};
     leftBounds.uMax = .5f;
     leftBounds.vMax = 1.f;
-    VRTextureBounds_t rightBounds;
+    VRTextureBounds_t rightBounds = {};
     rightBounds.uMin = .5f;
     rightBounds.uMax = 1.f;
     rightBounds.vMax = 1.f;
-
 
     VRVulkanTextureData_t vkTexture = {};
     vkTexture.m_nImage = (uint64_t)mCopyTarget->Image();
@@ -337,3 +347,12 @@ void OpenVR::EndFrame() {
     if (VRCompositor()->Submit(vr::Eye_Right, &texture, &rightBounds) != vr::VRCompositorError_None) fprintf_color(COLOR_YELLOW, stderr, "%s", "Failed to submit right eye\n");
     Instance::sDisableDebugCallback = false;
 }
+
+void OpenVR::NextFrame() {
+    for (InputPointer* p : mInputPointers) {
+        p->mLastWorldRay = p->mWorldRay;
+        memcpy(p->mLastAxis, p->mAxis, sizeof(float) * 5);
+        p->mLastGuiHitT = p->mGuiHitT;
+        p->mGuiHitT = 1e20f;
+    }
+ }

@@ -6,7 +6,7 @@
 #include <Scene/Scene.hpp>
 #include <Scene/MeshRenderer.hpp>
 
-class OpenVR : public XRRuntime {
+class OpenVR : public XRRuntime, public InputDevice {
 public:
     ENGINE_EXPORT OpenVR();
     ENGINE_EXPORT ~OpenVR();
@@ -21,6 +21,11 @@ public:
     ENGINE_EXPORT void PostRender(CommandBuffer* commandBuffer);
     ENGINE_EXPORT void EndFrame();
 
+    // InputDevice implementation
+    inline uint32_t PointerCount() { return mInputPointers.size(); }
+    inline const InputPointer* GetPointer(uint32_t index) { return mInputPointers[i]; }
+    ENGINE_EXPORT void NextFrame();
+
 private:
     Scene* mScene;
     Camera* mHmdCamera;
@@ -30,11 +35,12 @@ private:
 
     Texture* mCopyTarget;
 
-    Object* mTrackedObjects[vr::k_unMaxTrackedDeviceCount];
+    std::vector<InputPointer*> mInputPointers;
 
     std::unordered_map<std::string, std::pair<Mesh*, vr::TextureID_t>> mRenderModels;
     std::unordered_map<vr::TextureID_t, std::pair<Texture*, std::shared_ptr<Material>>> mRenderModelMaterials;
 
+    Object* mTrackedObjects[vr::k_unMaxTrackedDeviceCount];
     vr::TrackedDevicePose_t mTrackedDevices[vr::k_unMaxTrackedDeviceCount];
     vr::TrackedDevicePose_t mTrackedDevicesPredicted[vr::k_unMaxTrackedDeviceCount];
 };

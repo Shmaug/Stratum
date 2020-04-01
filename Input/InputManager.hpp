@@ -8,6 +8,8 @@ public:
 	ENGINE_EXPORT void RegisterInputDevice(InputDevice* device);
 	ENGINE_EXPORT void UnregisterInputDevice(InputDevice* device);
 
+	inline const std::vector<InputDevice*>& InputDevices() const { return mInputDevices; }
+
 	template<class T>
 	inline T* GetFirst() {
 		for (InputDevice* p : mInputDevices)

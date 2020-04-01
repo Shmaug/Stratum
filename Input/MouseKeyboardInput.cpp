@@ -3,9 +3,8 @@
 
 MouseKeyboardInput::MouseKeyboardInput(){
 	mMousePointer.mDevice = this;
-	mMousePointer.mAxis.emplace(0, 0.f);
-	mMousePointer.mAxis.emplace(1, 0.f);
-	mMousePointer.mAxis.emplace(2, 0.f);
+	memset(mMousePointer.mAxis, 0, sizeof(float) * 5);
+	memset(mMousePointer.mLastAxis, 0, sizeof(float) * 5);
 	mLockMouse = false;
 	mCurrent.mCursorPos = mLast.mCursorPos = 0;
 	mCurrent.mCursorDelta = mLast.mCursorDelta = 0;
@@ -29,10 +28,10 @@ void MouseKeyboardInput::LockMouse(bool l) {
 
 void MouseKeyboardInput::NextFrame() {
 	mMousePointer.mLastWorldRay = mMousePointer.mWorldRay;
-	mMousePointer.mLastAxis = mMousePointer.mAxis;
+	memcpy(mMousePointer.mLastAxis, mMousePointer.mAxis, sizeof(float) * 5);
 	mMousePointer.mLastGuiHitT = mMousePointer.mGuiHitT;
 	mLast = mCurrent;
 	mCurrent.mScrollDelta = 0;
 	mCurrent.mCursorDelta = 0;
-	mMousePointer.mGuiHitT = -1.f;
+	mMousePointer.mGuiHitT = 1e20f;
 }

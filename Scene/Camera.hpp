@@ -77,8 +77,7 @@ public:
 	inline virtual void FramebufferHeight(uint32_t h) { mFramebuffer->Height(h);  Dirty(); }
 	inline virtual void SampleCount(VkSampleCountFlagBits s) { mFramebuffer->SampleCount(s); }
 
-	inline virtual void EyeOffsetTranslate(const float3& translate, StereoEye eye = EYE_NONE) { mEyeOffsetTranslate[eye] = translate; Dirty(); }
-	inline virtual void EyeOffsetRotate(const quaternion& rotate, StereoEye eye = EYE_NONE) { mEyeOffsetRotate[eye] = rotate; Dirty(); }
+	inline virtual void EyeOffset(const float3& translate, const quaternion& rotate, StereoEye eye = EYE_NONE) { mEyeOffsetTranslate[eye] = translate; mEyeOffsetRotate[eye] = rotate;  Dirty(); }
 	inline virtual void Projection(const float4x4& projection, StereoEye eye = EYE_NONE) { mFieldOfView = 0; mOrthographic = false; mProjection[eye] = projection; Dirty(); }
 
 	// Getters

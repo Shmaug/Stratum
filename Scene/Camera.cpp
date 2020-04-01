@@ -151,13 +151,13 @@ Camera::~Camera() {
 
 float4 Camera::WorldToClip(const float3& worldPos, StereoEye eye) {
 	UpdateTransform();
-	return mViewProjection[eye] * float4(worldPos - WorldPosition(), 1);
+	return mViewProjection[eye] * float4((worldPos - (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz), 1);
 }
 float3 Camera::ClipToWorld(const float3& clipPos, StereoEye eye) {
 	UpdateTransform();
 	float4 wp = mInvViewProjection[eye] * float4(clipPos, 1);
 	wp.xyz /= wp.w;
-	return wp.xyz + WorldPosition();
+	return (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + wp.xyz;
 }
 Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	UpdateTransform();
@@ -165,12 +165,12 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	Ray ray;
 	if (mOrthographic) {
 		clip.x *= Aspect();
-		ray.mOrigin = WorldPosition() + WorldRotation() * float3(clip * mOrthographicSize, mNear);
+		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + WorldRotation() * float3(clip * mOrthographicSize, mNear);
 		ray.mDirection = WorldRotation() * float3(0, 0, 1);
 	} else {
 		float4 p1 = mInvViewProjection[eye] * float4(clip, .1f, 1);
 		ray.mDirection = normalize(p1.xyz / p1.w);
-		ray.mOrigin = WorldPosition();
+		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + mEyeOffsetTranslate[eye];
 	}
 	return ray;
 }
@@ -325,7 +325,7 @@ bool Camera::UpdateTransform() {
 
 void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
 	if (camera == this) return;
-	Gizmos::DrawWireSphere(WorldPosition(), .01f, 1.f);
+	Gizmos::DrawWireSphere(WorldPosition(), mNear, 1.f);
 
 	float3 f0 = ClipToWorld(float3(-1, -1, 0));
 	float3 f1 = ClipToWorld(float3(-1, 1, 0));
@@ -337,22 +337,25 @@ void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
 	float3 f6 = ClipToWorld(float3(1, -1, 1));
 	float3 f7 = ClipToWorld(float3(1, 1, 1));
 
-	Gizmos::DrawLine(f0, f1, 1);
-	Gizmos::DrawLine(f0, f2, 1);
-	Gizmos::DrawLine(f3, f1, 1);
-	Gizmos::DrawLine(f3, f2, 1);
-	
-	Gizmos::DrawLine(f4, f5, 1);
-	Gizmos::DrawLine(f4, f6, 1);
-	Gizmos::DrawLine(f7, f5, 1);
-	Gizmos::DrawLine(f7, f6, 1);
-	
-	Gizmos::DrawLine(f0, f4, 1);
-	Gizmos::DrawLine(f1, f5, 1);
-	Gizmos::DrawLine(f2, f6, 1);
-	Gizmos::DrawLine(f3, f7, 1);
+	float4 col = mStereoMode == STEREO_NONE ? 1 : float4(1, .5f, .5f, .5f);
+
+	Gizmos::DrawLine(f0, f1, col);
+	Gizmos::DrawLine(f0, f2, col);
+	Gizmos::DrawLine(f3, f1, col);
+	Gizmos::DrawLine(f3, f2, col);
+
+	Gizmos::DrawLine(f4, f5, col);
+	Gizmos::DrawLine(f4, f6, col);
+	Gizmos::DrawLine(f7, f5, col);
+	Gizmos::DrawLine(f7, f6, col);
+
+	Gizmos::DrawLine(f0, f4, col);
+	Gizmos::DrawLine(f1, f5, col);
+	Gizmos::DrawLine(f2, f6, col);
+	Gizmos::DrawLine(f3, f7, col);
 
 	if (mStereoMode != STEREO_NONE) {
+		col = float4(.5f, .5f, 1, .5f);
 		f0 = ClipToWorld(float3(-1, -1, 0), EYE_RIGHT);
 		f1 = ClipToWorld(float3(-1, 1, 0), EYE_RIGHT);
 		f2 = ClipToWorld(float3(1, -1, 0), EYE_RIGHT);
@@ -363,19 +366,19 @@ void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
 		f6 = ClipToWorld(float3(1, -1, 1), EYE_RIGHT);
 		f7 = ClipToWorld(float3(1, 1, 1), EYE_RIGHT);
 
-		Gizmos::DrawLine(f0, f1, 1);
-		Gizmos::DrawLine(f0, f2, 1);
-		Gizmos::DrawLine(f3, f1, 1);
-		Gizmos::DrawLine(f3, f2, 1);
+		Gizmos::DrawLine(f0, f1, col);
+		Gizmos::DrawLine(f0, f2, col);
+		Gizmos::DrawLine(f3, f1, col);
+		Gizmos::DrawLine(f3, f2, col);
 
-		Gizmos::DrawLine(f4, f5, 1);
-		Gizmos::DrawLine(f4, f6, 1);
-		Gizmos::DrawLine(f7, f5, 1);
-		Gizmos::DrawLine(f7, f6, 1);
+		Gizmos::DrawLine(f4, f5, col);
+		Gizmos::DrawLine(f4, f6, col);
+		Gizmos::DrawLine(f7, f5, col);
+		Gizmos::DrawLine(f7, f6, col);
 
-		Gizmos::DrawLine(f0, f4, 1);
-		Gizmos::DrawLine(f1, f5, 1);
-		Gizmos::DrawLine(f2, f6, 1);
-		Gizmos::DrawLine(f3, f7, 1);
+		Gizmos::DrawLine(f0, f4, col);
+		Gizmos::DrawLine(f1, f5, col);
+		Gizmos::DrawLine(f2, f6, col);
+		Gizmos::DrawLine(f3, f7, col);
 	}
 }

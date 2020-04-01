@@ -6,8 +6,8 @@ using namespace std;
 #define START_DEPTH  0.01f
 #define DEPTH_DELTA -0.0001f;
 
-uint32_t GUI::mHotControl = -1u;
-uint32_t GUI::mLastHotControl = -1u;
+unordered_map<const InputPointer*, uint32_t> GUI::mHotControl;
+unordered_map<const InputPointer*, uint32_t> GUI::mLastHotControl;
 uint32_t GUI::mNextControlId = 0;
 float GUI::mCurrentDepth = START_DEPTH;
 InputManager* GUI::mInputManager;
@@ -28,8 +28,6 @@ GUI::BufferCache* GUI::mCaches;
 
 
 void GUI::Initialize(Device* device, AssetManager* assetManager) {
-	mHotControl = -1;
-	mLastHotControl = -1;
 	mCaches = new BufferCache[device->MaxFramesInFlight()];
 }
 void GUI::Destroy(Device* device){
@@ -55,7 +53,7 @@ void GUI::PreFrame(Scene* scene) {
 	mNextControlId = 0;
 
 	mLastHotControl = mHotControl;
-	mHotControl = -1;
+	for (auto kp : mHotControl) kp.second = -1;
 
 	while (mLayoutStack.size()) mLayoutStack.pop();
 
@@ -442,10 +440,10 @@ bool GUI::Button(Font* font, const string& text, float textScale, const fRect2D&
 	c.y = i->WindowHeight() - c.y;
 
 	bool hvr = screenRect.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl == controlId);
+	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl = controlId;
+	if (clk) mHotControl[i->GetPointer(0)] = controlId;
 	
 	if (color.a > 0) {
 		float m = 1.f;
@@ -467,9 +465,39 @@ bool GUI::Button(Font* font, const string& text, float textScale, const float4x4
 	uint32_t controlId = mNextControlId++;
 	if (!clipRect.Intersects(rect)) return false;
 
-	// TODO: world-space input
+	float4x4 invTransform = inverse(transform);
 
-	if (color.a > 0) Rect(transform, rect, color, nullptr, 0, clipRect);
+	bool hvr = false;
+	bool clk = false;
+
+	for (InputDevice* device : mInputManager->InputDevices()) {
+		for (uint32_t i = 0; i < device->PointerCount(); i++) {
+			const InputPointer* p = device->GetPointer(i);
+			
+			Ray ray = p->mWorldRay;
+			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
+			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+
+			float t = p->mWorldRay.Intersect(float4(0, 0, 1, 0));
+			if (t < p->mGuiHitT) continue;
+
+			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+
+			hvr = rect.Contains(c) && clipRect.Contains(c);
+			clk = p->mAxis[0] > .75f && (hvr || mLastHotControl[p] == controlId);
+
+			if (hvr || clk) const_cast<InputPointer*>(p)->mGuiHitT = t;
+			if (clk) mHotControl[p] = controlId;
+		}
+	}
+
+
+	if (color.a > 0) {
+		float m = 1.f;
+		if (hvr) m = 1.2f;
+		if (clk) m = 1.5f;
+		Rect(transform, rect, color, nullptr, 0, clipRect);
+	}
 	if (textColor.a > 0 && text.length()){
 		float2 o = 0;
 		if (horizontalAnchor == TEXT_ANCHOR_MID) o.x = rect.mExtent.x * .5f;
@@ -503,7 +531,7 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 
 		barRect.mExtent.x = screenRect.mExtent.x * .1f;
 		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mLastHotControl == controlId) {
+		if (mLastHotControl[i->GetPointer(0)] == controlId) {
 			vo += i->CursorDelta().x;
 			value = ((vo - screenRect.mOffset.x) / (screenRect.mExtent.x - barRect.mExtent.x)) * (maximum - minimum) + minimum;
 			value = clamp(value, minimum, maximum);
@@ -519,7 +547,7 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 
 		barRect.mExtent.y = screenRect.mExtent.y * .1f;
 		vo = barRect.mOffset.x + ((value - minimum) / (maximum - minimum)) * (screenRect.mExtent.x - barRect.mExtent.x);
-		if (mHotControl == controlId) {
+		if (mHotControl[i->GetPointer(0)] == controlId) {
 			vo += i->CursorDelta().x;
 			value = (vo - barRect.mOffset.y) / (screenRect.mExtent.y - barRect.mExtent.y) * (maximum - minimum) - 1.f + minimum;
 			value = clamp(value, minimum, maximum);
@@ -532,10 +560,10 @@ bool GUI::Slider(float& value, float minimum, float maximum, LayoutAxis axis, co
 	}
 
 	bool hvr = barRect.Contains(c) && clipRect.Contains(c);
-	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl == controlId);
+	bool clk = i->KeyDown(MOUSE_LEFT) && (hvr || mLastHotControl[i->GetPointer(0)] == controlId);
 
 	if (hvr || clk) i->mMousePointer.mGuiHitT = 0.f;
-	if (clk) mHotControl = controlId;
+	if (clk) mHotControl[i->GetPointer(0)] = controlId;
 
 	float m = 1.25f;
 	if (hvr) m *= 1.2f;
