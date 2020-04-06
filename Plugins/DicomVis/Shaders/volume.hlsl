@@ -26,7 +26,6 @@
 
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
 	float4x4 InvViewProj;
-	float3 CameraPosition;
 
 	float2 ScreenResolution;
 	float3 VolumeResolution;
@@ -224,11 +223,13 @@ float4 Sample(float3 p, out float3 gradient) {
 
 [numthreads(8, 8, 1)]
 void Draw(uint3 index : SV_DispatchThreadID) {
-	float2 clip = 2 * index.xy / ScreenResolution - 1;
+	if (index.x >= ScreenResolution.x || index.y >= ScreenResolution.y) return;
+
+	float2 clip = 2 * (index.xy + .5) / ScreenResolution - 1;
 
 	float4 unprojected = mul(InvViewProj, float4(clip, 0, 1));
 
-	float3 ro = CameraPosition;
+	float3 ro = 0;
 	float3 rd_w = normalize(unprojected.xyz / unprojected.w - ro);
 
 	float depth = length(DepthNormal[WriteOffset + index.xy].xyz);

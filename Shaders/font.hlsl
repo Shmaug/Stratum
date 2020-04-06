@@ -101,6 +101,7 @@ void fsmain(v2f i,
 	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
 	color = SampleFont(i.texcoord.xy) * Color;
 	#endif
-	color.a *= i.texcoord.z > 0 && i.texcoord.w > 0 && i.texcoord.z < 1 && i.texcoord.w < 1;
+	clip(i.texcoord.zw);
+	clip(1 - i.texcoord.zw);
 	depthNormal.a = color.a;
 }

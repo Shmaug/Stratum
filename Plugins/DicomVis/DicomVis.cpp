@@ -48,7 +48,7 @@ private:
 	
 	Camera* mMainCamera;
 
-	MouseKeyboardInput* mInput;
+	MouseKeyboardInput* mKeyboardInput;
 
 	float mZoom;
 
@@ -115,7 +115,7 @@ public:
 
 	PLUGIN_EXPORT bool Init(Scene* scene) override {
 		mScene = scene;
-		mInput = mScene->InputManager()->GetFirst<MouseKeyboardInput>();
+		mKeyboardInput = mScene->InputManager()->GetFirst<MouseKeyboardInput>();
 
 		mZoom = 3.f;
 
@@ -128,8 +128,6 @@ public:
 		mMainCamera = camera.get();
 		mObjects.push_back(mMainCamera);
 
-		mScene->Environment()->EnableCelestials(false);
-		mScene->Environment()->EnableScattering(false);
 		mScene->Environment()->EnvironmentTexture(mScene->AssetManager()->LoadTexture("Assets/Textures/photo_studio_01_2k.hdr"));
 		mScene->Environment()->AmbientLight(.9f);
 
@@ -139,13 +137,11 @@ public:
 		return true;
 	}
 	PLUGIN_EXPORT void Update(CommandBuffer* commandBuffer) override {
-		if (mInput->KeyDownFirst(KEY_F1))
-			mScene->DrawGizmos(!mScene->DrawGizmos());
-		if (mInput->KeyDownFirst(KEY_TILDE))
-			mShowPerformance = !mShowPerformance;
+		if (mKeyboardInput->KeyDownFirst(KEY_F1)) mScene->DrawGizmos(!mScene->DrawGizmos());
+		if (mKeyboardInput->KeyDownFirst(KEY_TILDE)) mShowPerformance = !mShowPerformance;
 
 		// Snapshot profiler frames
-		if (mInput->KeyDownFirst(KEY_F3)) {
+		if (mKeyboardInput->KeyDownFirst(KEY_F3)) {
 			mSnapshotPerformance = !mSnapshotPerformance;
 			if (mSnapshotPerformance) {
 				mSelectedFrame = PROFILER_FRAME_COUNT;
@@ -172,15 +168,15 @@ public:
 			}
 		}
 
-		if (mInput->GetPointer(0)->mLastGuiHitT < 0) {
-			if (mInput->ScrollDelta() != 0){
-				mZoom = clamp(mZoom - mInput->ScrollDelta() * .025f, -1.f, 5.f);
+		if (mKeyboardInput->GetPointerLast(0)->mGuiHitT < 0) {
+			if (mKeyboardInput->ScrollDelta() != 0){
+				mZoom = clamp(mZoom - mKeyboardInput->ScrollDelta() * .025f, -1.f, 5.f);
 				mMainCamera->LocalPosition(0, 1.6f, -mZoom);
 
 				mFrameIndex = 0;
 			}
-			if (mInput->KeyDown(MOUSE_LEFT)) {
-				float3 axis = mMainCamera->WorldRotation() * float3(0, 1, 0) * mInput->CursorDelta().x + mMainCamera->WorldRotation() * float3(1, 0, 0) * mInput->CursorDelta().y;
+			if (mKeyboardInput->KeyDown(MOUSE_LEFT)) {
+				float3 axis = mMainCamera->WorldRotation() * float3(0, 1, 0) * mKeyboardInput->CursorDelta().x + mMainCamera->WorldRotation() * float3(1, 0, 0) * mKeyboardInput->CursorDelta().y;
 				if (dot(axis, axis) > .001f){
 					mVolumeRotation = quaternion(length(axis) * .003f, -normalize(axis)) * mVolumeRotation;
 					mFrameIndex = 0;
@@ -198,9 +194,10 @@ public:
 		Font* bld24 = mScene->AssetManager()->LoadFont("Assets/Fonts/OpenSans-Bold.ttf", 24);
 
 		float2 s(camera->FramebufferWidth(), camera->FramebufferHeight());
-		float2 c = mInput->CursorPos();
+		float2 c = mKeyboardInput->CursorPos();
 		c.y = s.y - c.y;
-		
+
+		// Draw performance overlay
 		if (mShowPerformance) {
 			char tmpText[64];
 			snprintf(tmpText, 64, "%.2f fps\n", mScene->FPS());
@@ -228,9 +225,9 @@ public:
 			snprintf(tmpText, 64, "%.1fms", m);
 			GUI::DrawString(sem11, tmpText, float4(.6f, .6f, .6f, 1.f), float2(2, graphHeight - 10), 11.f);
 
-			for (float i = 1; i < 3; i++) {
+			for (uint32_t i = 1; i < 3; i++) {
 				float x = m * i / 3.f;
-				snprintf(tmpText, 32, "%.1fms", x);
+				snprintf(tmpText, 64, "%.1fms", x);
 				GUI::Rect(fRect2D(0, graphHeight * (i / 3.f) - 1, s.x, 1), float4(.2f, .2f, .2f, 1));
 				GUI::DrawString(sem11, tmpText, float4(.6f, .6f, .6f, 1.f), float2(2, graphHeight * (i / 3.f) + 2), 11.f);
 			}
@@ -241,7 +238,7 @@ public:
 				if (c.y < 100) {
 					uint32_t hvr = (uint32_t)((c.x / s.x) * (PROFILER_FRAME_COUNT - 2) + .5f);
 					GUI::Rect(fRect2D(s.x * hvr / (PROFILER_FRAME_COUNT - 2), 0, 1, graphHeight), float4(1, 1, 1, .15f));
-					if (mInput->KeyDown(MOUSE_LEFT))
+					if (mKeyboardInput->KeyDown(MOUSE_LEFT))
 						mSelectedFrame = hvr;
 				}
 
@@ -278,31 +275,42 @@ public:
 
 					if (selected) {
 						snprintf(tmpText, 64, "%s: %.2fms\n", selected->mLabel, selected->mDuration.count() * 1e-6f);
-						GUI::Rect(fRect2D(0, graphHeight, s.x, 20), float4(0,0,0,.8f));
-						GUI::DrawString(reg14, tmpText, 1, float2(s.x * .5f, graphHeight + 8), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						float2 sp = c + float2(0, 10);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2( 1,  0), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2(-1,  0), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2( 0,  1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2( 0, -1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2(-1, -1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2( 1, -1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2(-1,  1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, float4(0, 0, 0, 1), sp + float2( 1,  1), 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
+						GUI::DrawString(reg14, tmpText, 1, sp, 14.f, TEXT_ANCHOR_MID, TEXT_ANCHOR_MID);
 					}
 				}
 
 			}
+			return;
 			#endif
 		}
 
 		if (!mScanDone) {
-			GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, s.y * .5f - 30, 300, 60), float4(.3f, .3f, .3f, 1), 10);
+			//GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, s.y * .5f - 30, 300, 60), float4(.3f, .3f, .3f, 1), 10);
+			GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 60), float4(.3f, .3f, .3f, 1), 10);
 			GUI::LayoutLabel(bld24, "Scanning...", 24, 38, 0, 1);
 			GUI::EndLayout();
 			return;
 		}
 		if (mScanThread.joinable()) mScanThread.join();
 
-		GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, s.y * .5f - 425, 300, 850), float4(.3f, .3f, .3f, 1), 10);
+		//GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, s.y * .5f - 425, 300, 850), float4(.3f, .3f, .3f, 1), 10);
+		GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0,0,0,1), .001f), fRect2D(0, 0, 300, 850), float4(.3f, .3f, .3f, 1), 10);
 
 		GUI::LayoutLabel(bld24, "Load Data Set", 24, 38, 0, 1);
 		GUI::LayoutSeparator(.5f, 1);
 
 		GUI::BeginScrollSubLayout(175, mDataFolders.size() * 24, float4(.2f, .2f, .2f, 1), 5);
 		for (const auto& p : mDataFolders)
-			if (GUI::LayoutButton(sem16, fs::path(p.first).stem().string(), 16, 24, float4(.2f, .2f, .2f, 1), 1, 2, TEXT_ANCHOR_MID))
+			if (GUI::LayoutButton(sem16, fs::path(p.first).stem().string(), 16, 24, float4(.2f, .2f, .2f, 1), 1, TEXT_ANCHOR_MIN))
 				LoadVolume(commandBuffer, p.first, p.second);
 		GUI::EndLayout();
 
@@ -327,19 +335,19 @@ public:
 		GUI::LayoutSpace(8);
 
 		GUI::LayoutLabel(sem16, "Step Size: " + to_string(mStepSize), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-		if (GUI::LayoutSlider(mStepSize, .0001f, .01f, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
+		if (GUI::LayoutSlider(mStepSize, .0001f, .01f, sliderHeight, float4(.5f, .5f, .5f, 1))) mFrameIndex = 0;
 		GUI::LayoutLabel(sem16, "Density: " + to_string(mDensity), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-		if (GUI::LayoutSlider(mDensity, 10, 50000.f, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
+		if (GUI::LayoutSlider(mDensity, 10, 50000.f, sliderHeight, float4(.5f, .5f, .5f, 1))) mFrameIndex = 0;
 		GUI::LayoutSpace(20);
 
 		GUI::LayoutLabel(sem16, "Remap Min: " + to_string(mRemapMin), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-		if (GUI::LayoutSlider(mRemapMin, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+		if (GUI::LayoutSlider(mRemapMin, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 			mGradientAlphaDirty = true;
 			mTransferLUTDirty = true;
 			mFrameIndex = 0;
 		}
 		GUI::LayoutLabel(sem16, "Remap Max: " + to_string(mRemapMax), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-		if (GUI::LayoutSlider(mRemapMax, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+		if (GUI::LayoutSlider(mRemapMax, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 			mGradientAlphaDirty = true;
 			mTransferLUTDirty = true;
 			mFrameIndex = 0;
@@ -349,12 +357,12 @@ public:
 			GUI::LayoutSpace(20);
 
 			GUI::LayoutLabel(sem16, "Transfer Min: " + to_string(mTransferMin), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-			if (GUI::LayoutSlider(mTransferMin, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+			if (GUI::LayoutSlider(mTransferMin, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 				mTransferLUTDirty = true;
 				mFrameIndex = 0;
 			}
 			GUI::LayoutLabel(sem16, "Transfer Max: " + to_string(mTransferMax), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-			if (GUI::LayoutSlider(mTransferMax, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+			if (GUI::LayoutSlider(mTransferMax, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 				mTransferLUTDirty = true;
 				mFrameIndex = 0;
 			}
@@ -366,28 +374,28 @@ public:
 			float d = mDirectLight.x;
 
 			GUI::LayoutLabel(sem16, "Roughness: " + to_string(mRoughness), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-			if (GUI::LayoutSlider(mRoughness, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+			if (GUI::LayoutSlider(mRoughness, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 				mFrameIndex = 0;
 			}
 
 			GUI::LayoutLabel(sem16, "Ambient Light: " + to_string(a), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-			if (GUI::LayoutSlider(a, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+			if (GUI::LayoutSlider(a, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 				mScene->Environment()->AmbientLight(a);
 				mFrameIndex = 0;
 			}
 			GUI::LayoutLabel(sem16, "Direct Light: " + to_string(d), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-			if (GUI::LayoutSlider(d, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) {
+			if (GUI::LayoutSlider(d, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1))) {
 				mDirectLight = d;
 				mFrameIndex = 0;
 			}
 
 			if (mPhysicalShading) {
 				GUI::LayoutLabel(sem16, "Light Step: " + to_string(mLightStep), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-				if (GUI::LayoutSlider(mLightStep, 0.0005f, .05f, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
+				if (GUI::LayoutSlider(mLightStep, 0.0005f, .05f, sliderHeight, float4(.5f, .5f, .5f, 1))) mFrameIndex = 0;
 				GUI::LayoutLabel(sem16, "Extinction: " + to_string(mVolumeExtinction), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-				if (GUI::LayoutSlider(mVolumeExtinction, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
+				if (GUI::LayoutSlider(mVolumeExtinction, 0, 1, sliderHeight, float4(.5f, .5f, .5f, 1))) mFrameIndex = 0;
 				GUI::LayoutLabel(sem16, "Scattering: " + to_string(mVolumeScatter), 14, 14, 0, 1, 0, TEXT_ANCHOR_MIN);
-				if (GUI::LayoutSlider(mVolumeScatter, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1), 4)) mFrameIndex = 0;
+				if (GUI::LayoutSlider(mVolumeScatter, 0, 3, sliderHeight, float4(.5f, .5f, .5f, 1))) mFrameIndex = 0;
 			}
 		}
 
@@ -408,9 +416,6 @@ public:
 		float4x4 ivp[2];
 		ivp[0] = camera->InverseViewProjection(EYE_LEFT);
 		ivp[1] = camera->InverseViewProjection(EYE_RIGHT);
-		float3 cp[2];
-		cp[0] = camera->InverseView(EYE_LEFT)[3].xyz;
-		cp[1] = camera->InverseView(EYE_RIGHT)[3].xyz;
 		float4 ivr = inverse(mVolumeRotation).xyzw;
 		float3 ivs = 1.f / mVolumeScale;
 		float near = camera->Near();
@@ -499,10 +504,11 @@ public:
 			vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader->mPipelineLayout, 0, 1, *ds, 0, nullptr);
 
 			uint2 wo(0);
-			float3 vp = mVolumePosition - camera->WorldPosition();
+			float3 vp[2];
+			vp[0] = mVolumePosition - (camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_LEFT), 1)).xyz;
+			vp[1] = mVolumePosition - (camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_RIGHT), 1)).xyz;
 			float3 ambient = mScene->Environment()->AmbientLight();
 
-			commandBuffer->PushConstant(shader, "VolumePosition", &vp);
 			commandBuffer->PushConstant(shader, "VolumeRotation", &mVolumeRotation.xyzw);
 			commandBuffer->PushConstant(shader, "VolumeScale", &mVolumeScale);
 			commandBuffer->PushConstant(shader, "InvVolumeRotation", &ivr);
@@ -522,35 +528,35 @@ public:
 
 			switch (camera->StereoMode()) {
 			case STEREO_NONE:
+				commandBuffer->PushConstant(shader, "VolumePosition", &vp[0]);
 				commandBuffer->PushConstant(shader, "InvViewProj", &ivp[0]);
-				commandBuffer->PushConstant(shader, "CameraPosition", &cp[0]);
 				commandBuffer->PushConstant(shader, "WriteOffset", &wo);
 				commandBuffer->PushConstant(shader, "ScreenResolution", &res);
 				vkCmdDispatch(*commandBuffer, (camera->FramebufferWidth() + 7) / 8, (camera->FramebufferHeight() + 7) / 8, 1);
 				break;
 			case STEREO_SBS_HORIZONTAL:
 				res.x *= .5f;
+				commandBuffer->PushConstant(shader, "VolumePosition", &vp[0]);
 				commandBuffer->PushConstant(shader, "InvViewProj", &ivp[0]);
-				commandBuffer->PushConstant(shader, "CameraPosition", &cp[0]);
 				commandBuffer->PushConstant(shader, "WriteOffset", &wo);
 				commandBuffer->PushConstant(shader, "ScreenResolution", &res);
 				vkCmdDispatch(*commandBuffer, (camera->FramebufferWidth() / 2 + 7) / 8, (camera->FramebufferHeight() + 7) / 8, 1);
 				wo.x = camera->FramebufferWidth() / 2;
+				commandBuffer->PushConstant(shader, "VolumePosition", &vp[1]);
 				commandBuffer->PushConstant(shader, "InvViewProj", &ivp[1]);
-				commandBuffer->PushConstant(shader, "CameraPosition", &cp[1]);
 				commandBuffer->PushConstant(shader, "WriteOffset", &wo);
 				vkCmdDispatch(*commandBuffer, (camera->FramebufferWidth()/2 + 7) / 8, (camera->FramebufferHeight() + 7) / 8, 1);
 				break;
 			case STEREO_SBS_VERTICAL:
 				res.y *= .5f;
+				commandBuffer->PushConstant(shader, "VolumePosition", &vp[0]);
 				commandBuffer->PushConstant(shader, "InvViewProj", &ivp[0]);
-				commandBuffer->PushConstant(shader, "CameraPosition", &cp[0]);
 				commandBuffer->PushConstant(shader, "WriteOffset", &wo);
 				commandBuffer->PushConstant(shader, "ScreenResolution", &res);
 				vkCmdDispatch(*commandBuffer, (camera->FramebufferWidth() + 7) / 8, (camera->FramebufferHeight() / 2 + 7) / 8, 1);
 				wo.y = camera->FramebufferWidth() / 2;
+				commandBuffer->PushConstant(shader, "VolumePosition", &vp[1]);
 				commandBuffer->PushConstant(shader, "InvViewProj", &ivp[1]);
-				commandBuffer->PushConstant(shader, "CameraPosition", &cp[1]);
 				commandBuffer->PushConstant(shader, "WriteOffset", &wo);
 				vkCmdDispatch(*commandBuffer, (camera->FramebufferWidth() + 7) / 8, (camera->FramebufferHeight() / 2 + 7) / 8, 1);
 				break;

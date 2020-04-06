@@ -105,7 +105,7 @@ void fsmain(v2f i,
 	#else
 	color = i.color;
 	#endif
-
-	color.a *= i.texcoord.z > 0 && i.texcoord.w > 0 && i.texcoord.z < 1 && i.texcoord.w < 1;
+	clip(i.texcoord.zw);
+	clip(1 - i.texcoord.zw);
 	depthNormal.a = color.a;
 }
