@@ -1,5 +1,8 @@
-#define PI 3.1415926535897932
-#define INV_PI 0.31830988618
+#ifndef BRDF_H
+#define BRDF_H
+
+#include "math.hlsli"
+
 #define MIN_ROUGHNESS 0.04
 #define unity_ColorSpaceDielectricSpec float4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
 
@@ -29,11 +32,6 @@ float3 DiffuseAndSpecularFromSpecular(float3 diffuse, float3 specular, out float
 	float oneMinusDielectricSpec = unity_ColorSpaceDielectricSpec.a;
 	oneMinusReflectivity = oneMinusDielectricSpec - metallic * oneMinusDielectricSpec;
 	return lerp(baseColorDiffusePart, baseColorSpecularPart, metallic * metallic);
-}
-
-float pow5(float x) {
-	float x2 = x * x;
-	return x2 * x2 * x;
 }
 
 float MicrofacetDistribution(float roughness, float NdotH) {
@@ -155,3 +153,5 @@ float3 ShadeSurface(MaterialInfo material, float3 worldPos, float3 normal, float
 
 	return eval;
 }
+
+#endif

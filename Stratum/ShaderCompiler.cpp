@@ -67,8 +67,17 @@ bool CompileStage(Compiler* compiler, const CompileOptions& options, const strin
 	
 	SpvCompilationResult result = compiler->CompileGlslToSpv(source, stage, filename.c_str(), entryPoint.c_str(), options);
 	
-	string error = result.GetErrorMessage();
-	if (error.size()) fprintf_color(COLOR_RED, stderr, "%s\n", error.c_str());
+	string msg = result.GetErrorMessage();
+	if (msg.size()) {
+		stringstream ss(msg);
+		string line;
+		while (getline(ss, line)) {
+			if (const char* error = strstr(line.c_str(), "error: "))
+				fprintf_color(COLOR_RED, stderr, "%s\n", error + 7);
+			else
+				fprintf_color(COLOR_RED, stderr, "%s\n", line.c_str());
+		}
+	}
 
 	switch (result.GetCompilationStatus()) {
 	case shaderc_compilation_status_success:

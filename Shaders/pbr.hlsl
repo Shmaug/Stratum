@@ -49,7 +49,7 @@
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
 	STRATUM_PUSH_CONSTANTS
 
-	float4 Color;
+	float4 BaseColor;
 	float Metallic;
 	float Roughness;
 	float BumpStrength;
@@ -111,7 +111,7 @@ v2f vsmain(
 
 #ifdef ALPHA_CLIP
 float fsdepth(in float4 worldPos : TEXCOORD0, in float2 texcoord : TEXCOORD2) : SV_Target0 {
-	clip((MainTextures[TextureIndex].Sample(Sampler, texcoord) * Color).a - .75);
+	clip((MainTextures[TextureIndex].Sample(Sampler, texcoord) * BaseColor).a - .75);
 #else
 float fsdepth(in float4 worldPos : TEXCOORD0) : SV_Target0 {
 #endif
@@ -126,9 +126,9 @@ void fsmain(v2f i,
 	float3 view = ComputeView(i.worldPos.xyz, i.screenPos);
 
 	#if defined(TEXTURED) || defined(TEXTURED_COLORONLY)
-	float4 col = MainTextures[TextureIndex].Sample(Sampler, i.texcoord) * Color;
+	float4 col = MainTextures[TextureIndex].Sample(Sampler, i.texcoord) * BaseColor;
 	#else
-	float4 col = Color;
+	float4 col = BaseColor;
 	#endif
 
 	bool ff = dot(i.normal, view) > 0;
