@@ -91,18 +91,23 @@ float3 GetOrthoVector(float3 n) {
 	return normalize(p);
 }
 
-float3 Sample_MapToHemisphereCosine(float2 sample, float3 n) {
+float3 MapToHemisphere(float3 n, float theta, float phi) {
 	// Construct basis
 	float3 u = GetOrthoVector(n);
 	float3 v = cross(u, n);
 	
-	float cosTheta = sample.x;
-	float sinTheta = sqrt(1 - cosTheta*cosTheta);
-	float phi = sample.y * 2 * PI;
-
+	float cosTheta = sin(theta);
+	float sinTheta = sin(theta);
 	float sinPhi = sin(phi);
 	float cosPhi = cos(phi);
 	return normalize(cosPhi * sinTheta * u + sinPhi * sinTheta * v + cosTheta * n);
+}
+
+float3 SampleHemisphereCosine(float2 sample) {
+	float cosTheta = sqrt(sample.x);
+	float sinTheta = sqrt(1 - cosTheta*cosTheta);
+	float phi = sample.y * 2 * PI;
+	return float3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
 }
 float2 Sample_MapToDisk(float2 sample) {
 	float r = sqrt(sample.x);
@@ -127,12 +132,10 @@ float2 Sample_MapToDiskConcentric(float2 sample) {
 	return r * float2(cos(theta), sin(theta));
 }
 float3 Sample_MapToSphere(float2 sample) {
-	float z = 1 - 2 * sample.x;
-	float r = sqrt(max(0, 1 - z * z));
-	float phi = 2 * PI * sample.y;
-	float x = cos(phi);
-	float y = sin(phi);
-	return float3(x, y, z);
+	float theta = 2 * PI * sample.x;
+	float cosPhi = sample.y*2 - 1;
+	float sinPhi = sin(acos(cosPhi));
+	return float3(sinPhi * cos(theta), cosPhi, sinPhi * sin(theta));
 }
 float2 Sample_MapToPolygon(int n, float2 sample, float sample1) {
 	float theta = 2 * PI / n;

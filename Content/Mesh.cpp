@@ -175,7 +175,7 @@ Mesh::Mesh(const string& name, ::Device* device, const string& filename, float s
 	uint32_t vertexCount = 0;
 	for (uint32_t m = 0; m < scene->mNumMeshes; m++)
 		vertexCount += scene->mMeshes[m]->mNumVertices;
-	bool use32bit = vertexCount > 0xFFFF;
+	bool use32bit = true;// vertexCount > 0xFFFF;
 
 	// append vertices, keep track of bounding box
 	for (uint32_t i = 0; i < scene->mNumMeshes; i++) {

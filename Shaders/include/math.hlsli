@@ -8,9 +8,6 @@
 float3 qtRotate(float4 q, float3 v) {
 	return 2 * dot(q.xyz, v) * q.xyz + (q.w * q.w - dot(q.xyz, q.xyz)) * v + 2 * q.w * cross(q.xyz, v);
 }
-float4 qtInvert(float4 q) {
-	return float4(-q.xyz, q.w) / dot(q.xyzw, q.xyzw);
-}
 
 float sqr(float x) { return x*x; }
 float pow2(float x) { return x*x; }

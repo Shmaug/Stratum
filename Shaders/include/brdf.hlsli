@@ -4,12 +4,10 @@
 #include "math.hlsli"
 
 #define MIN_ROUGHNESS 0.04
-#define unity_ColorSpaceDielectricSpec float4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
 
 float3 DiffuseAndSpecularFromMetallic(float3 albedo, float metallic, out float3 specColor, out float oneMinusReflectivity) {
-	specColor = lerp(unity_ColorSpaceDielectricSpec.rgb, albedo, metallic);
-	float oneMinusDielectricSpec = unity_ColorSpaceDielectricSpec.a;
-	oneMinusReflectivity = oneMinusDielectricSpec - metallic * oneMinusDielectricSpec;
+	specColor = lerp(.04, albedo, metallic);
+	oneMinusReflectivity = (1 - .04) * (1 - metallic);
 	return albedo * oneMinusReflectivity;
 }
 float3 DiffuseAndSpecularFromSpecular(float3 diffuse, float3 specular, out float3 specColor, out float oneMinusReflectivity) {
@@ -140,9 +138,10 @@ float3 ShadeSurface(MaterialInfo material, float3 worldPos, float3 normal, float
 	uint texWidth, texHeight, numMips;
 	EnvironmentTexture.GetDimensions(0, texWidth, texHeight, numMips);
 	float3 reflection = normalize(reflect(-view, normal));
-	float2 envuv = float2(atan2(reflection.z, reflection.x) * INV_PI * .5 + .5, acos(reflection.y) * INV_PI);
-	env_spec *= EnvironmentTexture.SampleLevel(Sampler, envuv, saturate(material.perceptualRoughness) * (numMips-1)).rgb;
-	env_diff *= EnvironmentTexture.SampleLevel(Sampler, envuv, .75 * numMips).rgb;
+	float2 spec_uv = float2(atan2(reflection.z, reflection.x) * INV_PI * .5 + .5, acos(reflection.y) * INV_PI);
+	float2 diff_uv = float2(atan2(normal.z, normal.x) * INV_PI * .5 + .5, acos(normal.y) * INV_PI);
+	env_spec *= EnvironmentTexture.SampleLevel(Sampler, spec_uv, saturate(material.perceptualRoughness) * (numMips - 1)).rgb;
+	env_diff *= EnvironmentTexture.SampleLevel(Sampler, diff_uv, .75 * numMips).rgb;
 	#endif
 
 	eval += BRDFIndirect(material, normal, view, nv, env_diff, env_spec) * material.occlusion;
