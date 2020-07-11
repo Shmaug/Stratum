@@ -67,12 +67,11 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 #endif
 
 Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
-	: mInstance(VK_NULL_HANDLE), mFrameCount(0), mMaxFramesInFlight(0), mWindow(nullptr), mWindowInput(nullptr), mDestroyPending(false), mXRRuntime(nullptr)
+	: mWindow(nullptr), mWindowInput(nullptr), mDestroyPending(false), mXRRuntime(nullptr)
 	#ifdef ENABLE_DEBUG_LAYERS
 	, mDebugMessenger(VK_NULL_HANDLE)
 	#endif
 	{
-	memset(const_cast<ProfilerSample*>(Profiler::Frames()), 0, sizeof(ProfilerSample) * PROFILER_FRAME_COUNT);
 	
 	for (int i = 0; i < argc; i++)
 		mCmdArguments.push_back(argv[i]);
@@ -146,7 +145,6 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 
 	for (EnginePlugin* p : pluginManager->Plugins())
 		p->PreInstanceInit(this);
-
 	if (mXRRuntime) mXRRuntime->PreInstanceInit(this);
 
 	#pragma region Create Vulkan Instance
@@ -214,7 +212,55 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	}
 	#endif
 
-	#ifdef WINDOWS
+	uint32_t deviceCount;
+	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices failed");
+	if (deviceIndex >= deviceCount) {
+		fprintf_color(COLOR_RED, stderr, "Device index out of bounds: %u\n", deviceIndex);
+		throw;
+	}
+	vector<VkPhysicalDevice> devices(deviceCount);
+	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
+	VkPhysicalDevice physicalDevice = devices[deviceIndex];
+
+	for (EnginePlugin* p : pluginManager->Plugins())
+		p->PreDeviceInit(this, physicalDevice);
+	if (mXRRuntime) mXRRuntime->PreDeviceInit(this, physicalDevice);
+
+	mWindowInput = new MouseKeyboardInput();
+
+	#ifdef __linux
+	// create xcb connection
+	mXCBConnection = xcb_connect(nullptr, nullptr);
+	if (int err = xcb_connection_has_error(mXCBConnection)){
+		fprintf_color(COLOR_RED, stderr, "Failed to connect to xcb: %d\n", err);
+		throw;
+	}
+	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
+
+	// find xcb screen
+	for (xcb_screen_iterator_t iter = xcb_setup_roots_iterator(xcb_get_setup(mXCBConnection)); iter.rem; xcb_screen_next(&iter)) {
+		xcb_screen_t* screen = iter.data;
+
+		// find suitable physical device
+		uint32_t queueFamilyCount;
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+		vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
+
+		for (uint32_t q = 0; q < queueFamilyCount; q++){
+			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)){
+				mWindow = new ::Window(this, "Stratum", mWindowInput, windowPosition, mXCBConnection, screen);
+				break;
+			}
+		}
+		if (mWindow) break;
+	}
+	if (!mWindow) {
+		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find a device with XCB presentation support!\n");
+		throw;
+	}
+	#else
+	// Create window class
 	HINSTANCE hInstance = GetModuleHandleA(NULL);
 
 	WNDCLASSEXA windowClass = {};
@@ -250,76 +296,17 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	if (RegisterRawInputDevices(rID, 2, sizeof(RAWINPUTDEVICE)) == FALSE)
 		fprintf_color(COLOR_RED, stderr, "Failed to register raw input device(s)\n");
 	sInstances.push_back(this);
-	#endif
-
-	mWindowInput = new MouseKeyboardInput();
-
-	mMaxFramesInFlight = 0xFFFF;
-	
-	uint32_t deviceCount;
-	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices failed");
-	vector<VkPhysicalDevice> devices(deviceCount);
-	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
-
-	if (deviceIndex >= devices.size()){
-		fprintf_color(COLOR_RED, stderr, "Device index out of bounds: %u\n", deviceIndex);
-		throw;
-	}
-	VkPhysicalDevice physicalDevice = devices[deviceIndex];
-
-	for (EnginePlugin* p : pluginManager->Plugins())
-		p->PreDeviceInit(this, physicalDevice);
-
-	if (mXRRuntime) mXRRuntime->PreDeviceInit(this, physicalDevice);
-
-	#pragma region Create Windows
-	#ifdef __linux
-	// create xcb connection
-	mXCBConnection = xcb_connect(nullptr, nullptr);
-	if (int err = xcb_connection_has_error(mXCBConnection)){
-		fprintf_color(COLOR_RED, stderr, "Failed to connect to xcb: %d\n", err);
-		throw;
-	}
-	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
-
-	// find xcb screen
-	for (xcb_screen_iterator_t iter = xcb_setup_roots_iterator(xcb_get_setup(mXCBConnection)); iter.rem; xcb_screen_next(&iter)) {
-		xcb_screen_t* screen = iter.data;
-
-		// find suitable physical device
-		uint32_t queueFamilyCount;
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-		vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-		for (uint32_t q = 0; q < queueFamilyCount; q++){
-			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)){
-				mWindow = new ::Window(this, "Stratum", mWindowInput, windowPosition, mXCBConnection, screen);
-				break;
-			}
-		}
-		if (mWindow) break;
-	}
-	if (!mWindow) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find a device with XCB presentation support!\n");
-		throw;
-	}
-	#else
 	mWindow = new ::Window(this, "Stratum", mWindowInput, windowPosition, hInstance);
 	#endif
+	
 	if (fullscreen) mWindow->Fullscreen(true);
-	#pragma endregion
 
 	uint32_t graphicsQueue, presentQueue;
-	Device::FindQueueFamilies(physicalDevice, mWindow->Surface(), graphicsQueue, presentQueue);
+	FindQueueFamilies(physicalDevice, mWindow->Surface(), graphicsQueue, presentQueue);
+
 	mDevice = new ::Device(this, physicalDevice, deviceIndex, graphicsQueue, presentQueue, mDeviceExtensions, validationLayers);
 
 	mWindow->CreateSwapchain(mDevice);
-	mMaxFramesInFlight = mWindow->mImageCount;
-
-	mDevice->mFrameContexts = new Device::FrameContext[mMaxFramesInFlight];
-	for (uint32_t i = 0; i < mMaxFramesInFlight; i++)
-		mDevice->mFrameContexts[i].mDevice = mDevice;
 }
 Instance::~Instance() {
 	safe_delete(mXRRuntime);
@@ -512,32 +499,24 @@ bool Instance::PollEvents() {
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = true;
 					mWindowInput->mMousePointer.mPrimaryButton = true;
 				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP){
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP) {
 					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = false;
 					mWindowInput->mMousePointer.mPrimaryButton = false;
 				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN){
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) {
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
 					mWindowInput->mMousePointer.mSecondaryButton = true;
 				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP){
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP) {
 					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
 					mWindowInput->mMousePointer.mSecondaryButton = false;
 				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN){
-					mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP){
-					mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN)
-					mWindowInput->mCurrent.mKeys[MOUSE_X1] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP)
-					mWindowInput->mCurrent.mKeys[MOUSE_X1] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN)
-					mWindowInput->mCurrent.mKeys[MOUSE_X2] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP)
-					mWindowInput->mCurrent.mKeys[MOUSE_X2] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_X1] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_X1] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_X2] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_X2] = false;
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
 					mWindowInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
@@ -561,6 +540,12 @@ bool Instance::PollEvents() {
 			delete[] lpb;
 			break;
 		}
+		case WM_SETFOCUS:
+			printf("Got focus\n");
+			break;
+		case WM_KILLFOCUS:
+			printf("Lost focus\n");
+			break;
 		}
 
 		if (msg.message == WM_PAINT) break; // break and allow a frame to execute
@@ -571,7 +556,7 @@ bool Instance::PollEvents() {
 	ScreenToClient(mWindow->mHwnd, &pt);
 	mWindowInput->mCurrent.mCursorPos = float2((float)pt.x, (float)pt.y);
 	if (mWindow->mTargetCamera) {
-		float2 uv = mWindowInput->mCurrent.mCursorPos / float2((float)mWindow->mSwapchainSize.width, (float)mWindow->mSwapchainSize.height);
+		float2 uv = mWindowInput->mCurrent.mCursorPos / float2((float)mWindow->mSwapchainExtent.width, (float)mWindow->mSwapchainExtent.height);
 		mWindowInput->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
 	}
 	mWindowInput->mWindowWidth = mWindow->mClientRect.extent.width;
@@ -579,19 +564,4 @@ bool Instance::PollEvents() {
 
 	return true;
 	#endif
-}
-
-void Instance::AdvanceFrame() {
-	PROFILER_BEGIN("Present");
-	vector<VkSemaphore> waitSemaphores;
-	for (const shared_ptr<Semaphore>& s : mDevice->CurrentFrameContext()->mSemaphores)
-		waitSemaphores.push_back(*s);
-	// will wait on the semaphores signalled by the frame mMaxFramesInFlight ago
-	mWindow->Present(waitSemaphores);
-	PROFILER_END;
-
-	mFrameCount++;
-
-	mDevice->mFrameContextIndex = mFrameCount % mMaxFramesInFlight;
-	mDevice->CurrentFrameContext()->Reset();
 }

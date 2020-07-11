@@ -174,11 +174,11 @@ bool OpenVR::InitScene(Scene* scene) {
     mRightPointer->RayDistance(1.f);
 
 
-    auto mat = make_shared<Material>("Untextured", mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
-    mat->SetParameter("Color", float4(1));
-    mat->SetParameter("Metallic", 0.f);
-    mat->SetParameter("Roughness", .85f);
-    mat->SetParameter("Emission", float3(0));
+    auto mat = make_shared<Material>("Untextured", mScene->Instance()->Device()->AssetManager()->LoadShader("Shaders/pbr.stm"));
+    mat->SetPushParameter("Color", float4(1));
+    mat->SetPushParameter("Metallic", 0.f);
+    mat->SetPushParameter("Roughness", .85f);
+    mat->SetPushParameter("Emission", float3(0));
     mRenderModelMaterials.emplace((TextureID_t)-1, make_pair((Texture*)nullptr, mat));
 
     uint32_t w, h;
@@ -187,12 +187,13 @@ bool OpenVR::InitScene(Scene* scene) {
     auto camera = make_shared<Camera>("OpenVR HMD", mScene->Instance()->Device(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_4_BIT);
     mScene->AddObject(camera);
     mHmdCamera = camera.get();
-    mHmdCamera->FramebufferWidth(w * 2);
-    mHmdCamera->FramebufferHeight(h);
-    mHmdCamera->ViewportX(0);
-    mHmdCamera->ViewportY(0);
-    mHmdCamera->ViewportWidth(w * 2);
-    mHmdCamera->ViewportHeight(h);
+    mHmdCamera->Framebuffer()->Extent({ w * 2, h });
+    VkViewport vp = mHmdCamera->Viewport();
+    vp.x = 0;
+    vp.y = 0;
+    vp.width = w * 2;
+    vp.height = h;
+    mHmdCamera->Viewport(vp);
     mHmdCamera->StereoMode(STEREO_SBS_HORIZONTAL);
     mHmdCamera->Near(.01f);
     mHmdCamera->Far(1024.f);
@@ -402,16 +403,16 @@ void OpenVR::BeginFrame() {
                         if (mRenderModelInterface->LoadTexture_Async(kp.second, &renderModelDiffuse) == VRRenderModelError_None) {
                             Texture* diffuse = new Texture(to_string(kp.second), mScene->Instance()->Device(),
                                 renderModelDiffuse->rubTextureMapData, renderModelDiffuse->unWidth * renderModelDiffuse->unHeight * 4,
-                                renderModelDiffuse->unWidth, renderModelDiffuse->unHeight, 1, VK_FORMAT_R8G8B8A8_UNORM, 0);
-                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->AssetManager()->LoadShader("Shaders/pbr.stm"));
+                                VkExtent2D { renderModelDiffuse->unWidth, renderModelDiffuse->unHeight }, VK_FORMAT_R8G8B8A8_UNORM, 0);
+                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadShader("Shaders/pbr.stm"));
                             mat->EnableKeyword("TEXTURED_COLORONLY");
-                            mat->SetParameter("MainTextures", 0, diffuse);
-                            mat->SetParameter("Color", float4(1));
-                            mat->SetParameter("Metallic", 0.f);
-                            mat->SetParameter("Roughness", .85f);
-                            mat->SetParameter("Emission", float3(0));
-                            mat->SetParameter("TextureIndex", 0u);
-                            mat->SetParameter("TextureST", float4(1, 1, 0, 0));
+                            mat->SetSampledTexture("MainTextures", diffuse, 0);
+                            mat->SetPushParameter("Color", float4(1));
+                            mat->SetPushParameter("Metallic", 0.f);
+                            mat->SetPushParameter("Roughness", .85f);
+                            mat->SetPushParameter("Emission", float3(0));
+                            mat->SetPushParameter("TextureIndex", 0u);
+                            mat->SetPushParameter("TextureST", float4(1, 1, 0, 0));
                             mRenderModelMaterials.emplace(kp.second, make_pair(diffuse, mat));
                             mr->Material(mat);
                         }
@@ -458,30 +459,25 @@ void OpenVR::BeginFrame() {
 }
 void OpenVR::PostRender(CommandBuffer* commandBuffer) {
     Profiler::BeginSample("OpenVR Copy");
-    Texture* src = mHmdCamera->ResolveBuffer();
-    src->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
 
-    if (!mCopyTarget){
-        mCopyTarget = new Texture("HMD Copy Target", mScene->Instance()->Device(),
-            mHmdCamera->FramebufferWidth(), mHmdCamera->FramebufferHeight(), 1, VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL,
+    if (!mCopyTarget)
+        mCopyTarget = new Texture("HMD Copy Target", mScene->Instance()->Device(), mHmdCamera->Framebuffer()->Extent(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT,
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-        mCopyTarget->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
-    } else
-        mCopyTarget->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
+    
+    commandBuffer->TransitionBarrier(mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    commandBuffer->TransitionBarrier(mCopyTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     VkImageCopy rgn = {};
     rgn.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     rgn.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     rgn.srcSubresource.layerCount = 1;
     rgn.dstSubresource.layerCount = 1;
-    rgn.extent = { mCopyTarget->Width(), mCopyTarget->Height(), 1 };
+    rgn.extent = mCopyTarget->Extent();
     vkCmdCopyImage(*commandBuffer, 
-        src->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        mCopyTarget->Image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        *mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        *mCopyTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1, &rgn);
 
-    src->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
-    mCopyTarget->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
     Profiler::EndSample();
 
     // last-minute pose update
@@ -528,14 +524,14 @@ void OpenVR::EndFrame() {
     rightBounds.vMax = 1.f;
 
     VRVulkanTextureData_t vkTexture = {};
-    vkTexture.m_nImage = (uint64_t)mCopyTarget->Image();
+    vkTexture.m_nImage = (uint64_t)(mCopyTarget->operator VkImage());
     vkTexture.m_pDevice = *mScene->Instance()->Device();
     vkTexture.m_pPhysicalDevice = mScene->Instance()->Device()->PhysicalDevice();
     vkTexture.m_pInstance = *mScene->Instance();
     vkTexture.m_pQueue = mScene->Instance()->Device()->GraphicsQueue();
     vkTexture.m_nQueueFamilyIndex = mScene->Instance()->Device()->GraphicsQueueFamilyIndex();
-    vkTexture.m_nWidth = mCopyTarget->Width();
-    vkTexture.m_nHeight = mCopyTarget->Height();
+    vkTexture.m_nWidth = mCopyTarget->Extent().width;
+    vkTexture.m_nHeight = mCopyTarget->Extent().height;
     vkTexture.m_nFormat = mCopyTarget->Format();
     vkTexture.m_nSampleCount = 1;
 

@@ -13,9 +13,9 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 #else
 Window::Window(Instance* instance, const string& title, MouseKeyboardInput* input, VkRect2D position, HINSTANCE hInstance)
 #endif
-	: mInstance(instance), mTargetCamera(nullptr), mDevice(nullptr), mTitle(title), mSwapchainSize({}), mFullscreen(false), mClientRect(position), mInput(input),
-	mSwapchain(VK_NULL_HANDLE), mPhysicalDevice(VK_NULL_HANDLE), mImageCount(0), mFormat({}),
-	mCurrentBackBufferIndex(0), mImageAvailableSemaphoreIndex(0), mFrameData(nullptr), mDirectDisplay(VK_NULL_HANDLE) {
+	: mInstance(instance), mTargetCamera(nullptr), mDevice(nullptr), mTitle(title), mSwapchainExtent({}), mFullscreen(false), mClientRect(position), mInput(input),
+	mSwapchain(VK_NULL_HANDLE), mPhysicalDevice(VK_NULL_HANDLE), mImageCount(0), mFormat({}), mVSync(false),
+	mBackBufferIndex(0), mImageAvailableSemaphoreIndex(0), mFrameData(nullptr), mDirectDisplay(VK_NULL_HANDLE) {
 
 	printf("Creating window... ");
 
@@ -110,7 +110,7 @@ Window::~Window() {
 	DestroySwapchain();
 	vkDestroySurfaceKHR(*mInstance, mSurface, nullptr);
 
-	if (mDirectDisplay){
+	if (mDirectDisplay) {
 		PFN_vkReleaseDisplayEXT vkReleaseDisplay = (PFN_vkReleaseDisplayEXT)vkGetInstanceProcAddr(*mInstance, "vkReleaseDisplayEXT");
 		vkReleaseDisplay(mPhysicalDevice, mDirectDisplay);
 	}
@@ -127,15 +127,15 @@ VkImage Window::AcquireNextImage() {
 	if (mSwapchain == VK_NULL_HANDLE) return VK_NULL_HANDLE;
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % (uint32_t)mImageAvailableSemaphores.size();
-	VkResult err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mCurrentBackBufferIndex);
+	VkResult err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mBackBufferIndex);
 	if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
 		CreateSwapchain(mDevice);
-		if (mSwapchain == VK_NULL_HANDLE) return VK_NULL_HANDLE;// swapchain failed to create (happens when window is minimized, etc)
-		err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mCurrentBackBufferIndex);
+		if (mSwapchain == VK_NULL_HANDLE) return VK_NULL_HANDLE; // swapchain failed to create (happens when window is minimized, etc)
+		err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mBackBufferIndex);
 	}
 
 	if (mFrameData == nullptr) return VK_NULL_HANDLE;
-	return mFrameData[mCurrentBackBufferIndex].mSwapchainImage;
+	return mFrameData[mBackBufferIndex].mSwapchainImage;
 }
 
 void Window::Present(vector<VkSemaphore> waitSemaphores) {
@@ -149,8 +149,9 @@ void Window::Present(vector<VkSemaphore> waitSemaphores) {
 	presentInfo.pWaitSemaphores = waitSemaphores.data();
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &mSwapchain;
-	presentInfo.pImageIndices = &mCurrentBackBufferIndex;
+	presentInfo.pImageIndices = &mBackBufferIndex;
 	vkQueuePresentKHR(mDevice->PresentQueue(), &presentInfo);
+	mDevice->mFrameCount++;
 }
 
 #ifdef __linux
@@ -251,36 +252,35 @@ void Window::CreateSwapchain(::Device* device) {
 	vector<VkPresentModeKHR> presentModes;
 
 	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(mPhysicalDevice, mSurface, &capabilities);
+
 	uint32_t formatCount;
 	vkGetPhysicalDeviceSurfaceFormatsKHR(mPhysicalDevice, mSurface, &formatCount, nullptr);
-	if (formatCount != 0) {
-		formats.resize(formatCount);
-		vkGetPhysicalDeviceSurfaceFormatsKHR(mDevice->PhysicalDevice(), mSurface, &formatCount, formats.data());
-	}
+	formats.resize(formatCount);
+	vkGetPhysicalDeviceSurfaceFormatsKHR(mDevice->PhysicalDevice(), mSurface, &formatCount, formats.data());
+	
 	uint32_t presentModeCount;
 	vkGetPhysicalDeviceSurfacePresentModesKHR(mPhysicalDevice, mSurface, &presentModeCount, nullptr);
-	if (presentModeCount != 0) {
-		presentModes.resize(presentModeCount);
-		vkGetPhysicalDeviceSurfacePresentModesKHR(mDevice->PhysicalDevice(), mSurface, &presentModeCount, presentModes.data());
-	}
+	presentModes.resize(presentModeCount);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(mDevice->PhysicalDevice(), mSurface, &presentModeCount, presentModes.data());
+
 	uint32_t graphicsFamily, presentFamily;
-	if (!Device::FindQueueFamilies(mPhysicalDevice, mSurface, graphicsFamily, presentFamily)) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find queue families\n");
+	if (!FindQueueFamilies(mPhysicalDevice, mSurface, graphicsFamily, presentFamily)) {
+		fprintf_color(COLOR_RED, stderr, "%s", "Error: Failed to find queue families\n");
 		throw;
 	}
 	
 	VkBool32 sfcSupport;
 	vkGetPhysicalDeviceSurfaceSupportKHR(mPhysicalDevice, presentFamily, mSurface, &sfcSupport);
 	if (!sfcSupport) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Surface not supported by device!");
+		fprintf_color(COLOR_RED, stderr, "%s", "Error: Surface not supported by device!");
 		throw;
 	}
 
 	uint32_t queueFamilyIndices[] = { graphicsFamily, presentFamily };
 
 	// get the size of the swapchain
-	mSwapchainSize = capabilities.currentExtent;
-	if (mSwapchainSize.width == numeric_limits<uint32_t>::max() || mSwapchainSize.height == numeric_limits<uint32_t>::max() || mSwapchainSize.width == 0 || mSwapchainSize.height == 0)
+	mSwapchainExtent = capabilities.currentExtent;
+	if (mSwapchainExtent.width == numeric_limits<uint32_t>::max() || mSwapchainExtent.height == numeric_limits<uint32_t>::max() || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
 		return;
 
 	// find a preferrable surface format 
@@ -293,13 +293,14 @@ void Window::CreateSwapchain(::Device* device) {
 
 	// find the best present mode
 	VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-	for (const auto& availablePresentMode : presentModes)
-		if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-			presentMode = availablePresentMode;
-			break;
-		} else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
-			presentMode = availablePresentMode;
-
+	if (!mVSync) {
+		for (const auto& availablePresentMode : presentModes)
+			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+				presentMode = availablePresentMode;
+				break;
+			} else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
+				presentMode = availablePresentMode;
+	}
 	// find the preferrable number of back buffers
 	mImageCount = capabilities.minImageCount + 1;
 
@@ -309,7 +310,7 @@ void Window::CreateSwapchain(::Device* device) {
 	createInfo.minImageCount = mImageCount;
 	createInfo.imageFormat = mFormat.format;
 	createInfo.imageColorSpace = mFormat.colorSpace;
-	createInfo.imageExtent = mSwapchainSize;
+	createInfo.imageExtent = mSwapchainExtent;
 	createInfo.imageArrayLayers = 1;
 	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	if (graphicsFamily != presentFamily) {
@@ -349,26 +350,16 @@ void Window::CreateSwapchain(::Device* device) {
 	mImageAvailableSemaphores.resize(mImageCount);
 	mImageAvailableSemaphoreIndex = 0;
 
-	auto commandBuffer = device->GetCommandBuffer();
 
-	vector<VkImageMemoryBarrier> barriers(mImageCount);
-
+	CommandBuffer* commandBuffer = device->GetCommandBuffer();
+	
 	// create per-frame objects
 	for (uint32_t i = 0; i < mImageCount; i++) {
 		mFrameData[i] = FrameData();
 		mFrameData[i].mSwapchainImage = images[i];
 		mDevice->SetObjectName(images[i], mTitle + " Image " + to_string(i), VK_OBJECT_TYPE_IMAGE);
 
-		barriers[i] = {};
-		barriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		barriers[i].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barriers[i].image = mFrameData[i].mSwapchainImage;
-		barriers[i].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barriers[i].subresourceRange.levelCount = 1;
-		barriers[i].subresourceRange.layerCount = 1;
+		commandBuffer->TransitionBarrier(mFrameData[i].mSwapchainImage, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 		VkImageViewCreateInfo createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -387,18 +378,12 @@ void Window::CreateSwapchain(::Device* device) {
 		ThrowIfFailed(vkCreateImageView(*mDevice, &createInfo, nullptr, &mFrameData[i].mSwapchainImageView), "vkCreateImageView failed for swapchain");
 		mDevice->SetObjectName(mFrameData[i].mSwapchainImageView, mTitle + " Image View " + to_string(i), VK_OBJECT_TYPE_IMAGE_VIEW);
 		
-		mImageAvailableSemaphores[i] = make_shared<Semaphore>(mDevice);
+		mImageAvailableSemaphores[i] = new Semaphore(mDevice);
 		mDevice->SetObjectName(mImageAvailableSemaphores[i]->operator VkSemaphore(), mTitle + " Image Avaiable Semaphore " + to_string(i), VK_OBJECT_TYPE_SEMAPHORE);
 	}
-	vkCmdPipelineBarrier(*commandBuffer,
-		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-		0,
-		0, nullptr,
-		0, nullptr,
-		(uint32_t)barriers.size(), barriers.data()
-	);
-
-	device->Execute(commandBuffer, false)->Wait();
+	
+	device->Execute(commandBuffer);
+	commandBuffer->Wait();
 }
 
 void Window::DestroySwapchain() {
@@ -408,6 +393,7 @@ void Window::DestroySwapchain() {
 		if (mFrameData[i].mSwapchainImageView != VK_NULL_HANDLE)
 			vkDestroyImageView(*mDevice, mFrameData[i].mSwapchainImageView, nullptr);
 		mFrameData[i].mSwapchainImageView = VK_NULL_HANDLE;
+		delete mImageAvailableSemaphores[i];
 	}
 	mImageAvailableSemaphores.clear();
 

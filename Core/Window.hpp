@@ -30,23 +30,27 @@ public:
 	ENGINE_EXPORT void Fullscreen(bool fs);
 	ENGINE_EXPORT void Resize(uint32_t w, uint32_t h);
 
+	inline VkSurfaceKHR Surface() const { return mSurface; }
+	inline VkSurfaceFormatKHR Format() const { return mFormat; }
+
 	inline bool Fullscreen() const { return mFullscreen; }
 	inline VkRect2D ClientRect() const { return mClientRect; };
 	inline std::string Title() const { return mTitle; }
-	inline uint32_t CurrentBackBufferIndex() const { return mCurrentBackBufferIndex; }
-	inline VkImage BackBuffer() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mCurrentBackBufferIndex].mSwapchainImage; }
-	inline VkImageView BackBufferView() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mCurrentBackBufferIndex].mSwapchainImageView; }
-	inline VkImage BackBuffer(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImage; }
-	inline VkImageView BackBufferView(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImageView; }
+
 	inline uint32_t BackBufferCount() const { return mImageCount; }
-	inline VkExtent2D BackBufferSize() const { return mSwapchainSize; }
-	inline VkSurfaceKHR Surface() const { return mSurface; }
-	inline VkSurfaceFormatKHR Format() const { return mFormat; }
+	inline uint32_t BackBufferIndex() const { return mBackBufferIndex; }
+	inline bool VSync() const { return mVSync; }
+	inline void VSync(bool v) { mVSync = v; }
+	
+	inline VkImage BackBuffer() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mBackBufferIndex].mSwapchainImage; }
+	inline VkImage BackBuffer(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImage; }
+	inline VkImageView BackBufferView() const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[mBackBufferIndex].mSwapchainImageView; }
+	inline VkImageView BackBufferView(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImageView; }
+	inline VkExtent2D SwapchainExtent() const { return mSwapchainExtent; }
 
 	#ifdef WINDOWS
 	inline HWND Hwnd() const { return mHwnd; }
 	#endif
-
 	inline ::Device* Device() const { return mDevice; }
 
 private:
@@ -67,6 +71,7 @@ private:
 	MouseKeyboardInput* mInput;
 
 	bool mFullscreen;
+	bool mVSync;
 	VkRect2D mClientRect;
 	std::string mTitle;
 
@@ -91,10 +96,10 @@ private:
 	VkSurfaceKHR mSurface;
 	VkSwapchainKHR mSwapchain;
 
-	VkExtent2D mSwapchainSize;
+	VkExtent2D mSwapchainExtent;
 	VkSurfaceFormatKHR mFormat;
 	uint32_t mImageCount;
-	uint32_t mCurrentBackBufferIndex;
+	uint32_t mBackBufferIndex;
 
 	struct FrameData {
 		VkImage mSwapchainImage;
@@ -104,7 +109,7 @@ private:
 	FrameData* mFrameData;
 
 	/// semaphores that signal when an image is available (via vkAcquireNextImageKHR)
-	std::vector<std::shared_ptr<Semaphore>> mImageAvailableSemaphores;
+	std::vector<Semaphore*> mImageAvailableSemaphores;
 	uint32_t mImageAvailableSemaphoreIndex;
 
 	Camera* mTargetCamera;

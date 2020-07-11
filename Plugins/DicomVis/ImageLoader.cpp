@@ -80,9 +80,7 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 	int x, y, c;
 	stbi_info(images[0].string().c_str(), &x, &y, &c);
 	
-	uint32_t depth = images.size();
-	uint32_t width = x;
-	uint32_t height = y;
+	VkExtent3D extent = { (uint32_t)x, (uint32_t)y, (uint32_t)images.size() };
 	uint32_t channels = channelCount == 0 ? c : channelCount;
 
 	VkFormat format;
@@ -103,9 +101,9 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 		return nullptr; // ??
 	}
 
-	size_t sliceSize = width * height * channels;
-	uint8_t* pixels = new uint8_t[sliceSize * depth];
-	memset(pixels, 0, sliceSize * depth);
+	size_t sliceSize = extent.width * extent.height * channels;
+	uint8_t* pixels = new uint8_t[sliceSize * extent.depth];
+	memset(pixels, 0, sliceSize * extent.depth);
 
 	uint32_t done = 0;
 	vector<thread> threads;
@@ -115,15 +113,15 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 			int xt, yt, ct;
 			for (uint32_t i = j; i < images.size(); i += threadCount) {
 				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, 0);
-				if (xt == width || yt == height) {
+				if (xt == extent.width || yt == extent.height) {
 					if (ct == channels)
 						memcpy(pixels + sliceSize * i, img, sliceSize);
 					else {
 						uint8_t* slice = pixels + sliceSize * i;
-						for (uint32_t y = 0; y < height; y++)
-							for (uint32_t x = 0; x < width; x++)
+						for (uint32_t y = 0; y < extent.height; y++)
+							for (uint32_t x = 0; x < extent.width; x++)
 								for (uint32_t k = 0; k < min((uint32_t)ct, channels); k++)
-									slice[channels * (y * width + x) + k] = img[ct * (y * width + x) + k];
+									slice[channels * (y * extent.width + x) + k] = img[ct * (y * extent.width + x) + k];
 					}
 				}
 				stbi_image_free(img);
@@ -140,7 +138,7 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 	for (thread& t : threads) t.join();
 	printf("\rLoading stack: Done           \n");
 
-	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize*depth, width, height, depth, format, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize*extent.depth, extent, format, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 	delete[] pixels;
 
 	if (scale) *scale = float3(.05f, .05f, .05f);
@@ -185,11 +183,9 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 		return a.location < b.location;
 	});
 
-	uint32_t w = images[0].image->getWidth();
-	uint32_t h = images[0].image->getHeight();
-	uint32_t d = (uint32_t)images.size();
+	VkExtent3D extent = { images[0].image->getWidth(), images[0].image->getHeight(), (uint32_t)images.size() };
 
-	if (w == 0 || h == 0) return nullptr;
+	if (extent.width == 0 || extent.height == 0) return nullptr;
 
 	// volume size in meters
 	if (size) {
@@ -199,19 +195,21 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 			b.y = (float)fmax(i.location + i.spacing.z * .5, b.y);
 		}
 
-		*size = float3(.001 * double3(maxSpacing.xy * double2(w, h), b.y - b.x));
+		*size = float3(.001 * double3(maxSpacing.xy * double2(extent.width, extent.height), b.y - b.x));
 		printf("%fm x %fm x %fm\n", size->x, size->y, size->z);
 	}
 
-	uint16_t* data = new uint16_t[w * h * d];
-	memset(data, 0, w * h * d * sizeof(uint16_t));
+	size_t sliceSize = extent.width * extent.height * sizeof(uint16_t);
+
+	uint16_t* data = new uint16_t[extent.width * extent.height * extent.depth];
+	memset(data, 0, extent.depth * sliceSize);
 	for (uint32_t i = 0; i < images.size(); i++) {
 		images[i].image->setMinMaxWindow();
 		uint16_t* pixels = (uint16_t*)images[i].image->getOutputData(16);
-		memcpy(data + i * w * h, pixels, w * h * sizeof(uint16_t));
+		memcpy(data + i * extent.width * extent.height, pixels, sliceSize);
 	}
 
-	Texture* tex = new Texture(folder.string(), device, data, w*h*d*sizeof(uint16_t), w, h, d, VK_FORMAT_R16_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+	Texture* tex = new Texture(folder.string(), device, data, extent.depth*sliceSize, extent, VK_FORMAT_R16_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
 	delete[] data;
 	for (auto& i : images) delete i.image;
 	return tex;
@@ -229,15 +227,12 @@ Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float
 		return a.string() < b.string();
 	});
 
-	uint32_t width = 2048;
-	uint32_t height = 1216;
-	uint32_t depth = images.size();
-
-	size_t pixelCount = width * height;
+	VkExtent3D extent = { 2048, 1216, (uint32_t)images.size() };
+	size_t pixelCount = extent.width * extent.height;
 
 	size_t sliceSize = pixelCount * 4;
-	uint8_t* pixels = new uint8_t[sliceSize * depth];
-	memset(pixels, 0, sliceSize * depth);
+	uint8_t* pixels = new uint8_t[sliceSize * extent.depth];
+	memset(pixels, 0, sliceSize * extent.depth);
 
 	uint32_t done = 0;
 	vector<thread> threads;
@@ -252,12 +247,12 @@ Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float
 				}
 
 				uint8_t* sliceStart = pixels + sliceSize * i;
-				for (uint32_t y = 0; y < height; y++)
-					for (uint32_t x = 0; x < width; x++) {
-						sliceStart[4 * (x + y * width) + 0] = slice[x + y * width];
-						sliceStart[4 * (x + y * width) + 1] = slice[x + y * width + pixelCount];
-						sliceStart[4 * (x + y * width) + 2] = slice[x + y * width + 2*pixelCount];
-						sliceStart[4 * (x + y * width) + 3] = 0xFF;
+				for (uint32_t y = 0; y < extent.height; y++)
+					for (uint32_t x = 0; x < extent.width; x++) {
+						sliceStart[4 * (x + y * extent.width) + 0] = slice[x + y * extent.width];
+						sliceStart[4 * (x + y * extent.width) + 1] = slice[x + y * extent.width + pixelCount];
+						sliceStart[4 * (x + y * extent.width) + 2] = slice[x + y * extent.width + 2*pixelCount];
+						sliceStart[4 * (x + y * extent.width) + 3] = 0xFF;
 					}
 
 				done++;
@@ -272,10 +267,10 @@ Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float
 	for (thread& t : threads) t.join();
 	printf("\rLoading stack: Done           \n");
 
-	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize * depth, width, height, depth, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	Texture* volume = new Texture(folder.string(), device, pixels, sliceSize * extent.depth, extent, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 	delete[] pixels;
 
-	if (scale) *scale = float3(.00033f * width, .00033f * height, .001f * depth);
+	if (scale) *scale = float3(.00033f * extent.width, .00033f * extent.height, .001f * extent.depth);
 
 	return volume;
 }

@@ -1,6 +1,5 @@
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
-#include <Scene/Gizmos.hpp>
 #include <Shaders/include/shadercompat.h>
 
 #include <Util/Profiler.hpp>
@@ -8,60 +7,51 @@
 using namespace std;
 
 void Camera::CreateDescriptorSet() {
-	VkDescriptorSetLayoutBinding binding = {};
-	binding.binding = CAMERA_BUFFER_BINDING;
-	binding.descriptorCount = 1;
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	VkDescriptorSetLayoutCreateInfo dslayoutinfo = {};
-	dslayoutinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	dslayoutinfo.bindingCount = 1;
-	dslayoutinfo.pBindings = &binding;
-
-	vector<VkShaderStageFlags> combos{
+	vector<VkShaderStageFlags> combos {
 		VK_SHADER_STAGE_VERTEX_BIT,
 		VK_SHADER_STAGE_FRAGMENT_BIT,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
 	};
 
-	uint32_t c = mDevice->MaxFramesInFlight();
-	VkDeviceSize bufSize = AlignUp(sizeof(CameraBuffer), mDevice->Limits().minUniformBufferOffsetAlignment);
-	mUniformBufferPtrs = new void*[c];
-	mUniformBuffer = new Buffer(mName + " Uniforms", mDevice, bufSize * c, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	mDescriptorSets.resize(c);
-	for (uint32_t i = 0; i < c; i++) {
+	VkDeviceSize sz = AlignUp<VkDeviceSize>(sizeof(CameraBuffer), mDevice->Limits().minUniformBufferOffsetAlignment);
+	mUniformBuffer = new Buffer(mName + " Uniforms", mDevice, mDevice->Instance()->Window()->BackBufferCount()*sz, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	
+	mFrameData.resize(mDevice->Instance()->Window()->BackBufferCount());
+	for (uint32_t i = 0; i < mFrameData.size(); i++) {
+		FrameData& fd = mFrameData[i];
+		fd.mMappedUniformBuffer = (uint8_t*)mUniformBuffer->MappedData() + i*sz;
 		for (auto& s : combos) {
+			VkDescriptorSetLayoutBinding binding = {};
 			binding.stageFlags = s;
-			
+			binding.binding = CAMERA_BUFFER_BINDING;
+			binding.descriptorCount = 1;
+			binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			VkDescriptorSetLayoutCreateInfo dslayoutinfo = {};
+			dslayoutinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+			dslayoutinfo.bindingCount = 1;
+			dslayoutinfo.pBindings = &binding;
 			VkDescriptorSetLayout layout;
 			vkCreateDescriptorSetLayout(*mDevice, &dslayoutinfo, nullptr, &layout);
 			mDevice->SetObjectName(layout, mName + " DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
 			
 			::DescriptorSet* ds = new ::DescriptorSet(mName + " DescriptorSet", mDevice, layout);
-			ds->CreateUniformBufferDescriptor(mUniformBuffer, bufSize * i, bufSize, CAMERA_BUFFER_BINDING);
+			ds->CreateUniformBufferDescriptor(mUniformBuffer, i*sz, sz, CAMERA_BUFFER_BINDING);
 			ds->FlushWrites();
-			mDescriptorSets[i].emplace(s, ds);
-
+			fd.mDescriptorSets.emplace(s, ds);
 		}
-		mUniformBufferPtrs[i] = (uint8_t*)mUniformBuffer->MappedData() + bufSize * i;
 	}
-
 	mViewport.x = 0;
 	mViewport.y = 0;
-	mViewport.width = (float)mFramebuffer->Width();
-	mViewport.height = (float)mFramebuffer->Height();
+	mViewport.width = (float)mFramebuffer->Extent().width;
+	mViewport.height = (float)mFramebuffer->Extent().height;
 	mViewport.minDepth = 0.f;
 	mViewport.maxDepth = 1.f;
 }
 
-Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, VkSampleCountFlagBits sampleCount)
-	: Object(name), mDevice(targetWindow->Device()), mTargetWindow(targetWindow),
-	mFramebuffer(nullptr),
-	mDeleteFramebuffer(true),
-	mOrthographic(false), mOrthographicSize(3),
-	mFieldOfView(PI/4),
-	mNear(.03f), mFar(500.f),
-	mRenderPriority(100), mStereoMode(STEREO_NONE) {
-
+Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, VkSampleCountFlagBits sampleCount, :: ClearFlags clearFlags)
+	: Object(name), mDevice(targetWindow->Device()), mTargetWindow(targetWindow), mDeleteFramebuffer(true), mClearFlags(clearFlags),
+	mOrthographic(false), mOrthographicSize(3), mFieldOfView(PI/4), mNear(.03f), mFar(500.f), mRenderPriority(100), mStereoMode(STEREO_NONE) {
+	
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
@@ -71,8 +61,13 @@ Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, V
 
 	VkFormat fmt = targetWindow->Format().format;
 
-	vector<VkFormat> colorFormats{ fmt, VK_FORMAT_R16G16B16A16_SFLOAT };
-	mFramebuffer = new ::Framebuffer(name, mDevice, targetWindow->ClientRect().extent.width, targetWindow->ClientRect().extent.height, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
+	vector<VkFormat> colorFormats { fmt, VK_FORMAT_R16G16B16A16_SFLOAT };
+	mFramebuffer = new ::Framebuffer(name, mDevice, targetWindow->SwapchainExtent(), colorFormats, depthFormat, sampleCount);
+
+	mViewport.x = 0;
+	mViewport.y = 0;
+	mViewport.width = (float)mFramebuffer->Extent().width;
+	mViewport.height = (float)mFramebuffer->Extent().height;
 	
 	VkClearValue c = {};
 	c.color.float32[0] = 1.f;
@@ -81,18 +76,11 @@ Camera::Camera(const string& name, Window* targetWindow, VkFormat depthFormat, V
 	c.color.float32[3] = 1.f;
 	mFramebuffer->ClearValue(1, c);
 
-	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
-	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
-
 	CreateDescriptorSet();
 }
-Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount)
-	: Object(name), mDevice(device), mTargetWindow(nullptr),
-	mDeleteFramebuffer(true),
-	mOrthographic(false), mOrthographicSize(3),
-	mFieldOfView(PI/4),
-	mNear(.03f), mFar(500.f),
-	mRenderPriority(100), mStereoMode(STEREO_NONE) {
+Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount, :: ClearFlags clearFlags)
+	: Object(name), mDevice(device), mTargetWindow(nullptr), mDeleteFramebuffer(true), mClearFlags(clearFlags),
+	mOrthographic(false), mOrthographicSize(3), mFieldOfView(PI/4), mNear(.03f), mFar(500.f), mRenderPriority(100), mStereoMode(STEREO_NONE) {
 
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
@@ -100,7 +88,12 @@ Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFo
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
 
 	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
-	mFramebuffer = new ::Framebuffer(name, mDevice, 1600, 900, colorFormats, depthFormat, sampleCount, {}, VK_ATTACHMENT_LOAD_OP_CLEAR);
+	mFramebuffer = new ::Framebuffer(name, mDevice, { 1600, 900 }, colorFormats, depthFormat, sampleCount);
+
+	mViewport.x = 0;
+	mViewport.y = 0;
+	mViewport.width = (float)mFramebuffer->Extent().width;
+	mViewport.height = (float)mFramebuffer->Extent().height;
 
 	VkClearValue c = {};
 	c.color.float32[0] = 1.f;
@@ -109,42 +102,33 @@ Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFo
 	c.color.float32[3] = 1.f;
 	mFramebuffer->ClearValue(1, c);
 
-	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
-	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
-
 	CreateDescriptorSet();
 }
-Camera::Camera(const string& name, ::Framebuffer* framebuffer)
-		: Object(name), mDevice(framebuffer->Device()), mTargetWindow(nullptr),
-	mFramebuffer(framebuffer),
-	mDeleteFramebuffer(false),
-	mOrthographic(false), mOrthographicSize(3),
-	mFieldOfView(PI/4),
-	mNear(.03f), mFar(500.f),
-	mRenderPriority(100), mStereoMode(STEREO_NONE) {
+Camera::Camera(const string& name, ::Framebuffer* framebuffer, :: ClearFlags clearFlags)
+		: Object(name), mDevice(framebuffer->Device()), mTargetWindow(nullptr), mFramebuffer(framebuffer), mDeleteFramebuffer(false), mClearFlags(clearFlags),
+	mOrthographic(false), mOrthographicSize(3), mFieldOfView(PI/4), mNear(.03f), mFar(500.f), mRenderPriority(100), mStereoMode(STEREO_NONE) {
+
+	mViewport.x = 0;
+	mViewport.y = 0;
+	mViewport.width = (float)mFramebuffer->Extent().width;
+	mViewport.height = (float)mFramebuffer->Extent().height;
 
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
 	
-	mResolveBuffers = new vector<Texture*>[mDevice->MaxFramesInFlight()];
-	memset(mResolveBuffers, 0, sizeof(Texture*) * mDevice->MaxFramesInFlight());
 	CreateDescriptorSet();
 }
 
 Camera::~Camera() {
 	if (mTargetWindow) mTargetWindow->mTargetCamera = nullptr;
-	for (uint32_t i = 0; i < mDevice->MaxFramesInFlight(); i++) {
-		for (auto& s : mDescriptorSets[i]) {
+	for (uint32_t i = 0; i < mDevice->Instance()->Window()->BackBufferCount(); i++) {
+		for (auto& s : mFrameData[i].mDescriptorSets) {
 			vkDestroyDescriptorSetLayout(*mDevice, s.second->Layout(), nullptr);
 			safe_delete(s.second);
 		}
-		for (uint32_t j = 0; j < mResolveBuffers[i].size(); j++)
-			safe_delete(mResolveBuffers[i][j]);
 	}
-	safe_delete_array(mResolveBuffers);
-	safe_delete_array(mUniformBufferPtrs);
 	safe_delete(mUniformBuffer);
 	if (mDeleteFramebuffer) safe_delete(mFramebuffer);
 }
@@ -175,58 +159,23 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	return ray;
 }
 
-::DescriptorSet* Camera::DescriptorSet(VkShaderStageFlags stages) {
-	return mDescriptorSets[mDevice->FrameContextIndex()].at(stages);
-}
-
-void Camera::PreRender() {
-	if (mTargetWindow && (FramebufferWidth() != mTargetWindow->BackBufferSize().width || FramebufferHeight() != mTargetWindow->BackBufferSize().height)) {
-		mFramebuffer->Width(mTargetWindow->BackBufferSize().width);
-		mFramebuffer->Height(mTargetWindow->BackBufferSize().height);
+void Camera::PreBeginRenderPass() {
+	if (mTargetWindow && mFramebuffer->Extent() != mTargetWindow->SwapchainExtent()) {
+		mFramebuffer->Extent(mTargetWindow->SwapchainExtent());
 		Dirty();
 
 		mViewport.x = 0;
 		mViewport.y = 0;
-		mViewport.width = (float)mFramebuffer->Width();
-		mViewport.height = (float)mFramebuffer->Height();
+		mViewport.width = (float)mFramebuffer->Extent().width;
+		mViewport.height = (float)mFramebuffer->Extent().height;
 	}
-}
-void Camera::Resolve(CommandBuffer* commandBuffer) {
-	if (!mFramebuffer->Width() || !mFramebuffer->Height()) return;
-
-	vector<Texture*>& buffers = mResolveBuffers[mDevice->FrameContextIndex()];
-	if (buffers.size() < mFramebuffer->ColorBufferCount()) buffers.resize(mFramebuffer->ColorBufferCount());
-	if (mFramebuffer->SampleCount() == VK_SAMPLE_COUNT_1_BIT)
-		for (uint32_t i = 0; i < buffers.size(); i++)
-			mFramebuffer->ColorBuffer(i)->TransitionImageLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
-	else {
-		PROFILER_BEGIN("Resolve/Copy Camera");
-		BEGIN_CMD_REGION(commandBuffer, "Resolve/Copy Camera");
-		for (uint32_t i = 0; i < buffers.size(); i++) {
-			if (buffers[i] && (buffers[i]->Width() != mFramebuffer->Width() || buffers[i]->Height() != mFramebuffer->Height()))
-				safe_delete(buffers[i]);
-			if (!buffers[i]) {
-				buffers[i] = new Texture("Camera Resolve", mDevice, mFramebuffer->Width(), mFramebuffer->Height(), 1, mFramebuffer->ColorBuffer(i)->Format(), VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-				buffers[i]->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
-			} else
-				buffers[i]->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
-			mFramebuffer->ResolveColor(commandBuffer, i, buffers[i]->Image());
-			buffers[i]->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, commandBuffer);
-		}
-		END_CMD_REGION(commandBuffer);
-		PROFILER_END;
-	}
-}
-void Camera::PostRender(CommandBuffer* commandBuffer) {
-	vector<Texture*>& buffers = mResolveBuffers[mDevice->FrameContextIndex()];
-	if (mFramebuffer->SampleCount() == VK_SAMPLE_COUNT_1_BIT)
-		for (uint32_t i = 0; i < buffers.size(); i++)
-			mFramebuffer->ColorBuffer(i)->TransitionImageLayout(VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, commandBuffer);
+	
+	mFramebuffer->PreBeginRenderPass();
 }
 
-void Camera::SetUniforms() {
+void Camera::UpdateUniformBuffer() {
 	UpdateTransform();
-	CameraBuffer& buf = *(CameraBuffer*)mUniformBufferPtrs[mDevice->FrameContextIndex()];
+	CameraBuffer& buf = *(CameraBuffer*)mFrameData[mDevice->Instance()->Window()->BackBufferIndex()].mMappedUniformBuffer;
 	buf.View[0] = mView[0];
 	buf.View[1] = mView[1];
 	buf.Projection[0] = mProjection[0];
@@ -242,11 +191,17 @@ void Camera::SetUniforms() {
 	buf.AspectRatio = Aspect();
 	buf.OrthographicSize = mOrthographic ? mOrthographicSize : 0;
 }
-void Camera::Set(CommandBuffer* commandBuffer) {
-	SetUniforms();
-	VkRect2D scissor{ { 0, 0 }, { FramebufferWidth(), FramebufferHeight() } };
+void Camera::SetViewportScissor(CommandBuffer* commandBuffer) {
+	VkRect2D scissor { { 0, 0 }, mFramebuffer->Extent() };
 	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
 	vkCmdSetViewport(*commandBuffer, 0, 1, &mViewport);
+}
+void Camera::BeginRenderPass(CommandBuffer* commandBuffer) {
+	mFramebuffer->BeginRenderPass(commandBuffer);
+	if (mClearFlags != CLEAR_NONE) mFramebuffer->Clear(commandBuffer, mClearFlags);
+
+	UpdateUniformBuffer();
+	SetViewportScissor(commandBuffer);
 }
 
 void Camera::SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye) {
@@ -261,8 +216,7 @@ void Camera::SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shad
 
 	vkCmdSetViewport(*commandBuffer, 0, 1, &vp);
 
-	uint32_t eyec = eye;
-	if (shader) commandBuffer->PushConstant(shader, "StereoEye", &eyec);
+	if (shader) commandBuffer->PushConstantRef(shader, "StereoEye", (uint32_t)eye);
 }
 
 bool Camera::UpdateTransform() {
@@ -323,9 +277,9 @@ bool Camera::UpdateTransform() {
 	return true;
 }
 
-void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
+void Camera::DrawGUI(CommandBuffer* commandBuffer, Camera* camera) {
 	if (camera == this) return;
-	Gizmos::DrawWireSphere(WorldPosition(), mNear, 1.f);
+	GUI::WireSphere(WorldPosition(), mNear, 1.f);
 
 	float3 f0 = ClipToWorld(float3(-1, -1, 0));
 	float3 f1 = ClipToWorld(float3(-1, 1, 0));
@@ -337,25 +291,16 @@ void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
 	float3 f6 = ClipToWorld(float3(1, -1, 1));
 	float3 f7 = ClipToWorld(float3(1, 1, 1));
 
-	float4 col = mStereoMode == STEREO_NONE ? 1 : float4(1, .5f, .5f, .5f);
+	float4 color = mStereoMode == STEREO_NONE ? 1 : float4(1, .5f, .5f, .5f);
 
-	Gizmos::DrawLine(f0, f1, col);
-	Gizmos::DrawLine(f0, f2, col);
-	Gizmos::DrawLine(f3, f1, col);
-	Gizmos::DrawLine(f3, f2, col);
-
-	Gizmos::DrawLine(f4, f5, col);
-	Gizmos::DrawLine(f4, f6, col);
-	Gizmos::DrawLine(f7, f5, col);
-	Gizmos::DrawLine(f7, f6, col);
-
-	Gizmos::DrawLine(f0, f4, col);
-	Gizmos::DrawLine(f1, f5, col);
-	Gizmos::DrawLine(f2, f6, col);
-	Gizmos::DrawLine(f3, f7, col);
+	vector<float3> points {
+		f0, f4, f5, f1, f0,
+		f2, f6, f7, f3, f2,
+		f6, f4, f5, f7, f3, f1
+	};
+	GUI::PolyLine(float4x4(1), points.data(), points.size(), color, 1.f);
 
 	if (mStereoMode != STEREO_NONE) {
-		col = float4(.5f, .5f, 1, .5f);
 		f0 = ClipToWorld(float3(-1, -1, 0), EYE_RIGHT);
 		f1 = ClipToWorld(float3(-1, 1, 0), EYE_RIGHT);
 		f2 = ClipToWorld(float3(1, -1, 0), EYE_RIGHT);
@@ -366,19 +311,9 @@ void Camera::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {
 		f6 = ClipToWorld(float3(1, -1, 1), EYE_RIGHT);
 		f7 = ClipToWorld(float3(1, 1, 1), EYE_RIGHT);
 
-		Gizmos::DrawLine(f0, f1, col);
-		Gizmos::DrawLine(f0, f2, col);
-		Gizmos::DrawLine(f3, f1, col);
-		Gizmos::DrawLine(f3, f2, col);
-
-		Gizmos::DrawLine(f4, f5, col);
-		Gizmos::DrawLine(f4, f6, col);
-		Gizmos::DrawLine(f7, f5, col);
-		Gizmos::DrawLine(f7, f6, col);
-
-		Gizmos::DrawLine(f0, f4, col);
-		Gizmos::DrawLine(f1, f5, col);
-		Gizmos::DrawLine(f2, f6, col);
-		Gizmos::DrawLine(f3, f7, col);
+		vector<float3> points2 {
+			f0, f4, f5, f1, f0, f2, 
+		};
+		GUI::PolyLine(float4x4(1), points2.data(), points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
 	}
 }

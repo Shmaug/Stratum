@@ -18,7 +18,7 @@ public:
 	}
 
 	template<class T>
-	inline void GetDevices(std::vector<T*>& devices) {
+	inline void GetAll(std::vector<T*>& devices) {
 		for (InputDevice* p : mInputDevices)
 			if (T* t = dynamic_cast<T*>(p))
 				devices.push_back(t);

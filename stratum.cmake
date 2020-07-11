@@ -38,11 +38,19 @@ function(link_plugin TARGET_NAME)
 
 		# Link vulkan and assimp
 		target_link_libraries(${TARGET_NAME}
-			"${PROJECT_BINARY_DIR}/lib/Engine.lib"
-			"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
-			"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
-			"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
-			"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib" )
+				"${PROJECT_BINARY_DIR}/lib/Engine.lib"
+				"$ENV{VULKAN_SDK}/lib/vulkan-1.lib" )
+		if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+			target_link_libraries(${TARGET_NAME}
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/assimpd.lib"
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstaticd.lib"
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXMLd.lib" )
+		else()
+			target_link_libraries(${TARGET_NAME}
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
+				"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib" )
+		endif()
 
 		if (${ENABLE_DEBUG_LAYERS})
 			target_link_libraries(${TARGET_NAME} "$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")

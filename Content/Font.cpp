@@ -11,25 +11,29 @@
 
 using namespace std;
 
-Font::Font(const string& name, Device* device, const string& filename, float pixelSize, float scale)
-	: mName(name), mTexture(nullptr), mPixelSize(pixelSize), mAscender(0), mDescender(0), mLineSpace(0) {
+Font::Font(const string& name, Device* device, const string& filename, float characterHeight)
+	: mName(name), mTexture(nullptr), mCharacterHeight(characterHeight), mLineSpace(0) {
 
 	memset(mGlyphs, 0, sizeof(FontGlyph) * 0xFF);
 
 	string file;
-	ReadFile(filename, file);
+	if (!ReadFile(filename, file)) throw;
 
 	stbtt_fontinfo font;
-	stbtt_InitFont(&font, (const unsigned char*)file.data(), 0);
+	int err = stbtt_InitFont(&font, (const unsigned char*)file.data(), 0);
+	if (err != 1) {
+		fprintf_color(COLOR_RED, stderr, "Error: Failed to load %s (%d)\n", filename.c_str(), err);
+		throw;
+	}
 
-	float fontScale = stbtt_ScaleForPixelHeight(&font, pixelSize);
+	float FS = stbtt_ScaleForPixelHeight(&font, characterHeight);
 
 	int ascend, descend, space;
 	stbtt_GetFontVMetrics(&font, &ascend, &descend, &space);
 
-	mAscender = ascend * fontScale * scale;
-	mDescender = descend * fontScale * scale;
-	mLineSpace = space * fontScale * scale;
+	mAscender = ascend * FS;
+	mDescender = descend * FS;
+	mLineSpace = (-descend + ascend) * FS;
 
 	struct GlyphBitmap {
 		unsigned char* data;
@@ -38,36 +42,54 @@ Font::Font(const string& name, Device* device, const string& filename, float pix
 	};
 	vector<GlyphBitmap> bitmaps;
 
-	const uint32_t PADDING = 1;
+	const uint32_t PADDING = 2;
 
 	uint32_t area = 0;
 	uint32_t maxWidth = 0;
+	uint32_t maxCharSize = 0;
 
 	for (uint32_t c = 0; c < 0xFF; c++) {
+		int glyphIndex = stbtt_FindGlyphIndex(&font, c);
+		if (glyphIndex <= 0) continue;
+
 		FontGlyph& g = mGlyphs[c];
 		g.mCharacter = c;
 
-		int advance, lsb;
-		stbtt_GetCodepointHMetrics(&font, c, &advance, &lsb);
-		int ymin, ymax;
-		stbtt_GetCodepointBitmapBox(&font, c, fontScale, fontScale, 0, &ymin, 0, &ymax);
+		int advanceWidth, leftSideBearing;
+		stbtt_GetGlyphHMetrics(&font, glyphIndex, &advanceWidth, &leftSideBearing);
+		int x0, y0, x1, y1;
+		stbtt_GetGlyphBitmapBox(&font, glyphIndex, FS, FS, &x0, &y0, &x1, &y1);
 
-		int w, h, x, y;
-		unsigned char* data = stbtt_GetCodepointBitmapSubpixel(&font, fontScale, fontScale, 0, 0, c, &w, &h, &x, &y);
-		
-		g.mVertOffset = -ymin * scale;
-		g.mSize = float2((float)w, -(float)h) * scale;
-		g.mAdvance = advance * fontScale * scale;
+		int x, y, w, h;
+		uint8_t* data = stbtt_GetGlyphBitmap(&font, FS, FS, glyphIndex, &w, &h, &x, &y);
+		bitmaps.push_back({ data, c, {{ 0, 0 }, { (uint32_t)w + PADDING, (uint32_t)h + PADDING } } });
 
-		w += PADDING;
-		h += PADDING;
-		bitmaps.push_back({ data, (uint32_t)c, {{ 0, 0 }, { (uint32_t)w, (uint32_t)h } } });
+		g.mAdvance = advanceWidth * FS;
+		g.mOffset = float2(x0, -y0);
+		g.mExtent = float2(x1 - x0, y0 - y1);
 
 		area += w * h;
 		maxWidth = max(maxWidth, (uint32_t)w);
+		maxCharSize = max((uint32_t)min(w, h), maxCharSize);
+		
+		/*
+		if (c == 'e' || c == 'i' || c == 'z') {
+			string stem = fs::path(filename).stem().string();
+			fprintf(stderr, "%s: ", stem.c_str());
+			for (int i = 0; i < w - (int)stem.length(); i++) fprintf(stderr, "%c", '*');
+				fprintf(stderr, "\n");
+
+			for (int j = 0; j < h; j++) {
+				fprintf(stderr, " ");
+				for (int i = 0; i < w; i++)
+					fprintf(stderr, "%c", " +#@"[data[i + j*w] / 64]);
+				fprintf(stderr, "\n");
+			}
+		}
+		*/
 
 		for (uint32_t c2 = 0; c2 < 0xFF; c2++)
-			g.mKerning[c2] = stbtt_GetCodepointKernAdvance(&font, c, c2) * fontScale * scale;
+			g.mKerning[c2] = stbtt_GetCodepointKernAdvance(&font, c, c2) * FS;
 	}
 
 	// Pack glyph bitmaps
@@ -158,31 +180,23 @@ Font::Font(const string& name, Device* device, const string& filename, float pix
 	packedSize.x++;
 	packedSize.y++;
 	
-	VkDeviceSize imageSize = packedSize.x * packedSize.y * 4;
+	VkDeviceSize imageSize = packedSize.x * packedSize.y * sizeof(uint8_t);
 	uint8_t* pixels = new uint8_t[imageSize];
-	memset(pixels, 0xFF, imageSize);
-
-	// zero alpha channel
-	for (uint32_t x = 0; x < packedSize.x; x++)
-		for (uint32_t y = 0; y < packedSize.y; y++)
-			pixels[4 * (x + y * packedSize.x) + 3] = 0;
+	memset(pixels, 0, imageSize);
 
 	// copy glyph bitmaps
+	float2 packedSizef = float2(packedSize.x, packedSize.y);
 	for (GlyphBitmap& p : bitmaps) {
 		p.rect.extent.width -= PADDING;
 		p.rect.extent.height -= PADDING;
+		mGlyphs[p.glyph].mTextureRect = fRect2D(float2(p.rect.offset.x, p.rect.offset.y) / packedSizef, float2(p.rect.extent.width, p.rect.extent.height) / packedSizef);
 
-		mGlyphs[p.glyph].mUV = float2((float)p.rect.offset.x, (float)p.rect.offset.y) / float2(packedSize);
-		mGlyphs[p.glyph].mUVSize = float2((float)p.rect.extent.width, (float)p.rect.extent.height) / float2(packedSize);
-
-		for (uint32_t x = 0; x < p.rect.extent.width; x++)
-			for (uint32_t y = 0; y < p.rect.extent.height; y++) {
-				size_t pixel = 4 * (p.rect.offset.x + x + (p.rect.offset.y + y) * packedSize.x);
-				pixels[pixel + 3] = p.data[x + y * p.rect.extent.width];
-			}
+		for (uint32_t y = 0; y < p.rect.extent.height; y++)
+			for (uint32_t x = 0; x < p.rect.extent.width; x++)
+				pixels[p.rect.offset.x + x + (p.rect.offset.y + y) * packedSize.x] = p.data[x + y * p.rect.extent.width];
 	}
 
-	mTexture = new ::Texture(mName + " Texture", device, pixels, imageSize, packedSize.x, packedSize.y, 1, VK_FORMAT_R8G8B8A8_UNORM, 0);
+	mTexture = new ::Texture(mName + " Texture", device, pixels, imageSize, { packedSize.x, packedSize.y, 1 }, VK_FORMAT_R8_UNORM, (uint32_t)std::floor(std::log2(maxCharSize)) + 1);
 
 	delete[] pixels;
 
@@ -194,32 +208,36 @@ Font::~Font() {
 }
 
 const FontGlyph* Font::Glyph(uint32_t c) const {
-	return mGlyphs[c].mAdvance ? &mGlyphs[c] : nullptr;
+	return mGlyphs[c].mCharacter == c ? &mGlyphs[c] : nullptr;
 }
 float Font::Kerning(uint32_t from, uint32_t to) const {
 	return mGlyphs[from].mKerning[to];
 };
 
-uint32_t Font::GenerateGlyphs(const string& str, float scale, AABB* aabb, std::vector<TextGlyph>& glyphs, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) const {
+uint32_t Font::GenerateGlyphs(const string& str, AABB* aabb, std::vector<TextGlyph>& glyphs, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) const {
 	glyphs.resize(str.size());
 
-	float2 p(0);
-	uint32_t lc = 0;
+	float currentPoint = 0;
+	float baseline = 0;
+
+	uint32_t lineCount = 0;
 
 	const FontGlyph* prev = nullptr;
+
+	float tabSize = 4;
+	if (const FontGlyph* spaceGlyph = Glyph(' ')) tabSize *= spaceGlyph->mAdvance;
 
 	float lineMin = 0;
 	float lineMax = 0;
 
 	uint32_t lineStart = 0;
 	uint32_t glyphCount = 0;
-	float ly = (mAscender - mDescender) + mLineSpace;
 
 	auto newLine = [&]() {
-		p.x = 0;
-		p.y -= ly;
+		currentPoint = 0;
+		baseline -= mLineSpace;
 		prev = nullptr;
-		lc++;
+		lineCount++;
 
 		float x = 0.f;
 		switch (horizontalAnchor) {
@@ -235,7 +253,7 @@ uint32_t Font::GenerateGlyphs(const string& str, float scale, AABB* aabb, std::v
 			break;
 		}
 		for (uint32_t v = lineStart; v < glyphCount; v++)
-			glyphs[v].mPosition.x -= x;
+			glyphs[v].Offset.x -= x;
 
 		lineMin = 0;
 		lineMax = 0;
@@ -247,53 +265,55 @@ uint32_t Font::GenerateGlyphs(const string& str, float scale, AABB* aabb, std::v
 			lineStart = glyphCount;
 			continue;
 		}
-
-		if (str[i] < 0) continue;
-
+		if (str[i] == '\t') {
+			prev = nullptr;
+			currentPoint = ceilf(currentPoint / tabSize) * tabSize;
+			lineMin = fminf(lineMin, currentPoint);
+			lineMax = fmaxf(lineMax, currentPoint);
+			continue;
+		}
+		
 		const FontGlyph* glyph = Glyph(str[i]);
-		if (!glyph) { prev = glyph; continue; }
+		if (!glyph) { prev = nullptr; continue; }
 
-		if (prev) p.x += prev->mKerning[str[i]];
+		if (prev) currentPoint += prev->mKerning[str[i]];
 
-		glyphs[glyphCount].mPosition = (p + float2(0, glyph->mVertOffset)) * scale;
-		glyphs[glyphCount].mSize = glyph->mSize * scale;
-		glyphs[glyphCount].mUV = glyph->mUV;
-		glyphs[glyphCount].mUVSize = glyph->mUVSize;
+		glyphs[glyphCount].Offset = float2(currentPoint, baseline) + glyph->mOffset;
+		glyphs[glyphCount].Extent = glyph->mExtent;
+		glyphs[glyphCount].TexOffset = glyph->mTextureRect.mOffset;
+		glyphs[glyphCount].TexExtent = glyph->mTextureRect.mExtent;
 
-		lineMin = fminf(lineMin, glyphs[glyphCount].mPosition.x);
-		lineMax = fmaxf(lineMax, glyphs[glyphCount].mPosition.x + glyphs[glyphCount].mSize.x);
+		lineMin = fminf(lineMin, glyphs[glyphCount].Offset.x);
+		lineMax = fmaxf(lineMax, glyphs[glyphCount].Offset.x + glyphs[glyphCount].Extent.x);
 
 		glyphCount++;
-		p.x += glyph->mAdvance;
+		currentPoint += glyph->mAdvance;
 
 		prev = glyph;
 	}
 
 	newLine();
-	p.y += ly;
-
 	float verticalOffset = 0;
 	switch (verticalAnchor) {
 	case TEXT_ANCHOR_MIN:
-		verticalOffset = -p.y  * scale;
+		verticalOffset = -(baseline + mLineSpace);
 		break;
 	case TEXT_ANCHOR_MID:
-		verticalOffset = (lc * (-mDescender - (mAscender - mDescender) * .5f) + (lc - 1) * mLineSpace) * scale * .5f;
+		verticalOffset = (lineCount * (-mDescender - mLineSpace * .5f) + (lineCount - 1) * mLineSpace) * .5f;
 		break;
 	case TEXT_ANCHOR_MAX:
 		verticalOffset = 0;
 		break;
 	}
-
 	for (uint32_t i = 0; i < glyphCount; i++)
-		glyphs[i].mPosition.y += verticalOffset;
+		glyphs[i].Offset.y += verticalOffset;
 
 	if (aabb) {
-		float2 mn = glyphs[0].mPosition;
-		float2 mx = glyphs[0].mPosition + glyphs[0].mSize;
+		float2 mn = glyphs[0].Offset;
+		float2 mx = glyphs[0].Offset + glyphs[0].Extent;
 		for (uint32_t i = 1; i < glyphCount; i++) {
-			mn = min(mn, glyphs[i].mPosition);
-			mx = max(mx, glyphs[i].mPosition + glyphs[i].mSize);
+			mn = min(mn, glyphs[i].Offset);
+			mx = max(mx, glyphs[i].Offset + glyphs[i].Extent);
 		}
 		*aabb = AABB(float3(mn, 0), float3(mx, 0));
 	}

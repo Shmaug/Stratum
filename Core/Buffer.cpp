@@ -86,10 +86,11 @@ void Buffer::CopyFrom(const Buffer& other) {
 	VkBufferCopy copyRegion = {};
 	copyRegion.size = mSize;
 	vkCmdCopyBuffer(*commandBuffer, other.mBuffer, mBuffer, 1, &copyRegion);
-	mDevice->Execute(commandBuffer, false)->Wait();
+	mDevice->Execute(commandBuffer);
+	commandBuffer->Wait();
 }
 
-void Buffer::Allocate(){
+void Buffer::Allocate() {
 	VkBufferCreateInfo bufferInfo = {};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufferInfo.size = mSize;

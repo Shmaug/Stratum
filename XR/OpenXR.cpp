@@ -364,12 +364,13 @@ bool OpenXR::InitScene(Scene* scene) {
 	#pragma endregion
 
 	auto camera = make_shared<Camera>(mSystemProperties.systemName, mScene->Instance()->Device(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, sampleCount);
-	camera->FramebufferWidth(views[0].recommendedImageRectWidth * 2);
-	camera->FramebufferHeight(views[0].recommendedImageRectHeight);
-	camera->ViewportX(0);
-	camera->ViewportY(0);
-	camera->ViewportWidth(views[0].recommendedImageRectWidth * 2);
-	camera->ViewportHeight(views[0].recommendedImageRectHeight);
+	camera->Framebuffer()->Extent({ views[0].recommendedImageRectWidth * 2, views[0].recommendedImageRectHeight });
+	VkViewport vp = camera->Viewport();
+	vp.x = 0;
+	vp.y = 0;
+	vp.width = views[0].recommendedImageRectWidth * 2;
+	vp.height = views[0].recommendedImageRectHeight;
+	camera->Viewport(vp);
 	camera->StereoMode(STEREO_SBS_HORIZONTAL);
 	mScene->AddObject(camera);
 	mHmdCamera = camera.get();
@@ -597,34 +598,31 @@ void OpenXR::PostRender(CommandBuffer* commandBuffer) {
 	mHmdCamera->EyeOffset(iq * (positions[0] - center), quaternion(0,0,0,1), eyes[0]);
 	mHmdCamera->EyeOffset(iq * (positions[1] - center), iq * rotations[1], eyes[1]);
 
-	mHmdCamera->SetUniforms();
+	mHmdCamera->UpdateUniformBuffer();
 
 	#pragma region Copy images
-	Texture* src = mHmdCamera->ResolveBuffer();
 	VkImage right = mSwapchainImages[0][mProjectionViews[0].subImage.imageArrayIndex].image;
 	VkImage left = mSwapchainImages[1][mProjectionViews[1].subImage.imageArrayIndex].image;
 
-	VkImageLayout srcLayout = mHmdCamera->SampleCount() == VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
-
-	src->TransitionImageLayout(srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, commandBuffer);
-	Texture::TransitionImageLayout(left, mSwapchainFormat, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
-	Texture::TransitionImageLayout(right, mSwapchainFormat, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
+	commandBuffer->TransitionBarrier(mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	commandBuffer->TransitionBarrier(left, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	commandBuffer->TransitionBarrier(right, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	VkImageCopy rgn = {};
 	rgn.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	rgn.srcSubresource.layerCount = 1;
 	rgn.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	rgn.dstSubresource.layerCount = 1;
-	rgn.extent.width = mHmdCamera->FramebufferWidth() / 2;
-	rgn.extent.height = mHmdCamera->FramebufferHeight();
+	rgn.extent.width = mHmdCamera->Framebuffer()->Extent().width / 2;
+	rgn.extent.height = mHmdCamera->Framebuffer()->Extent().height;
 	rgn.extent.depth = 1;
 
 	vkCmdCopyImage(*commandBuffer,
-		mHmdCamera->ResolveBuffer()->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		*mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		left, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
-	rgn.srcOffset.x = mHmdCamera->FramebufferWidth() / 2;
+	rgn.srcOffset.x = mHmdCamera->Framebuffer()->Extent().width / 2;
 	vkCmdCopyImage(*commandBuffer,
-		src->Image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		*mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		right, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
 	
 	/*
@@ -650,10 +648,6 @@ void OpenXR::PostRender(CommandBuffer* commandBuffer) {
 			Texture::TransitionImageLayout(camera->TargetWindow()->BackBuffer(), camera->TargetWindow()->Format().format, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, commandBuffer);
 		}
 	*/
-
-	src->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, commandBuffer);
-	Texture::TransitionImageLayout(left, mSwapchainFormat, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, commandBuffer);
-	Texture::TransitionImageLayout(right, mSwapchainFormat, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, commandBuffer);
 
 	#pragma endregion
 }

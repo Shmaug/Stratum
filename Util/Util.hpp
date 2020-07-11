@@ -14,26 +14,30 @@
 #pragma GCC diagnostic ignored "-Wformat-security"
 #endif
 
-#include <stdexcept>
-#include <algorithm>
 #include <fstream>
 #include <iostream>
-#include <memory>
+#include <sstream>
+#include <algorithm>
 #include <string>
 #include <cstring>
+#include <stdexcept>
+#include <variant>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <chrono>
+
 #include <unordered_map>
 #include <vector>
 #include <queue>
 #include <set>
-#include <variant>
-#include <optional>
+#include <list>
+#include <forward_list>
 
 #include <vulkan/vulkan.h>
-
 #include <Math/Geometry.hpp>
+#include <Util/Enums.hpp>
+#include <Util/Helpers.hpp>
 
 #ifdef __GNUC__
 #include <experimental/filesystem>
@@ -69,117 +73,6 @@ namespace fs = std::filesystem;
 
 #define safe_delete(x) if (x != nullptr) { delete x; x = nullptr; }
 #define safe_delete_array(x) if (x != nullptr) { delete[] x; x = nullptr; }
-
-struct fRect2D {
-	float2 mOffset;
-	float2 mExtent;
-
-	inline fRect2D() : mOffset(0), mExtent(0) {};
-	inline fRect2D(const float2& offset, const float2& extent) : mOffset(offset), mExtent(extent) {};
-	inline fRect2D(float ox, float oy, float ex, float ey) : mOffset(float2(ox, oy)), mExtent(ex, ey) {};
-
-	inline fRect2D& operator=(const fRect2D & rhs) {
-		mOffset = rhs.mOffset;
-		mExtent = rhs.mExtent;
-		return *this;
-	}
-
-	inline bool Intersects(const fRect2D& p) const {
-		return !(
-			mOffset.x + mExtent.x < p.mOffset.x ||
-			mOffset.y  + mExtent.y < p.mOffset.y ||
-			mOffset.x > p.mOffset.x + p.mExtent.x ||
-			mOffset.y > p.mOffset.y + p.mExtent.y);
-	}
-	inline bool Contains(const float2& p) const {
-		return 
-			p.x > mOffset.x && p.y > mOffset.y &&
-			p.x < mOffset.x + mExtent.x && p.y < mOffset.y + mExtent.y;
-	}
-};
-
-// Defines a vertex input. Hashes itself once at creation, then remains immutable.
-struct VertexInput {
-public:
-	const std::vector<VkVertexInputBindingDescription> mBindings;
-	// Note: In order to hash and compare correctly, attributes must appear in order of location.
-	const std::vector<VkVertexInputAttributeDescription> mAttributes;
-
-	VertexInput(const std::vector<VkVertexInputBindingDescription>& bindings, const std::vector<VkVertexInputAttributeDescription>& attribs)
-		: mBindings(bindings), mAttributes(attribs) {
-		std::size_t h = 0;
-		for (const auto& b : mBindings) {
-			hash_combine(h, b.binding);
-			hash_combine(h, b.inputRate);
-			hash_combine(h, b.stride);
-		}
-		for (const auto& a : mAttributes) {
-			hash_combine(h, a.binding);
-			hash_combine(h, a.format);
-			hash_combine(h, a.location);
-			hash_combine(h, a.offset);
-		}
-		mHash = h;
-	};
-
-	inline bool operator==(const VertexInput& rhs) const {
-		/*
-		if (mBinding.binding != rhs.mBinding.binding ||
-			mBinding.inputRate != rhs.mBinding.inputRate ||
-			mBinding.stride != rhs.mBinding.stride ||
-			mAttributes.size() != rhs.mAttributes.size()) return false;
-		for (uint32_t i = 0; i < mAttributes.size(); i++)
-			if (mAttributes[i].binding != rhs.mAttributes[i].binding ||
-				mAttributes[i].format != rhs.mAttributes[i].format ||
-				mAttributes[i].location != rhs.mAttributes[i].location ||
-				mAttributes[i].offset != rhs.mAttributes[i].offset) return false;
-		return true;
-		*/
-		return mHash == rhs.mHash;
-	}
-
-private:
-	friend struct std::hash<VertexInput>;
-	size_t mHash;
-};
-namespace std {
-	template<>
-	struct hash<VertexInput> {
-		inline std::size_t operator()(const  VertexInput& v) const {
-			return v.mHash;
-		}
-	};
-}
-
-enum PassType {
-	PASS_MAIN = 1 << 24,
-	PASS_DEPTH = 1 << 25,
-	PASS_MASK_MAX_ENUM = 1 << 31
-};
-
-enum BlendMode {
-	BLEND_MODE_OPAQUE = 0,
-	BLEND_MODE_ALPHA = 1,
-	BLEND_MODE_ADDITIVE = 2,
-	BLEND_MODE_MULTIPLY = 3,
-	BLEND_MODE_MAX_ENUM = 0x7FFFFFFF
-};
-
-enum ConsoleColor {
-	COLOR_RED,
-	COLOR_GREEN,
-	COLOR_BLUE,
-	COLOR_YELLOW,
-	COLOR_CYAN,
-	COLOR_MAGENTA,
-
-	COLOR_RED_BOLD,
-	COLOR_GREEN_BOLD,
-	COLOR_BLUE_BOLD,
-	COLOR_YELLOW_BOLD,
-	COLOR_CYAN_BOLD,
-	COLOR_MAGENTA_BOLD
-};
 
 template<typename... Args>
 inline void printf_color(ConsoleColor color, const char* format, Args&&... a) {
@@ -263,6 +156,7 @@ inline void printf_color(ConsoleColor color, const char* format, Args&&... a) {
 	printf("\x1B[0m");
 	#endif
 }
+
 template<typename... Args>
 #ifdef WINDOWS
 inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Args&&... a) {
@@ -412,8 +306,8 @@ inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
 	return true;
 }
 
-inline void ThrowIfFailed(VkResult result, const std::string& message){
-	if (result != VK_SUCCESS){
+inline void ThrowIfFailed(VkResult result, const std::string& message) {
+	if (result != VK_SUCCESS) {
 		const char* code = "<unknown>";
 		switch (result) {
 			case VK_NOT_READY: code = "VK_NOT_READY"; break;
@@ -448,6 +342,73 @@ inline void ThrowIfFailed(VkResult result, const std::string& message){
 		//throw;
 	}
 }
+
+
+inline VkAccessFlags GuessAccessMask(VkImageLayout layout) {
+	switch (layout) {
+    case VK_IMAGE_LAYOUT_UNDEFINED:
+    case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			return 0;
+
+    case VK_IMAGE_LAYOUT_GENERAL:
+			return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+    case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+    case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+    case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+			return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+    case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+    case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+			return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			return VK_ACCESS_SHADER_READ_BIT;
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			return VK_ACCESS_TRANSFER_READ_BIT;
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return VK_ACCESS_TRANSFER_WRITE_BIT;
+	}
+	return VK_ACCESS_SHADER_READ_BIT;
+}
+inline VkPipelineStageFlags GuessStage(VkImageLayout layout) {
+	switch (layout) {
+		case VK_IMAGE_LAYOUT_GENERAL:
+			return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+		case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+			return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+		case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+		case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+		case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+			return VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+
+		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+		case VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR:
+			return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+		default:
+			return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	}
+}
+
 
 // Size of an element of format, in bytes
 inline const VkDeviceSize FormatSize(VkFormat format) {
@@ -884,4 +845,41 @@ inline VkSamplerMipmapMode atomipmapmode(const std::string& str) {
 	if (str == "linear") return VK_SAMPLER_MIPMAP_MODE_LINEAR;
 	fprintf(stderr, "Unknown mipmap mode: %s\n", str.c_str());
 	throw;
+}
+
+inline VkExtent2D To2D(const VkExtent3D& e) { return { e.width, e.height }; }
+inline VkExtent3D To3D(const VkExtent2D& e) { return { e.width, e.height, 1}; }
+inline bool operator !=(const VkExtent2D& a, const VkExtent2D& b) { return a.width != b.width || a.height != b.height; }
+inline bool operator !=(const VkExtent3D& a, const VkExtent3D& b) { return a.width != b.width || a.height != b.height || a.depth != b.depth; }
+inline bool operator ==(const VkExtent2D& a, const VkExtent2D& b) { return a.width == b.width && a.height == b.height; }
+inline bool operator ==(const VkExtent3D& a, const VkExtent3D& b) { return a.width == b.width && a.height == b.height && a.height == b.depth; }
+
+inline bool FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily) {
+	uint32_t queueFamilyCount = 0;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+	bool g = false;
+	bool p = false;
+
+	uint32_t i = 0;
+	for (const auto& queueFamily : queueFamilies) {
+		if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			graphicsFamily = i;
+			g = true;
+		}
+
+		VkBool32 presentSupport = false;
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+
+		if (queueFamily.queueCount > 0 && presentSupport) {
+			presentFamily = i;
+			p = true;
+		}
+
+		i++;
+	}
+
+	return g && p;
 }

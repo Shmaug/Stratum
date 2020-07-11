@@ -19,7 +19,7 @@ using namespace std;
 #define SHADOW_ATLAS_RESOLUTION 8192
 #define SHADOW_RESOLUTION 4096
 
-const ::VertexInput Float3VertexInput{
+const ::VertexInput Float3VertexInput {
 	{
 		{
 			0, // binding
@@ -119,9 +119,7 @@ inline Bone* AddBone(AnimationRig& rig, aiNode* node, const aiScene* scene, aiNo
 	return bone;
 }
 
-bool RendererCompare(Object* oa, Object* ob) {
-	Renderer* a = dynamic_cast<Renderer*>(oa);
-	Renderer* b = dynamic_cast<Renderer*>(ob);
+bool RendererCompare(Renderer* a, Renderer* b) {
 	uint32_t qa = a->Visible() ? a->RenderQueue() : 0xFFFFFFFF;
 	uint32_t qb = b->Visible() ? b->RenderQueue() : 0xFFFFFFFF;
 	if (qa == qb && qa != 0xFFFFFFFF) {
@@ -136,31 +134,19 @@ bool RendererCompare(Object* oa, Object* ob) {
 	return qa < qb;
 };
 
-Scene::Scene(::Instance* instance, ::AssetManager* assetManager, ::InputManager* inputManager, ::PluginManager* pluginManager)
-	: mInstance(instance), mAssetManager(assetManager), mInputManager(inputManager), mPluginManager(pluginManager), mLastBvhBuild(0), mDrawGizmos(false), mBvhDirty(true), mDrawSkybox(true),
-	mFixedTimeStep(.0025f), mPhysicsTimeLimitPerFrame(.2f) , mFixedAccumulator(0), mDeltaTime(0), mTotalTime(0), mFps(0), mFrameTimeAccum(0), mFrameCount(0){
+Scene::Scene(::Instance* instance, ::InputManager* inputManager, ::PluginManager* pluginManager)
+	: mInstance(instance), mInputManager(inputManager), mPluginManager(pluginManager), mLastBvhBuild(0), mBvhDirty(true),
+	mFixedTimeStep(.0025f), mPhysicsTimeLimitPerFrame(.2f) , mFixedAccumulator(0), mDeltaTime(0), mTotalTime(0), mFps(0), mFrameTimeAccum(0), mFpsAccum(0) {
 
+	mSkyboxMaterial = new Material("Skybox", mInstance->Device()->AssetManager()->LoadShader("Shaders/skybox.stm"));
 	mBvh = new ObjectBvh2();
-	mShadowTexelSize = float2(1.f / SHADOW_ATLAS_RESOLUTION, 1.f / SHADOW_ATLAS_RESOLUTION) * .75f;
-	mEnvironment = new ::Environment(this);
 
-	mShadowAtlasFramebuffer = new Framebuffer("ShadowAtlas", mInstance->Device(), SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION, {}, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, {}, VK_ATTACHMENT_LOAD_OP_LOAD);
-	mShadowAtlases = new Texture*[mInstance->Device()->MaxFramesInFlight()];
+	mShadowAtlas = new Framebuffer("ShadowAtlas", mInstance->Device(),
+		{ SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION }, {},
+		VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT,
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		VK_ATTACHMENT_LOAD_OP_LOAD);
 	
-	auto commandBuffer = mInstance->Device()->GetCommandBuffer();
-
-	uint32_t c = mInstance->Device()->MaxFramesInFlight();
-	mLightBuffers = new Buffer*[c];
-	mShadowBuffers = new Buffer*[c];
-	for (uint32_t i = 0; i < c; i++) {
-		mLightBuffers[i] = new Buffer("Light Buffer", mInstance->Device(), MAX_GPU_LIGHTS * sizeof(GPULight), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-		mShadowBuffers[i] = new Buffer("Shadow Buffer", mInstance->Device(), MAX_GPU_LIGHTS * sizeof(ShadowData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-		mShadowAtlases[i] = new Texture("ShadowAtlas", mInstance->Device(), SHADOW_ATLAS_RESOLUTION, SHADOW_ATLAS_RESOLUTION, 1, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-		
-		mShadowAtlases[i]->TransitionImageLayout(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, commandBuffer.get());
-	}
-	mInstance->Device()->Execute(commandBuffer, false)->Wait();
-
 	float r = .5f;
 	float3 verts[8]{
 		float3(-r, -r, -r),
@@ -182,6 +168,8 @@ Scene::Scene(::Instance* instance, ::AssetManager* assetManager, ::InputManager*
 	};
 	mSkyboxCube = new Mesh("SkyCube", mInstance->Device(), verts, indices, 8, sizeof(float3), 36, &Float3VertexInput, VK_INDEX_TYPE_UINT16);
 
+	mEnvironmentTexture = mInstance->Device()->AssetManager()->WhiteTexture();
+
 	mStartTime = mClock.now();
 	mLastFrame = mClock.now();
 }
@@ -189,21 +177,15 @@ Scene::~Scene(){
 	safe_delete(mSkyboxCube);
 	safe_delete(mBvh);
 
+
 	while (mObjects.size())
 		RemoveObject(mObjects[0].get());
 
-	safe_delete(mEnvironment);
+	safe_delete(mSkyboxMaterial);
 
-	for (uint32_t i = 0; i < mInstance->Device()->MaxFramesInFlight(); i++) {
-		safe_delete(mShadowAtlases[i]);
-		safe_delete(mLightBuffers[i]);
-		safe_delete(mShadowBuffers[i]);
-	}
-	safe_delete_array(mShadowAtlases);
-	safe_delete_array(mLightBuffers);
-	safe_delete_array(mShadowBuffers);
-	safe_delete(mShadowAtlasFramebuffer);
 	for (Camera* c : mShadowCameras) safe_delete(c);
+
+	safe_delete(mShadowAtlas);
 
 	mCameras.clear();
 	mRenderers.clear();
@@ -443,19 +425,22 @@ Object* Scene::LoadModelScene(const string& filename,
 			if (!mesh) continue;
 			uint32_t mat = scene->mMeshes[n->mMeshes[i]]->mMaterialIndex;
 
-			shared_ptr<MeshRenderer> mr;
 			if (mesh->WeightBuffer()) {
-				auto smr = make_shared<SkinnedMeshRenderer>(n->mName.C_Str() + mesh->mName);
+				shared_ptr<SkinnedMeshRenderer> smr = make_shared<SkinnedMeshRenderer>(n->mName.C_Str() + mesh->mName);
 				smr->Rig(rig);
-				mr = smr;
-			} else
-				mr = make_shared<MeshRenderer>(n->mName.C_Str() + mesh->mName);
-			
-			AddObject(mr);
-			mr->Material(mat < materials.size() ? materials[mat] : nullptr);
-			mr->Mesh(mesh);
-			obj->AddChild(mr.get());
-			objectSetupFunc(this, mr.get(), scene->mMaterials[mat]);
+				AddObject(smr);
+				smr->Material(mat < materials.size() ? materials[mat] : nullptr);
+				smr->Mesh(mesh);
+				obj->AddChild(smr.get());
+				objectSetupFunc(this, smr.get(), scene->mMaterials[mat]);
+			} else {
+				shared_ptr<MeshRenderer> mr = make_shared<MeshRenderer>(n->mName.C_Str() + mesh->mName);
+				AddObject(mr);
+				mr->Material(mat < materials.size() ? materials[mat] : nullptr);
+				mr->Mesh(mesh);
+				obj->AddChild(mr.get());
+				objectSetupFunc(this, mr.get(), scene->mMaterials[mat]);
+			}
 		}
 
 		for (uint32_t i = 0; i < n->mNumChildren; i++)
@@ -566,11 +551,11 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 
 	// count fps
 	mFrameTimeAccum += mDeltaTime;
-	mFrameCount++;
+	mFpsAccum++;
 	if (mFrameTimeAccum > 1.f) {
-		mFps = mFrameCount / mFrameTimeAccum;
+		mFps = mFpsAccum / mFrameTimeAccum;
 		mFrameTimeAccum -= 1.f;
-		mFrameCount = 0;
+		mFpsAccum = 0;
 	}
 
 	PROFILER_BEGIN("FixedUpdate");
@@ -578,12 +563,10 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 	mFixedAccumulator += mDeltaTime;
 	t1 = mClock.now();
 	while (mFixedAccumulator > mFixedTimeStep && physicsTime < mPhysicsTimeLimitPerFrame) {
-		for (auto o : mObjects)
-			if (o->EnabledHierarchy())
-				o->FixedUpdate(commandBuffer);
 		for (const auto& p : mPluginManager->Plugins())
-			if (p->mEnabled)
-				p->FixedUpdate(commandBuffer);
+			if (p->mEnabled) p->FixedUpdate(commandBuffer);
+		for (auto o : mObjects)
+			if (o->EnabledHierarchy()) o->FixedUpdate(commandBuffer);
 
 		mFixedAccumulator -= mFixedTimeStep;
 		physicsTime = (mClock.now() - t1).count() * 1e-9f;
@@ -592,18 +575,24 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 
 	PROFILER_BEGIN("Update");
 	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled)
-			p->PreUpdate(commandBuffer);
+		if (p->mEnabled) p->PreUpdate(commandBuffer);
+		for (auto o : mObjects)
+			if (o->EnabledHierarchy()) o->PreUpdate(commandBuffer);
 
 	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled)
-			p->Update(commandBuffer);
+		if (p->mEnabled) p->Update(commandBuffer);
+	for (auto o : mObjects)
+		if (o->EnabledHierarchy()) o->Update(commandBuffer);
 
 	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled)
-			p->PostUpdate(commandBuffer);
+		if (p->mEnabled) p->PostUpdate(commandBuffer);
+	for (auto o : mObjects)
+		if (o->EnabledHierarchy()) o->PostUpdate(commandBuffer);
 	PROFILER_END;
 
+	sort(mCameras.begin(), mCameras.end(), [](const auto& a, const auto& b) { return a->RenderPriority() > b->RenderPriority(); });
+
+	RenderShadows(commandBuffer, mCameras[0]);
 }
 
 void Scene::AddObject(shared_ptr<Object> object) {
@@ -665,7 +654,7 @@ void Scene::RemoveObject(Object* object) {
 
 void Scene::AddShadowCamera(uint32_t si, ShadowData* sd, bool ortho, float size, const float3& pos, const quaternion& rot, float near, float far) {
 	if (mShadowCameras.size() <= si)
-		mShadowCameras.push_back(new Camera("ShadowCamera", mShadowAtlasFramebuffer));
+		mShadowCameras.push_back(new Camera("ShadowCamera", mShadowAtlas, CLEAR_NONE));
 	Camera* sc = mShadowCameras[si];
 
 	sc->Orthographic(ortho);
@@ -676,281 +665,252 @@ void Scene::AddShadowCamera(uint32_t si, ShadowData* sd, bool ortho, float size,
 	sc->LocalPosition(pos);
 	sc->LocalRotation(rot);
 
-	sc->ViewportX((float)((si % (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION)) * SHADOW_RESOLUTION));
-	sc->ViewportY((float)((si / (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION)) * SHADOW_RESOLUTION));
-	sc->ViewportWidth(SHADOW_RESOLUTION);
-	sc->ViewportHeight(SHADOW_RESOLUTION);
+	VkViewport vp = sc->Viewport();
+	vp.x = (float)((si % (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION)) * SHADOW_RESOLUTION);
+	vp.y = (float)((si / (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION)) * SHADOW_RESOLUTION);
+	vp.width = vp.height = SHADOW_RESOLUTION;
+	sc->Viewport(vp);
 
 	sd->WorldToShadow = sc->ViewProjection();
 	sd->CameraPosition = pos;
-	sd->ShadowST = float4(sc->ViewportWidth() - 2, sc->ViewportHeight() - 2, sc->ViewportX() + 1, sc->ViewportY() + 1) / SHADOW_ATLAS_RESOLUTION;
+	sd->ShadowST = float4(vp.width - 2, vp.height - 2, vp.x + 1, vp.y + 1) / SHADOW_ATLAS_RESOLUTION;
 	sd->InvProj22 = 1.f / (sc->Projection()[2][2] * (far - near));
 };
 
-void Scene::PreFrame(CommandBuffer* commandBuffer) {
-	vkCmdSetLineWidth(*commandBuffer, 1.0f);
-	
-	PROFILER_BEGIN("Renderer PreFrame");
-	for (Renderer* r : mRenderers)
-		if (r->EnabledHierarchy())
-			r->PreFrame(commandBuffer);
-	PROFILER_END;
+void Scene::RenderShadows(CommandBuffer* commandBuffer, Camera* camera) {
+	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 
-	Camera* mainCamera = nullptr;
-	sort(mCameras.begin(), mCameras.end(), [](const auto& a, const auto& b) {
-		return a->RenderPriority() > b->RenderPriority();
-	});
-	for (Camera* c : mCameras)
-		if (c->EnabledHierarchy()) {
-			mainCamera = c;
-			break;
-		}
-	if (!mainCamera) return;
+	mShadowAtlas->PreBeginRenderPass();
 
-	GUI::PreFrame(commandBuffer);
+	if (mLights.empty() || mRenderers.empty()) return;
 
-	if (!mBvh) {
-		PROFILER_BEGIN("Sort Renderers");
-		sort(mRenderers.begin(), mRenderers.end(), RendererCompare);
-		PROFILER_END;
-	}
-
-	Device* device = commandBuffer->Device();
 	PROFILER_BEGIN("Lighting");
 	uint32_t si = 0;
 	mShadowCount = 0;
 	mActiveLights.clear();
-	if (mainCamera && mLights.size()) {
-		AABB sceneBounds;
-		if (mBvh)
-			sceneBounds = BVH()->RendererBounds();
-		else
-			for (Renderer* r : mRenderers)
-				if (r->Visible()) sceneBounds.Encapsulate(r->Bounds());
-		
-		float3 sceneCenter = sceneBounds.Center();
-		float3 sceneExtent = sceneBounds.Extents();
-		float sceneExtentMax = max(max(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
-		
-		PROFILER_BEGIN("Gather Lights");
-		uint32_t li = 0;
-		uint32_t frameContextIndex = device->FrameContextIndex();
-		GPULight* lights = (GPULight*)mLightBuffers[frameContextIndex]->MappedData();
-		ShadowData* shadows = (ShadowData*)mShadowBuffers[frameContextIndex]->MappedData();
+	
+	AABB sceneBounds = BVH()->RendererBounds();
+	float3 sceneCenter = sceneBounds.Center();
+	float3 sceneExtent = sceneBounds.Extents();
+	float sceneExtentMax = max(max(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
+	
+	// Create shadow cameras and GPULights
 
-		uint32_t maxShadows = (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION) * (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION);
+	PROFILER_BEGIN("Gather Lights");
+	uint32_t li = 0;
+	GPULight* lights = (GPULight*)LightBuffer()->MappedData();
+	ShadowData* shadows = (ShadowData*)ShadowBuffer()->MappedData();
 
-		float ct = tanf(mainCamera->FieldOfView() * .5f) * max(1.f, mainCamera->Aspect());
-		float3 cp = mainCamera->WorldPosition();
-		float3 fwd = mainCamera->WorldRotation() * float3(0, 0, 1);
+	uint32_t maxShadows = (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION) * (SHADOW_ATLAS_RESOLUTION / SHADOW_RESOLUTION);
 
-		Ray rays[4] {
-			mainCamera->ScreenToWorldRay(float2(0, 0)),
-			mainCamera->ScreenToWorldRay(float2(1, 0)),
-			mainCamera->ScreenToWorldRay(float2(0, 1)),
-			mainCamera->ScreenToWorldRay(float2(1, 1))
-		};
-		float3 corners[8];
+	float tanfov = tanf(camera->FieldOfView() * .5f);
+	float3 cp = camera->WorldPosition();
+	float3 fwd = camera->WorldRotation() * float3(0, 0, 1);
 
-		for (Light* l : mLights) {
-			if (!l->EnabledHierarchy()) continue;
-			mActiveLights.push_back(l);
+	Ray rays[4] {
+		camera->ScreenToWorldRay(float2(0, 0)),
+		camera->ScreenToWorldRay(float2(1, 0)),
+		camera->ScreenToWorldRay(float2(0, 1)),
+		camera->ScreenToWorldRay(float2(1, 1))
+	};
+	float3 corners[8];
 
-			float cosInner = cosf(l->InnerSpotAngle());
-			float cosOuter = cosf(l->OuterSpotAngle());
+	for (Light* l : mLights) {
+		if (!l->EnabledHierarchy()) continue;
+		mActiveLights.push_back(l);
 
-			lights[li].WorldPosition = l->WorldPosition();
-			lights[li].InvSqrRange = 1.f / (l->Range() * l->Range());
-			lights[li].Color = l->Color() * l->Intensity();
-			lights[li].SpotAngleScale = 1.f / fmaxf(.001f, cosInner - cosOuter);
-			lights[li].SpotAngleOffset = -cosOuter * lights[li].SpotAngleScale;
-			lights[li].Direction = -(l->WorldRotation() * float3(0, 0, 1));
-			lights[li].Type = l->Type();
-			lights[li].ShadowIndex = -1;
-			lights[li].CascadeSplits = -1.f;
+		float cosInner = cosf(l->InnerSpotAngle());
+		float cosOuter = cosf(l->OuterSpotAngle());
 
-			if (l->CastShadows() && si+1 < maxShadows) {
-				switch (l->Type()) {
-				case LIGHT_TYPE_SUN: {
-					float4 cascadeSplits = 0;
-					float cf = min(l->ShadowDistance(), mainCamera->Far());
+		lights[li].WorldPosition = l->WorldPosition();
+		lights[li].InvSqrRange = 1.f / (l->Range() * l->Range());
+		lights[li].Color = l->Color() * l->Intensity();
+		lights[li].SpotAngleScale = 1.f / fmaxf(.001f, cosInner - cosOuter);
+		lights[li].SpotAngleOffset = -cosOuter * lights[li].SpotAngleScale;
+		lights[li].Direction = -(l->WorldRotation() * float3(0, 0, 1));
+		lights[li].Type = l->Type();
+		lights[li].ShadowIndex = -1;
+		lights[li].CascadeSplits = -1.f;
 
-					switch (l->CascadeCount()) {
-					case 4:
-						cascadeSplits[0] = cf * .07f;
-						cascadeSplits[1] = cf * .18f;
-						cascadeSplits[2] = cf * .40f;
-						cascadeSplits[3] = cf;
-					case 3:
-						cascadeSplits[0] = cf * .15f;
-						cascadeSplits[1] = cf * .4f;
-						cascadeSplits[2] = cf;
-						cascadeSplits[3] = cf;
-					case 2:
-						cascadeSplits[0] = cf * .4f;
-						cascadeSplits[1] = cf;
-						cascadeSplits[2] = cf;
-						cascadeSplits[3] = cf;
-					case 1:
-						cascadeSplits = cf;
-					}
+		if (l->CastShadows() && si+1 < maxShadows) {
+			switch (l->Type()) {
+			case LIGHT_TYPE_SUN: {
+				float4 cascadeSplits = 0;
+				float cf = min(l->ShadowDistance(), camera->Far());
 
-					lights[li].CascadeSplits = cascadeSplits / mainCamera->Far();
-					lights[li].ShadowIndex = (int32_t)si;
-					
-					float z0 = mainCamera->Near();
-					for (uint32_t ci = 0; ci < l->CascadeCount(); ci++) {
-						float z1 = cascadeSplits[ci];
-
-						// compute corners and center of the frusum this cascade covers
-						float3 pos = 0;
-						for (uint32_t j = 0; j < 4; j++) {
-							corners[j]   = rays[j].mOrigin + rays[j].mDirection * z0;
-							corners[j+4] = rays[j].mOrigin + rays[j].mDirection * z1;
-							pos += corners[j] + corners[j+4];
-						}
-						pos /= 8.f;
-
-						// min and max relative to light rotation
-						float3 mx = 0;
-						float3 mn = 1e20f;
-						quaternion r = inverse(l->WorldRotation());
-						for (uint32_t j = 0; j < 8; j++) {
-							float3 rc = r * (corners[j] - pos);
-							mx = max(mx, rc);
-							mn = min(mn, rc);
-						}
-
-						if (max(mx.x - mn.x, mx.y - mn.y) > sceneExtentMax) {
-							// use scene bounds instead of frustum bounds
-							pos = sceneCenter;
-							corners[0] = float3(-sceneExtent.x,  sceneExtent.y, -sceneExtent.z) + sceneCenter;
-							corners[1] = float3( sceneExtent.x,  sceneExtent.y, -sceneExtent.z) + sceneCenter;
-							corners[2] = float3(-sceneExtent.x, -sceneExtent.y, -sceneExtent.z) + sceneCenter;
-							corners[3] = float3( sceneExtent.x, -sceneExtent.y, -sceneExtent.z) + sceneCenter;
-							corners[4] = float3(-sceneExtent.x,  sceneExtent.y,  sceneExtent.z) + sceneCenter;
-							corners[5] = float3( sceneExtent.x,  sceneExtent.y,  sceneExtent.z) + sceneCenter;
-							corners[6] = float3(-sceneExtent.x, -sceneExtent.y,  sceneExtent.z) + sceneCenter;
-							corners[7] = float3( sceneExtent.x, -sceneExtent.y,  sceneExtent.z) + sceneCenter;
-						}
-
-						// project direction onto scene bounds for near and far
-						float3 fwd   = l->WorldRotation() * float3(0, 0, 1);
-						float3 right = l->WorldRotation() * float3(1, 0, 0);
-						float near = 0;
-						float far = 0;
-						float sz = 0;
-						for (uint32_t j = 0; j < 8; j++){
-							float d = dot(corners[j] - pos, fwd);
-							near = min(near, d);
-							far = max(far, d);
-							sz = max(sz, abs(dot(corners[j] - pos, right)));
-						}
-
-						AddShadowCamera(si, &shadows[si], true, 2*sz, pos, l->WorldRotation(), near, far);
-						si++;
-						z0 = z1;
-					}
-
-					break;
+				switch (l->CascadeCount()) {
+				case 4:
+					cascadeSplits[0] = cf * .07f;
+					cascadeSplits[1] = cf * .18f;
+					cascadeSplits[2] = cf * .40f;
+					cascadeSplits[3] = cf;
+				case 3:
+					cascadeSplits[0] = cf * .15f;
+					cascadeSplits[1] = cf * .4f;
+					cascadeSplits[2] = cf;
+					cascadeSplits[3] = cf;
+				case 2:
+					cascadeSplits[0] = cf * .4f;
+					cascadeSplits[1] = cf;
+					cascadeSplits[2] = cf;
+					cascadeSplits[3] = cf;
+				case 1:
+					cascadeSplits = cf;
 				}
-				case LIGHT_TYPE_POINT:
-					break;
-				case LIGHT_TYPE_SPOT:
-					lights[li].CascadeSplits = 1.f;
-					lights[li].ShadowIndex = (int32_t)si;
-					AddShadowCamera(si, &shadows[si], false, l->OuterSpotAngle() * 2, l->WorldPosition(), l->WorldRotation(), l->Radius() - .001f, l->Range());
+
+				lights[li].CascadeSplits = cascadeSplits / camera->Far();
+				lights[li].ShadowIndex = (int32_t)si;
+				
+				float z0 = camera->Near();
+				for (uint32_t ci = 0; ci < l->CascadeCount(); ci++) {
+					float z1 = cascadeSplits[ci];
+
+					// compute corners and center of the frusum this cascade covers
+					float3 pos = 0;
+					for (uint32_t j = 0; j < 4; j++) {
+						corners[j]   = rays[j].mOrigin + rays[j].mDirection * z0;
+						corners[j+4] = rays[j].mOrigin + rays[j].mDirection * z1;
+						pos += corners[j] + corners[j+4];
+					}
+					pos /= 8.f;
+
+					// min and max relative to light rotation
+					float3 mx = 0;
+					float3 mn = 1e20f;
+					quaternion r = inverse(l->WorldRotation());
+					for (uint32_t j = 0; j < 8; j++) {
+						float3 rc = r * (corners[j] - pos);
+						mx = max(mx, rc);
+						mn = min(mn, rc);
+					}
+
+					if (max(mx.x - mn.x, mx.y - mn.y) > sceneExtentMax) {
+						// use scene bounds instead of frustum bounds
+						pos = sceneCenter;
+						corners[0] = float3(-sceneExtent.x,  sceneExtent.y, -sceneExtent.z) + sceneCenter;
+						corners[1] = float3( sceneExtent.x,  sceneExtent.y, -sceneExtent.z) + sceneCenter;
+						corners[2] = float3(-sceneExtent.x, -sceneExtent.y, -sceneExtent.z) + sceneCenter;
+						corners[3] = float3( sceneExtent.x, -sceneExtent.y, -sceneExtent.z) + sceneCenter;
+						corners[4] = float3(-sceneExtent.x,  sceneExtent.y,  sceneExtent.z) + sceneCenter;
+						corners[5] = float3( sceneExtent.x,  sceneExtent.y,  sceneExtent.z) + sceneCenter;
+						corners[6] = float3(-sceneExtent.x, -sceneExtent.y,  sceneExtent.z) + sceneCenter;
+						corners[7] = float3( sceneExtent.x, -sceneExtent.y,  sceneExtent.z) + sceneCenter;
+					}
+
+					// project direction onto scene bounds for near and far
+					float3 fwd   = l->WorldRotation() * float3(0, 0, 1);
+					float3 right = l->WorldRotation() * float3(1, 0, 0);
+					float near = 0;
+					float far = 0;
+					float sz = 0;
+					for (uint32_t j = 0; j < 8; j++){
+						float d = dot(corners[j] - pos, fwd);
+						near = min(near, d);
+						far = max(far, d);
+						sz = max(sz, abs(dot(corners[j] - pos, right)));
+					}
+
+					AddShadowCamera(si, &shadows[si], true, 2*sz, pos, l->WorldRotation(), near, far);
 					si++;
-					break;
+					z0 = z1;
 				}
-			}
 
-			li++;
-			if (li >= MAX_GPU_LIGHTS) break;
+				break;
+			}
+			case LIGHT_TYPE_POINT:
+				break;
+			case LIGHT_TYPE_SPOT:
+				lights[li].CascadeSplits = 1.f;
+				lights[li].ShadowIndex = (int32_t)si;
+				AddShadowCamera(si, &shadows[si], false, l->OuterSpotAngle() * 2, l->WorldPosition(), l->WorldRotation(), l->Radius() - .001f, l->Range());
+				si++;
+				break;
+			}
 		}
-		PROFILER_END;
+
+		li++;
+		if (li >= MAX_GPU_LIGHTS) break;
 	}
+	PROFILER_END;
+		
 	if (si) {
 		PROFILER_BEGIN("Render Shadows");
 		BEGIN_CMD_REGION(commandBuffer, "Render Shadows");
 
-		bool g = mDrawGizmos;
-		mDrawGizmos = false;
+		commandBuffer->TransitionBarrier(mShadowAtlas->DepthBuffer(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+		mShadowAtlas->Clear(commandBuffer, CLEAR_DEPTH);
+
 		for (uint32_t i = 0; i < si; i++) {
 			mShadowCameras[i]->mEnabled = true;
-			Render(commandBuffer, mShadowCameras[i], mShadowAtlasFramebuffer, PASS_DEPTH, i == 0);
+			Render(commandBuffer, mShadowCameras[i], PASS_DEPTH, i == 0);
 			mShadowCount++;
 		}
 		for (uint32_t i = si; i < mShadowCameras.size(); i++)
 			mShadowCameras[i]->mEnabled = false;
-		mDrawGizmos = g;
-
-		uint32_t fc = commandBuffer->Device()->FrameContextIndex();
-		mShadowAtlases[fc]->TransitionImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, commandBuffer);
-		mShadowAtlasFramebuffer->ResolveDepth(commandBuffer, mShadowAtlases[fc]->Image());
-		mShadowAtlases[fc]->TransitionImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, commandBuffer);
+		
+		commandBuffer->TransitionBarrier(mShadowAtlas->DepthBuffer(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		END_CMD_REGION(commandBuffer);
 		PROFILER_END;
 	}
-	PROFILER_END;
 }
 
-void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* framebuffer, PassType pass, bool clear) {
-	PROFILER_BEGIN("Gather Renderers");
-	mRenderList.clear();
-	BVH()->FrustumCheck(camera->Frustum(), mRenderList, pass);
+void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, PassType pass, bool clear) {
+	PROFILER_BEGIN("Culling/Sorting");
+	vector<Object*> objects;
+	BVH()->FrustumCheck(camera->Frustum(), objects, pass);
+	vector<Renderer*> renderers;
+	renderers.reserve(objects.size());
+	for (Object* o : objects) if (Renderer* r = dynamic_cast<Renderer*>(o)) renderers.push_back(r);
+	sort(renderers.begin(), renderers.end(), RendererCompare);
 	PROFILER_END;
-	PROFILER_BEGIN("Sort Renderers");
-	sort(mRenderList.begin(), mRenderList.end(), RendererCompare);
-	PROFILER_END;
-
-	Render(commandBuffer, camera, framebuffer, pass, clear, mRenderList);
+	Render(commandBuffer, camera, pass, clear, renderers);
 }
 
-void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* framebuffer, PassType pass, bool clear, vector<Object*>& renderList) {
-	camera->PreRender();
-	if (camera->FramebufferWidth() == 0 || camera->FramebufferHeight() == 0)
-		return;
+void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, PassType pass, bool clear, vector<Renderer*>& renderers) {
+	camera->PreBeginRenderPass();
+	if (camera->Framebuffer()->Extent().width == 0 || camera->Framebuffer()->Extent().height == 0) return;
 
-	PROFILER_BEGIN("Plugin PreRender");
-	BEGIN_CMD_REGION(commandBuffer, "Plugin PreRender");
+	PROFILER_BEGIN("PreBeginRenderPass");
+	BEGIN_CMD_REGION(commandBuffer, "PreBeginRenderPass");
 	for (const auto& p : mPluginManager->Plugins())
 		if (p->mEnabled)
-			p->PreRender(commandBuffer, camera, pass);
+			p->PreBeginRenderPass(commandBuffer, camera, pass);
+	if (camera->ClearFlags() == CLEAR_SKYBOX && mSkyboxMaterial && pass == PASS_MAIN) {
+		SetEnvironmentParameters(mSkyboxMaterial);
+		mSkyboxMaterial->PreBeginRenderPass(commandBuffer, pass);
+	}
+	for (Renderer* r : renderers)
+		r->PreBeginRenderPass(commandBuffer, camera, pass);
 	END_CMD_REGION(commandBuffer);
 	PROFILER_END;
-
-	PROFILER_BEGIN("Renderer PreRender");
-	BEGIN_CMD_REGION(commandBuffer, "Renderer PreRender");
-	// renderer prerender
-	for (Object* o : renderList)
-		dynamic_cast<Renderer*>(o)->PreRender(commandBuffer, camera, pass);
-	END_CMD_REGION(commandBuffer);
+	
+	PROFILER_BEGIN("DrawGUI");
+	GUI::Reset(commandBuffer);
+	for (const auto& r : mObjects)
+		if (r->EnabledHierarchy())
+			r->DrawGUI(commandBuffer, camera);
+	for (const auto& p : mPluginManager->Plugins())
+		if (p->mEnabled)
+			p->DrawGUI(commandBuffer, camera);
+	GUI::PreBeginRenderPass(commandBuffer);
 	PROFILER_END;
 
 	PROFILER_BEGIN("Render");
 	BEGIN_CMD_REGION(commandBuffer, "Render");
 
-	PROFILER_BEGIN("Begin RenderPass");
-	// begin renderpass
-	if (!framebuffer) framebuffer = camera->Framebuffer();
-	framebuffer->BeginRenderPass(commandBuffer);
-	if (clear) framebuffer->Clear(commandBuffer);
-	camera->Set(commandBuffer);
-	PROFILER_END;
+	camera->BeginRenderPass(commandBuffer);
 
-	PROFILER_BEGIN("Plugin PreRenderScene");
+	PROFILER_BEGIN("PreRender");
 	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled) p->PreRenderScene(commandBuffer, camera, pass);
+		if (p->mEnabled) p->PreRender(commandBuffer, camera, pass);
 	PROFILER_END;
 
-	// skybox
-	if (mDrawSkybox && mEnvironment->mSkyboxMaterial && pass == PASS_MAIN) {
-		PROFILER_BEGIN("Draw skybox");
-		mEnvironment->PreRender(commandBuffer, camera);
-		ShaderVariant* shader = mEnvironment->mSkyboxMaterial->GetShader(PASS_MAIN);
-		VkPipelineLayout layout = commandBuffer->BindMaterial(mEnvironment->mSkyboxMaterial.get(), pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
+	// Skybox
+	if (camera->ClearFlags() == CLEAR_SKYBOX && mSkyboxMaterial && pass == PASS_MAIN) {
+		ShaderVariant* shader = mSkyboxMaterial->GetShader(PASS_MAIN);
+		VkPipelineLayout layout = commandBuffer->BindMaterial(mSkyboxMaterial, pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
 		commandBuffer->BindVertexBuffer(mSkyboxCube->VertexBuffer().get(), 0, 0);
 		commandBuffer->BindIndexBuffer(mSkyboxCube->IndexBuffer().get(), 0, mSkyboxCube->IndexType());
 		camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
@@ -961,149 +921,65 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, Framebuffer* fr
 			vkCmdDrawIndexed(*commandBuffer, mSkyboxCube->IndexCount(), 1, mSkyboxCube->BaseIndex(), mSkyboxCube->BaseVertex(), 0);
 			commandBuffer->mTriangleCount += mSkyboxCube->IndexCount() / 3;
 		}
-		PROFILER_END;
 	}
 
-	#pragma region Render renderers
-	uint32_t frameContextIndex = commandBuffer->Device()->FrameContextIndex();
-	DescriptorSet* batchDS = nullptr;
-	Buffer* batchBuffer = nullptr;
-	InstanceBuffer* curBatch = nullptr;
-	MeshRenderer* batchStart = nullptr;
-	uint32_t batchSize = 0;
-	bool guiDrawn = false;
+	Buffer* instanceBuffer = nullptr;
+	uint32_t instanceCount = 0;
+	Renderer* firstInstance = nullptr;
+	bool drawGui = true;
 
-	auto DrawGUI = [&]() {
-		guiDrawn = true;
-		if (pass == PASS_MAIN) {
-			if (mDrawGizmos) {
-				PROFILER_BEGIN("Draw Gizmos");
-				BEGIN_CMD_REGION(commandBuffer, "Draw Gizmos");
-				/*
-				for (Camera* c : mShadowCameras)
-					if (camera != c) {
-						float3 f0 = c->ClipToWorld(float3(-1, -1, 0));
-						float3 f1 = c->ClipToWorld(float3(-1, 1, 0));
-						float3 f2 = c->ClipToWorld(float3(1, -1, 0));
-						float3 f3 = c->ClipToWorld(float3(1, 1, 0));
-						float3 f4 = c->ClipToWorld(float3(-1, -1, 1));
-						float3 f5 = c->ClipToWorld(float3(-1, 1, 1));
-						float3 f6 = c->ClipToWorld(float3(1, -1, 1));
-						float3 f7 = c->ClipToWorld(float3(1, 1, 1));
-						Gizmos::DrawLine(f0, f1, 1);
-						Gizmos::DrawLine(f0, f2, 1);
-						Gizmos::DrawLine(f3, f1, 1);
-						Gizmos::DrawLine(f3, f2, 1);
-						Gizmos::DrawLine(f4, f5, 1);
-						Gizmos::DrawLine(f4, f6, 1);
-						Gizmos::DrawLine(f7, f5, 1);
-						Gizmos::DrawLine(f7, f6, 1);
-						Gizmos::DrawLine(f0, f4, 1);
-						Gizmos::DrawLine(f1, f5, 1);
-						Gizmos::DrawLine(f2, f6, 1);
-						Gizmos::DrawLine(f3, f7, 1);
-					}
-				*/
+	for (Object* o : renderers)
+		if (Renderer* r = dynamic_cast<Renderer*>(o)) {
+			if (!r || !r->Visible()) continue;
 
-				if (mBvh) mBvh->DrawGizmos(commandBuffer, camera, this);
-
-				for (const auto& r : mObjects)
-					if (r->EnabledHierarchy())
-						r->DrawGizmos(commandBuffer, camera);
-
-				for (const auto& p : mPluginManager->Plugins())
-					if (p->mEnabled)
-						p->DrawGizmos(commandBuffer, camera);
-				Gizmos::Draw(commandBuffer, pass, camera);
-				END_CMD_REGION(commandBuffer);
-				PROFILER_END;
+			if (drawGui && r->RenderQueue() > GUI::mRenderQueue) {
+				GUI::Draw(commandBuffer, pass, camera);
+				drawGui = false;
 			}
-			PROFILER_BEGIN("Draw GUI");
-			GUI::Draw(commandBuffer, pass, camera);
-			PROFILER_END;
-		}
-	};
-	auto DrawLastBatch = [&]() {
-		if (batchStart) {
-			PROFILER_BEGIN("Draw Batch");
-			batchStart->DrawInstanced(commandBuffer, camera, batchSize, *batchDS, pass);
-			batchStart = nullptr;
-			PROFILER_END;
-		}
-	};
-	for (Object* o : renderList) {
-		Renderer* r = dynamic_cast<Renderer*>(o);
 
-		if (!guiDrawn && r->RenderQueue() > GUI::mRenderQueue) DrawGUI();
-
-		if (!r || !r->Visible()) continue;
-		bool batched = false;
-		if (MeshRenderer* cur = dynamic_cast<MeshRenderer*>(r)) {
-			GraphicsShader* curShader = cur->Material()->GetShader(pass);
-			if (curShader->mDescriptorBindings.count("Instances")) {
-				if (!batchStart || batchSize + 1 >= INSTANCE_BATCH_SIZE || (batchStart->Material() != cur->Material()) || batchStart->Mesh() != cur->Mesh()) {
-					// render last batch
-					DrawLastBatch();
-
-					// start a new batch
-					PROFILER_BEGIN("Start batch");
-					batchSize = 0;
-					batchStart = cur;
-
-					batchBuffer = commandBuffer->Device()->GetTempBuffer("Instance Batch", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-					curBatch = (InstanceBuffer*)batchBuffer->MappedData();
-
-					batchDS = commandBuffer->Device()->GetTempDescriptorSet("Instance Batch", curShader->mDescriptorSetLayouts[PER_OBJECT]);
-					batchDS->CreateStorageBufferDescriptor(batchBuffer, 0, batchBuffer->Size(), INSTANCE_BUFFER_BINDING);
-					if (pass == PASS_MAIN) {
-						if (curShader->mDescriptorBindings.count("Lights"))
-							batchDS->CreateStorageBufferDescriptor(mLightBuffers[frameContextIndex], 0, mLightBuffers[frameContextIndex]->Size(), LIGHT_BUFFER_BINDING);
-						if (curShader->mDescriptorBindings.count("Shadows"))
-							batchDS->CreateStorageBufferDescriptor(mShadowBuffers[frameContextIndex], 0, mShadowBuffers[frameContextIndex]->Size(), SHADOW_BUFFER_BINDING);
-						if (curShader->mDescriptorBindings.count("ShadowAtlas"))
-							batchDS->CreateSampledTextureDescriptor(mShadowAtlases[frameContextIndex], SHADOW_ATLAS_BINDING);
-					}
-					batchDS->FlushWrites();
-
-					PROFILER_END;
-				}
-
-				// append to batch
-				PROFILER_BEGIN("Append to batch");
-				curBatch[batchSize].ObjectToWorld = cur->ObjectToWorld();
-				curBatch[batchSize].WorldToObject = cur->WorldToObject();
-				batchSize++;
-				batched = true;
-				PROFILER_END;
+			// TODO: call TryCombineInstances outside of RenderPass for potential compute support
+			if (!firstInstance || firstInstance->TryCombineInstances(commandBuffer, r, instanceBuffer, instanceCount)) {
+				// Failed to combine, draw last batch
+				firstInstance->DrawInstanced(commandBuffer, camera, pass, instanceBuffer, instanceCount);
+				instanceCount = 0;
+				firstInstance = nullptr;
+				r->Draw(commandBuffer, camera, pass);
 			}
 		}
+	if (firstInstance) firstInstance->DrawInstanced(commandBuffer, camera, pass, instanceBuffer, instanceCount);
+	if (drawGui) GUI::Draw(commandBuffer, pass, camera);
 
-		if (!batched) {
-			// render last batch
-			DrawLastBatch();
-			PROFILER_BEGIN("Draw Unbatched");
-			r->Draw(commandBuffer, camera, pass);
-			PROFILER_END;
-		}
-	}
-	// render last batch
-	DrawLastBatch();
-	DrawGUI();
-	#pragma endregion
+	camera->SetViewportScissor(commandBuffer);
 
-	camera->Set(commandBuffer);
-	PROFILER_BEGIN("Plugin PostRenderScene");
+	PROFILER_BEGIN("PostRender");
 	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled) p->PostRenderScene(commandBuffer, camera, pass);
+		if (p->mEnabled) p->PostRender(commandBuffer, camera, pass);
 	PROFILER_END;
 
-
-	PROFILER_BEGIN("End RenderPass");
 	vkCmdEndRenderPass(*commandBuffer);
+
+	PROFILER_BEGIN("PostEndRenderPass");
+	BEGIN_CMD_REGION(commandBuffer, "PostEndRenderPass");
+	for (const auto& p : mPluginManager->Plugins())
+		if (p->mEnabled)
+			p->PostEndRenderPass(commandBuffer, camera, pass);
+	END_CMD_REGION(commandBuffer);
 	PROFILER_END;
 
 	END_CMD_REGION(commandBuffer);
 	PROFILER_END;
+}
+
+void Scene::SetEnvironmentParameters(Material* mat) {
+	mat->SetPushParameter("AmbientLight", mAmbientLight);
+	mat->SetPushParameter("Time", mTotalTime);
+	mat->SetPushParameter("LightCount", (uint32_t)mActiveLights.size());
+	mat->SetPushParameter("ShadowTexelSize", float2(1.f / mShadowAtlas->Extent().width, 1.f / mShadowAtlas->Extent().height));
+
+	mat->SetStorageBuffer("Lights", mLightBuffer);
+	mat->SetStorageBuffer("Shadows", mShadowBuffer);
+	mat->SetSampledTexture("ShadowAtlas", mShadowAtlas->DepthBuffer());
+	mat->SetSampledTexture("EnvironmentTexture", mEnvironmentTexture);
 }
 
 vector<Object*> Scene::Objects() const {
@@ -1114,12 +990,12 @@ vector<Object*> Scene::Objects() const {
 }
 
 ObjectBvh2* Scene::BVH() {
-	if (mBvh && mBvhDirty) {
+	if (mBvhDirty) {
 		PROFILER_BEGIN("Build BVH");
 		vector<Object*> objs = Objects();
 		mBvh->Build(objs.data(), objs.size());
 		mBvhDirty = false;
-		mLastBvhBuild = mInstance->FrameCount();
+		mLastBvhBuild = mInstance->Device()->FrameCount();
 		PROFILER_END;
 	}
 	return mBvh;

@@ -1,11 +1,12 @@
-#include <Core/Buffer.hpp>
 #include <Core/Device.hpp>
+#include <Content/AssetManager.hpp>
+#include <Content/Texture.hpp>
+#include <Core/Buffer.hpp>
 #include <Core/Instance.hpp>
 #include <Core/CommandBuffer.hpp>
 #include <Core/Window.hpp>
 #include <Util/Profiler.hpp>
 #include <Util/Util.hpp>
-
 
 //#define PRINT_VK_ALLOCATIONS
 
@@ -16,84 +17,23 @@
 
 using namespace std;
 
-/*static*/ bool Device::FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily) {
-	uint32_t queueFamilyCount = 0;
-	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
-	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
-
-	bool g = false;
-	bool p = false;
-
-	uint32_t i = 0;
-	for (const auto& queueFamily : queueFamilies) {
-		if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-			graphicsFamily = i;
-			g = true;
-		}
-
-		VkBool32 presentSupport = false;
-		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
-
-		if (queueFamily.queueCount > 0 && presentSupport) {
-			presentFamily = i;
-			p = true;
-		}
-
-		i++;
-	}
-
-	return g && p;
+inline size_t HashTextureData(const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+	size_t value = 0;
+	hash_combine(value, extent.width);
+	hash_combine(value, extent.height);
+	hash_combine(value, extent.depth);
+	hash_combine(value, format);
+	hash_combine(value, sampleCount);
+	hash_combine(value, usage);
+	hash_combine(value, properties);
+	return value;
 }
+inline size_t HashTextureData(const Texture* tex) { return HashTextureData(tex->Extent(), tex->Format(), tex->MipLevels(), tex->SampleCount(), tex->Usage(), tex->MemoryProperties()); }
 
-void Device::FrameContext::Reset() {
-	if (mFences.size()) {
-		PROFILER_BEGIN("Wait for GPU");
-		vector<VkFence> fences(mFences.size());
-		for (uint32_t i = 0; i < mFences.size(); i++)
-			fences[i] = *mFences[i];
-		ThrowIfFailed(vkWaitForFences(*mDevice, fences.size(), fences.data(), true, numeric_limits<uint64_t>::max()), "vkWaitForFences failed");
-		PROFILER_END;
-	}
-
-	mFences.clear();
-	mSemaphores.clear();
-
-	PROFILER_BEGIN("Clear old buffers");
-	for (auto it = mTempBuffers.begin(); it != mTempBuffers.end();) {
-		if (it->second == 1) {
-			safe_delete(it->first);
-			it = mTempBuffers.erase(it);
-		}
-
-		it->second--;
-		it++;
-	}
-	PROFILER_END;
-
-	for (Buffer* b : mTempBuffersInUse)
-		mTempBuffers.push_back(make_pair(b, 8));
-	for (DescriptorSet* ds : mTempDescriptorSetsInUse)
-		mTempDescriptorSets[ds->Layout()].push_back(make_pair(ds, 8));
-
-	mTempBuffersInUse.clear();
-	mTempDescriptorSetsInUse.clear();
-}
-Device::FrameContext::~FrameContext() {
-	Reset();
-	for (auto b : mTempBuffers)
-		safe_delete(b.first);
-	for (auto kp : mTempDescriptorSets)
-		while (kp.second.size()) {
-			auto front = kp.second.begin();
-			safe_delete(front->first);
-			kp.second.erase(front);
-		}
-}
 
 Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mInstance(instance), mFrameContexts(nullptr), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily),
-	mFrameContextIndex(0), mDescriptorSetCount(0), mMemoryAllocationCount(0), mMemoryUsage(0) {
+	: mInstance(instance), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily),
+	mCommandBufferCount(0), mDescriptorSetCount(0), mMemoryAllocationCount(0), mMemoryUsage(0), mFrameCount(0) {
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(*instance, "vkSetDebugUtilsObjectNameEXT");
@@ -203,12 +143,22 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	#pragma endregion
 
 	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &mMemoryProperties);
+
+	mAssetManager = new ::AssetManager(this);
 }
 Device::~Device() {
 	Flush();
-	safe_delete_array(mFrameContexts);
-	vkDestroyDescriptorPool(mDevice, mDescriptorPool, nullptr);
 
+	for (auto& b : mBufferPool) safe_delete(b.mResource);
+	for (auto& kp : mTexturePool)
+		for (auto& t : kp.second)
+			safe_delete(t.mResource);
+	for (auto& kp : mDescriptorSetPool)
+		for (auto& ds : kp.second)
+			safe_delete(ds.mResource);
+
+	delete mAssetManager;
+	
 	size_t size = 0;
 	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, nullptr);
 	char* cacheData = new char[size];
@@ -218,87 +168,18 @@ Device::~Device() {
 	delete[] cacheData;
 
 	vkDestroyPipelineCache(mDevice, mPipelineCache, nullptr);
-	for (auto& p : mCommandBuffers)
-		vkDestroyCommandPool(mDevice, p.first, nullptr);
+	vkDestroyDescriptorPool(mDevice, mDescriptorPool, nullptr);
+	for (auto& p : mCommandPools)
+		vkDestroyCommandPool(mDevice, p.second, nullptr);
 	
-	for (auto kp : mMemoryAllocations) {
+	for (auto kp : mMemoryAllocations)
 		for (uint32_t i = 0; i < kp.second.size(); i++) {
 			for (auto it = kp.second[i].mAllocations.begin(); it != kp.second[i].mAllocations.begin(); it++)
-				fprintf_color(COLOR_RED, stderr, "Device memory leak detected. Tag: %s\n", it->mTag.c_str());
+				fprintf_color(COLOR_RED, stderr, "Device memory leak detected [%s]\n", it->mTag.c_str());
 			vkFreeMemory(mDevice, kp.second[i].mMemory, nullptr);
 		}
-	}
 
 	vkDestroyDevice(mDevice, nullptr);
-}
-
-VkSampleCountFlagBits Device::GetMaxUsableSampleCount() {
-	VkPhysicalDeviceProperties physicalDeviceProperties;
-	vkGetPhysicalDeviceProperties(mPhysicalDevice, &physicalDeviceProperties);
-
-	VkSampleCountFlags counts = std::min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
-	if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
-	if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
-	if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
-	if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
-	if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
-	if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
-
-	return VK_SAMPLE_COUNT_1_BIT;
-}
-
-void Device::Flush() {
-	//vkDeviceWaitIdle(mDevice);
-	lock_guard<mutex> lock(mCommandPoolMutex);
-	for (auto& p : mCommandBuffers) {
-		while (p.second.size()) {
-			p.second.front()->mSignalFence->Wait();
-			p.second.pop();
-		}
-	}
-	for (uint32_t i = 0; i < MaxFramesInFlight(); i++)
-		mFrameContexts[i].Reset();
-}
-
-void Device::SetObjectName(void* object, const string& name, VkObjectType type) const {
-	#ifdef ENABLE_DEBUG_LAYERS
-	VkDebugUtilsObjectNameInfoEXT info = {};
-	info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-	info.objectHandle = (uint64_t)object;
-	info.objectType = type;
-	info.pObjectName = name.c_str();
-	SetDebugUtilsObjectNameEXT(mDevice, &info);
-	#endif
-}
-
-void Device::PrintAllocations() {
-	VkDeviceSize used = 0;
-	VkDeviceSize available = 0;
-	VkDeviceSize total = 0;
-
-	for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
-		total += mMemoryProperties.memoryHeaps[i].size;
-
-	for (auto kp : mMemoryAllocations)
-		for (auto a : kp.second) {
-			used += a.mSize;
-			for (auto av : a.mAvailable) available += av.second;
-		}
-
-	if (used == 0) {
-		printf_color(COLOR_YELLOW, "%s", "Using 0 B");
-		return;
-	}
-
-	float percentTotal = 100.f * (float)used / (float)total;
-	float percentWasted = 100.f * (float)available / (float)used;
-
-	if (used < 1024)
-		printf_color(COLOR_YELLOW, "Using %lu B (%.1f%%) - %.1f%% wasted", used, percentTotal, percentWasted);
-	else if (used < 1024 * 1024)
-		printf_color(COLOR_YELLOW, "Using %.3f KiB (%.1f%%) - %.1f%%wasted", used / 1024.f, percentTotal, percentWasted);
-	else
-		printf_color(COLOR_YELLOW, "Using %.3f MiB (%.1f%%) - %.1f%% wasted", used / (1024.f * 1024.f), percentTotal, percentWasted);
 }
 
 bool Device::Allocation::SubAllocate(const VkMemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const string& tag) {
@@ -338,7 +219,7 @@ if (mAvailable.empty()) return false;
 	} else
 		mAvailable.erase(block);
 
-	mAllocations.push_back(allocation);
+	mAllocations.push_front(allocation);
 
 	return true;
 }
@@ -506,10 +387,110 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 	}
 }
 
-shared_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name) {
+Buffer* Device::GetPooledBuffer(const string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+	Buffer* b = nullptr;
+	mBufferPoolMutex.lock();
+	auto best = mBufferPool.end();
+	for (auto it = mBufferPool.begin(); it != mBufferPool.end(); it++)
+		if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties) && it->mResource->Size() >= size) {
+			if (best == mBufferPool.end() || it->mResource->Size() < it->mResource->Size())
+				best = it;
+			if (it->mResource->Size() == size) break;
+		}
+	if (best != mBufferPool.end()) {
+		b = best->mResource;
+		mBufferPool.erase(best);
+	}
+	mBufferPoolMutex.unlock();
+	return b ? b : new Buffer(name, this, size, usage, memoryProperties);
+}
+DescriptorSet* Device::GetPooledDescriptorSet(const string& name, VkDescriptorSetLayout layout) {
+	DescriptorSet* ds = nullptr;
+	mDescriptorSetPoolMutex.lock();
+	auto& sets = mDescriptorSetPool[layout];
+	if (sets.size()) {
+		auto front = sets.front();
+		ds = front.mResource;
+		sets.pop_front();
+		ds->mPendingWrites.clear();
+	}
+	mDescriptorSetPoolMutex.unlock();
+	return ds ? ds : new DescriptorSet(name, this, layout);
+}
+Texture* Device::GetPooledTexture(const string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+	Texture* tex = nullptr;
+	mTexturePoolMutex.lock();
+	auto& textures = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount, usage, memoryProperties)];
+	if (textures.size()) {
+		auto front = textures.front();
+		tex = front.mResource;
+		textures.pop_front();
+	}
+	mTexturePoolMutex.unlock();
+	return tex ? tex : new Texture(name, this, extent, format, mipLevels, sampleCount, usage, memoryProperties);
+}
+void Device::ReturnToPool(Buffer* buffer) {
+	mBufferPoolMutex.lock();
+	mBufferPool.push_back({ mFrameCount, buffer });
+	mBufferPoolMutex.unlock();
+}
+void Device::ReturnToPool(DescriptorSet* descriptorSet) {
+	mDescriptorSetPoolMutex.lock();
+	mDescriptorSetPool[descriptorSet->Layout()].push_back({ mFrameCount, descriptorSet });
+	mDescriptorSetPoolMutex.unlock();
+}
+void Device::ReturnToPool(Texture* texture) {
+	mTexturePoolMutex.lock();
+	mTexturePool[HashTextureData(texture)].push_back({ mFrameCount, texture });
+	mTexturePoolMutex.unlock();
+}
+
+void Device::TrimPool() {
+
+	mCommandBufferPoolMutex.lock();
+	for (auto& kp : mCommandBufferPool)
+		for (auto& it = kp.second.begin(); it != kp.second.end();) {
+			if (it->mResource->State() != CMDBUF_STATE_DONE) continue;
+			it->mResource->Clear();
+			if (mFrameCount - it->mLastFrameUsed >= 8) {
+				safe_delete(it->mResource);
+				it = kp.second.erase(it);
+			} else it++;
+		}
+	mCommandBufferPoolMutex.unlock();
+
+	mBufferPoolMutex.lock();
+	for (auto& it = mBufferPool.begin(); it != mBufferPool.end();)
+		if (mFrameCount - it->mLastFrameUsed >= 8) {
+			safe_delete(it->mResource);
+			it = mBufferPool.erase(it);
+		} else it++;
+	mBufferPoolMutex.unlock();
+			
+	mTexturePoolMutex.lock();
+	for (auto& kp : mTexturePool)
+		for (auto& it = kp.second.begin(); it != kp.second.end();)
+			if (mFrameCount - it->mLastFrameUsed >= 8) {
+				safe_delete(it->mResource);
+				it = kp.second.erase(it);
+			} else it++;
+	mTexturePoolMutex.unlock();
+	
+	mDescriptorSetPoolMutex.lock();
+	for (auto& kp : mDescriptorSetPool)
+		for (auto& it = kp.second.begin(); it != kp.second.end();)
+			if (mFrameCount - it->mLastFrameUsed >= 8) {
+				safe_delete(it->mResource);
+				it = kp.second.erase(it);
+			} else it++;
+	mDescriptorSetPoolMutex.unlock();
+}
+
+CommandBuffer* Device::GetCommandBuffer(const std::string& name) {
 	// get a commandpool for the current thread
-	lock_guard<mutex> lock(mCommandPoolMutex);
+	mCommandPoolMutex.lock();
 	VkCommandPool& commandPool = mCommandPools[this_thread::get_id()];
+	mCommandPoolMutex.unlock();
 	if (!commandPool) {
 		VkCommandPoolCreateInfo poolInfo = {};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -519,100 +500,117 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name) {
 		SetObjectName(commandPool, name + " Graphics Command Pool", VK_OBJECT_TYPE_COMMAND_POOL);
 	}
 
-	auto& commandBufferQueue = mCommandBuffers[commandPool];
-
-	shared_ptr<CommandBuffer> commandBuffer;
-	// see if the command buffer at the front of the queue is done
-	if (commandBufferQueue.size()) {
-		commandBuffer = commandBufferQueue.front();
-		if (commandBuffer->mSignalFence->Signaled()) {
-			// reset and reuse the command buffer at the front of the queue
-			commandBufferQueue.pop();
-			commandBuffer->Reset(name);
-		} else
-			commandBuffer.reset();
+	auto& pool = mCommandBufferPool[commandPool];
+	if (!pool.empty()) {
+		if (pool.front().mResource->State() == CMDBUF_STATE_DONE) {
+			CommandBuffer* commandBuffer = pool.front().mResource;
+			pool.pop_front();
+			commandBuffer->Reset();
+			return commandBuffer;
+		}
 	}
-	
-	if (!commandBuffer) commandBuffer = shared_ptr<CommandBuffer>(new CommandBuffer(this, commandPool, name));
 
-	// begin recording commands
-	VkCommandBufferBeginInfo beginInfo = {};
-	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	ThrowIfFailed(vkBeginCommandBuffer(commandBuffer->mCommandBuffer, &beginInfo), "vkBeginCommandBuffer failed");
-
-	return commandBuffer;
+	return new CommandBuffer(this, commandPool, name);
 }
-shared_ptr<Fence> Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool frameContext) {
-	lock_guard<mutex> lock(mCommandPoolMutex);
+void Device::Execute(CommandBuffer* commandBuffer) {
+	if (commandBuffer->State() != CMDBUF_STATE_RECORDING)
+		fprintf_color(COLOR_YELLOW, stderr, "Warning: Execute() expected CommandBuffer to be in CMDBUF_STATE_RECORDING\n");
 	ThrowIfFailed(vkEndCommandBuffer(commandBuffer->mCommandBuffer), "vkEndCommandBuffer failed");
 
-	VkSemaphore semaphore = VK_NULL_HANDLE;
-	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-	if (frameContext) {		
-		CurrentFrameContext()->mFences.push_back(commandBuffer->mSignalFence);
-
-		if (!commandBuffer->mSignalSemaphore) {
-			commandBuffer->mSignalSemaphore = make_shared<Semaphore>(this);
-			SetObjectName(*commandBuffer->mSignalSemaphore, "CommandBuffer Semaphore", VK_OBJECT_TYPE_SEMAPHORE);
-		}
-		
-		semaphore = *commandBuffer->mSignalSemaphore;
-
-		CurrentFrameContext()->mSemaphores.push_back(commandBuffer->mSignalSemaphore);
+	vector<VkPipelineStageFlags> waitStages;	
+	vector<VkSemaphore> waitSemaphores;	
+	for (uint32_t i = 0; i < commandBuffer->mWaitSemaphores.size(); i++) {
+		waitStages.push_back(commandBuffer->mWaitSemaphores[i].first);
+		waitSemaphores.push_back(*commandBuffer->mWaitSemaphores[i].second);
 	}
+
+	vector<VkSemaphore> signalSemaphores;
+	for (uint32_t i = 0; i < commandBuffer->mSignalSemaphores.size(); i++)
+		signalSemaphores.push_back(*commandBuffer->mSignalSemaphores[i]);
 
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.pWaitDstStageMask = semaphore ? &waitStage : nullptr;
-	submitInfo.signalSemaphoreCount = semaphore ? 1 : 0;
-	submitInfo.pSignalSemaphores = semaphore ? &semaphore : nullptr;
-	submitInfo.waitSemaphoreCount = 0;
+	submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
+	submitInfo.pSignalSemaphores = signalSemaphores.data();
+	submitInfo.pWaitDstStageMask = waitStages.data();
+	submitInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
+	submitInfo.pWaitSemaphores = waitSemaphores.data();
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &commandBuffer->mCommandBuffer;
-	vkQueueSubmit(mGraphicsQueue, 1, &submitInfo, *commandBuffer->mSignalFence);
+	vkQueueSubmit(mGraphicsQueue, 1, &submitInfo, commandBuffer->mSignalFence);
 
-	// store the command buffer in the queue
-	mCommandBuffers[commandBuffer->mCommandPool].push(commandBuffer);
-	return commandBuffer->mSignalFence;
+	commandBuffer->mState = CMDBUF_STATE_PENDING;
+
+	mCommandBufferPoolMutex.lock();
+	mCommandBufferPool[commandBuffer->mCommandPool].push_back({ mFrameCount, commandBuffer });
+	mCommandBufferPoolMutex.unlock();
+}
+void Device::Flush() {
+	mCommandBufferPoolMutex.lock();
+
+	vkDeviceWaitIdle(mDevice);
+
+	for (auto& kp : mCommandBufferPool)
+		while (!kp.second.empty()) {
+			CommandBuffer* commandBuffer = kp.second.front().mResource;
+			kp.second.pop_front();
+			safe_delete(commandBuffer);
+		}
+	
+	mCommandBufferPoolMutex.unlock();
 }
 
-Buffer* Device::GetTempBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
-	lock_guard<mutex> lock(mTmpBufferMutex);
-	FrameContext* frame = CurrentFrameContext();
+void Device::SetObjectName(void* object, const string& name, VkObjectType type) const {
+	#ifdef ENABLE_DEBUG_LAYERS
+	VkDebugUtilsObjectNameInfoEXT info = {};
+	info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+	info.objectHandle = (uint64_t)object;
+	info.objectType = type;
+	info.pObjectName = name.c_str();
+	SetDebugUtilsObjectNameEXT(mDevice, &info);
+	#endif
+}
 
-	auto closest = frame->mTempBuffers.end();
-	for (auto it = frame->mTempBuffers.begin(); it != frame->mTempBuffers.end(); it++) {
-		if (((it->first->Usage() & usage) == usage) && ((it->first->MemoryProperties() & properties) == properties) && it->first->Size() >= size) {
-			if (closest == frame->mTempBuffers.end() || it->first->Size() < it->first->Size())
-				closest = it;
-			if (it->first->Size() == size) break;
+VkSampleCountFlagBits Device::GetMaxUsableSampleCount() {
+	VkPhysicalDeviceProperties physicalDeviceProperties;
+	vkGetPhysicalDeviceProperties(mPhysicalDevice, &physicalDeviceProperties);
+
+	VkSampleCountFlags counts = std::min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
+	if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+	if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+	if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+	if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+	if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+	if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+	return VK_SAMPLE_COUNT_1_BIT;
+}
+
+void Device::PrintAllocations() {
+	VkDeviceSize used = 0;
+	VkDeviceSize available = 0;
+	VkDeviceSize total = 0;
+
+	for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
+		total += mMemoryProperties.memoryHeaps[i].size;
+
+	for (auto kp : mMemoryAllocations)
+		for (auto a : kp.second) {
+			used += a.mSize;
+			for (auto av : a.mAvailable) available += av.second;
 		}
+
+	if (used == 0) {
+		printf_color(COLOR_YELLOW, "%s", "Using 0 B");
+		return;
 	}
 
-	Buffer* b;
-	if (closest != frame->mTempBuffers.end()) {
-		b = closest->first;
-		frame->mTempBuffers.erase(closest);
-	} else
-		b = new Buffer(name, this, size, usage, properties);
-	frame->mTempBuffersInUse.push_back(b);
-	return b;
-}
-DescriptorSet* Device::GetTempDescriptorSet(const std::string& name, VkDescriptorSetLayout layout) {
-	lock_guard<mutex> lock(mTmpDescriptorSetMutex);
-	FrameContext* frame = CurrentFrameContext();
+	float percentTotal = 100.f * (float)used / (float)total;
+	float percentWasted = 100.f * (float)available / (float)used;
 
-	auto& sets = frame->mTempDescriptorSets[layout];
-
-	DescriptorSet* ds;
-	if (sets.size()) {
-		auto front = sets.begin();
-		ds = front->first;
-		sets.erase(front);
-	} else
-		ds = new DescriptorSet(name, this, layout);
-
-	frame->mTempDescriptorSetsInUse.push_back(ds);
-	return ds;
+	if (used < 1024)
+		printf_color(COLOR_YELLOW, "Using %lu B (%.1f%%) - %.1f%% wasted", used, percentTotal, percentWasted);
+	else if (used < 1024 * 1024)
+		printf_color(COLOR_YELLOW, "Using %.3f KiB (%.1f%%) - %.1f%%wasted", used / 1024.f, percentTotal, percentWasted);
+	else
+		printf_color(COLOR_YELLOW, "Using %.3f MiB (%.1f%%) - %.1f%% wasted", used / (1024.f * 1024.f), percentTotal, percentWasted);
 }

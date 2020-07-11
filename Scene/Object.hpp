@@ -17,13 +17,6 @@ public:
 
 	inline ::Scene* Scene() const { return mScene; }
 
-	inline Object* Parent() const { return mParent; }
-	ENGINE_EXPORT void AddChild(Object* obj);
-	ENGINE_EXPORT void RemoveChild(Object* obj);
-
-	inline uint32_t ChildCount() const { return (uint32_t)mChildren.size(); }
-	inline Object* Child(uint32_t index) const { return mChildren[index]; }
-
 	inline float3 WorldPosition() { UpdateTransform(); return mWorldPosition; }
 	inline quaternion WorldRotation() { UpdateTransform(); return mWorldRotation; }
 
@@ -45,20 +38,33 @@ public:
 	inline virtual void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; Dirty(); }
 
 	ENGINE_EXPORT virtual AABB Bounds();
-
-	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {};
-	inline virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) {};
 	
+	inline Object* Parent() const { return mParent; }
+	ENGINE_EXPORT void AddChild(Object* obj);
+	ENGINE_EXPORT void RemoveChild(Object* obj);
+
+	inline uint32_t ChildCount() const { return (uint32_t)mChildren.size(); }
+	inline Object* Child(uint32_t index) const { return mChildren[index]; }
+
 	// Returns true only if this object and all its ancestors are enabled
 	ENGINE_EXPORT bool EnabledHierarchy();
-
-	// Returns true when an intersection occurs, assigns t to the intersection time if t is not null
-	// If any is true, will return the first hit, otherwise will return the closest hit
-	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
+	
 	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
 	// Note Renderers should OR this with their PassMask()
 	inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
 	inline virtual uint32_t LayerMask() { return mLayerMask; };
+
+	// Returns true when an intersection occurs, assigns t to the intersection time if t is not null
+	// If any is true, will return the first hit, otherwise will return the closest hit
+	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
+
+	// Callbacks
+	
+	inline virtual void PreUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void Update(CommandBuffer* commandBuffer) {}
+	inline virtual void PostUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void DrawGUI(CommandBuffer* commandBuffer, Camera* camera) {};
 
 private:
 	friend class ::Scene;

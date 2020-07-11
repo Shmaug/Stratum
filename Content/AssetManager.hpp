@@ -20,11 +20,23 @@ public:
 	ENGINE_EXPORT Mesh*		LoadMesh(const std::string& filename, float scale = 1.f);
 	ENGINE_EXPORT Font*		LoadFont(const std::string& filename, uint32_t pixelHeight);
 
+	inline Texture* WhiteTexture() const { return mWhiteTexture; }
+	inline Texture* TransparentBlackTexture() const { return mTransparentBlackTexture; }
+	inline Texture* BlackTexture() const { return mBlackTexture; }
+	inline Texture* BumpTexture() const { return mBumpTexture; }
+	inline Texture* NoiseTexture() const { return mNoiseTexture; }
+
 private:
-	friend class Stratum;
+	friend class Device;
 	ENGINE_EXPORT AssetManager(Device* device);
+
+	Texture* mWhiteTexture;
+	Texture* mBlackTexture;
+	Texture* mTransparentBlackTexture;
+	Texture* mBumpTexture;
+	Texture* mNoiseTexture;
 
 	Device* mDevice;
 	std::unordered_map<std::string, Asset*> mAssets;
-	std::mutex mMutex;
+	mutable std::mutex mMutex;
 };

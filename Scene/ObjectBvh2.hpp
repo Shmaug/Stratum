@@ -30,8 +30,6 @@ public:
 	ENGINE_EXPORT void FrustumCheck(const float4 frustum[6], std::vector<Object*>& objects, uint32_t mask);
 	ENGINE_EXPORT Object* Intersect(const Ray& ray, float* t, bool any, uint32_t mask);
 
-	ENGINE_EXPORT void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene* scene);
-
 private:
 	struct Primitive {
 		AABB mBounds;

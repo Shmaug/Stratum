@@ -2,70 +2,97 @@
 
 #include <Content/Asset.hpp>
 #include <Core/Device.hpp>
-#include <Core/Sampler.hpp>
 #include <Util/Util.hpp>
+
+class Sampler {
+public:
+	const std::string mName;
+
+	ENGINE_EXPORT Sampler(const std::string& name, Device* device, const VkSamplerCreateInfo& samplerInfo);
+	ENGINE_EXPORT Sampler(const std::string& name, Device* device, float maxLod, VkFilter filter = VK_FILTER_LINEAR, VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, float maxAnisotropy = 16);
+	ENGINE_EXPORT ~Sampler();
+
+	inline const ::VkSampler& VkSampler() const { return mSampler; }
+	inline operator ::VkSampler() const { return mSampler; }
+
+private:
+	Device* mDevice;
+	::VkSampler mSampler;
+};
 
 class Texture : public Asset {
 public:
 	const std::string mName;
 
-	ENGINE_EXPORT Texture(const std::string& name, Device* device,
-		uint32_t width, uint32_t height, uint32_t depth, VkFormat format,
-		VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL,
+	// Texture will be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL or (VK_IMAGE_LAYOUT_GENERAL if VK_IMAGE_USAGE_STORAGE_BIT is set)
+	ENGINE_EXPORT Texture(const std::string& name, Device* device, const void* data, VkDeviceSize dataSize, 
+		const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-		
-	ENGINE_EXPORT Texture(const std::string& name, Device* device,
-		const void* pixels, VkDeviceSize imageSize, uint32_t width, uint32_t height, uint32_t depth, VkFormat format, uint32_t mipLevels,
-		VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT, VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL,
+
+	// Texture will be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL or (VK_IMAGE_LAYOUT_GENERAL if VK_IMAGE_USAGE_STORAGE_BIT is set)
+	ENGINE_EXPORT Texture(const std::string& name, Device* device, 
+		const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	
+	// Texture will be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL or (VK_IMAGE_LAYOUT_GENERAL if VK_IMAGE_USAGE_STORAGE_BIT is set)
+	ENGINE_EXPORT Texture(const std::string& name, Device* device, const void* data, VkDeviceSize dataSize,
+		const VkExtent2D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	
+	// Texture will be in VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL or (VK_IMAGE_LAYOUT_GENERAL if VK_IMAGE_USAGE_STORAGE_BIT is set)
+	ENGINE_EXPORT Texture(const std::string& name, Device* device, 
+		const VkExtent2D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
+		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	
 	ENGINE_EXPORT ~Texture() override;
 
-	inline uint32_t Width() const { return mWidth; }
-	inline uint32_t Height() const { return mHeight; }
-	inline uint32_t Depth() const { return mDepth; }
-	inline uint32_t MipLevels() const { return mMipLevels; }
+	inline operator VkImage() const { return mImage; }
+
+	inline VkExtent3D Extent() const { return mExtent; }
+	inline uint32_t ArrayLayers() const { return mArrayLayers; }
 	inline VkFormat Format() const { return mFormat; }
+	inline uint32_t MipLevels() const { return mMipLevels; }
 	inline VkSampleCountFlagBits SampleCount() const { return mSampleCount; }
+	inline VkImageAspectFlags AspectFlags() const { return mAspectFlags; }
 	inline VkImageUsageFlags Usage() const { return mUsage; }
-
-	inline VkImage Image() const { return mImage; }
+	inline VkMemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
 	inline VkImageView View() const { return mView; }
+	inline VkImageView View(uint32_t mipLevel);
 
-	ENGINE_EXPORT void TransitionImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout, CommandBuffer* commandBuffer);
-	// Create the struct used to transition the layout, and return the stage flags associated with each layout
-	ENGINE_EXPORT VkImageMemoryBarrier TransitionImageLayout(VkImageLayout oldLayout, VkImageLayout newLayout, VkPipelineStageFlags& srcStage, VkPipelineStageFlags& dstStage);
+	inline VkImageLayout LastKnownLayout() const { return mLastKnownLayout; }
 	
-	ENGINE_EXPORT static void TransitionImageLayout(VkImage image, VkFormat format, uint32_t mipLevels, VkImageLayout oldLayout, VkImageLayout newLayout, CommandBuffer* commandBuffer);
-
-	// Texture must have been created with the appropriate mipmap levels defined
-	// Texture must be in VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+	// Texture must have been created with the appropriate mipmap levels
+	// Texture must support VK_IMAGE_ASPECT_COLOR
 	ENGINE_EXPORT void GenerateMipMaps(CommandBuffer* commandBuffer);
 
 private:
+	friend class CommandBuffer;
 	friend class AssetManager;
 	ENGINE_EXPORT Texture(const std::string& name, Device* device, const std::string& filename, bool srgb = true);
-	ENGINE_EXPORT Texture(const std::string& name, Device* device, const std::string& px, const std::string& nx, const std::string& py, const std::string& ny, const std::string& pz, const std::string& nz, bool srgb = true);
+	ENGINE_EXPORT Texture(const std::string& name, Device* device, const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, bool srgb = true);
 
 	Device* mDevice;
 	DeviceMemoryAllocation mMemory;
 	
-	uint32_t mWidth;
-	uint32_t mHeight;
-	uint32_t mDepth;
-	uint32_t mMipLevels;
+	VkExtent3D mExtent;
 	uint32_t mArrayLayers;
-
 	VkFormat mFormat;
+	uint32_t mMipLevels;
 	VkSampleCountFlagBits mSampleCount;
-	VkImageTiling mTiling;
+	VkImageAspectFlags mAspectFlags;
 	VkImageUsageFlags mUsage;
 	VkMemoryPropertyFlags mMemoryProperties;
+	VkImageTiling mTiling;
+	
+	VkImageLayout mLastKnownLayout;
+	VkPipelineStageFlags mLastKnownStageFlags;
+	VkAccessFlags mLastKnownAccessFlags;
 
 	VkMemoryAllocateInfo mAllocationInfo;
 
 	VkImage mImage;
 	VkImageView mView;
+	std::unordered_map<uint32_t, VkImageView> mMipViews;
 
-	ENGINE_EXPORT void CreateImage();
-	ENGINE_EXPORT void CreateImageView(VkImageAspectFlags flags);
+	ENGINE_EXPORT void Create();
 };

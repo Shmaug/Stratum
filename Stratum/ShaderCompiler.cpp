@@ -88,7 +88,7 @@ bool CompileStage(Compiler* compiler, const CompileOptions& options, const strin
 			m.mSpirv.push_back(*d);
 
 		// assign SPIRV module
-		VkShaderStageFlagBits vkstage;
+		VkSampleCountFlags vkstage;
 		switch (stage) {
 		case shaderc_vertex_shader:
 			dest.mModules[0] = (uint32_t)destShader.mModules.size() - 1;
@@ -449,30 +449,33 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 
 		/// applies array and static_sampler pragmas
 		auto UpdateBindings = [&](CompiledVariant& input) {
-			for (auto& b : input.mDescriptorBindings) {
-				for (const auto& s : staticSamplers)
-					if (s.first == b.first) {
-						input.mStaticSamplers.emplace(s.first, s.second);
+			for (auto b = input.mDescriptorBindings.begin(); b != input.mDescriptorBindings.end(); b++) {
+				for (const auto& s : arrays)
+					if (s.first == b->first) {
+						b->second.second.descriptorCount = s.second;
 						break;
 					}
-				for (const auto& s : arrays)
-					if (s.first == b.first) {
-						b.second.second.descriptorCount = s.second;
+				for (const auto& s : staticSamplers)
+					if (s.first == b->first) {
+						input.mStaticSamplers.emplace(s.first, s.second);
+						//input.mDescriptorBindings.erase(b);
 						break;
 					}
 			}
 		};
 
 		if (kernels.size()) {
-			auto stageOptions = variantOptions;
-			stageOptions.AddMacroDefinition("SHADER_STAGE_COMPUTE");
 			for (const auto& k : kernels) {
+				auto kernelOptions = variantOptions;
+				kernelOptions.AddMacroDefinition("KERNEL_" + k);
+				kernelOptions.AddMacroDefinition("SHADER_STAGE_COMPUTE");
+
 				// compile all kernels for this variant
 				CompiledVariant v = {};
 				v.mPass = (PassType)0;
 				v.mKeywords = keywords;
 				v.mEntryPoints[0] = k;
-				if (!CompileStage(compiler, stageOptions, source, filename, shaderc_compute_shader, k, v, *result)) return nullptr;
+				if (!CompileStage(compiler, kernelOptions, source, filename, shaderc_compute_shader, k, v, *result)) return nullptr;
 				UpdateBindings(v);
 				result->mVariants.push_back(v);
 			}

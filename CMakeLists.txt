@@ -25,18 +25,15 @@ add_library(Engine SHARED
 	"Core/Instance.cpp"
 	"Core/PluginManager.cpp"
 	"Core/RenderPass.cpp"
-	"Core/Sampler.cpp"
 	"Core/Socket.cpp"
 	"Core/Window.cpp"
 	"Input/InputManager.cpp"
 	"Input/MouseKeyboardInput.cpp"
 	"Scene/Camera.cpp"
 	"Scene/ClothRenderer.cpp"
-	"Scene/Gizmos.cpp"
 	"Scene/GUI.cpp"
 	"Scene/Light.cpp"
 	"Scene/MeshRenderer.cpp"
-	"Scene/Environment.cpp"
 	"Scene/Scene.cpp"
 	"Scene/Object.cpp"
 	"Scene/ObjectBvh2.cpp"
@@ -86,15 +83,11 @@ if(WIN32)
 	target_link_libraries(ShaderCompiler
 		"Ws2_32.lib"
 		"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
-		"${STRATUM_HOME}/ThirdParty/shaderc/lib/shaderc_combined.lib"
-		"${STRATUM_HOME}/ThirdParty/shaderc/third_party/spirv-cross/lib/spirv-cross-core.lib" )
+		"${STRATUM_HOME}/ThirdParty/shaderc/lib/shaderc_combined.lib" )
 
 	target_link_libraries(Engine
 		"Ws2_32.lib"
 		"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib"
 		"${STRATUM_HOME}/ThirdParty/openvr/lib/win64/openvr_api.lib"
 		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/openxr_loader.lib" )
 
@@ -102,11 +95,22 @@ if(WIN32)
 		"Ws2_32.lib"
 		"${PROJECT_BINARY_DIR}/lib/Engine.lib"
 		"$ENV{VULKAN_SDK}/lib/vulkan-1.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib"
 		"${STRATUM_HOME}/ThirdParty/openvr/lib/win64/openvr_api.lib"
 		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/openxr_loader.lib" )
+		
+	if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+		target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/shaderc/third_party/spirv-cross/lib/spirv-cross-cored.lib")
+		target_link_libraries(Engine
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimpd.lib"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstaticd.lib"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXMLd.lib" )
+	else()
+		target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/shaderc/third_party/spirv-cross/lib/spirv-cross-core.lib")
+		target_link_libraries(Engine
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/assimp.lib"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/zlibstatic.lib"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/IrrXML.lib" )
+	endif()
 
 	if (${ENABLE_DEBUG_LAYERS})
 		target_link_libraries(Engine "$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")
@@ -130,11 +134,11 @@ else()
 		"libX11-xcb.so"
 		"libxcb-keysyms.so"
 		"libxcb-randr.so"
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/libassimp.a"
-		z
-		"${STRATUM_HOME}/ThirdParty/assimp/lib/libIrrXML.a"
 		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/lib/libopenxr_loader.a"
-		"${STRATUM_HOME}/ThirdParty/openvr/lib/linux64/libopenvr_api.so" )
+		"${STRATUM_HOME}/ThirdParty/openvr/lib/linux64/libopenvr_api.so"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/libzlibstatic.a"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/libassimp.a"
+		"${STRATUM_HOME}/ThirdParty/assimp/lib/libIrrXML.a" )
 
 	target_link_libraries(Stratum "${PROJECT_BINARY_DIR}/bin/libEngine.so" "libvulkan.so.1")
 

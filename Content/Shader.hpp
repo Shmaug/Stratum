@@ -2,45 +2,9 @@
 
 #include <Content/Asset.hpp>
 #include <Core/Instance.hpp>
-#include <Core/Sampler.hpp>
 #include <Core/RenderPass.hpp>
 
 class Shader;
-
-// Represents a pipeline with various parameters
-struct PipelineInstance {
-	public:
-	const VkRenderPass mRenderPass;
-	const VertexInput* mVertexInput;
-	const VkPrimitiveTopology mTopology;
-	const VkCullModeFlags mCullMode;
-	const BlendMode mBlendMode;
-	const VkPolygonMode mPolygonMode;
-
-	inline PipelineInstance(VkRenderPass renderPass, const VertexInput* vertexInput, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode)
-		: mRenderPass(renderPass), mVertexInput(vertexInput), mTopology(topology), mCullMode(cullMode), mBlendMode(blendMode), mPolygonMode(polyMode) {
-			// Compute hash once upon creation
-			mHash = 0;
-			hash_combine(mHash, mRenderPass);
-			if (mVertexInput) hash_combine(mHash, *mVertexInput);
-			hash_combine(mHash, mTopology);
-			hash_combine(mHash, mCullMode);
-			hash_combine(mHash, mBlendMode);
-			hash_combine(mHash, mPolygonMode);
-		};
-
-	ENGINE_EXPORT bool operator==(const PipelineInstance& rhs) const;
-	
-private:
-	friend struct std::hash<PipelineInstance>;
-	size_t mHash;
-};
-namespace std {
-	template<>
-	struct hash<PipelineInstance> {
-		inline std::size_t operator()(const PipelineInstance& p) const { return p.mHash; }
-	};
-}
 
 // Represents a shader compiled with a set of keywords
 class ShaderVariant {
@@ -92,6 +56,8 @@ public:
 	ENGINE_EXPORT GraphicsShader* GetGraphics(PassType pass, const std::set<std::string>& keywords) const;
 	// Returns a shader variant for a specific kernel and set of keywords, or nullptr if none exists
 	ENGINE_EXPORT ComputeShader* GetCompute(const std::string& kernel, const std::set<std::string>& keywords) const;
+
+	inline bool HasKeyword(const std::string& kw) const { return mKeywords.count(kw); }
 
 	inline ::Device* Device() const { return mDevice; }
 	inline PassType PassMask() const { return mPassMask; }

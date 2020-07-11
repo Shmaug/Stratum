@@ -4,28 +4,18 @@
 #include <Content/Texture.hpp>
 #include <Util/Util.hpp>
 #include <Math/Geometry.hpp>
+#include <Shaders/include/shadercompat.h>
 
 class Camera;
 
 struct FontGlyph {
 	char mCharacter;
 	float mAdvance;
-	float mVertOffset;
-	float2 mSize;
-
-	float2 mUV;
-	float2 mUVSize;
+	float2 mOffset;
+	float2 mExtent;
+	fRect2D mTextureRect;
 
 	float mKerning[0xFF];
-};
-struct TextGlyph {
-	float2 mPosition;
-	float2 mSize;
-	float2 mUV;
-	float2 mUVSize;
-};
-enum TextAnchor {
-	TEXT_ANCHOR_MIN, TEXT_ANCHOR_MID, TEXT_ANCHOR_MAX
 };
 
 class Font : public Asset {
@@ -39,18 +29,17 @@ public:
 	ENGINE_EXPORT const FontGlyph* Glyph(uint32_t c) const;
 	ENGINE_EXPORT float Kerning(uint32_t from, uint32_t to) const;
 
-	ENGINE_EXPORT uint32_t GenerateGlyphs(const std::string& str, float scale, AABB* aabb, std::vector<TextGlyph>& glyph, TextAnchor horizontalAnchor = TEXT_ANCHOR_MIN, TextAnchor verticalAnchor = TEXT_ANCHOR_MIN) const;
+	ENGINE_EXPORT uint32_t GenerateGlyphs(const std::string& str, AABB* aabb, std::vector<TextGlyph>& glyph, TextAnchor horizontalAnchor = TEXT_ANCHOR_MIN, TextAnchor verticalAnchor = TEXT_ANCHOR_MIN) const;
 
-	inline float PixelSize() const { return mPixelSize; };
+	// Character extent in the vertical direction, in pixels
+	inline float CharacterHeight() const { return mCharacterHeight; };
 	inline float LineSpacing() const { return mLineSpace; };
-	inline float Ascender() const { return mAscender; };
-	inline float Descender() const { return mDescender; };
 
 private:
 	friend class AssetManager;
-	ENGINE_EXPORT Font(const std::string& name, Device* device, const std::string& filename, float pixelSize, float scale);
+	ENGINE_EXPORT Font(const std::string& name, Device* device, const std::string& filename, float pixelSize);
 
-	float mPixelSize;
+	float mCharacterHeight;
 	float mAscender;
 	float mDescender;
 	float mLineSpace;

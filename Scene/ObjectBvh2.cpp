@@ -196,28 +196,3 @@ Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask)
 	if (t) *t = ht;
 	return hitObject;
 }
-
-void ObjectBvh2::DrawGizmos(CommandBuffer* commandBuffer, Camera* camera, Scene* scene) {
-	if (mNodes.size() == 0) return;
-
-	uint32_t todo[1024];
-	int32_t stackptr = 0;
-
-	todo[stackptr] = 0;
-
-	while (stackptr >= 0) {
-		int ni = todo[stackptr];
-		stackptr--;
-		const Node& node(mNodes[ni]);
-
-		if (node.mRightOffset == 0) { // leaf node
-			AABB box = mPrimitives[node.mStartIndex].mBounds;
-			Gizmos::DrawWireCube(box.Center(), box.Extents(), quaternion(0, 0, 0, 1), float4(.2f, 1, .2f, .5f));
-		} else {
-			uint32_t n0 = ni + 1;
-			uint32_t n1 = ni + node.mRightOffset;
-			todo[++stackptr] = n0;
-			todo[++stackptr] = n1;
-		}
-	}
-}

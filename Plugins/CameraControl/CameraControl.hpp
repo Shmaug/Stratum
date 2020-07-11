@@ -17,9 +17,6 @@ private:
 	std::vector<Camera*> mCameras;
 
 	bool mShowPerformance;
-	bool mSnapshotPerformance;
-	ProfilerSample mProfilerFrames[PROFILER_FRAME_COUNT - 1];
-	uint32_t mSelectedFrame;
 
 public:
 	PLUGIN_EXPORT CameraControl();
@@ -27,7 +24,6 @@ public:
 
 	PLUGIN_EXPORT bool Init(Scene* scene) override;
 	PLUGIN_EXPORT void Update(CommandBuffer* commandBuffer) override;
-	PLUGIN_EXPORT void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) override;
 	PLUGIN_EXPORT void PreRenderScene(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
 
 	inline void CameraDistance(float d) { mCameraDistance = d; }

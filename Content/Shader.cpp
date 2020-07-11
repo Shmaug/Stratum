@@ -1,19 +1,10 @@
 #include <Content/Shader.hpp>
+#include <Content/Texture.hpp>
 #include <Stratum/ShaderCompiler.hpp>
 
 #include <string>
 
 using namespace std;
-
-bool PipelineInstance::operator==(const PipelineInstance& rhs) const {
-	return rhs.mHash == mHash;
-		// rhs.mRenderPass == mRenderPass &&
-		// ((!rhs.mVertexInput && !mVertexInput) || (rhs.mVertexInput && mVertexInput && *rhs.mVertexInput == *mVertexInput)) &&
-		// mTopology == rhs.mTopology &&
-		// mCullMode == rhs.mCullMode &&
-		// mBlendMode == rhs.mBlendMode &&
-		// mPolygonMode == rhs.mPolygonMode;
-}
 
 Shader::Shader(const string& name, ::Device* device, const string& filename)
 	: mName(name), mDevice(device), mViewportState({}), mRasterizationState({}), mDynamicState({}), mBlendMode(BLEND_MODE_OPAQUE), mDepthStencilState({}), mPassMask(PASS_MAIN) {
@@ -432,7 +423,7 @@ VkPipeline GraphicsShader::GetPipeline(RenderPass* renderPass, const VertexInput
 
 		VkPipeline p;
 		vkCreateGraphicsPipelines(*mShader->mDevice, mShader->mDevice->PipelineCache(), 1, &info, nullptr, &p);
-		mShader->mDevice->SetObjectName(p, mShader->mName + " Variant", VK_OBJECT_TYPE_PIPELINE);
+		mShader->mDevice->SetObjectName(p, mShader->mName + "[" + kw + "]", VK_OBJECT_TYPE_PIPELINE);
 		mPipelines.emplace(instance, p);
 
 		return p;

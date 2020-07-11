@@ -26,9 +26,8 @@ public:
 	uint32_t TriangleCount() const { return mTriangles.size(); }
 
 	inline AABB Bounds() { return mNodes.size() ? mNodes[0].mBounds : AABB(); }
-
+	
 	ENGINE_EXPORT void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, VkIndexType indexType);
-
 	ENGINE_EXPORT bool Intersect(const Ray& ray, float* t, bool any);
 
 private:

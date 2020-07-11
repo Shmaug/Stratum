@@ -24,28 +24,24 @@ public:
 
 	// Renderer functions
 
-	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
-	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
-	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
-
-	ENGINE_EXPORT virtual void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-
 	ENGINE_EXPORT virtual bool Intersect(const Ray& ray, float* t, bool any) override;
 	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
 
-	ENGINE_EXPORT virtual void DrawGizmos(CommandBuffer* commandBuffer, Camera* camera) override;
+	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
+	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
+	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
+	
+	ENGINE_EXPORT virtual bool TryCombineInstances(CommandBuffer* commandBuffer, Renderer* renderer, Buffer*& instanceBuffer, uint32_t& instanceCount) override;
+
+	ENGINE_EXPORT virtual void PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, PassType pass, Buffer* instanceBuffer, uint32_t instanceCount) override;
 
 private:
-	uint32_t mRayMask;
-
-protected:
-	std::shared_ptr<::Material> mMaterial;
-
-	AABB mAABB;
 	std::variant<::Mesh*, std::shared_ptr<::Mesh>> mMesh;
-	ENGINE_EXPORT virtual bool UpdateTransform() override;
+	std::shared_ptr<::Material> mMaterial;
+	uint32_t mRayMask;
+	AABB mAABB;
 
-	friend class Scene;
-	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, uint32_t instanceCount, VkDescriptorSet instanceDS, PassType pass);
+	ENGINE_EXPORT bool UpdateTransform() override;
 };

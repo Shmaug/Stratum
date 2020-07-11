@@ -3,11 +3,13 @@
 #include <Content/Material.hpp>
 #include <Content/Mesh.hpp>
 #include <Core/DescriptorSet.hpp>
-#include <Scene/MeshRenderer.hpp>
+#include <Scene/Renderer.hpp>
 #include <Util/Util.hpp>
 
-class ClothRenderer : public MeshRenderer {
+class ClothRenderer : public Renderer {
 public:
+bool mVisible;
+
 	ENGINE_EXPORT ClothRenderer(const std::string& name);
 	ENGINE_EXPORT ~ClothRenderer();
 
@@ -26,17 +28,30 @@ public:
 	inline void Move(const float3& f) { mMove = f; }
 	inline float3 Move() const { return mMove; }
 
-	ENGINE_EXPORT virtual void Mesh(::Mesh* m) override;
-	ENGINE_EXPORT virtual void Mesh(std::shared_ptr<::Mesh> m) override;
-
 	inline virtual void AddSphereCollider(Object* obj, float radius) { mSphereColliders.push_back(std::make_pair(obj, radius)); }
+
+	ENGINE_EXPORT virtual void Mesh(::Mesh* m);
+	ENGINE_EXPORT virtual void Mesh(std::shared_ptr<::Mesh> m);
+	inline virtual ::Mesh* Mesh() const { return mMesh.index() == 0 ? std::get<::Mesh*>(mMesh) : std::get<std::shared_ptr<::Mesh>>(mMesh).get(); }
+
+	inline virtual ::Material* Material() { return mMaterial.get(); }
+	ENGINE_EXPORT virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
+
+	// Renderer functions
+
+	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
+	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
+	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
 	
 	ENGINE_EXPORT virtual void FixedUpdate(CommandBuffer* commandBuffer) override;
-	ENGINE_EXPORT virtual void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	ENGINE_EXPORT virtual void PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
 
-	ENGINE_EXPORT bool Intersect(const Ray& ray, float* t, bool any) override;
+private:
+	std::shared_ptr<::Material> mMaterial;
+	std::variant<::Mesh*, std::shared_ptr<::Mesh>> mMesh;
+	AABB mAABB;
 
-protected:
 	Buffer* mVertexBuffer;
 	Buffer* mVelocityBuffer;
 	Buffer* mForceBuffer;
@@ -54,6 +69,5 @@ protected:
 	float mDamping;
 	float3 mGravity;
 
-	ENGINE_EXPORT virtual bool UpdateTransform() override;
-	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, uint32_t instanceCount, VkDescriptorSet instanceDS, PassType pass) override;
+	ENGINE_EXPORT bool UpdateTransform() override;
 };

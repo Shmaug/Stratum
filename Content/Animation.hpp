@@ -1,7 +1,5 @@
 #pragma once
 
-#include <unordered_map>
-
 #include <assimp/scene.h>
 #include <assimp/anim.h>
 
@@ -45,21 +43,6 @@ inline void lerp(Pose& dest, const Pose& p0, const Pose& p1, float t) {
 	for (uint32_t i = 0; i < dest.size(); i++)
 		dest[i] = lerp(p0[i], p1[i], t);
 }
-
-enum AnimationExtrapolate {
-	EXTRAPOLATE_CONSTANT,
-	EXTRAPOLATE_LINEAR,
-	EXTRAPOLATE_CYCLE,
-	EXTRAPOLATE_CYCLE_OFFSET,
-	EXTRAPOLATE_BOUNCE,
-};
-enum AnimationTangent {
-	ANIMATION_TANGENT_MANUAL,
-	ANIMATION_TANGENT_FLAT,
-	ANIMATION_TANGENT_LINEAR,
-	ANIMATION_TANGENT_SMOOTH,
-	ANIMATION_TANGENT_STEP,
-};
 
 struct AnimationKeyframe {
 	float mValue;
