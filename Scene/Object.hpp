@@ -5,6 +5,7 @@
 
 class Camera;
 class Scene;
+class GuiContext;
 
 // A hierarchical object in a Scene. Keeps track of a transform internally that is updated on-demand during getter functions
 class Object {
@@ -64,7 +65,7 @@ public:
 	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {}
 	inline virtual void Update(CommandBuffer* commandBuffer) {}
 	inline virtual void PostUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void DrawGUI(CommandBuffer* commandBuffer, Camera* camera) {};
+	inline virtual void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {};
 
 private:
 	friend class ::Scene;

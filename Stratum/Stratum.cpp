@@ -1,6 +1,6 @@
 ﻿#include <Core/PluginManager.hpp>
 #include <Input/InputManager.hpp>
-#include <Scene/GUI.hpp>
+#include <Scene/GuiContext.hpp>
 #include <Scene/Scene.hpp>
 #include <Util/Profiler.hpp>
 
@@ -18,15 +18,6 @@ private:
 		for (Camera* camera : mScene->Cameras())
 			if (camera->EnabledHierarchy())
 				mScene->Render(commandBuffer, camera, PASS_MAIN);
-
-		// Copy to window
-		for (Camera* camera : mScene->Cameras())
-			if (camera->TargetWindow() && camera->EnabledHierarchy() && camera->TargetWindow()->BackBuffer() != VK_NULL_HANDLE) {
-				commandBuffer->TransitionBarrier(camera->TargetWindow()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-				camera->Framebuffer()->ResolveColor(commandBuffer, 0, camera->TargetWindow()->BackBuffer());
-				commandBuffer->TransitionBarrier(camera->TargetWindow()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-			}
-
 		PROFILER_END;
 	}
 
@@ -40,7 +31,6 @@ public:
 		printf("Initialized.\n");
 
 		mScene = new Scene(mInstance, mInputManager, mPluginManager);
-		GUI::Initialize(mInstance->Device(), mInputManager);
 		mInputManager->RegisterInputDevice(mInstance->Window()->mInput);
 	}
 
@@ -74,6 +64,15 @@ public:
 			Render(commandBuffer);
 			if (mInstance->mXRRuntime) mInstance->mXRRuntime->PostRender(commandBuffer);
 
+			// TODO: this should happen as part of EndRenderPass
+			// Copy to window
+			Camera* camera = mScene->mCameras[0];
+			if (camera && camera->EnabledHierarchy() && mInstance->Window()->BackBuffer() != VK_NULL_HANDLE) {
+				commandBuffer->TransitionBarrier(mInstance->Window()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+				camera->Framebuffer()->ResolveColor(commandBuffer, 0, mInstance->Window()->BackBuffer());
+				commandBuffer->TransitionBarrier(mInstance->Window()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+			}
+
 			PROFILER_BEGIN("Execute CommandBuffer");
 			mInstance->Device()->Execute(commandBuffer);
 			PROFILER_END;
@@ -87,7 +86,7 @@ public:
 			for (auto& kp : commandBuffer->mWaitSemaphores) waitSemaphores.push_back(*kp.second);
 			mInstance->mWindow->Present(waitSemaphores);
 
-			mInstance->Device()->TrimPool();
+			mInstance->Device()->PurgePooledResources(8);
 
 			#ifdef PROFILER_ENABLE
 			Profiler::FrameEnd();
@@ -102,9 +101,10 @@ public:
 
 	~Stratum() {
 		safe_delete(mPluginManager);
-				
+		
 		safe_delete(mInstance->mXRRuntime);
 		safe_delete(mScene);
+
 		safe_delete(mInputManager);
 		safe_delete(mInstance);
 
@@ -131,7 +131,6 @@ int main(int argc, char** argv) {
 	#if defined(WINDOWS)
 	OutputDebugString("Dumping Memory Leaks...\n");
 	_CrtDumpMemoryLeaks();
-	OutputDebugString("Done\n");
 	#endif
 	return EXIT_SUCCESS;
 }

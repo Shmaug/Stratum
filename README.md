@@ -36,8 +36,8 @@ run `setup.bat` or `setup.sh`, then build Stratum with CMake
   - Renders a `Mesh` simulating soft-body spring physics along triangle edges, and aerodynamic drag along triangle faces.
 - `Light`
   - Defines a light using the built-in lighting system.
-- `GUI`
-  - Provides a basic immediate-mode GUI system, similar to Unity's EditorGUI. It can draw GUI content in world-space and in screen-space.
+- `GuiContext`
+  - Provides a basic immediate-mode GuiContext system, similar to Unity's EditorGUI. It can draw GuiContext content in world-space and in screen-space.
 
 # Content Overview
 - `Asset`

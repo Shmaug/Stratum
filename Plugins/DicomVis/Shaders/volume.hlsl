@@ -85,14 +85,6 @@ float3 VolumeToWorldV(float3 vec) {
 void Render(uint3 index : SV_DispatchThreadID) {
 	if (any(index.xy >= ScreenResolution)) return;
 
-	// 4xMSAA sampling pattern (unused atm)
-	static const float2 jitters[4] = {
-		 float2(0.125, 0.375),
-		-float2(0.125, 0.375) - float2(0.125, 0.375),
-		 float2(0.125, 0.375) - float2(0.125, 0.375),
-		-float2(0.125, 0.375) + float2(0.125, 0.375),
-	};
-
 	uint idx = index.y * ScreenResolution.x + index.x;
 	uint rnd = 0xFFFF * NoiseTex.Load(uint3((idx / (4 * 256)) % 256, (idx / 4) % 256, 0))[idx % 4];
 	RandomSampler rng;

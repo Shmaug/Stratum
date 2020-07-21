@@ -5,7 +5,7 @@ set "ASSIMP_DIR=%cd%/ThirdParty/assimp"
 set "SHADERC_DIR=%cd%/ThirdParty/shaderc"
 set "SPIRV_CROSS_DIR=%cd%/ThirdParty/shaderc/third_party/spirv-cross"
 set "OPENXR_DIR=%cd%/ThirdParty/OpenXR-SDK"
-set TARGET_CONFIG=RelWithDebInfo
+set TARGET_CONFIG=Release
 
 echo Updating submodules...
 git submodule update --init

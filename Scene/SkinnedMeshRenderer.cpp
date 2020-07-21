@@ -77,11 +77,11 @@ void SkinnedMeshRenderer::PostUpdate(CommandBuffer* commandBuffer) {
 		ds->FlushWrites();
 		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipelineLayout, 0, 1, *ds, 0, nullptr);
 
-		commandBuffer->PushConstantRef(s, "VertexCount", m->VertexCount());
-		commandBuffer->PushConstantRef(s, "VertexStride", m->VertexSize());
-		commandBuffer->PushConstantRef(s, "NormalOffset", (uint32_t)offsetof(StdVertex, normal));
-		commandBuffer->PushConstantRef(s, "TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
-		commandBuffer->PushConstantRef(s, "BlendFactors", weights);
+		commandBuffer->PushConstantRef("VertexCount", m->VertexCount());
+		commandBuffer->PushConstantRef("VertexStride", m->VertexSize());
+		commandBuffer->PushConstantRef("NormalOffset", (uint32_t)offsetof(StdVertex, normal));
+		commandBuffer->PushConstantRef("TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
+		commandBuffer->PushConstantRef("BlendFactors", weights);
 
 		vkCmdDispatch(*commandBuffer, ( + 63) / 64, 1, 1);
 
@@ -110,10 +110,10 @@ void SkinnedMeshRenderer::PostUpdate(CommandBuffer* commandBuffer) {
 		ds->FlushWrites();
 		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipelineLayout, 0, 1, *ds, 0, nullptr);
 
-		commandBuffer->PushConstantRef(s, "VertexCount", m->VertexCount());
-		commandBuffer->PushConstantRef(s, "VertexStride", m->VertexSize());
-		commandBuffer->PushConstantRef(s, "NormalOffset", (uint32_t)offsetof(StdVertex, normal));
-		commandBuffer->PushConstantRef(s, "TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
+		commandBuffer->PushConstantRef("VertexCount", m->VertexCount());
+		commandBuffer->PushConstantRef("VertexStride", m->VertexSize());
+		commandBuffer->PushConstantRef("NormalOffset", (uint32_t)offsetof(StdVertex, normal));
+		commandBuffer->PushConstantRef("TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
 
 		vkCmdDispatch(*commandBuffer, (m->VertexCount() + 63) / 64, 1, 1);
 	}
@@ -146,26 +146,26 @@ void SkinnedMeshRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, Pas
 	commandBuffer->BindVertexBuffer(mVertexBuffer, 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 	commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 	}
 }
 
-void SkinnedMeshRenderer::DrawGUI(CommandBuffer* commandBuffer, Camera* camera) {
+void SkinnedMeshRenderer::DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {
 	if (mRig.size()){
 		for (auto b : mRig) {
-			GUI::WireSphere(b->WorldPosition(), .01f, float4(0.25f, 1.f, 0.25f, 1.f));
+			gui->WireSphere(b->WorldPosition(), .01f, float4(0.25f, 1.f, 0.25f, 1.f));
 			if (Bone* parent = dynamic_cast<Bone*>(b->Parent())) {
 				float3 pts[2];
 				pts[0] = b->WorldPosition();
 				pts[1] = parent->WorldPosition();
-				GUI::PolyLine(float4x4(1), pts, 2, float4(0.25f, 1.f, 0.25f, 1.f), 1.5f);
+				gui->PolyLine(float4x4(1), pts, 2, float4(0.25f, 1.f, 0.25f, 1.f), 1.5f);
 			}
 		}
 	}

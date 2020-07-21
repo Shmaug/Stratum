@@ -4,6 +4,7 @@
 #include <Util/Util.hpp>
 
 class Scene;
+class GuiContext;
 class Camera;
 class Instance;
 
@@ -38,7 +39,7 @@ public:
 	inline virtual void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
 	inline virtual void PostRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
 
-	inline virtual void DrawGUI(CommandBuffer* commandBuffer, Camera* camera) {}
+	inline virtual void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {}
 
 	// Called before the window presents the next swapchain image, after the command buffer(s) are executed
 	inline virtual void PrePresent() {}

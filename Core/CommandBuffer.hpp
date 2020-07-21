@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Util/Util.hpp>
+#include <Core/Device.hpp>
 
 #ifdef ENABLE_DEBUG_LAYERS
 #define BEGIN_CMD_REGION(cmd, label) cmd->BeginLabel(label)
@@ -10,16 +10,6 @@
 #define BEGIN_CMD_REGION(cmd, label)
 #define END_CMD_REGION(cmd)
 #endif
-
-class Buffer;
-class Camera;
-class DescriptorSet;
-class Device;
-class GraphicsShader;
-class Material;
-class RenderPass;
-class ShaderVariant;
-class Texture;
 
 class Semaphore {
 public:
@@ -76,7 +66,7 @@ public:
 	ENGINE_EXPORT void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkImageLayout oldLayout, VkImageLayout newLayout);
 	ENGINE_EXPORT void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout);
 
-	ENGINE_EXPORT void BeginRenderPass(RenderPass* renderPass, const VkRect2D& renderArea, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount);
+	ENGINE_EXPORT void BeginRenderPass(RenderPass* renderPass, Framebuffer* frameBuffer);
 	ENGINE_EXPORT void EndRenderPass();
 
 	ENGINE_EXPORT void BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset);
@@ -98,10 +88,10 @@ public:
 		BlendMode blendMode = BLEND_MODE_MAX_ENUM,
 		VkPolygonMode polyMode = VK_POLYGON_MODE_MAX_ENUM);
 
-	// Find the range for a push constant named 'name' and push it
-	ENGINE_EXPORT bool PushConstant(ShaderVariant* shader, const std::string& name, const void* data, uint32_t dataSize);
+	// Find the range for a push constant (in the current shader's layout) named 'name' and push it
+	ENGINE_EXPORT bool PushConstant(const std::string& name, const void* data, uint32_t dataSize);
 	template<typename T>
-	inline bool PushConstantRef(ShaderVariant* shader, const std::string& name, const T& value) { return PushConstant(shader, name, &value, sizeof(T)); }
+	inline bool PushConstantRef(const std::string& name, const T& value) { return PushConstant(name, &value, sizeof(T)); }
 
 private:
 	friend class Stratum;
@@ -133,4 +123,5 @@ private:
 	RenderPass* mCurrentRenderPass;
 	Camera* mCurrentCamera;
 	Material* mCurrentMaterial;
+	GraphicsShader* mCurrentShader;
 };

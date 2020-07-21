@@ -2,6 +2,7 @@
 
 #include <Content/Shader.hpp>
 #include <Core/Buffer.hpp>
+#include <Core/DescriptorSet.hpp>
 
 class Material {
 public:

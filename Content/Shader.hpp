@@ -34,6 +34,7 @@ public:
 
 	// Vertex and Fragment shader stage create struct
 	VkPipelineShaderStageCreateInfo mStages[2];
+	std::vector<VkPipelineColorBlendAttachmentState> mBlendStates;
 
 	std::unordered_map<PipelineInstance, VkPipeline> mPipelines;
 	Shader* mShader;

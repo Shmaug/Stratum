@@ -10,9 +10,10 @@
 #pragma array MainTextures 8
 #pragma array NormalTextures 8
 #pragma array MaskTextures 8
-
 #pragma static_sampler Sampler
 #pragma static_sampler ShadowSampler maxAnisotropy=0 maxLod=0 addressMode=clamp_border borderColor=float_opaque_white compareOp=less
+
+#include <include/shadercompat.h>
 
 #if defined(TEXTURED_COLORONLY)
 #define NEED_TEXCOORD
@@ -24,8 +25,6 @@
 #ifdef ALPHA_CLIP
 #define NEED_TEXCOORD
 #endif
-
-#include <include/shadercompat.h>
 
 [[vk::binding(INSTANCE_BUFFER_BINDING, PER_OBJECT)]] StructuredBuffer<InstanceBuffer> Instances : register(t0);
 [[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> BaseColorTexture		: register(t4);

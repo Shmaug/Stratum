@@ -12,8 +12,8 @@
 
 #include <Util/Util.hpp>
 
-class Scene;
 class Stratum;
+class GuiContext;
 
 struct ProfilerSample {
 	std::string mLabel;
@@ -31,7 +31,7 @@ public:
 	ENGINE_EXPORT static void BeginSample(const std::string& label);
 	ENGINE_EXPORT static void EndSample();
 
-	ENGINE_EXPORT static void DrawProfiler(Scene* scene);
+	ENGINE_EXPORT static void DrawProfiler(GuiContext* gui);
 
 private:
 	friend class Stratum;
@@ -39,11 +39,11 @@ private:
 	ENGINE_EXPORT static void FrameEnd();
 	ENGINE_EXPORT static void Destroy();
 
-	ENGINE_EXPORT static const std::chrono::high_resolution_clock mTimer;
+	ENGINE_EXPORT static bool mEnabled;
 	ENGINE_EXPORT static std::list<ProfilerSample*> mFrames;
 	ENGINE_EXPORT static ProfilerSample* mCurrentSample;
-	ENGINE_EXPORT static bool mEnabled;
 	ENGINE_EXPORT static uint32_t mHistoryCount;
+	ENGINE_EXPORT static const std::chrono::high_resolution_clock mTimer;
 
 	// Drawing settings
 	

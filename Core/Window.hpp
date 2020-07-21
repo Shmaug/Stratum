@@ -48,13 +48,15 @@ public:
 	inline VkImageView BackBufferView(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImageView; }
 	inline VkExtent2D SwapchainExtent() const { return mSwapchainExtent; }
 
+	inline void TargetCamera(Camera* camera) { mTargetCamera = camera; }
+	inline Camera* TargetCamera() const { return mTargetCamera; }
+
 	#ifdef WINDOWS
 	inline HWND Hwnd() const { return mHwnd; }
 	#endif
 	inline ::Device* Device() const { return mDevice; }
 
 private:
-	friend class Camera;
 	friend class Stratum;
 	friend class Instance;
 

@@ -1,14 +1,14 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
+#pragma multi_compile ENVIRONMENT_TEXTURE_HDR
+
 #pragma renderqueue 0
 #pragma cull false
 #pragma zwrite false
 #pragma ztest false
 
 #pragma static_sampler Sampler maxAnisotropy=0 addressMode=clamp_edge
-
-#pragma multi_compile ENVIRONMENT_TEXTURE_HDR
 
 #include <include/shadercompat.h>
 #include <include/math.hlsli>

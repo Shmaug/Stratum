@@ -1,6 +1,7 @@
 #include <Core/CommandBuffer.hpp>
 #include <Core/Buffer.hpp>
 #include <Core/RenderPass.hpp>
+#include <Core/Framebuffer.hpp>
 #include <Content/Material.hpp>
 #include <Content/Shader.hpp>
 #include <Content/Texture.hpp>
@@ -80,6 +81,7 @@ void CommandBuffer::Clear() {
 	mCurrentRenderPass = nullptr;
 	mCurrentCamera = nullptr;
 	mCurrentMaterial = nullptr;
+	mCurrentShader = nullptr;
 	mCurrentPipeline = VK_NULL_HANDLE;
 	mTriangleCount = 0;
 	mCurrentIndexBuffer = nullptr;
@@ -218,19 +220,13 @@ void CommandBuffer::TransitionBarrier(VkImage image, const VkImageSubresourceRan
 	Barrier(srcStage, dstStage, barrier);
 }
 
-void CommandBuffer::BeginRenderPass(RenderPass* renderPass, const VkRect2D& renderArea, VkFramebuffer frameBuffer, VkClearValue* clearValues, uint32_t clearValueCount) {
-	VkRenderPassBeginInfo info = {};
-	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	info.renderPass = *renderPass;
-	info.clearValueCount = clearValueCount;
-	info.pClearValues = clearValues;
-	info.renderArea = renderArea;
-	info.framebuffer = frameBuffer;
-	vkCmdBeginRenderPass(*this, &info, VK_SUBPASS_CONTENTS_INLINE);
-
+void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer) {
+	for (uint32_t i = 0; i < framebuffer->ColorBufferCount(); i++)
+		TransitionBarrier(framebuffer->ColorBuffer(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	if (framebuffer->DepthBuffer()) TransitionBarrier(framebuffer->DepthBuffer(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	
+	renderPass->Begin(this, framebuffer);
 	mCurrentRenderPass = renderPass;
-
-	mTriangleCount = 0;
 }
 void CommandBuffer::EndRenderPass() {
 	vkCmdEndRenderPass(*this);
@@ -242,10 +238,10 @@ void CommandBuffer::EndRenderPass() {
 	mCurrentPipeline = VK_NULL_HANDLE;
 }
 
-bool CommandBuffer::PushConstant(ShaderVariant* shader, const std::string& name, const void* data, uint32_t dataSize) {
-	if (shader->mPushConstants.count(name) == 0) return false;
-	VkPushConstantRange range = shader->mPushConstants.at(name);
-	vkCmdPushConstants(*this, shader->mPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint32_t dataSize) {
+	if (mCurrentShader->mPushConstants.count(name) == 0) return false;
+	VkPushConstantRange range = mCurrentShader->mPushConstants.at(name);
+	vkCmdPushConstants(mCommandBuffer, mCurrentShader->mPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
 	return true;
 }
 
@@ -254,6 +250,7 @@ VkPipelineLayout CommandBuffer::BindShader(GraphicsShader* shader, PassType pass
 	if (pipeline != mCurrentPipeline) {
 		vkCmdBindPipeline(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 		mCurrentPipeline = pipeline;
+		mCurrentShader = shader;
 		mCurrentCamera = nullptr;
 		mCurrentMaterial = nullptr;
 	}
@@ -261,7 +258,7 @@ VkPipelineLayout CommandBuffer::BindShader(GraphicsShader* shader, PassType pass
 	if (camera && mCurrentCamera != camera) {
 		if (mCurrentRenderPass && shader->mDescriptorBindings.count("Camera"))
 			vkCmdBindDescriptorSets(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->mPipelineLayout, PER_CAMERA, 1, *camera->DescriptorSet(shader->mDescriptorBindings.at("Camera").second.stageFlags), 0, nullptr);
-		PushConstantRef(shader, "StereoEye", (uint32_t)EYE_LEFT);
+		PushConstantRef("StereoEye", (uint32_t)EYE_LEFT);
 		mCurrentCamera = camera;
 	}
 	return shader->mPipelineLayout;
@@ -277,6 +274,7 @@ VkPipelineLayout CommandBuffer::BindMaterial(Material* material, PassType pass, 
 	if (pipeline != mCurrentPipeline) {
 		vkCmdBindPipeline(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 		mCurrentPipeline = pipeline;
+		mCurrentShader = shader;
 		mCurrentCamera = nullptr;
 		mCurrentMaterial = nullptr;
 	}

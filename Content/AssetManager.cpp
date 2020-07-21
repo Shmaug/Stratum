@@ -57,10 +57,10 @@ Mesh* AssetManager::LoadMesh(const string& filename, float scale) {
 	if (!asset) asset = new Mesh(filename, mDevice, filename, scale);
 	return (Mesh*)asset;
 }
-Font* AssetManager::LoadFont(const string& filename, uint32_t pixelHeight) {
+Font* AssetManager::LoadFont(const string& filename) {
 	mMutex.lock();
-	Asset*& asset = mAssets[filename + to_string(pixelHeight)];
+	Asset*& asset = mAssets[filename];
 	mMutex.unlock();
-	if (!asset) asset = new Font(filename, mDevice, filename, (float)pixelHeight);
+	if (!asset) asset = new Font(filename, mDevice, filename);
 	return (Font*)asset;
 }

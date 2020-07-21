@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Core/Device.hpp>
 #include <Util/Util.hpp>
 
 class Buffer {

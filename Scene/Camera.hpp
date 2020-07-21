@@ -7,12 +7,9 @@
 #include <Scene/Object.hpp>
 #include <Util/Util.hpp>
 
-
-// A scene object that renders the scene
-// Stores an internal ResolveBuffer for render buffer if the framebuffer's sample count is not VK_SAMPLE_COUNT_1_BIT
+// A scene object that the scene will use to render renderers
 class Camera : public virtual Object {
 public:
-	ENGINE_EXPORT Camera(const std::string& name, Window* targetWindow, VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, :: ClearFlags clearFlags = CLEAR_SKYBOX);
 	ENGINE_EXPORT Camera(const std::string& name, ::Device* device, VkFormat renderFormat = VK_FORMAT_R8G8B8A8_UNORM, VkFormat depthFormat = VK_FORMAT_D32_SFLOAT, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, :: ClearFlags clearFlags = CLEAR_SKYBOX);
 	ENGINE_EXPORT Camera(const std::string& name, ::Framebuffer* framebuffer, :: ClearFlags clearFlags = CLEAR_SKYBOX);
 	ENGINE_EXPORT virtual ~Camera();
@@ -20,19 +17,16 @@ public:
 	inline ::Device* Device() const { return mDevice; }
 
 	// Callbacks
-
-	ENGINE_EXPORT virtual void PreBeginRenderPass();
-	ENGINE_EXPORT virtual void DrawGUI(CommandBuffer* commandBuffer, Camera* camera) override;
+	
+	ENGINE_EXPORT virtual void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) override;
 
 
 	// Updates the uniform buffer
 	ENGINE_EXPORT virtual void UpdateUniformBuffer();
 	// Calls vkCmdSetViewport and vkCmdSetScissor
 	ENGINE_EXPORT virtual void SetViewportScissor(CommandBuffer* commandBuffer);
-	// Set uniforms and viewport and call vkCmdBeginRenderPass
-	ENGINE_EXPORT virtual void BeginRenderPass(CommandBuffer* commandBuffer);
 	// Sets the viewport and StereoEye push constant
-	ENGINE_EXPORT virtual void SetStereoViewport(CommandBuffer* commandBuffer, ShaderVariant* shader, StereoEye eye);
+	ENGINE_EXPORT virtual void SetStereoViewport(CommandBuffer* commandBuffer, StereoEye eye);
 
 	ENGINE_EXPORT virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = EYE_NONE);
 	ENGINE_EXPORT virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = EYE_NONE);
@@ -40,8 +34,6 @@ public:
 	
 	inline virtual uint32_t RenderPriority() const { return mRenderPriority; }
 	inline virtual void RenderPriority(uint32_t x) { mRenderPriority = x; }
-
-	inline Window* TargetWindow() const { return mTargetWindow; }
 
 	// Setters
 
@@ -123,7 +115,6 @@ private:
 
 	VkViewport mViewport;
 
-	Window* mTargetWindow;
 	::Device* mDevice;
 	::Framebuffer* mFramebuffer;
 	// If the framebuffer was not supplied to the camera on creation, then delete it

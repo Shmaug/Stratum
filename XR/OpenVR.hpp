@@ -47,8 +47,6 @@ private:
     std::list<std::pair<float3, quaternion>> mPoseHistoryRightPointer;
     uint32_t mPoseHistoryFrameCount;
 
-    Texture* mCopyTarget;
-
     std::vector<InputPointer> mInputPointers;
     std::vector<InputPointer> mInputPointersLast;
 

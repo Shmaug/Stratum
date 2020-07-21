@@ -1,6 +1,6 @@
 #include <Scene/MeshRenderer.hpp>
 #include <Content/Font.hpp>
-#include <Scene/GUI.hpp>
+#include <Scene/GuiContext.hpp>
 #include <Util/Profiler.hpp>
 
 #include <Core/EnginePlugin.hpp>
@@ -177,60 +177,69 @@ public:
 		}
 	}
 
-	PLUGIN_EXPORT void DrawGUI(CommandBuffer* commandBuffer, Camera* camera) override {
+	PLUGIN_EXPORT void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) override {		
 		bool worldSpace = camera->StereoMode() != STEREO_NONE;
 
 		// Draw performance overlay
 		#ifdef PROFILER_ENABLE
 		if (mShowPerformance && !worldSpace)
-			Profiler::DrawProfiler(mScene);
+			Profiler::DrawProfiler(gui);
 		#endif
 
 		if (!mScanDone)  return;
 		if (mScanThread.joinable()) mScanThread.join();
 
 		if (worldSpace)
-			GUI::BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
+			gui->BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
 		else
-			GUI::BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, camera->Framebuffer()->Extent().height - 460, 300, 450));
+			gui->BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, camera->Framebuffer()->Extent().height - 460, 300, 450));
 
-		GUI::LayoutTitle("Load Dataset");
-		GUI::LayoutSeparator();
-		float prev = GUI::mLayoutTheme.mControlSize;
-		GUI::mLayoutTheme.mControlSize = 24;
-		GUI::BeginScrollSubLayout(175, mDataFolders.size() * (GUI::mLayoutTheme.mControlSize + 2*GUI::mLayoutTheme.mControlPadding));
+		gui->LayoutTitle("Load Dataset");
+		gui->LayoutSeparator();
+		float prev = gui->mLayoutTheme.mControlSize;
+		gui->mLayoutTheme.mControlSize = 24;
+		gui->BeginScrollSubLayout(175, mDataFolders.size() * (gui->mLayoutTheme.mControlSize + 2*gui->mLayoutTheme.mControlPadding));
 		for (const auto& p : mDataFolders)
-			if (GUI::LayoutTextButton(fs::path(p.first).stem().string(), TEXT_ANCHOR_MIN))
+			if (gui->LayoutTextButton(fs::path(p.first).stem().string(), TEXT_ANCHOR_MIN))
 				LoadVolume(commandBuffer, p.first, p.second);
-		GUI::mLayoutTheme.mControlSize = prev;
-		GUI::EndLayout();
+		gui->mLayoutTheme.mControlSize = prev;
+		gui->EndLayout();
 
-		GUI::LayoutTitle("Render Settings");
-		if (GUI::LayoutToggle("Colorize", mColorize)) {
+		gui->LayoutTitle("Render Settings");
+		if (gui->LayoutToggle("Colorize", mColorize)) {
 			mBakeDirty = true;
 			mFrameIndex = 0;
 		}
-		if (GUI::LayoutToggle("Lighting", mLighting)) {
+		if (gui->LayoutToggle("Lighting", mLighting)) {
 			mFrameIndex = 0;
 		}
-		if (GUI::LayoutSlider("Step Size", mStepSize, .0001f, .01f)) mFrameIndex = 0;
-		if (GUI::LayoutSlider("Density", mDensity, 10, 50000.f)) mFrameIndex = 0;
-		if (GUI::LayoutRangeSlider("Remap", mRemapRange, 0, 1)) {
+		if (gui->LayoutSlider("Step Size", mStepSize, .0001f, .01f)) mFrameIndex = 0;
+		if (gui->LayoutSlider("Density", mDensity, 10, 50000.f)) mFrameIndex = 0;
+		if (gui->LayoutRangeSlider("Remap", mRemapRange, 0, 1)) {
 			mBakeDirty = true;
 			mFrameIndex = 0;
 		}
 		if (mColorize) {
-			if (GUI::LayoutRangeSlider("Hue Range", mHueRange, 0, 1)) {
+			if (gui->LayoutRangeSlider("Hue Range", mHueRange, 0, 1)) {
 				mBakeDirty = true;
 				mFrameIndex = 0;
 			}
 		}
 
-		GUI::EndLayout();
+		gui->EndLayout();
 	}
 
 	PLUGIN_EXPORT void PostEndRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override {
 		if (!mRawVolume || camera != mRenderCamera) return;
+
+		if (camera->Framebuffer()->SampleCount() != VK_SAMPLE_COUNT_1_BIT) {
+			camera->Framebuffer()->SampleCount(VK_SAMPLE_COUNT_1_BIT);
+			return;
+		}
+		if (camera->Framebuffer()->ColorBufferUsage() & VK_IMAGE_USAGE_STORAGE_BIT) {
+			camera->Framebuffer()->ColorBufferUsage(camera->Framebuffer()->ColorBufferUsage() | VK_IMAGE_USAGE_STORAGE_BIT);
+			return;
+		}
 
 		if (!mHistoryBuffer || camera->Framebuffer()->Extent() != To2D(mHistoryBuffer->Extent())) {
 			safe_delete(mHistoryBuffer);
@@ -246,11 +255,11 @@ public:
 
 		uint2 res(camera->Framebuffer()->Extent().width, camera->Framebuffer()->Extent().height);
 		uint3 vres(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
-		float4x4 ivp[2]{
+		float4x4 ivp[2] {
 			camera->InverseViewProjection(EYE_LEFT),
 			camera->InverseViewProjection(EYE_RIGHT)
 		};
-		float3 vp[2]{
+		float3 vp[2] {
 			mVolumePosition - (camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_LEFT), 1)).xyz,
 			mVolumePosition - (camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_RIGHT), 1)).xyz
 		};

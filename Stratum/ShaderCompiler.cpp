@@ -62,11 +62,10 @@ private:
 	unordered_map<string, string> mFullPaths;
 };
 
-bool CompileStage(Compiler* compiler, const CompileOptions& options, const string& source, const string& filename, shaderc_shader_kind stage, const string& entryPoint,
-	CompiledVariant& dest, CompiledShader& destShader) {
+bool CompileAssembly(Compiler* compiler, const CompileOptions& options, const string& source, const string& filename,
+	shaderc_shader_kind stage, const string& entryPoint, const string& destFile) {
 	
-	SpvCompilationResult result = compiler->CompileGlslToSpv(source, stage, filename.c_str(), entryPoint.c_str(), options);
-	
+	AssemblyCompilationResult result = compiler->CompileGlslToSpvAssembly(source, stage, filename.c_str(), entryPoint.c_str(), options);
 	string msg = result.GetErrorMessage();
 	if (msg.size()) {
 		stringstream ss(msg);
@@ -79,157 +78,188 @@ bool CompileStage(Compiler* compiler, const CompileOptions& options, const strin
 		}
 	}
 
-	switch (result.GetCompilationStatus()) {
-	case shaderc_compilation_status_success:
-		// store SPIRV module
-		destShader.mModules.push_back({});
-		SpirvModule& m = destShader.mModules.back();
-		for (auto d = result.cbegin(); d != result.cend(); d++)
-			m.mSpirv.push_back(*d);
+	if (result.GetCompilationStatus() != shaderc_compilation_status_success) return false;
 
-		// assign SPIRV module
-		VkSampleCountFlags vkstage;
-		switch (stage) {
-		case shaderc_vertex_shader:
-			dest.mModules[0] = (uint32_t)destShader.mModules.size() - 1;
-			vkstage = VK_SHADER_STAGE_VERTEX_BIT;
-			break;
-		case shaderc_fragment_shader:
-			dest.mModules[1] = (uint32_t)destShader.mModules.size() - 1;
-			vkstage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			break;
-		case shaderc_compute_shader:
-			dest.mModules[0] = (uint32_t)destShader.mModules.size() - 1;
-			vkstage = VK_SHADER_STAGE_COMPUTE_BIT;
-			break;
+	fs::path dstPath(destFile);
+	if (dstPath.is_relative()) {
+		fs::path srcPath(filename);
+		dstPath = fs::path(srcPath.parent_path().string() + "/" + destFile);
+		fprintf(stdout, "Outputting SPIR-V assembly file: %s\n", dstPath.string().c_str());
+	}
+
+	ofstream file(dstPath.c_str(), ios::out);
+	for (auto d = result.cbegin(); d != result.cend(); d++)
+		file << d << "\n";
+
+	return true;
+}
+
+bool CompileStage(Compiler* compiler, const CompileOptions& options, const string& source, const string& filename,
+	shaderc_shader_kind stage, const string& entryPoint, CompiledVariant& dest, CompiledShader& destShader) {
+	
+	SpvCompilationResult result = compiler->CompileGlslToSpv(source, stage, filename.c_str(), entryPoint.c_str(), options);
+	string msg = result.GetErrorMessage();
+
+	if (msg.size()) {
+		stringstream ss(msg);
+		string line;
+		while (getline(ss, line)) {
+			if (const char* error = strstr(line.c_str(), "error: "))
+				fprintf_color(COLOR_RED, stderr, "%s\n", error + 7);
+			else
+				fprintf_color(COLOR_RED, stderr, "%s\n", line.c_str());
 		}
+	}
 
-		spirv_cross::Compiler comp(m.mSpirv.data(), m.mSpirv.size());
-		spirv_cross::ShaderResources res = comp.get_shader_resources();
-		
-		#pragma region register resource bindings
-		auto registerResource = [&](const spirv_cross::Resource& res, VkDescriptorType type) {
-			auto& binding = dest.mDescriptorBindings[res.name];
+	if (result.GetCompilationStatus() != shaderc_compilation_status_success) return false;
 
-			binding.first = comp.get_decoration(res.id, spv::DecorationDescriptorSet);
+	// store SPIRV module
+	destShader.mModules.push_back({});
+	SpirvModule& m = destShader.mModules.back();
+	for (auto d = result.cbegin(); d != result.cend(); d++)
+		m.mSpirv.push_back(*d);
 
-			binding.second.stageFlags |= vkstage;
-			binding.second.binding = comp.get_decoration(res.id, spv::DecorationBinding);
-			binding.second.descriptorCount = 1;
-			binding.second.descriptorType = type;
-		};
+	// assign SPIRV module
+	VkSampleCountFlags vkstage;
+	switch (stage) {
+	case shaderc_vertex_shader:
+		dest.mModules[0] = (uint32_t)destShader.mModules.size() - 1;
+		vkstage = VK_SHADER_STAGE_VERTEX_BIT;
+		break;
+	case shaderc_fragment_shader:
+		dest.mModules[1] = (uint32_t)destShader.mModules.size() - 1;
+		vkstage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		break;
+	case shaderc_compute_shader:
+		dest.mModules[0] = (uint32_t)destShader.mModules.size() - 1;
+		vkstage = VK_SHADER_STAGE_COMPUTE_BIT;
+		break;
+	}
 
-		for (const auto& r : res.sampled_images)
-			registerResource(r, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-		for (const auto& r : res.separate_images)
-			if (comp.get_type(r.type_id).image.dim == spv::DimBuffer)
-				registerResource(r, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
-			else
-				registerResource(r, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-		for (const auto& r : res.storage_images)
-			if (comp.get_type(r.type_id).image.dim == spv::DimBuffer)
-				registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
-			else
-				registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-		for (const auto& r : res.storage_buffers)
-			registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-		for (const auto& r : res.separate_samplers)
-			registerResource(r, VK_DESCRIPTOR_TYPE_SAMPLER);
-		for (const auto& r : res.uniform_buffers)
-			registerResource(r, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+	spirv_cross::Compiler comp(m.mSpirv.data(), m.mSpirv.size());
+	spirv_cross::ShaderResources res = comp.get_shader_resources();
+	
+	#pragma region register resource bindings
+	auto registerResource = [&](const spirv_cross::Resource& res, VkDescriptorType type) {
+		auto& binding = dest.mDescriptorBindings[res.name];
 
-		for (const auto& r : res.push_constant_buffers) {
-			uint32_t index = 0;
+		binding.first = comp.get_decoration(res.id, spv::DecorationDescriptorSet);
 
-			const auto& type = comp.get_type(r.base_type_id);
+		binding.second.stageFlags |= vkstage;
+		binding.second.binding = comp.get_decoration(res.id, spv::DecorationBinding);
+		binding.second.descriptorCount = 1;
+		binding.second.descriptorType = type;
+	};
 
-			if (type.basetype == spirv_cross::SPIRType::Struct) {
-				for (uint32_t i = 0; i < type.member_types.size(); i++) {
-					const auto& mtype = comp.get_type(type.member_types[i]);
+	for (const auto& r : res.sampled_images)
+		registerResource(r, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+	for (const auto& r : res.separate_images)
+		if (comp.get_type(r.type_id).image.dim == spv::DimBuffer)
+			registerResource(r, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+		else
+			registerResource(r, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+	for (const auto& r : res.storage_images)
+		if (comp.get_type(r.type_id).image.dim == spv::DimBuffer)
+			registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
+		else
+			registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+	for (const auto& r : res.storage_buffers)
+		registerResource(r, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+	for (const auto& r : res.separate_samplers)
+		registerResource(r, VK_DESCRIPTOR_TYPE_SAMPLER);
+	for (const auto& r : res.uniform_buffers)
+		registerResource(r, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
-					const string name = comp.get_member_name(r.base_type_id, index);
-					
-					VkPushConstantRange range = {};
-					range.stageFlags = vkstage == VK_SHADER_STAGE_COMPUTE_BIT ? VK_SHADER_STAGE_COMPUTE_BIT : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-					range.offset = comp.type_struct_member_offset(type, index);
+	for (const auto& r : res.push_constant_buffers) {
+		uint32_t index = 0;
 
-					switch (mtype.basetype) {
-					case spirv_cross::SPIRType::Boolean:
-					case spirv_cross::SPIRType::SByte:
-					case spirv_cross::SPIRType::UByte:
-						range.size = 1;
-						break;
-					case spirv_cross::SPIRType::Short:
-					case spirv_cross::SPIRType::UShort:
-					case spirv_cross::SPIRType::Half:
-						range.size = 2;
-						break;
-					case spirv_cross::SPIRType::Int:
-					case spirv_cross::SPIRType::UInt:
-					case spirv_cross::SPIRType::Float:
-						range.size = 4;
-						break;
-					case spirv_cross::SPIRType::Int64:
-					case spirv_cross::SPIRType::UInt64:
-					case spirv_cross::SPIRType::Double:
-						range.size = 8;
-						break;
-					case spirv_cross::SPIRType::Struct:
-						range.size = (uint32_t)comp.get_declared_struct_size(mtype);
-						break;
-					case spirv_cross::SPIRType::Unknown:
-					case spirv_cross::SPIRType::Void:
-					case spirv_cross::SPIRType::AtomicCounter:
-					case spirv_cross::SPIRType::Image:
-					case spirv_cross::SPIRType::SampledImage:
-					case spirv_cross::SPIRType::Sampler:
-					case spirv_cross::SPIRType::AccelerationStructureNV:
-						fprintf(stderr, "Unknown type for push constant: %s\n", name.c_str());
-						range.size = 0;
-						break;
-					}
+		const auto& type = comp.get_type(r.base_type_id);
 
-					range.size *= mtype.columns * mtype.vecsize;
+		if (type.basetype == spirv_cross::SPIRType::Struct) {
+			for (uint32_t i = 0; i < type.member_types.size(); i++) {
+				const auto& mtype = comp.get_type(type.member_types[i]);
 
-					vector<pair<string, VkPushConstantRange>> ranges;
-					ranges.push_back(make_pair(name, range));
+				const string name = comp.get_member_name(r.base_type_id, index);
+				
+				VkPushConstantRange range = {};
+				range.stageFlags = vkstage == VK_SHADER_STAGE_COMPUTE_BIT ? VK_SHADER_STAGE_COMPUTE_BIT : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+				range.offset = comp.type_struct_member_offset(type, index);
 
-					for (uint32_t dim : mtype.array) {
-						for (auto& r : ranges)
-							r.second.size *= dim;
-						// TODO: support individual element ranges
-						//uint32_t sz = ranges.size();
-						//for (uint32_t j = 0; j < sz; j++)
-						//	for (uint32_t c = 0; c < dim; c++)
-						//		ranges.push_back(make_pair(ranges[j].first + "[" + to_string(c) + "]", range));
-					}
+				switch (mtype.basetype) {
+				case spirv_cross::SPIRType::Boolean:
+				case spirv_cross::SPIRType::SByte:
+				case spirv_cross::SPIRType::UByte:
+					range.size = 1;
+					break;
+				case spirv_cross::SPIRType::Short:
+				case spirv_cross::SPIRType::UShort:
+				case spirv_cross::SPIRType::Half:
+					range.size = 2;
+					break;
+				case spirv_cross::SPIRType::Int:
+				case spirv_cross::SPIRType::UInt:
+				case spirv_cross::SPIRType::Float:
+					range.size = 4;
+					break;
+				case spirv_cross::SPIRType::Int64:
+				case spirv_cross::SPIRType::UInt64:
+				case spirv_cross::SPIRType::Double:
+					range.size = 8;
+					break;
+				case spirv_cross::SPIRType::Struct:
+					range.size = (uint32_t)comp.get_declared_struct_size(mtype);
+					break;
+				case spirv_cross::SPIRType::Unknown:
+				case spirv_cross::SPIRType::Void:
+				case spirv_cross::SPIRType::AtomicCounter:
+				case spirv_cross::SPIRType::Image:
+				case spirv_cross::SPIRType::SampledImage:
+				case spirv_cross::SPIRType::Sampler:
+				case spirv_cross::SPIRType::AccelerationStructureNV:
+					fprintf(stderr, "Warning: Unknown type for push constant: %s\n", name.c_str());
+					range.size = 0;
+					break;
+				}
 
+				range.size *= mtype.columns * mtype.vecsize;
+
+				vector<pair<string, VkPushConstantRange>> ranges;
+				ranges.push_back(make_pair(name, range));
+
+				for (uint32_t dim : mtype.array) {
 					for (auto& r : ranges)
-						dest.mPushConstants[r.first] = r.second;
+						r.second.size *= dim;
+					// TODO: support individual element ranges
+					//uint32_t sz = ranges.size();
+					//for (uint32_t j = 0; j < sz; j++)
+					//	for (uint32_t c = 0; c < dim; c++)
+					//		ranges.push_back(make_pair(ranges[j].first + "[" + to_string(c) + "]", range));
+				}
 
-					index++;
-				}
-			} else
-				fprintf(stderr, "Push constant data is not a struct! Reflection will not work.\n");
-		}
-		#pragma endregion
-		
-		if (vkstage == VK_SHADER_STAGE_COMPUTE_BIT) {
-			auto entryPoints = comp.get_entry_points_and_stages();
-			for (const auto& e : entryPoints) {
-				if (e.name == entryPoint) {
-					auto& ep = comp.get_entry_point(e.name, e.execution_model);
-					dest.mWorkgroupSize[0] = ep.workgroup_size.x;
-					dest.mWorkgroupSize[1] = ep.workgroup_size.y;
-					dest.mWorkgroupSize[2] = ep.workgroup_size.z;
-				}
+				for (auto& r : ranges)
+					dest.mPushConstants[r.first] = r.second;
+
+				index++;
 			}
 		} else
-			dest.mWorkgroupSize = 0;
-
-		return true;
+			fprintf(stderr, "Warning: Push constant data is not a struct! Reflection will not work.\n");
 	}
-	return false;
+	#pragma endregion
+	
+	if (vkstage == VK_SHADER_STAGE_COMPUTE_BIT) {
+		auto entryPoints = comp.get_entry_points_and_stages();
+		for (const auto& e : entryPoints) {
+			if (e.name == entryPoint) {
+				auto& ep = comp.get_entry_point(e.name, e.execution_model);
+				dest.mWorkgroupSize[0] = ep.workgroup_size.x;
+				dest.mWorkgroupSize[1] = ep.workgroup_size.y;
+				dest.mWorkgroupSize[2] = ep.workgroup_size.z;
+			}
+		}
+	} else
+		dest.mWorkgroupSize = 0;
+	
+	return true;
 }
 
 CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
@@ -244,6 +274,14 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 
 	std::vector<std::pair<std::string, uint32_t>> arrays; // name, size
 	std::vector<std::pair<std::string, VkSamplerCreateInfo>> staticSamplers;
+	
+	struct AssemblyOutput {
+		string destFile;
+		string entryPoint;
+		shaderc_shader_kind stage;
+		vector<string> keywords;
+	};
+	std::vector<AssemblyOutput> assemblyOutputs; // filename, entryPoint, compilerArgs
 
 	CompiledShader* result = new CompiledShader();
 	result->mRenderQueue = 1000;
@@ -263,8 +301,13 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 
 	istringstream srcstream(source);
 
+	uint32_t lineNumber = 0;
+
+	#define RET_ERR(...) { fprintf_color(COLOR_RED, stderr, "%s(%u): ", filename.c_str(), lineNumber); fprintf_color(COLOR_RED, stderr, __VA_ARGS__);  return nullptr; }
+
 	string line;
 	while (getline(srcstream, line)) {
+		lineNumber++;
 		istringstream linestream(line);
 		vector<string> words{ istream_iterator<string>{linestream}, istream_iterator<string>{} };
 		
@@ -272,9 +315,9 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 
 		for (auto it = words.begin(); it != words.end(); ++it) {
 			if (*it == "#pragma") {
-				if (++it == words.end()) break;
+				if (++it == words.end()) RET_ERR("Error: 'pragma': expected compiler directive\n");
 				if (*it == "multi_compile") {
-					if (++it == words.end()) break;
+					if (++it == words.end()) RET_ERR("Error: 'multi_compile': expected one or more keywords\n");
 					// iterate all the keywords added by this multi_compile
 					while (it != words.end()) {
 						// duplicate all existing variants, add this keyword to each
@@ -286,96 +329,92 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 					}
 				
 				} else if (*it == "vertex") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'vertex': expected an entry point\n");
 					string ep = *it;
 					PassType pass = PASS_MAIN;
 					if (++it != words.end()) pass = atopass(*it);
-					if (passes.count(pass) && passes[pass].first != "") {
-						fprintf_color(COLOR_RED, stderr, "Duplicate vertex shader for pass %s!\n", it->c_str());
-						return nullptr;
-					}
+					if (passes.count(pass) && passes[pass].first != "") RET_ERR("Error: 'vertex': Cannot have more than oney vertex shader for pass %s!\n", it->c_str());
 					passes[pass].first = ep;
 
 				} else if (*it == "fragment") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'fragment': expected an entry point\n");
 					string ep = *it;
 					PassType pass = PASS_MAIN;
 					if (++it != words.end()) pass = atopass(*it);
-					if (passes.count(pass) && passes[pass].second != "") {
-						fprintf_color(COLOR_RED, stderr, "Duplicate vertex shader for pass %s!\n", it->c_str());
-						return nullptr;
-					}
+					if (passes.count(pass) && passes[pass].second != "") RET_ERR("Error: 'fragment': Cannot have more than one fragment shader for pass %s\n", it->c_str());
 					passes[pass].second = ep;
 
 				} else if (*it == "kernel") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'kernel': expected an entry point\n");
 					kernels.push_back(*it);
 
+				} else if (*it == "output_assembly") {
+					if (++it == words.end()) RET_ERR("Error: 'output_assembly': expected a filename\n");
+					string filename = *it;
+					if (++it == words.end()) RET_ERR("Error: 'output_assembly': expected a stage identifier\n");
+					shaderc_shader_kind stage;
+					if (*it == "kernel") stage = shaderc_compute_shader;
+					else if (*it == "fragment") stage = shaderc_fragment_shader;
+					else if (*it == "vertex") stage = shaderc_vertex_shader;
+					else RET_ERR("Error: 'output_assembly': unknown stage identifer %s (expected one of: 'vertex' 'fragment' 'kernel')\n");
+					if (++it == words.end()) RET_ERR("Error: 'output_assembly': expected an entry point\n");
+					assemblyOutputs.push_back({});
+					AssemblyOutput& a = assemblyOutputs.back();
+					a.entryPoint = *it;
+					a.destFile = filename;
+					a.stage = stage;
+					while (++it != words.end()) a.keywords.push_back(*it);
+				
 				} else if (*it == "render_queue"){
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'render_queue': expected an integer\n");
 					result->mRenderQueue = atoi(it->c_str());
 
 				} else if (*it == "color_mask") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'color_mask': expected a concatenation of 'r' 'g' 'b' 'a'\n");
 					result->mColorMask = atomask(*it);
 
 				} else if (*it == "zwrite") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'zwrite': expected one of 'true' 'false'\n");
 					if (*it == "true") result->mDepthStencilState.depthWriteEnable = VK_TRUE;
 					else if (*it == "false") result->mDepthStencilState.depthWriteEnable = VK_FALSE;
-					else {
-						fprintf_color(COLOR_RED, stderr, "%s", "zwrite must be true or false.\n");
-						return nullptr;
-					}
+					else RET_ERR("Error: 'zwrite' expected one of 'true' 'false'\n");
 
 				} else if (*it == "ztest") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'ztest': expected one of 'true' 'false'\n");
 					if (*it == "true")
 						result->mDepthStencilState.depthTestEnable = VK_TRUE;
 					else if (*it == "false")
 						result->mDepthStencilState.depthTestEnable = VK_FALSE;
-					else{
-						fprintf_color(COLOR_RED, stderr, "%s", "ztest must be true or false.\n");
-						return nullptr;
-					}
+					else RET_ERR("Error: 'ztest': expected one of 'true' 'false'\n");
 
 				} else if (*it == "depth_op") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'depth_op': expected a depth op\n");
 					result->mDepthStencilState.depthCompareOp = atocmp(*it);
 
 				} else if (*it == "cull") {
-					if (++it == words.end()) return nullptr;
-					if (*it == "front") result->mCullMode = VK_CULL_MODE_FRONT_BIT;
-					else if (*it == "back") result->mCullMode = VK_CULL_MODE_BACK_BIT;
-					else if (*it == "false") result->mCullMode = VK_CULL_MODE_NONE;
-					else {
-						fprintf_color(COLOR_RED, stderr, "Unknown cull mode: %s\n", it->c_str());
-						return nullptr;
-					}
+					if (++it == words.end()) RET_ERR("Error: 'cull': expected one of 'front' 'back' 'false'\n");
+					if (*it == "front") 			result->mCullMode = VK_CULL_MODE_FRONT_BIT;
+					else if (*it == "back") 	result->mCullMode = VK_CULL_MODE_BACK_BIT;
+					else if (*it == "false") 	result->mCullMode = VK_CULL_MODE_NONE;
+					else RET_ERR("Error: 'cull': expected one of 'front' 'back' 'false'\n");
 
 				} else if (*it == "fill") {
-					if (++it == words.end()) return nullptr;
-					if (*it == "solid") result->mFillMode = VK_POLYGON_MODE_FILL;
-					else if (*it == "line") result->mFillMode = VK_POLYGON_MODE_LINE;
-					else if (*it == "point") result->mFillMode = VK_POLYGON_MODE_POINT;
-					else {
-						fprintf_color(COLOR_RED, stderr, "Unknown fill mode: %s\n", it->c_str());
-						return nullptr;
-					}
+					if (++it == words.end()) RET_ERR("Error: 'fill': expected one of 'solid' 'line' 'point'\n");
+					if (*it == "solid") 		 	result->mFillMode = VK_POLYGON_MODE_FILL;
+					else if (*it == "line")  	result->mFillMode = VK_POLYGON_MODE_LINE;
+					else if (*it == "point") 	result->mFillMode = VK_POLYGON_MODE_POINT;
+					else RET_ERR("Error: 'fill': expected one of 'solid' 'line' 'point'\n");
 
 				} else if (*it == "blend") {
-					if (++it == words.end()) return nullptr;
-					if (*it == "opaque")		result->mBlendMode = BLEND_MODE_OPAQUE;
-					else if (*it == "alpha")	result->mBlendMode = BLEND_MODE_ALPHA;
-					else if (*it == "add")		result->mBlendMode = BLEND_MODE_ADDITIVE;
+					if (++it == words.end()) RET_ERR("Error: 'blend': expected one of 'opaque' 'alpha' 'add' 'multiply'\n");
+					if (*it == "opaque")		    result->mBlendMode = BLEND_MODE_OPAQUE;
+					else if (*it == "alpha")	  result->mBlendMode = BLEND_MODE_ALPHA;
+					else if (*it == "add")		  result->mBlendMode = BLEND_MODE_ADDITIVE;
 					else if (*it == "multiply")	result->mBlendMode = BLEND_MODE_MULTIPLY;
-					else {
-						fprintf_color(COLOR_RED, stderr, "Unknown blend mode: %s\n", it->c_str());
-						return nullptr;
-					}
+					else RET_ERR("Error: 'blend': expected one of 'opaque' 'alpha' 'add' 'multiply'\n");
 
 				} else if (*it == "static_sampler") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'static_sampler': expected an sampler name\n");
 					string name = *it;
 
 					VkSamplerCreateInfo samplerInfo = {};
@@ -398,38 +437,41 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 
 					while (++it != words.end()) {
 						size_t eq = it->find('=');
-						if (eq == string::npos) continue;
+						if (eq == string::npos) RET_ERR("Error: 'static_sampler': expected arguments in the form '<arg>=<value>'\n");
 						string id = it->substr(0, eq);
 						string val = it->substr(eq + 1);
-						if (id == "magFilter")		    	samplerInfo.magFilter = atofilter(val);
+						if      (id == "magFilter")		  samplerInfo.magFilter = atofilter(val);
 						else if (id == "minFilter")			samplerInfo.minFilter = atofilter(val);
 						else if (id == "filter")				samplerInfo.minFilter = samplerInfo.magFilter = atofilter(val);
-						else if (id == "addressModeU")	samplerInfo.addressModeU = atoaddressmode(val);
-						else if (id == "addressModeV")	samplerInfo.addressModeV = atoaddressmode(val);
-						else if (id == "addressModeW")	samplerInfo.addressModeW = atoaddressmode(val);
-						else if (id == "addressMode")	samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW = atoaddressmode(val);
-						else if (id == "maxAnisotropy") {
-							float aniso = (float)atof(val.c_str());
-							samplerInfo.anisotropyEnable = aniso <= 0 ? VK_FALSE : VK_TRUE;
-							samplerInfo.maxAnisotropy = aniso;
-						} else if (id == "borderColor")				samplerInfo.borderColor = atobordercolor(val);
-						else if (id == "unnormalizedCoordinates")	samplerInfo.unnormalizedCoordinates = val == "true" ? VK_TRUE : VK_FALSE;
 						else if (id == "compareOp") {
 							VkCompareOp cmp = atocmp(val);
 							samplerInfo.compareEnable = cmp == VK_COMPARE_OP_MAX_ENUM ? VK_FALSE : VK_TRUE;
 							samplerInfo.compareOp = cmp;
-						} else if (id == "mipmapMode") samplerInfo.mipmapMode = atomipmapmode(val);
+						}
+						else if (id == "addressModeU")	samplerInfo.addressModeU = atoaddressmode(val);
+						else if (id == "addressModeV")	samplerInfo.addressModeV = atoaddressmode(val);
+						else if (id == "addressModeW")	samplerInfo.addressModeW = atoaddressmode(val);
+						else if (id == "addressMode")	 	samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW = atoaddressmode(val);
+						else if (id == "maxAnisotropy") {
+							float aniso = (float)atof(val.c_str());
+							samplerInfo.anisotropyEnable = aniso <= 0 ? VK_FALSE : VK_TRUE;
+							samplerInfo.maxAnisotropy = aniso;
+						}
+						else if (id == "borderColor")				samplerInfo.borderColor = atobordercolor(val);
+						else if (id == "unnormalizedCoordinates")	samplerInfo.unnormalizedCoordinates = val == "true" ? VK_TRUE : VK_FALSE;
+						else if (id == "mipmapMode") samplerInfo.mipmapMode = atomipmapmode(val);
 						else if (id == "minLod") samplerInfo.minLod = (float)atof(val.c_str());
 						else if (id == "maxLod") samplerInfo.maxLod = (float)atof(val.c_str());
 						else if (id == "mipLodBias") samplerInfo.mipLodBias = (float)atof(val.c_str());
+						else RET_ERR("Error: 'static_sampler': Unknown argument %s (expected one of '[min,mag]Filter' 'addressMode[U,V,W]' 'borderColor' 'compareOp' 'maxAnisotropy' 'unnormalizedCoordinates')\n", id.c_str());
 					}
 
 					staticSamplers.push_back(make_pair(name, samplerInfo));
 
 				} else if (*it == "array") {
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'array': expected a descriptor name\n");
 					string name = *it;
-					if (++it == words.end()) return nullptr;
+					if (++it == words.end()) RET_ERR("Error: 'array': expected an integer\n");
 					arrays.push_back(make_pair(name, (uint32_t)atoi(it->c_str())));
 				}
 				break;
@@ -540,6 +582,19 @@ CompiledShader* Compile(shaderc::Compiler* compiler, const string& filename) {
 			}
 		}
 	}
+
+	
+	for (const auto& assemblyOutput : assemblyOutputs) {
+		auto opts = options;
+
+		for (const auto& kw : assemblyOutput.keywords) {
+			if (kw.empty()) continue;
+			opts.AddMacroDefinition(kw);
+		}
+
+		if (!CompileAssembly(compiler, opts, source, filename, assemblyOutput.stage, assemblyOutput.entryPoint, assemblyOutput.destFile)) return nullptr;		
+	}
+
 	return result;
 }
 

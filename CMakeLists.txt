@@ -31,7 +31,7 @@ add_library(Engine SHARED
 	"Input/MouseKeyboardInput.cpp"
 	"Scene/Camera.cpp"
 	"Scene/ClothRenderer.cpp"
-	"Scene/GUI.cpp"
+	"Scene/GuiContext.cpp"
 	"Scene/Light.cpp"
 	"Scene/MeshRenderer.cpp"
 	"Scene/Scene.cpp"

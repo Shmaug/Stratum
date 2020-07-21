@@ -63,11 +63,21 @@ struct VertexWeight {
 	float4 Weights;
 	uint4 Indices;
 };
+
+struct GlyphVertex {
+	int2 Endpoint;
+	int2 ControlPoint;
+	uint Degree;
+	uint pad[3];
+};
 struct TextGlyph {
 	float2 Offset;
 	float2 Extent;
-	float2 TexOffset;
-	float2 TexExtent;
+	float2 ShapeOffset;
+	float2 ShapeExtent;
+	uint StartVertex;
+	uint VertexCount;
+	uint pad[2];
 };
 
 #ifdef __cplusplus

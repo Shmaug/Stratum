@@ -55,7 +55,7 @@ void MeshRenderer::DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, P
 	// TODO: Cache object descriptorset?
 	
 	DescriptorSet* objDS = commandBuffer->GetDescriptorSet(mName, shader->mDescriptorSetLayouts[PER_OBJECT]);
-	objDS->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
+	objDS->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING);
 	objDS->FlushWrites();
 	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *objDS, 0, nullptr);
 
@@ -63,19 +63,19 @@ void MeshRenderer::DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, P
 	commandBuffer->BindVertexBuffer(mesh->VertexBuffer().get(), 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 	commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
 	
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
 	}
 }
 
 void MeshRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
-	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
 	buf->ObjectToWorld = ObjectToWorld();
 	buf->WorldToObject = WorldToObject();

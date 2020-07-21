@@ -136,20 +136,20 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 
 	vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, add->mPipeline);
 	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, add->mPipelineLayout, 0, 1, *ds, 0, nullptr);
-	commandBuffer->PushConstantRef(add, "TriangleCount", triCount);
-	commandBuffer->PushConstantRef(add, "VertexCount", m->VertexCount());
-	commandBuffer->PushConstantRef(add, "VertexSize", m->VertexSize());
-	commandBuffer->PushConstantRef(add, "NormalLocation", (uint32_t)offsetof(StdVertex, normal));
-	commandBuffer->PushConstantRef(add, "TangentLocation", (uint32_t)offsetof(StdVertex, tangent));
-	commandBuffer->PushConstantRef(add, "TexcoordLocation", (uint32_t)offsetof(StdVertex, uv));
-	commandBuffer->PushConstantRef(add, "Friction", mFriction);
-	commandBuffer->PushConstantRef(add, "Drag", mDrag);
-	commandBuffer->PushConstantRef(add, "SpringK", mStiffness);
-	commandBuffer->PushConstantRef(add, "SpringD", mDamping);
-	commandBuffer->PushConstantRef(add, "DeltaTime", Scene()->FixedTimeStep());
-	commandBuffer->PushConstantRef(add, "SphereCount", (uint32_t)mSphereColliders.size());
-	commandBuffer->PushConstantRef(add, "Gravity", mGravity);
-	commandBuffer->PushConstantRef(add, "Move", mMove);
+	commandBuffer->PushConstantRef<uint32_t>("TriangleCount", triCount);
+	commandBuffer->PushConstantRef<uint32_t>("VertexCount", m->VertexCount());
+	commandBuffer->PushConstantRef<uint32_t>("VertexSize", m->VertexSize());
+	commandBuffer->PushConstantRef<uint32_t>("NormalLocation", (uint32_t)offsetof(StdVertex, normal));
+	commandBuffer->PushConstantRef<uint32_t>("TangentLocation", (uint32_t)offsetof(StdVertex, tangent));
+	commandBuffer->PushConstantRef<uint32_t>("TexcoordLocation", (uint32_t)offsetof(StdVertex, uv));
+	commandBuffer->PushConstantRef<float>("Friction", mFriction);
+	commandBuffer->PushConstantRef<float>("Drag", mDrag);
+	commandBuffer->PushConstantRef<float>("SpringK", mStiffness);
+	commandBuffer->PushConstantRef<float>("SpringD", mDamping);
+	commandBuffer->PushConstantRef<float>("DeltaTime", Scene()->FixedTimeStep());
+	commandBuffer->PushConstantRef<uint32_t>("SphereCount", (uint32_t)mSphereColliders.size());
+	commandBuffer->PushConstantRef<float3>("Gravity", mGravity);
+	commandBuffer->PushConstantRef<float3>("Move", mMove);
 	vkCmdDispatch(*commandBuffer, (triCount + 63) / 64, 1, 1);
 
 
@@ -250,12 +250,12 @@ void ClothRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassType 
 	commandBuffer->BindVertexBuffer(mVertexBuffer, 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), 0, 0);
 	commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), 0, 0);
 		commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 	}

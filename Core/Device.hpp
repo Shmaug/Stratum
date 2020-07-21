@@ -1,12 +1,6 @@
 #pragma once
 
-#include <Core/DescriptorSet.hpp>
-#include <Core/CommandBuffer.hpp>
 #include <Core/Instance.hpp>
-#include <Util/Util.hpp>
-
-class AssetManager;
-class Window;
 
 class Device {
 public:
@@ -23,7 +17,7 @@ public:
 	ENGINE_EXPORT void ReturnToPool(DescriptorSet* descriptorSet);
 	ENGINE_EXPORT void ReturnToPool(Texture* texture);
 	
-	ENGINE_EXPORT void TrimPool();
+	ENGINE_EXPORT void PurgePooledResources(uint32_t maxAge);
 
 	ENGINE_EXPORT CommandBuffer* GetCommandBuffer(const std::string& name = "Command Buffer");
 	ENGINE_EXPORT void Execute(CommandBuffer* commandBuffer);

@@ -33,7 +33,7 @@ public:
 	ENGINE_EXPORT virtual void PostUpdate(CommandBuffer* commandBuffer) override;
 	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
 	
-	ENGINE_EXPORT void DrawGUI(CommandBuffer* commandBuffer, Camera* camera);
+	ENGINE_EXPORT void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera);
 
 private:
 	std::shared_ptr<::Material> mMaterial;

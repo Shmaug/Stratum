@@ -1,11 +1,11 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
+#pragma multi_compile SCREEN_SPACE
+
 #pragma render_queue 4000
 #pragma cull false
 #pragma blend alpha
-
-#pragma multi_compile SCREEN_SPACE
 
 #include <include/shadercompat.h>
 
@@ -16,7 +16,7 @@
 	STRATUM_PUSH_CONSTANTS
 	uint TransformIndex;
 	float4 Color;
-	float4 Bounds;
+	float4 ClipBounds;
 	float2 ScreenSize;
 	float Depth;
 }
@@ -25,10 +25,8 @@
 
 struct v2f {
 	float4 position : SV_Position;
-#ifndef SCREEN_SPACE
 	float4 worldPos : TEXCOORD0;
-#endif
-	float2 canvasPos;
+	float2 canvasPos : TEXCOORD1;
 };
 
 v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
@@ -49,7 +47,7 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	o.worldPos = float4(worldPos.xyz, o.position.z);
 #endif
 
-	o.canvasPos = (p - Bounds.xy) / Bounds.zw;
+	o.canvasPos = (p - ClipBounds.xy) / ClipBounds.zw;
 
 	return o;
 }
@@ -57,13 +55,15 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 void fsmain(v2f i,
 	out float4 color : SV_Target0,
 	out float4 depthNormal : SV_Target1) {
+	
 	color = Color;
+
 	#ifdef SCREEN_SPACE
 	depthNormal = 0;
 	#else
-	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 0);
+	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, color.a);
 	#endif
+	
 	clip(i.canvasPos);
 	clip(1 - i.canvasPos);
-	depthNormal.a = color.a;
 }

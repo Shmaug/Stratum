@@ -9,7 +9,7 @@
 #include <Input/InputManager.hpp>
 #include <Scene/ObjectBvh2.hpp>
 #include <Scene/Camera.hpp>
-#include <Scene/GUI.hpp>
+#include <Scene/GuiContext.hpp>
 #include <Scene/Light.hpp>
 #include <Scene/Object.hpp>
 #include <Util/Util.hpp>
@@ -92,6 +92,7 @@ private:
 	::Instance* mInstance;
 	::InputManager* mInputManager;
 	::PluginManager* mPluginManager;
+	GuiContext* mGuiContext;
 	
 	std::vector<std::shared_ptr<Object>> mObjects;
 	std::vector<Light*> mLights;

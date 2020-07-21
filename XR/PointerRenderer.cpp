@@ -27,16 +27,16 @@ void PointerRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassTyp
 
 	float3 p0 = WorldPosition();
 	float3 p1 = WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance);
-	commandBuffer->PushConstantRef(shader, "P0", p0);
-	commandBuffer->PushConstantRef(shader, "P1", p1);
-	commandBuffer->PushConstantRef(shader, "Width", mWidth);
-	commandBuffer->PushConstantRef(shader, "Color", mColor);
+	commandBuffer->PushConstantRef("P0", p0);
+	commandBuffer->PushConstantRef("P1", p1);
+	commandBuffer->PushConstantRef("Width", mWidth);
+	commandBuffer->PushConstantRef("Color", mColor);
 
-	camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
 	vkCmdDraw(*commandBuffer, 6, 1, 0, 0);
 
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
 		vkCmdDraw(*commandBuffer, 6, 1, 0, 0);
 	}
 }

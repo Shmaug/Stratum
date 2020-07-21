@@ -2,7 +2,7 @@
 #include <Scene/Renderer.hpp>
 #include <Scene/MeshRenderer.hpp>
 #include <Scene/SkinnedMeshRenderer.hpp>
-#include <Scene/GUI.hpp>
+#include <Scene/GuiContext.hpp>
 #include <Core/Instance.hpp>
 #include <Util/Profiler.hpp>
 
@@ -171,12 +171,15 @@ Scene::Scene(::Instance* instance, ::InputManager* inputManager, ::PluginManager
 	mEnvironmentTexture = mInstance->Device()->AssetManager()->WhiteTexture();
 
 	mStartTime = mClock.now();
-	mLastFrame = mClock.now();
+	mLastFrame = mStartTime;
+
+	mGuiContext = new GuiContext(mInstance->Device(), mInputManager);
 }
 Scene::~Scene(){
+	safe_delete(mGuiContext);
+
 	safe_delete(mSkyboxCube);
 	safe_delete(mBvh);
-
 
 	while (mObjects.size())
 		RemoveObject(mObjects[0].get());
@@ -681,8 +684,6 @@ void Scene::RenderShadows(CommandBuffer* commandBuffer, Camera* camera) {
 	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 
-	mShadowAtlas->PreBeginRenderPass();
-
 	if (mLights.empty() || mRenderers.empty()) return;
 
 	PROFILER_BEGIN("Lighting");
@@ -840,6 +841,8 @@ void Scene::RenderShadows(CommandBuffer* commandBuffer, Camera* camera) {
 
 		commandBuffer->TransitionBarrier(mShadowAtlas->DepthBuffer(), VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 		mShadowAtlas->Clear(commandBuffer, CLEAR_DEPTH);
+		
+		// TODO: BeginRenderPass for shadows
 
 		for (uint32_t i = 0; i < si; i++) {
 			mShadowCameras[i]->mEnabled = true;
@@ -869,8 +872,20 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, PassType pass, 
 }
 
 void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, PassType pass, bool clear, vector<Renderer*>& renderers) {
-	camera->PreBeginRenderPass();
 	if (camera->Framebuffer()->Extent().width == 0 || camera->Framebuffer()->Extent().height == 0) return;
+
+
+	// TODO: pull these DrawGui and PreBeginRenderPass loops so that Scene::Render() doesn't care about RenderPasses
+
+	PROFILER_BEGIN("DrawGui");
+	for (const auto& r : mObjects)
+		if (r->EnabledHierarchy())
+			r->DrawGui(commandBuffer, mGuiContext, camera);
+	for (const auto& p : mPluginManager->Plugins())
+		if (p->mEnabled)
+			p->DrawGui(commandBuffer, mGuiContext, camera);
+	mGuiContext->PreBeginRenderPass(commandBuffer);
+	PROFILER_END;
 
 	PROFILER_BEGIN("PreBeginRenderPass");
 	BEGIN_CMD_REGION(commandBuffer, "PreBeginRenderPass");
@@ -885,76 +900,70 @@ void Scene::Render(CommandBuffer* commandBuffer, Camera* camera, PassType pass, 
 		r->PreBeginRenderPass(commandBuffer, camera, pass);
 	END_CMD_REGION(commandBuffer);
 	PROFILER_END;
-	
-	PROFILER_BEGIN("DrawGUI");
-	GUI::Reset(commandBuffer);
-	for (const auto& r : mObjects)
-		if (r->EnabledHierarchy())
-			r->DrawGUI(commandBuffer, camera);
-	for (const auto& p : mPluginManager->Plugins())
-		if (p->mEnabled)
-			p->DrawGUI(commandBuffer, camera);
-	GUI::PreBeginRenderPass(commandBuffer);
-	PROFILER_END;
 
+	
 	PROFILER_BEGIN("Render");
 	BEGIN_CMD_REGION(commandBuffer, "Render");
 
-	camera->BeginRenderPass(commandBuffer);
+	if (camera->ClearFlags() != CLEAR_NONE)
+		camera->Framebuffer()->Clear(commandBuffer, camera->ClearFlags());
+	camera->SetViewportScissor(commandBuffer);
+	camera->UpdateUniformBuffer();
 
 	PROFILER_BEGIN("PreRender");
 	for (const auto& p : mPluginManager->Plugins())
 		if (p->mEnabled) p->PreRender(commandBuffer, camera, pass);
 	PROFILER_END;
 
-	// Skybox
-	if (camera->ClearFlags() == CLEAR_SKYBOX && mSkyboxMaterial && pass == PASS_MAIN) {
-		ShaderVariant* shader = mSkyboxMaterial->GetShader(PASS_MAIN);
-		VkPipelineLayout layout = commandBuffer->BindMaterial(mSkyboxMaterial, pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
+	// Draw Skybox
+	if (pass == PASS_MAIN && camera->ClearFlags() == CLEAR_SKYBOX && mSkyboxMaterial) {
+		commandBuffer->BindMaterial(mSkyboxMaterial, pass, mSkyboxCube->VertexInput(), camera, mSkyboxCube->Topology());
 		commandBuffer->BindVertexBuffer(mSkyboxCube->VertexBuffer().get(), 0, 0);
 		commandBuffer->BindIndexBuffer(mSkyboxCube->IndexBuffer().get(), 0, mSkyboxCube->IndexType());
-		camera->SetStereoViewport(commandBuffer, shader, EYE_LEFT);
+		camera->SetStereoViewport(commandBuffer, EYE_LEFT);
 		vkCmdDrawIndexed(*commandBuffer, mSkyboxCube->IndexCount(), 1, mSkyboxCube->BaseIndex(), mSkyboxCube->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += mSkyboxCube->IndexCount() / 3;
 		if (camera->StereoMode() != STEREO_NONE) {
-			camera->SetStereoViewport(commandBuffer, shader, EYE_RIGHT);
+			camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
 			vkCmdDrawIndexed(*commandBuffer, mSkyboxCube->IndexCount(), 1, mSkyboxCube->BaseIndex(), mSkyboxCube->BaseVertex(), 0);
 			commandBuffer->mTriangleCount += mSkyboxCube->IndexCount() / 3;
 		}
 	}
 
+	// Draw Renderers
+
 	Buffer* instanceBuffer = nullptr;
 	uint32_t instanceCount = 0;
 	Renderer* firstInstance = nullptr;
 	bool drawGui = true;
-
 	for (Object* o : renderers)
 		if (Renderer* r = dynamic_cast<Renderer*>(o)) {
 			if (!r || !r->Visible()) continue;
 
-			if (drawGui && r->RenderQueue() > GUI::mRenderQueue) {
-				GUI::Draw(commandBuffer, pass, camera);
+			if (drawGui && r->RenderQueue() > mGuiContext->mRenderQueue) {
+				// draw guicontext just before any renderers higher than the guicontext renderqueue
+				mGuiContext->Draw(commandBuffer, pass, camera);
 				drawGui = false;
 			}
 
 			// TODO: call TryCombineInstances outside of RenderPass for potential compute support
 			if (!firstInstance || firstInstance->TryCombineInstances(commandBuffer, r, instanceBuffer, instanceCount)) {
 				// Failed to combine, draw last batch
-				firstInstance->DrawInstanced(commandBuffer, camera, pass, instanceBuffer, instanceCount);
+				if (firstInstance) firstInstance->DrawInstanced(commandBuffer, camera, pass, instanceBuffer, instanceCount);
 				instanceCount = 0;
 				firstInstance = nullptr;
 				r->Draw(commandBuffer, camera, pass);
 			}
 		}
 	if (firstInstance) firstInstance->DrawInstanced(commandBuffer, camera, pass, instanceBuffer, instanceCount);
-	if (drawGui) GUI::Draw(commandBuffer, pass, camera);
+	if (drawGui) mGuiContext->Draw(commandBuffer, pass, camera);
 
-	camera->SetViewportScissor(commandBuffer);
 
 	PROFILER_BEGIN("PostRender");
 	for (const auto& p : mPluginManager->Plugins())
 		if (p->mEnabled) p->PostRender(commandBuffer, camera, pass);
 	PROFILER_END;
+
 
 	vkCmdEndRenderPass(*commandBuffer);
 

@@ -1,23 +1,22 @@
 #pragma vertex vsmain
 #pragma fragment fsmain
 
+#pragma multi_compile TEXTURED
+#pragma multi_compile SCREEN_SPACE
+
 #pragma render_queue 4000
 #pragma cull false
 #pragma blend alpha
 
-#pragma static_sampler Sampler
-
-#pragma multi_compile TEXTURED
-#pragma multi_compile SCREEN_SPACE
-
 #pragma array Textures 64
+#pragma static_sampler Sampler
 
 #include <include/shadercompat.h>
 
 struct GuiRect {
 	float4x4 ObjectToWorld;
 	float4 ScaleTranslate;
-	float4 Bounds;
+	float4 ClipBounds;
 	float4 Color;
 
 	float4 TextureST;
@@ -87,7 +86,7 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	o.texcoord.xy = positions[index] * r.TextureST.xy + r.TextureST.zw;
 	#endif
 
-	o.texcoord.zw = (p - r.Bounds.xy) / r.Bounds.zw;
+	o.texcoord.zw = (p - r.ClipBounds.xy) / r.ClipBounds.zw;
 
 	o.color = r.Color;
 
@@ -97,6 +96,7 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 void fsmain(v2f i,
 	out float4 color : SV_Target0,
 	out float4 depthNormal : SV_Target1) {
+
 	#ifdef SCREEN_SPACE
 	depthNormal = 0;
 	#else
@@ -112,7 +112,9 @@ void fsmain(v2f i,
 	#else
 	color = i.color;
 	#endif
+
 	clip(i.texcoord.zw);
 	clip(1 - i.texcoord.zw);
+
 	depthNormal.a = color.a;
 }

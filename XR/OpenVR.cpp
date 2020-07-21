@@ -51,12 +51,10 @@ VertexInput RenderModelVertexInput = {
     }
 };
 
-OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mCopyTarget(nullptr), mScrollTouchCount(0), mPoseHistoryFrameCount(8) {
+OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mScrollTouchCount(0), mPoseHistoryFrameCount(8) {
     memset(mTrackedObjects, 0, sizeof(Object*) * k_unMaxTrackedDeviceCount);
 }
 OpenVR::~OpenVR() {
-    safe_delete(mCopyTarget);
-
     for (auto& kp : mRenderModelObjects)
         mScene->RemoveObject(kp.second);
     for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
@@ -217,7 +215,7 @@ bool OpenVR::InitScene(Scene* scene) {
 }
 
 void OpenVR::BeginFrame() {
-    Profiler::BeginSample("OpenVR Poll Event");
+    Profiler::BeginSample("OpenVR Poll Events");
     VREvent_t event;
     while (mSystem->PollNextEvent(&event, sizeof(event))) {
         switch (event.eventType) {
@@ -374,7 +372,7 @@ void OpenVR::BeginFrame() {
             char* renderModelName = new char[len];
             len = mRenderModelInterface->GetComponentRenderModelName(deviceRenderModelName, componentName, renderModelName, len);
 
-            // Retreive or create renderer
+            // Retrieve or create renderer
             string mrname = to_string(i) + "/" + componentName + to_string(j);
             MeshRenderer* mr;
             if (mRenderModelObjects.count(mrname))
@@ -406,12 +404,11 @@ void OpenVR::BeginFrame() {
                                 VkExtent2D { renderModelDiffuse->unWidth, renderModelDiffuse->unHeight }, VK_FORMAT_R8G8B8A8_UNORM, 0);
                             shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadShader("Shaders/pbr.stm"));
                             mat->EnableKeyword("TEXTURED_COLORONLY");
-                            mat->SetSampledTexture("MainTextures", diffuse, 0);
+                            mat->SetSampledTexture("BaseColorTexture", diffuse, 0);
                             mat->SetPushParameter("Color", float4(1));
                             mat->SetPushParameter("Metallic", 0.f);
                             mat->SetPushParameter("Roughness", .85f);
                             mat->SetPushParameter("Emission", float3(0));
-                            mat->SetPushParameter("TextureIndex", 0u);
                             mat->SetPushParameter("TextureST", float4(1, 1, 0, 0));
                             mRenderModelMaterials.emplace(kp.second, make_pair(diffuse, mat));
                             mr->Material(mat);
@@ -458,28 +455,6 @@ void OpenVR::BeginFrame() {
     }
 }
 void OpenVR::PostRender(CommandBuffer* commandBuffer) {
-    Profiler::BeginSample("OpenVR Copy");
-
-    if (!mCopyTarget)
-        mCopyTarget = new Texture("HMD Copy Target", mScene->Instance()->Device(), mHmdCamera->Framebuffer()->Extent(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT,
-            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    
-    commandBuffer->TransitionBarrier(mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    commandBuffer->TransitionBarrier(mCopyTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-    VkImageCopy rgn = {};
-    rgn.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    rgn.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    rgn.srcSubresource.layerCount = 1;
-    rgn.dstSubresource.layerCount = 1;
-    rgn.extent = mCopyTarget->Extent();
-    vkCmdCopyImage(*commandBuffer, 
-        *mHmdCamera->Framebuffer()->ColorBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        *mCopyTarget, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1, &rgn);
-
-    Profiler::EndSample();
-
     // last-minute pose update
     TrackedDevicePose_t renderPoses[k_unMaxTrackedDeviceCount];
     TrackedDevicePose_t gamePoses[k_unMaxTrackedDeviceCount];
@@ -524,16 +499,16 @@ void OpenVR::EndFrame() {
     rightBounds.vMax = 1.f;
 
     VRVulkanTextureData_t vkTexture = {};
-    vkTexture.m_nImage = (uint64_t)(mCopyTarget->operator VkImage());
+    vkTexture.m_nImage = (uint64_t)(mHmdCamera->Framebuffer()->ColorBuffer()->operator VkImage());
     vkTexture.m_pDevice = *mScene->Instance()->Device();
     vkTexture.m_pPhysicalDevice = mScene->Instance()->Device()->PhysicalDevice();
     vkTexture.m_pInstance = *mScene->Instance();
     vkTexture.m_pQueue = mScene->Instance()->Device()->GraphicsQueue();
     vkTexture.m_nQueueFamilyIndex = mScene->Instance()->Device()->GraphicsQueueFamilyIndex();
-    vkTexture.m_nWidth = mCopyTarget->Extent().width;
-    vkTexture.m_nHeight = mCopyTarget->Extent().height;
-    vkTexture.m_nFormat = mCopyTarget->Format();
-    vkTexture.m_nSampleCount = 1;
+    vkTexture.m_nWidth = mHmdCamera->Framebuffer()->ColorBuffer()->Extent().width;
+    vkTexture.m_nHeight = mHmdCamera->Framebuffer()->ColorBuffer()->Extent().height;
+    vkTexture.m_nFormat = mHmdCamera->Framebuffer()->ColorBuffer()->Format();
+    vkTexture.m_nSampleCount = mHmdCamera->Framebuffer()->ColorBuffer()->SampleCount();
 
     Texture_t texture = {};
     texture.eType = TextureType_Vulkan;

@@ -119,6 +119,49 @@ Shader::Shader(const string& name, ::Device* device, const string& filename)
 			gv->mStages[1].pName = gv->mEntryPoints[1].c_str();
 			gv->mStages[1].module = modules[compiled.mVariants[v].mModules[1]];
 
+		
+			VkPipelineColorBlendAttachmentState bs = {};
+			bs.colorWriteMask = mColorMask;
+			switch (mBlendMode) {
+			case BLEND_MODE_OPAQUE:
+				bs.blendEnable = VK_FALSE;
+				bs.colorBlendOp = VK_BLEND_OP_ADD;
+				bs.alphaBlendOp = VK_BLEND_OP_ADD;
+				bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+				bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+				break;
+			case BLEND_MODE_ALPHA:
+				bs.blendEnable = VK_TRUE;
+				bs.colorBlendOp = VK_BLEND_OP_ADD;
+				bs.alphaBlendOp = VK_BLEND_OP_ADD;
+				bs.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+				bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+				bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				break;
+			case BLEND_MODE_ADDITIVE:
+				bs.blendEnable = VK_TRUE;
+				bs.colorBlendOp = VK_BLEND_OP_ADD;
+				bs.alphaBlendOp = VK_BLEND_OP_ADD;
+				bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				break;
+			case BLEND_MODE_MULTIPLY:
+				bs.blendEnable = VK_TRUE;
+				bs.colorBlendOp = VK_BLEND_OP_MULTIPLY_EXT;
+				bs.alphaBlendOp = VK_BLEND_OP_MULTIPLY_EXT;
+				bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+				break;
+			}
+			gv->mBlendStates = { bs, bs };	// TODO: read BlendStates
+
 			var = gv;
 		}
 
@@ -302,57 +345,14 @@ VkPipeline GraphicsShader::GetPipeline(RenderPass* renderPass, const VertexInput
 	if (mPipelines.count(instance))
 		return mPipelines.at(instance);
 	else {
-		VkPipelineColorBlendAttachmentState bs = {};
-		bs.colorWriteMask = mShader->mColorMask;
-		switch (blend) {
-		case BLEND_MODE_OPAQUE:
-			bs.blendEnable = VK_FALSE;
-			bs.colorBlendOp = VK_BLEND_OP_ADD;
-			bs.alphaBlendOp = VK_BLEND_OP_ADD;
-			bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-			bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-			break;
-		case BLEND_MODE_ALPHA:
-			bs.blendEnable = VK_TRUE;
-			bs.colorBlendOp = VK_BLEND_OP_ADD;
-			bs.alphaBlendOp = VK_BLEND_OP_ADD;
-			bs.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-			bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-			bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-			break;
-		case BLEND_MODE_ADDITIVE:
-			bs.blendEnable = VK_TRUE;
-			bs.colorBlendOp = VK_BLEND_OP_ADD;
-			bs.alphaBlendOp = VK_BLEND_OP_ADD;
-			bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			break;
-		case BLEND_MODE_MULTIPLY:
-			bs.blendEnable = VK_TRUE;
-			bs.colorBlendOp = VK_BLEND_OP_MULTIPLY_EXT;
-			bs.alphaBlendOp = VK_BLEND_OP_MULTIPLY_EXT;
-			bs.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			bs.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-			break;
-		}
-		vector<VkPipelineColorBlendAttachmentState> blendAttachmentStates(renderPass->ColorAttachmentCount());
-		for (uint32_t i = 0; i < blendAttachmentStates.size(); i++) blendAttachmentStates[i] = bs;
-
 		VkPipelineRasterizationStateCreateInfo rasterState = mShader->mRasterizationState;
 		if (cullMode != VK_CULL_MODE_FLAG_BITS_MAX_ENUM) rasterState.cullMode = cullMode;
 		if (polyMode != VK_POLYGON_MODE_MAX_ENUM) rasterState.polygonMode = polyMode;
 
 		VkPipelineColorBlendStateCreateInfo blendState = {};
 		blendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		blendState.attachmentCount = (uint32_t)blendAttachmentStates.size();
-		blendState.pAttachments = blendAttachmentStates.data();
+		blendState.attachmentCount = (uint32_t)mBlendStates.size();
+		blendState.pAttachments = mBlendStates.data();
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
 		inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -376,7 +376,9 @@ VkPipeline GraphicsShader::GetPipeline(RenderPass* renderPass, const VertexInput
 		VkPipelineMultisampleStateCreateInfo multisampleState = {};
 		multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampleState.sampleShadingEnable = VK_FALSE;
-		multisampleState.rasterizationSamples = renderPass->RasterizationSamples();
+		multisampleState.alphaToCoverageEnable = VK_FALSE;
+		multisampleState.alphaToOneEnable = VK_FALSE;
+		multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM;
 
 		VkGraphicsPipelineCreateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

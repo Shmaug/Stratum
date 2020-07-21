@@ -2,11 +2,10 @@
 #include <Content/AssetManager.hpp>
 #include <Content/Texture.hpp>
 #include <Core/Buffer.hpp>
-#include <Core/Instance.hpp>
 #include <Core/CommandBuffer.hpp>
+#include <Core/DescriptorSet.hpp>
 #include <Core/Window.hpp>
 #include <Util/Profiler.hpp>
-#include <Util/Util.hpp>
 
 //#define PRINT_VK_ALLOCATIONS
 
@@ -116,7 +115,7 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 		cacheData = new char[size];
 		cacheFile.seekg(0, ios::beg);
 		cacheFile.read(cacheData, size);
-
+		
 		cacheInfo.pInitialData = cacheData;
 		cacheInfo.initialDataSize = size;
 	}
@@ -445,14 +444,14 @@ void Device::ReturnToPool(Texture* texture) {
 	mTexturePoolMutex.unlock();
 }
 
-void Device::TrimPool() {
+void Device::PurgePooledResources(uint32_t maxAge) {
 
 	mCommandBufferPoolMutex.lock();
 	for (auto& kp : mCommandBufferPool)
 		for (auto& it = kp.second.begin(); it != kp.second.end();) {
 			if (it->mResource->State() != CMDBUF_STATE_DONE) continue;
 			it->mResource->Clear();
-			if (mFrameCount - it->mLastFrameUsed >= 8) {
+			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 				safe_delete(it->mResource);
 				it = kp.second.erase(it);
 			} else it++;
@@ -461,7 +460,7 @@ void Device::TrimPool() {
 
 	mBufferPoolMutex.lock();
 	for (auto& it = mBufferPool.begin(); it != mBufferPool.end();)
-		if (mFrameCount - it->mLastFrameUsed >= 8) {
+		if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 			safe_delete(it->mResource);
 			it = mBufferPool.erase(it);
 		} else it++;
@@ -470,7 +469,7 @@ void Device::TrimPool() {
 	mTexturePoolMutex.lock();
 	for (auto& kp : mTexturePool)
 		for (auto& it = kp.second.begin(); it != kp.second.end();)
-			if (mFrameCount - it->mLastFrameUsed >= 8) {
+			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 				safe_delete(it->mResource);
 				it = kp.second.erase(it);
 			} else it++;
@@ -479,7 +478,7 @@ void Device::TrimPool() {
 	mDescriptorSetPoolMutex.lock();
 	for (auto& kp : mDescriptorSetPool)
 		for (auto& it = kp.second.begin(); it != kp.second.end();)
-			if (mFrameCount - it->mLastFrameUsed >= 8) {
+			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 				safe_delete(it->mResource);
 				it = kp.second.erase(it);
 			} else it++;

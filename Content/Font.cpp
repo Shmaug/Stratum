@@ -11,11 +11,49 @@
 
 using namespace std;
 
-Font::Font(const string& name, Device* device, const string& filename, float characterHeight)
-	: mName(name), mTexture(nullptr), mCharacterHeight(characterHeight), mLineSpace(0) {
+#define PADDING 2
 
-	memset(mGlyphs, 0, sizeof(FontGlyph) * 0xFF);
+struct GlyphBitmap {
+	unsigned char* data;
+	uint2 resolution;
+	VkRect2D rect;
+	uint32_t codepoint;
+};
 
+float2 barycentrics(const float2& p, const float2& a, const float2& b, const float2& c) {
+	float2 v0 = c - a;
+	float2 v1 = b - a;
+	float2 v2 = p - a;
+	float dot00 = dot(v0, v0);
+	float dot01 = dot(v0, v1);
+	float dot02 = dot(v0, v2);
+	float dot11 = dot(v1, v1);
+	float dot12 = dot(v1, v2);
+	return float2(dot11 * dot02 - dot01 * dot12, dot00 * dot12 - dot01 * dot02) / (dot00 * dot11 - dot01 * dot01);
+}
+inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1) {
+	uint2 mx = uint2(ceil(max(p0, p1)));
+	float2 uv;
+	for (uint32_t y = 0; y < mx.y; y++) 
+		for (uint32_t x = 0; x < mx.x; x++) {
+			uv = barycentrics(float2(x, y) + .5f, p0, p1, 0);
+			if (uv.x < 0 || uv.y < 0 || uv.x + uv.y > 1) continue;
+			data[x + y * width] = !data[x + y * width];
+		}
+}
+inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1, const float2& c) {
+	uint2 mx = uint2(ceil(max(max(p0, p1), c)));
+	float2 uv;
+	for (uint32_t y = 0; y < mx.y; y++) 
+		for (uint32_t x = 0; x < mx.x; x++) {
+			uv = barycentrics(float2(x, y) + .5f, p0, p1, c);
+			float g = uv.x/2 + uv.y;
+			if (g*g < uv.y && uv.x >= 0.0 && uv.y >= 0.0 && uv.x + uv.y <= 1.0)
+				data[x + y * width] = !data[x + y * width];
+		}
+}
+
+Font::Font(const string& name, Device* device, const string& filename) : mName(name), mLineSpace(0) {
 	string file;
 	if (!ReadFile(filename, file)) throw;
 
@@ -26,243 +64,81 @@ Font::Font(const string& name, Device* device, const string& filename, float cha
 		throw;
 	}
 
-	float FS = stbtt_ScaleForPixelHeight(&font, characterHeight);
+	stbtt_GetFontVMetrics(&font, &mAscent, &mDescent, nullptr);
+	mLineSpace = -mDescent + mAscent;
 
-	int ascend, descend, space;
-	stbtt_GetFontVMetrics(&font, &ascend, &descend, &space);
-
-	mAscender = ascend * FS;
-	mDescender = descend * FS;
-	mLineSpace = (-descend + ascend) * FS;
-
-	struct GlyphBitmap {
-		unsigned char* data;
-		uint32_t glyph;
-		VkRect2D rect;
-	};
-	vector<GlyphBitmap> bitmaps;
-
-	const uint32_t PADDING = 2;
-
-	uint32_t area = 0;
-	uint32_t maxWidth = 0;
-	uint32_t maxCharSize = 0;
+	mFontHeight = 1.f / stbtt_ScaleForPixelHeight(&font, 1.f);
+	
+	// Create glyphs and kernings for 0-255
 
 	for (uint32_t c = 0; c < 0xFF; c++) {
 		int glyphIndex = stbtt_FindGlyphIndex(&font, c);
 		if (glyphIndex <= 0) continue;
 
+		int2 p0, p1;
+		stbtt_GetGlyphBitmapBox(&font, glyphIndex, 1, 1, &p0.x, &p0.y, &p1.x, &p1.y);
+
+		swap(p0.y, p1.y);
+		p0.y = -p0.y;
+		p1.y = -p1.y;
+
 		FontGlyph& g = mGlyphs[c];
-		g.mCharacter = c;
-
-		int advanceWidth, leftSideBearing;
-		stbtt_GetGlyphHMetrics(&font, glyphIndex, &advanceWidth, &leftSideBearing);
-		int x0, y0, x1, y1;
-		stbtt_GetGlyphBitmapBox(&font, glyphIndex, FS, FS, &x0, &y0, &x1, &y1);
-
-		int x, y, w, h;
-		uint8_t* data = stbtt_GetGlyphBitmap(&font, FS, FS, glyphIndex, &w, &h, &x, &y);
-		bitmaps.push_back({ data, c, {{ 0, 0 }, { (uint32_t)w + PADDING, (uint32_t)h + PADDING } } });
-
-		g.mAdvance = advanceWidth * FS;
-		g.mOffset = float2(x0, -y0);
-		g.mExtent = float2(x1 - x0, y0 - y1);
-
-		area += w * h;
-		maxWidth = max(maxWidth, (uint32_t)w);
-		maxCharSize = max((uint32_t)min(w, h), maxCharSize);
-		
-		/*
-		if (c == 'e' || c == 'i' || c == 'z') {
-			string stem = fs::path(filename).stem().string();
-			fprintf(stderr, "%s: ", stem.c_str());
-			for (int i = 0; i < w - (int)stem.length(); i++) fprintf(stderr, "%c", '*');
-				fprintf(stderr, "\n");
-
-			for (int j = 0; j < h; j++) {
-				fprintf(stderr, " ");
-				for (int i = 0; i < w; i++)
-					fprintf(stderr, "%c", " +#@"[data[i + j*w] / 64]);
-				fprintf(stderr, "\n");
-			}
-		}
-		*/
-
+		g.mCodepoint = (char)c;
+		g.mOffset = p0;
+		g.mExtent = p1 - p0;
+		stbtt_GetGlyphHMetrics(&font, glyphIndex, &g.mAdvance, nullptr);
 		for (uint32_t c2 = 0; c2 < 0xFF; c2++)
-			g.mKerning[c2] = stbtt_GetCodepointKernAdvance(&font, c, c2) * FS;
-	}
+			if (int32_t kern = stbtt_GetCodepointKernAdvance(&font, c, c2))
+				g.mKerning[c2] = kern;
 
-	// Pack glyph bitmaps
-
-	// sort the boxes for insertion by height, descending
-	sort(bitmaps.begin(), bitmaps.end(), [](const GlyphBitmap& a, const GlyphBitmap& b) {
-		return b.rect.extent.height < a.rect.extent.height;
-	});
-
-	// aim for a squarish resulting container,
-	// slightly adjusted for sub-100% space utilization
-	// start with a single empty space, unbounded at the bottom
-	deque<VkRect2D> spaces {
-		{ { PADDING, PADDING }, { max((uint32_t)ceilf(sqrtf(area / 0.95f)), maxWidth), 0xFFFFFFFF } }
-	};
-
-	uint2 packedSize(0);
-
-	for (GlyphBitmap& box : bitmaps) {
-		// look through spaces backwards so that we check smaller spaces first
-		for (int i = (int)spaces.size() - 1; i >= 0; i--) {
-			VkRect2D& space = spaces[i];
-
-			// look for empty spaces that can accommodate the current box
-			if (box.rect.extent.width > space.extent.width || box.rect.extent.height > space.extent.height) continue;
-
-			// found the space; add the box to its top-left corner
-			// |-------|-------|
-			// |  box  |       |
-			// |_______|       |
-			// |         space |
-			// |_______________|
-			box.rect.offset = space.offset;
-			packedSize = max(packedSize, uint2(space.offset.x + box.rect.extent.width, space.offset.y + box.rect.extent.height));
-
-			if (box.rect.extent.width == space.extent.width && box.rect.extent.height == space.extent.height) {
-				spaces.erase(spaces.begin() + i);
-
-			} else if (box.rect.extent.height == space.extent.height) {
-				// space matches the box height; update it accordingly
-				// |-------|---------------|
-				// |  box  | updated space |
-				// |_______|_______________|
-				space.offset.x += box.rect.extent.width;
-				space.extent.width -= box.rect.extent.width;
-
-			} else if (box.rect.extent.width == space.extent.width) {
-				// space matches the box width; update it accordingly
-				// |---------------|
-				// |      box      |
-				// |_______________|
-				// | updated space |
-				// |_______________|
-				space.offset.y += box.rect.extent.height;
-				space.extent.height -= box.rect.extent.height;
-
-			} else {
-				// otherwise the box splits the space into two spaces
-				// |-------|-----------|
-				// |  box  | new space |
-				// |_______|___________|
-				// | updated space     |
-				// |___________________|
-				spaces.push_back({
-					{ (int32_t)(space.offset.x + box.rect.extent.width), space.offset.y },
-					{ space.extent.width - box.rect.extent.width, box.rect.extent.height }
-				});
-				space.offset.y += box.rect.extent.height;
-				space.extent.height -= box.rect.extent.height;
-			}
-			break;
+		stbtt_vertex* vertices;
+		int vertexCount = stbtt_GetGlyphShape(&font, glyphIndex, &vertices);
+		g.mShape.resize(vertexCount);
+		for (uint32_t i = 0; i < (uint32_t)vertexCount; i++) {
+			g.mShape[i].Endpoint = int2(vertices[i].x, -vertices[i].y);
+			g.mShape[i].ControlPoint = uint2(vertices[i].cx, -vertices[i].cy);
+			g.mShape[i].Degree = vertices[i].type - 1;
 		}
+		stbtt_FreeShape(&font, vertices);
 	}
-
-	// round size up to power of 2
-	packedSize.x--;
-	packedSize.y--;
-	packedSize.x |= packedSize.x >> 1;
-	packedSize.y |= packedSize.y >> 1;
-	packedSize.x |= packedSize.x >> 2;
-	packedSize.y |= packedSize.y >> 2;
-	packedSize.x |= packedSize.x >> 4;
-	packedSize.y |= packedSize.y >> 4;
-	packedSize.x |= packedSize.x >> 8;
-	packedSize.y |= packedSize.y >> 8;
-	packedSize.x |= packedSize.x >> 16;
-	packedSize.y |= packedSize.y >> 16;
-	packedSize.x++;
-	packedSize.y++;
-	
-	VkDeviceSize imageSize = packedSize.x * packedSize.y * sizeof(uint8_t);
-	uint8_t* pixels = new uint8_t[imageSize];
-	memset(pixels, 0, imageSize);
-
-	// copy glyph bitmaps
-	float2 packedSizef = float2(packedSize.x, packedSize.y);
-	for (GlyphBitmap& p : bitmaps) {
-		p.rect.extent.width -= PADDING;
-		p.rect.extent.height -= PADDING;
-		mGlyphs[p.glyph].mTextureRect = fRect2D(float2(p.rect.offset.x, p.rect.offset.y) / packedSizef, float2(p.rect.extent.width, p.rect.extent.height) / packedSizef);
-
-		for (uint32_t y = 0; y < p.rect.extent.height; y++)
-			for (uint32_t x = 0; x < p.rect.extent.width; x++)
-				pixels[p.rect.offset.x + x + (p.rect.offset.y + y) * packedSize.x] = p.data[x + y * p.rect.extent.width];
-	}
-
-	mTexture = new ::Texture(mName + " Texture", device, pixels, imageSize, { packedSize.x, packedSize.y, 1 }, VK_FORMAT_R8_UNORM, (uint32_t)std::floor(std::log2(maxCharSize)) + 1);
-
-	delete[] pixels;
-
-	for (auto& g : bitmaps)
-		stbtt_FreeBitmap(g.data, font.userdata);
 }
-Font::~Font() {
-	safe_delete(mTexture)
-}
+Font::~Font() {}
 
-const FontGlyph* Font::Glyph(uint32_t c) const {
-	return mGlyphs[c].mCharacter == c ? &mGlyphs[c] : nullptr;
-}
-float Font::Kerning(uint32_t from, uint32_t to) const {
-	return mGlyphs[from].mKerning[to];
-};
-
-uint32_t Font::GenerateGlyphs(const string& str, AABB* aabb, std::vector<TextGlyph>& glyphs, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) const {
-	glyphs.resize(str.size());
-
-	float currentPoint = 0;
-	float baseline = 0;
-
-	uint32_t lineCount = 0;
+void Font::GenerateGlyphs(const string& str, float pixelHeight, std::vector<TextGlyph>& glyphs, std::vector<GlyphVertex>& vertices, const float2& offset, AABB* aabb, TextAnchor horizontalAnchor) const {	
+	if (str.empty()) return;
 
 	const FontGlyph* prev = nullptr;
 
+	float FS = pixelHeight / mFontHeight;
+
+	float baseline = offset.y;
+	float currentPoint = offset.x;
+
+	int32_t lineCount = 0;
+	float lineMin = currentPoint;
+	float lineMax = currentPoint;
+
+	uint32_t baseGlyph = glyphs.size();
+	uint32_t lineStart = baseGlyph;
+
 	float tabSize = 4;
-	if (const FontGlyph* spaceGlyph = Glyph(' ')) tabSize *= spaceGlyph->mAdvance;
-
-	float lineMin = 0;
-	float lineMax = 0;
-
-	uint32_t lineStart = 0;
-	uint32_t glyphCount = 0;
-
-	auto newLine = [&]() {
-		currentPoint = 0;
-		baseline -= mLineSpace;
-		prev = nullptr;
-		lineCount++;
-
-		float x = 0.f;
-		switch (horizontalAnchor) {
-		case TEXT_ANCHOR_MIN:
-			lineMin = 0;
-			lineMax = 0;
-			return;
-		case TEXT_ANCHOR_MID:
-			x = (lineMax + lineMin) * .5f;
-			break;
-		case TEXT_ANCHOR_MAX:
-			x = lineMax;
-			break;
-		}
-		for (uint32_t v = lineStart; v < glyphCount; v++)
-			glyphs[v].Offset.x -= x;
-
-		lineMin = 0;
-		lineMax = 0;
-	};
+	if (const FontGlyph* spaceGlyph = Glyph(' ')) tabSize *= spaceGlyph->mAdvance * FS;
 
 	for (uint32_t i = 0; i < str.length(); i++) {
 		if (str[i] == '\n') {
-			newLine();
-			lineStart = glyphCount;
+			if (horizontalAnchor == TEXT_ANCHOR_MID) {
+				float ox = (lineMax + lineMin) * .5f;
+				for (uint32_t i = lineStart; i < glyphs.size(); i++) glyphs[i].Offset.x -= ox;
+			} else if (horizontalAnchor == TEXT_ANCHOR_MAX) {
+				for (uint32_t i = lineStart; i < glyphs.size(); i++) glyphs[i].Offset.x -= lineMax;
+			}
+			currentPoint = offset.x;
+			baseline -= mLineSpace*FS;
+			prev = nullptr;
+			lineCount++;
+			lineStart = glyphs.size();
+			lineMin = currentPoint;
+			lineMax = currentPoint;
 			continue;
 		}
 		if (str[i] == '\t') {
@@ -276,46 +152,42 @@ uint32_t Font::GenerateGlyphs(const string& str, AABB* aabb, std::vector<TextGly
 		const FontGlyph* glyph = Glyph(str[i]);
 		if (!glyph) { prev = nullptr; continue; }
 
-		if (prev) currentPoint += prev->mKerning[str[i]];
+		if (prev && prev->mKerning.count((uint32_t)str[i]))
+			currentPoint += prev->mKerning.at((uint32_t)str[i])*FS;
+		
+		TextGlyph g = {};
+		g.StartVertex = vertices.size();
+		g.VertexCount = glyph->mShape.size();
+		g.Offset = float2(currentPoint, baseline) + float2(glyph->mOffset)*FS;
+		g.Extent = float2(glyph->mExtent)*FS;
+		g.ShapeOffset = float2(glyph->mOffset)*float2(1,-1);
+		g.ShapeExtent = float2(glyph->mExtent);
+		g.ShapeExtent.y = -g.ShapeExtent.y;
+		glyphs.push_back(g);
 
-		glyphs[glyphCount].Offset = float2(currentPoint, baseline) + glyph->mOffset;
-		glyphs[glyphCount].Extent = glyph->mExtent;
-		glyphs[glyphCount].TexOffset = glyph->mTextureRect.mOffset;
-		glyphs[glyphCount].TexExtent = glyph->mTextureRect.mExtent;
+		for (uint32_t i = 0; i < glyph->mShape.size(); i++)
+			vertices.push_back(glyph->mShape[i]);
 
-		lineMin = fminf(lineMin, glyphs[glyphCount].Offset.x);
-		lineMax = fmaxf(lineMax, glyphs[glyphCount].Offset.x + glyphs[glyphCount].Extent.x);
-
-		glyphCount++;
-		currentPoint += glyph->mAdvance;
-
+		lineMin = fminf(lineMin, currentPoint);
+		currentPoint += glyph->mAdvance*FS;
+		lineMax = fmaxf(lineMax, currentPoint);
 		prev = glyph;
 	}
 
-	newLine();
-	float verticalOffset = 0;
-	switch (verticalAnchor) {
-	case TEXT_ANCHOR_MIN:
-		verticalOffset = -(baseline + mLineSpace);
-		break;
-	case TEXT_ANCHOR_MID:
-		verticalOffset = (lineCount * (-mDescender - mLineSpace * .5f) + (lineCount - 1) * mLineSpace) * .5f;
-		break;
-	case TEXT_ANCHOR_MAX:
-		verticalOffset = 0;
-		break;
-	}
-	for (uint32_t i = 0; i < glyphCount; i++)
-		glyphs[i].Offset.y += verticalOffset;
+	if (glyphs.size() == baseGlyph) return;
+
+	if (horizontalAnchor == TEXT_ANCHOR_MID)
+		for (uint32_t i = lineStart; i < glyphs.size(); i++) glyphs[i].Offset.x -= (lineMax + lineMin) * .5f;
+	else if (horizontalAnchor == TEXT_ANCHOR_MAX)
+		for (uint32_t i = lineStart; i < glyphs.size(); i++) glyphs[i].Offset.x -= lineMax;
 
 	if (aabb) {
-		float2 mn = glyphs[0].Offset;
-		float2 mx = glyphs[0].Offset + glyphs[0].Extent;
-		for (uint32_t i = 1; i < glyphCount; i++) {
-			mn = min(mn, glyphs[i].Offset);
-			mx = max(mx, glyphs[i].Offset + glyphs[i].Extent);
+		float2 mn = glyphs[baseGlyph].Offset;
+		float2 mx = glyphs[baseGlyph].Offset + glyphs[baseGlyph].Extent;
+		for (uint32_t i = baseGlyph + 1; i < glyphs.size(); i++) {
+			mn = min(mn, min(glyphs[i].Offset, glyphs[i].Offset + glyphs[i].Extent));
+			mx = max(mx, max(glyphs[i].Offset, glyphs[i].Offset + glyphs[i].Extent));
 		}
 		*aabb = AABB(float3(mn, 0), float3(mx, 0));
 	}
-	return glyphCount;
 }
