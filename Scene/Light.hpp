@@ -1,9 +1,6 @@
 #pragma once
 
 #include <Scene/Object.hpp>
-#include <Util/Util.hpp>
-
-#include <Shaders/include/shadercompat.h>
 
 enum LightType {
 	LIGHT_TYPE_SUN = LIGHT_SUN,
@@ -13,8 +10,8 @@ enum LightType {
 
 class Light : public virtual Object {
 public:
-	ENGINE_EXPORT Light(const std::string& name);
-	ENGINE_EXPORT ~Light();
+	STRATUM_API Light(const std::string& name);
+	STRATUM_API ~Light();
 
 	inline void Color(const float3& c) { mColor = c; }
 	inline float3 Color() const { return mColor; }

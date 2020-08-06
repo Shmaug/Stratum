@@ -23,12 +23,12 @@ public:
 
 	float3 GetVertex(uint32_t index) const { return mVertices[index]; }
 	uint3 GetTriangle(uint32_t index) const { return mTriangles[index]; }
-	uint32_t TriangleCount() const { return mTriangles.size(); }
+	uint32_t TriangleCount() const { return (uint32_t)mTriangles.size(); }
 
 	inline AABB Bounds() { return mNodes.size() ? mNodes[0].mBounds : AABB(); }
 	
-	ENGINE_EXPORT void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, VkIndexType indexType);
-	ENGINE_EXPORT bool Intersect(const Ray& ray, float* t, bool any);
+	STRATUM_API void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, VkIndexType indexType);
+	STRATUM_API bool Intersect(const Ray& ray, float* t, bool any);
 
 private:
 	std::vector<Node> mNodes;

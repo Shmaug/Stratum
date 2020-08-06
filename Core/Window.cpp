@@ -1,4 +1,4 @@
-#include <Content/Texture.hpp>
+#include <Data/Texture.hpp>
 #include <Core/Window.hpp>
 #include <Core/Device.hpp>
 #include <Core/Instance.hpp>
@@ -13,12 +13,9 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 #else
 Window::Window(Instance* instance, const string& title, MouseKeyboardInput* input, VkRect2D position, HINSTANCE hInstance)
 #endif
-	: mInstance(instance), mTargetCamera(nullptr), mDevice(nullptr), mTitle(title), mSwapchainExtent({}), mFullscreen(false), mClientRect(position), mInput(input),
+	: mInstance(instance), mDevice(nullptr), mTitle(title), mSwapchainExtent({}), mFullscreen(false), mClientRect(position), mInput(input),
 	mSwapchain(VK_NULL_HANDLE), mPhysicalDevice(VK_NULL_HANDLE), mImageCount(0), mFormat({}), mVSync(false),
 	mBackBufferIndex(0), mImageAvailableSemaphoreIndex(0), mFrameData(nullptr), mDirectDisplay(VK_NULL_HANDLE) {
-
-	printf("Creating window... ");
-
 	#ifdef __linux
 	mXCBConnection = XCBConnection;
 	mXCBScreen = XCBScreen;
@@ -70,6 +67,7 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 	ThrowIfFailed(vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface), "vkCreateXcbSurfaceKHR Failed");
 
 	#else
+
 	mWindowedRect = {};
 
 	mHwnd = CreateWindowExA(
@@ -103,8 +101,6 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 	mClientRect.offset = { (int32_t)cr.top, (int32_t)cr.left };
 	mClientRect.extent = { (uint32_t)((int32_t)cr.right - (int32_t)cr.left), (uint32_t)((int32_t)cr.bottom - (int32_t)cr.top) };
 	#endif
-
-	printf_color(COLOR_GREEN, "%s", "Done\n");
 }
 Window::~Window() {
 	DestroySwapchain();
@@ -138,10 +134,8 @@ VkImage Window::AcquireNextImage() {
 	return mFrameData[mBackBufferIndex].mSwapchainImage;
 }
 
-void Window::Present(vector<VkSemaphore> waitSemaphores) {
+void Window::Present(const vector<VkSemaphore>& waitSemaphores) {
 	if (mSwapchain == VK_NULL_HANDLE) return;
-
-	waitSemaphores.push_back(*mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]);
 
 	VkPresentInfoKHR presentInfo = {};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -353,7 +347,7 @@ void Window::CreateSwapchain(::Device* device) {
 
 	CommandBuffer* commandBuffer = device->GetCommandBuffer();
 	
-	// create per-frame objects
+	// create per-frame image views and semaphores
 	for (uint32_t i = 0; i < mImageCount; i++) {
 		mFrameData[i] = FrameData();
 		mFrameData[i].mSwapchainImage = images[i];
@@ -384,11 +378,6 @@ void Window::CreateSwapchain(::Device* device) {
 	
 	device->Execute(commandBuffer);
 	commandBuffer->Wait();
-
-	if (mTargetCamera && mTargetCamera->Framebuffer()->Extent() != mSwapchainExtent) {
-		mTargetCamera->Framebuffer()->Extent(mSwapchainExtent);
-		mTargetCamera->Viewport({ 0, 0, (float)mSwapchainExtent.width, (float)mSwapchainExtent.height, 0.f, 1.f });
-	}
 }
 
 void Window::DestroySwapchain() {

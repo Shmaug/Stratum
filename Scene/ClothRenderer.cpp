@@ -1,9 +1,7 @@
-#include <Core/DescriptorSet.hpp>
+#include <Data/AssetManager.hpp>
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
 #include <Util/Profiler.hpp>
-
-#include <Shaders/include/shadercompat.h>
 
 #include "ClothRenderer.hpp"
 
@@ -17,7 +15,7 @@ ClothRenderer::~ClothRenderer() { safe_delete(mVertexBuffer); safe_delete(mVeloc
 
 void ClothRenderer::Mesh(::Mesh* m) {
 	mMesh = m;
-	Dirty();
+	DirtyTransform();
 
 	// safe_delete(mVertexBuffer);
 	// safe_delete(mVelocityBuffer);
@@ -35,7 +33,7 @@ void ClothRenderer::Mesh(::Mesh* m) {
 }
 void ClothRenderer::Mesh(std::shared_ptr<::Mesh> m) {
 	mMesh = m;
-	Dirty();
+	DirtyTransform();
 
 	// safe_delete(mVertexBuffer);
 	// safe_delete(mVelocityBuffer);
@@ -58,14 +56,14 @@ bool ClothRenderer::UpdateTransform() {
 		mAABB = AABB(WorldPosition(), WorldPosition());
 	else
 		mAABB = Mesh()->Bounds() * ObjectToWorld();
-	float3 e = mAABB.Extents();
+	float3 e = mAABB.HalfSize();
 	mAABB.mMin -= 10*e;
 	mAABB.mMax += 10*e;
 	mAABB *= ObjectToWorld();
 	return true;
 }
 
-void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
+void ClothRenderer::OnFixedUpdate(CommandBuffer* commandBuffer) {
 	if (!mVertexBuffer) return;
 	::Mesh* m = this->Mesh();
 
@@ -107,9 +105,9 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	b.size = mEdgeBuffer->Size();
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 
-	Shader* shader = commandBuffer->Device()->AssetManager()->LoadShader("Shaders/cloth.stm");
+	Pipeline* shader = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/cloth.stm");
 
-	Buffer* sphereBuffer = commandBuffer->GetBuffer("Cloth Spheres", sizeof(float4) * max(1u, mSphereColliders.size()), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+	Buffer* sphereBuffer = commandBuffer->GetBuffer("Cloth Spheres", sizeof(float4) * max(1u, (uint32_t)mSphereColliders.size()), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 	for (uint32_t i = 0; i < mSphereColliders.size(); i++)
 		((float4*)sphereBuffer->MappedData())[i] = float4(mSphereColliders[i].first->WorldPosition(), mSphereColliders[i].second);
 	
@@ -123,19 +121,18 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	VkDeviceSize baseVertex = m->BaseVertex() * m->VertexSize();
 	VkDeviceSize baseIndex = m->BaseIndex() * (m->IndexType() == VK_INDEX_TYPE_UINT16 ? sizeof(uint16_t) : sizeof(uint32_t));
 
-	ComputeShader* add = m->IndexType() == VK_INDEX_TYPE_UINT16 ? shader->GetCompute("AddForces", {}) : shader->GetCompute("AddForces", {"INDEX_UINT32"});
+	ComputePipeline* add = m->IndexType() == VK_INDEX_TYPE_UINT16 ? shader->GetCompute("AddForces", {}) : shader->GetCompute("AddForces", {"INDEX_UINT32"});
 	DescriptorSet* ds = commandBuffer->GetDescriptorSet("AddForces", add->mDescriptorSetLayouts[0]);
-	ds->CreateUniformBufferDescriptor(objBuffer, add->mDescriptorBindings.at("ObjectBuffer").second.binding);
-	ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, add->mDescriptorBindings.at("SourceVertices").second.binding);
-	ds->CreateStorageBufferDescriptor(m->IndexBuffer().get(), baseIndex, m->IndexBuffer()->Size() - baseIndex, add->mDescriptorBindings.at("Triangles").second.binding);
-	ds->CreateStorageBufferDescriptor(mVertexBuffer, add->mDescriptorBindings.at("Vertices").second.binding);
-	ds->CreateStorageBufferDescriptor(mVelocityBuffer, add->mDescriptorBindings.at("Velocities").second.binding);
-	ds->CreateStorageBufferDescriptor(mForceBuffer, add->mDescriptorBindings.at("Forces").second.binding);
-	ds->CreateStorageBufferDescriptor(mEdgeBuffer, add->mDescriptorBindings.at("Edges").second.binding);
-	ds->FlushWrites();
+	ds->CreateUniformBufferDescriptor(objBuffer, add->GetDescriptorLocation("ObjectBuffer"));
+	ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, add->GetDescriptorLocation("SourceVertices"));
+	ds->CreateStorageBufferDescriptor(m->IndexBuffer().get(), baseIndex, m->IndexBuffer()->Size() - baseIndex, add->GetDescriptorLocation("Triangles"));
+	ds->CreateStorageBufferDescriptor(mVertexBuffer, add->GetDescriptorLocation("Vertices"));
+	ds->CreateStorageBufferDescriptor(mVelocityBuffer, add->GetDescriptorLocation("Velocities"));
+	ds->CreateStorageBufferDescriptor(mForceBuffer, add->GetDescriptorLocation("Forces"));
+	ds->CreateStorageBufferDescriptor(mEdgeBuffer, add->GetDescriptorLocation("Edges"));
+	commandBuffer->BindDescriptorSet(ds, 0);
 
-	vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, add->mPipeline);
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, add->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+	commandBuffer->BindPipeline(add);
 	commandBuffer->PushConstantRef<uint32_t>("TriangleCount", triCount);
 	commandBuffer->PushConstantRef<uint32_t>("VertexCount", m->VertexCount());
 	commandBuffer->PushConstantRef<uint32_t>("VertexSize", m->VertexSize());
@@ -150,7 +147,7 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	commandBuffer->PushConstantRef<uint32_t>("SphereCount", (uint32_t)mSphereColliders.size());
 	commandBuffer->PushConstantRef<float3>("Gravity", mGravity);
 	commandBuffer->PushConstantRef<float3>("Move", mMove);
-	vkCmdDispatch(*commandBuffer, (triCount + 63) / 64, 1, 1);
+	commandBuffer->DispatchAligned(triCount);
 
 
 	b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -163,18 +160,17 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 
 
-	ComputeShader* integrate = mPin ? shader->GetCompute("Integrate", { "PIN" }) : shader->GetCompute("Integrate", {});
+	ComputePipeline* integrate = mPin ? shader->GetCompute("Integrate", { "PIN" }) : shader->GetCompute("Integrate", {});
 	ds = commandBuffer->GetDescriptorSet("Integrate0", integrate->mDescriptorSetLayouts[0]);
-	if (mPin) ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, integrate->mDescriptorBindings.at("SourceVertices").second.binding);
-	ds->CreateUniformBufferDescriptor(objBuffer, integrate->mDescriptorBindings.at("ObjectBuffer").second.binding);
-	ds->CreateStorageBufferDescriptor(mVertexBuffer, integrate->mDescriptorBindings.at("Vertices").second.binding);
-	ds->CreateStorageBufferDescriptor(mVelocityBuffer, integrate->mDescriptorBindings.at("Velocities").second.binding);
-	ds->CreateStorageBufferDescriptor(mForceBuffer, integrate->mDescriptorBindings.at("Forces").second.binding);
-	ds->CreateStorageBufferDescriptor(sphereBuffer, integrate->mDescriptorBindings.at("Spheres").second.binding);
-	ds->FlushWrites();
-	vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, integrate->mPipeline);
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, integrate->mPipelineLayout, 0, 1, *ds, 0, nullptr);
-	vkCmdDispatch(*commandBuffer, (m->VertexCount() + 63) / 64, 1, 1);
+	if (mPin) ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, integrate->GetDescriptorLocation("SourceVertices"));
+	ds->CreateUniformBufferDescriptor(objBuffer, integrate->GetDescriptorLocation("ObjectBuffer"));
+	ds->CreateStorageBufferDescriptor(mVertexBuffer, integrate->GetDescriptorLocation("Vertices"));
+	ds->CreateStorageBufferDescriptor(mVelocityBuffer, integrate->GetDescriptorLocation("Velocities"));
+	ds->CreateStorageBufferDescriptor(mForceBuffer, integrate->GetDescriptorLocation("Forces"));
+	ds->CreateStorageBufferDescriptor(sphereBuffer, integrate->GetDescriptorLocation("Spheres"));
+	commandBuffer->BindDescriptorSet(ds, 0);
+	commandBuffer->BindPipeline(integrate);
+	commandBuffer->DispatchAligned(m->VertexCount());
 
 
 	b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
@@ -184,15 +180,14 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 
 
-	ComputeShader* normals = m->IndexType() == VK_INDEX_TYPE_UINT16 ? shader->GetCompute("ComputeNormals0", {}) : shader->GetCompute("ComputeNormals0", { "INDEX_UINT32" });
+	ComputePipeline* normals = m->IndexType() == VK_INDEX_TYPE_UINT16 ? shader->GetCompute("ComputeNormals0", {}) : shader->GetCompute("ComputeNormals0", { "INDEX_UINT32" });
 	ds = commandBuffer->GetDescriptorSet("Normals0", normals->mDescriptorSetLayouts[0]);
-	ds->CreateStorageBufferDescriptor(mVertexBuffer, normals->mDescriptorBindings.at("Verticesu").second.binding);
-	ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, normals->mDescriptorBindings.at("SourceVertices").second.binding);
-	ds->CreateStorageBufferDescriptor(m->IndexBuffer().get(), baseIndex, m->IndexBuffer()->Size() - baseIndex, normals->mDescriptorBindings.at("Triangles").second.binding);
-	ds->FlushWrites();
-	vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, normals->mPipeline);
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, normals->mPipelineLayout, 0, 1, *ds, 0, nullptr);
-	vkCmdDispatch(*commandBuffer, (triCount + 63) / 64, 1, 1);
+	ds->CreateStorageBufferDescriptor(mVertexBuffer, normals->GetDescriptorLocation("Verticesu"));
+	ds->CreateStorageBufferDescriptor(m->VertexBuffer().get(), baseVertex, m->VertexBuffer()->Size() - baseVertex, normals->GetDescriptorLocation("SourceVertices"));
+	ds->CreateStorageBufferDescriptor(m->IndexBuffer().get(), baseIndex, m->IndexBuffer()->Size() - baseIndex, normals->GetDescriptorLocation("Triangles"));
+	commandBuffer->BindDescriptorSet(ds, 0);
+	commandBuffer->BindPipeline(normals);
+	commandBuffer->DispatchAligned(triCount);
 
 
 	b.buffer = *mVertexBuffer;
@@ -200,13 +195,12 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 
 
-	ComputeShader* normals2 = shader->GetCompute("ComputeNormals1", {});
+	ComputePipeline* normals2 = shader->GetCompute("ComputeNormals1", {});
 	ds = commandBuffer->GetDescriptorSet("Normals1", normals2->mDescriptorSetLayouts[0]);
-	ds->CreateStorageBufferDescriptor(mVertexBuffer, normals2->mDescriptorBindings.at("Vertices").second.binding);
-	ds->FlushWrites();
-	vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, normals2->mPipeline);
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, normals2->mPipelineLayout, 0, 1, *ds, 0, nullptr);
-	vkCmdDispatch(*commandBuffer, (m->VertexCount() + 63) / 64, 1, 1);
+	ds->CreateStorageBufferDescriptor(mVertexBuffer, normals2->GetDescriptorLocation("Vertices"));
+	commandBuffer->BindDescriptorSet(ds, 0);
+	commandBuffer->BindPipeline(normals2);
+	commandBuffer->DispatchAligned(m->VertexCount());
 
 
 	b.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
@@ -215,7 +209,7 @@ void ClothRenderer::FixedUpdate(CommandBuffer* commandBuffer) {
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 }
 
-void ClothRenderer::PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
+void ClothRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	if (!mVertexBuffer) return;
 	VkBufferMemoryBarrier barrier = {};
 	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -227,35 +221,32 @@ void ClothRenderer::PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* cam
 	barrier.size = mVertexBuffer->Size();
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, barrier);
 }
-void ClothRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
+void ClothRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	::Mesh* mesh = this->Mesh();
 
-	VkCullModeFlags cull = (pass == PASS_DEPTH) ? VK_CULL_MODE_NONE : VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
-	VkPipelineLayout layout = commandBuffer->BindMaterial(mMaterial.get(), pass, mesh->VertexInput(), camera, mesh->Topology(), cull);
-	if (!layout) return;
-	auto shader = mMaterial->GetShader(pass);
+	commandBuffer->BindMaterial(mMaterial.get(), mesh->VertexInput(), mesh->Topology());
+	GraphicsPipeline* pipeline = mMaterial->GetPassPipeline(commandBuffer->CurrentShaderPass());
 
-	// TODO: Cache object descriptorset?
-
-	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
-	buf->ObjectToWorld = ObjectToWorld();
-	buf->WorldToObject = WorldToObject();
-	DescriptorSet* objDS = commandBuffer->GetDescriptorSet(mName, shader->mDescriptorSetLayouts[PER_OBJECT]);
-	objDS->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
-	objDS->FlushWrites();
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *objDS, 0, nullptr);
+	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT] != VK_NULL_HANDLE) {
+		Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+		InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
+		buf->ObjectToWorld = ObjectToWorld();
+		buf->WorldToObject = WorldToObject();
+		DescriptorSet* perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
+		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
+		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
+	}
 	
+	Scene()->PushSceneConstants(commandBuffer);
 
 	commandBuffer->BindVertexBuffer(mVertexBuffer, 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
+	camera->SetViewportScissor(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), 0, 0);
 	commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
-
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
+		camera->SetViewportScissor(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), 0, 0);
 		commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 	}

@@ -1,4 +1,4 @@
-// Content
+// Data
 
 class Animation;
 class Asset;
@@ -6,10 +6,10 @@ class AssetManager;
 class Font;
 class Material;
 class Mesh;
-class Shader;
-class ShaderVariant;
-class GraphicsShader;
-class ComputeShader;
+class Pipeline;
+class PipelineVariant;
+class GraphicsPipeline;
+class ComputePipeline;
 class Texture;
 class Sampler;
 

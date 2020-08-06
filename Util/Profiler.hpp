@@ -12,9 +12,6 @@
 
 #include <Util/Util.hpp>
 
-class Stratum;
-class GuiContext;
-
 struct ProfilerSample {
 	std::string mLabel;
 	ProfilerSample* mParent;
@@ -23,31 +20,31 @@ struct ProfilerSample {
 	std::chrono::nanoseconds mDuration;
 	float4 mColor;
 	
-	ENGINE_EXPORT ~ProfilerSample();
+	STRATUM_API ~ProfilerSample();
 };
 
 class Profiler {
 public:
-	ENGINE_EXPORT static void BeginSample(const std::string& label);
-	ENGINE_EXPORT static void EndSample();
+	STRATUM_API static void BeginSample(const std::string& label);
+	STRATUM_API static void EndSample();
 
-	ENGINE_EXPORT static void DrawProfiler(GuiContext* gui);
+	STRATUM_API static void DrawGui(GuiContext* gui, uint32_t framerate);
+	STRATUM_API static void ClearAll();
 
 private:
-	friend class Stratum;
-	ENGINE_EXPORT static void FrameStart(uint64_t frameIndex);
-	ENGINE_EXPORT static void FrameEnd();
-	ENGINE_EXPORT static void Destroy();
+	friend class Instance;
+	STRATUM_API static void BeginFrame(uint64_t frameIndex);
+	STRATUM_API static void EndFrame();
 
-	ENGINE_EXPORT static bool mEnabled;
-	ENGINE_EXPORT static std::list<ProfilerSample*> mFrames;
-	ENGINE_EXPORT static ProfilerSample* mCurrentSample;
-	ENGINE_EXPORT static uint32_t mHistoryCount;
-	ENGINE_EXPORT static const std::chrono::high_resolution_clock mTimer;
+	STRATUM_API static bool mEnabled;
+	STRATUM_API static std::list<ProfilerSample*> mFrames;
+	STRATUM_API static ProfilerSample* mCurrentSample;
+	STRATUM_API static uint32_t mHistoryCount;
+	STRATUM_API static const std::chrono::high_resolution_clock mTimer;
 
 	// Drawing settings
 	
-	ENGINE_EXPORT static ProfilerSample* mSelectedFrame;
-	ENGINE_EXPORT static float mGraphHeight;
-	ENGINE_EXPORT static float mSampleHeight;
+	STRATUM_API static ProfilerSample* mSelectedFrame;
+	STRATUM_API static float mGraphHeight;
+	STRATUM_API static float mSampleHeight;
 };

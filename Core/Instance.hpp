@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Util/Util.hpp>
+
 #ifdef __linux
 #include <vulkan/vulkan.h>
 #include <xcb/xcb.h>
@@ -13,44 +15,38 @@ namespace x11{
 #endif
 
 #include <Input/MouseKeyboardInput.hpp>
-#include <Util/Util.hpp>
 #include <XR/XRRuntime.hpp>
-
-class Window;
-class Device;
-class PluginManager;
 
 class Instance {
 public:
 	static bool sDisableDebugCallback;
 
-	ENGINE_EXPORT ~Instance();
+	STRATUM_API Instance(int argc, char** argv);
+	STRATUM_API ~Instance();
+
+	// Poll events, advance swapchain. Returns false if the program should exit
+	STRATUM_API bool BeginFrame();
+	// Present swapchain
+	STRATUM_API void EndFrame(const std::vector<VkSemaphore>& waitSemaphores);
 
 	inline const std::vector<std::string>& CommandLineArguments() const { return mCmdArguments; }
 	
 	inline ::Device* Device() const { return mDevice; }
 	inline ::Window* Window() const { return mWindow; }
-	inline XRRuntime* XR() const { return mXRRuntime; }
+	inline const std::vector<XRRuntime*>& XRRuntimes() const { return mXRRuntimes; }
 
-	inline void RequestInstanceExtension(const std::string& name) { mInstanceExtensions.emplace(name); }
-	inline void RequestDeviceExtension(const std::string& name) { mDeviceExtensions.emplace(name); }
-
+	inline ::PluginManager* PluginManager() const { return mPluginManager; }
+	inline ::InputManager* InputManager() const { return mInputManager; }
 	inline operator VkInstance() const { return mInstance; }
 
 private:
-	friend class Stratum;
-	ENGINE_EXPORT Instance(int argc, char** argv, PluginManager* pluginManager);
-
-	ENGINE_EXPORT bool PollEvents();
-
 	VkInstance mInstance;
 	::Device* mDevice;
 	::Window* mWindow;
-	MouseKeyboardInput* mWindowInput;
-	XRRuntime* mXRRuntime;
-
-	std::set<std::string> mInstanceExtensions;
-	std::set<std::string> mDeviceExtensions;
+	::PluginManager* mPluginManager;
+	::InputManager* mInputManager;
+	MouseKeyboardInput* mMouseKeyboardInput;
+	std::vector<XRRuntime*> mXRRuntimes;
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	VkDebugUtilsMessengerEXT mDebugMessenger;
@@ -60,8 +56,8 @@ private:
 
 	bool mDestroyPending;
 	#ifdef __linux
-	ENGINE_EXPORT void ProcessEvent(xcb_generic_event_t* event);
-	ENGINE_EXPORT xcb_generic_event_t* PollEvent();
+	STRATUM_API void ProcessEvent(xcb_generic_event_t* event);
+	STRATUM_API xcb_generic_event_t* PollEvent();
 
 	x11::Display* mXDisplay;
 	xcb_connection_t* mXCBConnection;
@@ -69,6 +65,7 @@ private:
 	#else
 	void HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
-	static std::vector<Instance*> sInstances;
 	#endif
+
+	STRATUM_API bool PollEvents();
 };

@@ -1,39 +1,36 @@
 #pragma once
 
-#include <Content/Animation.hpp>
+#include <Data/Animation.hpp>
 #include <Scene/MeshRenderer.hpp>
 
 class SkinnedMeshRenderer : public Renderer {
 public:
-	bool mVisible;
-	
-	ENGINE_EXPORT SkinnedMeshRenderer(const std::string& name);
-	ENGINE_EXPORT ~SkinnedMeshRenderer();
+	STRATUM_API SkinnedMeshRenderer(const std::string& name);
+	STRATUM_API ~SkinnedMeshRenderer();
 
 	inline virtual float ShapeKey(const std::string& name) const { return mShapeKeys.at(name); };
 	inline virtual void ShapeKey(const std::string& name, float val) { mShapeKeys[name] = val; };
 
-	ENGINE_EXPORT virtual AnimationRig& Rig() { return mRig; };
-	ENGINE_EXPORT virtual void Rig(const AnimationRig& rig);
-	ENGINE_EXPORT virtual Bone* GetBone(const std::string& name) const;
+	STRATUM_API virtual AnimationRig& Rig() { return mRig; };
+	STRATUM_API virtual void Rig(const AnimationRig& rig);
+	STRATUM_API virtual Bone* GetBone(const std::string& name) const;
 
-	inline virtual void Mesh(::Mesh* m) { mMesh = m; Dirty(); }
-	inline virtual void Mesh(std::shared_ptr<::Mesh> m) { mMesh = m; Dirty(); }
+	inline virtual void Mesh(::Mesh* m) { mMesh = m; DirtyTransform(); }
+	inline virtual void Mesh(std::shared_ptr<::Mesh> m) { mMesh = m; DirtyTransform(); }
 	inline virtual ::Mesh* Mesh() const { return mMesh.index() == 0 ? std::get<::Mesh*>(mMesh) : std::get<std::shared_ptr<::Mesh>>(mMesh).get(); }
 
 	inline virtual ::Material* Material() { return mMaterial.get(); }
-	ENGINE_EXPORT virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
+	STRATUM_API virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
 
 	// Renderer functions
-
-	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
-	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
-	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
+protected:
+	inline virtual bool Visible(const std::string& pass) override { return Mesh() && mMaterial && Renderer::Visible(pass); }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
 	
-	ENGINE_EXPORT virtual void PostUpdate(CommandBuffer* commandBuffer) override;
-	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	STRATUM_API virtual void OnLateUpdate(CommandBuffer* commandBuffer) override;
+	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
 	
-	ENGINE_EXPORT void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera);
+	STRATUM_API void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui);
 
 private:
 	std::shared_ptr<::Material> mMaterial;
@@ -46,5 +43,5 @@ private:
 	AnimationRig mRig;
 	std::unordered_map<std::string, float> mShapeKeys;
 
-	ENGINE_EXPORT bool UpdateTransform() override;
+	STRATUM_API bool UpdateTransform() override;
 };

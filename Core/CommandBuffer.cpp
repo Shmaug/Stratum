@@ -2,14 +2,12 @@
 #include <Core/Buffer.hpp>
 #include <Core/RenderPass.hpp>
 #include <Core/Framebuffer.hpp>
-#include <Content/Material.hpp>
-#include <Content/Shader.hpp>
-#include <Content/Texture.hpp>
+#include <Data/Material.hpp>
+#include <Core/Pipeline.hpp>
+#include <Data/Texture.hpp>
 #include <Scene/Camera.hpp>
 #include <Util/Profiler.hpp>
 #include <Util/Util.hpp>
-
-#include <Shaders/include/shadercompat.h>
 
 using namespace std;
 
@@ -23,13 +21,12 @@ Semaphore::~Semaphore() {
 }
 
 
-CommandBuffer::CommandBuffer(::Device* device, VkCommandPool commandPool, const string& name)
-	: mDevice(device), mCommandPool(commandPool), mCurrentRenderPass(nullptr), mCurrentMaterial(nullptr), mCurrentPipeline(VK_NULL_HANDLE), mCurrentIndexBuffer(nullptr), mTriangleCount(0) {
+CommandBuffer::CommandBuffer( const string& name, ::Device* device, VkCommandPool commandPool, VkCommandBufferLevel level) : mDevice(device), mCommandPool(commandPool) {
 	
 	VkCommandBufferAllocateInfo allocInfo = {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 	allocInfo.commandPool = mCommandPool;
-	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.level = level;
 	allocInfo.commandBufferCount = 1;
 	ThrowIfFailed(vkAllocateCommandBuffers(*mDevice, &allocInfo, &mCommandBuffer), "vkAllocateCommandBuffers failed");
 	mDevice->SetObjectName(mCommandBuffer, name, VK_OBJECT_TYPE_COMMAND_BUFFER);
@@ -41,12 +38,13 @@ CommandBuffer::CommandBuffer(::Device* device, VkCommandPool commandPool, const 
 	ThrowIfFailed(vkCreateFence(*mDevice, &fenceInfo, nullptr, &mSignalFence), "vkCreateFence failed");
 	mDevice->SetObjectName(mSignalFence, name, VK_OBJECT_TYPE_FENCE);
 	
+	Clear();
+
 	VkCommandBufferBeginInfo beginInfo = {};
 	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	ThrowIfFailed(vkBeginCommandBuffer(mCommandBuffer, &beginInfo), "vkBeginCommandBuffer failed");
 	mState = CMDBUF_STATE_RECORDING;
-
 }
 CommandBuffer::~CommandBuffer() {
 	if (State() == CMDBUF_STATE_PENDING)
@@ -71,23 +69,39 @@ void CommandBuffer::EndLabel() {
 #endif
 
 void CommandBuffer::Clear() {
-	for (uint32_t i = 0; i < mBuffers.size(); i++) mDevice->ReturnToPool(mBuffers[i]);
-	for (uint32_t i = 0; i < mDescriptorSets.size(); i++) mDevice->ReturnToPool(mDescriptorSets[i]);
-	for (uint32_t i = 0; i < mTextures.size(); i++) mDevice->ReturnToPool(mTextures[i]);
+	for (uint32_t i = 0; i < mBuffers.size(); i++) mDevice->PoolResource(mBuffers[i]);
+	for (uint32_t i = 0; i < mDescriptorSets.size(); i++) mDevice->PoolResource(mDescriptorSets[i]);
+	for (uint32_t i = 0; i < mTextures.size(); i++) mDevice->PoolResource(mTextures[i]);
+	for (uint32_t i = 0; i < mFramebuffers.size(); i++) safe_delete(mFramebuffers[i]);
+	for (uint32_t i = 0; i < mRenderPasses.size(); i++) safe_delete(mRenderPasses[i]);
 	mBuffers.clear();
 	mDescriptorSets.clear();
 	mTextures.clear();
+	mFramebuffers.clear();
+	mRenderPasses.clear();
 
-	mCurrentRenderPass = nullptr;
-	mCurrentCamera = nullptr;
-	mCurrentMaterial = nullptr;
-	mCurrentShader = nullptr;
-	mCurrentPipeline = VK_NULL_HANDLE;
-	mTriangleCount = 0;
-	mCurrentIndexBuffer = nullptr;
-	mCurrentVertexBuffers.clear();
 	mSignalSemaphores.clear();
 	mWaitSemaphores.clear();
+	mTriangleCount = 0;
+
+	mBoundComputePipeline = nullptr;
+	mComputePipeline = VK_NULL_HANDLE;
+	mComputePipelineLayout = VK_NULL_HANDLE;
+
+	mCurrentFramebuffer = nullptr;
+	mCurrentRenderPass = nullptr;
+	mCurrentSubpassIndex = -1;
+	mCurrentShaderPass = "";
+	mBoundMaterial = nullptr;
+	mBoundGraphicsPipeline = nullptr;
+	mGraphicsPipeline = VK_NULL_HANDLE;
+	mGraphicsPipelineLayout = VK_NULL_HANDLE;
+
+	mBoundGraphicsDescriptorSets.clear();
+	mBoundComputeDescriptorSets.clear();
+
+	mBoundIndexBuffer = nullptr;
+	mBoundVertexBuffers.clear();
 }
 void CommandBuffer::Reset(const string& name) {
 	ThrowIfFailed(vkResetCommandBuffer(mCommandBuffer, 0), "vkResetCommandBuffer failed");
@@ -138,14 +152,12 @@ Texture* CommandBuffer::GetTexture(const std::string& name, const VkExtent3D& ex
 	return tex;
 }
 
-// Track a resource, and add it to the resource pool after this commandbuffer finishes executing. The resource will be deleted by the device at a later time.
-void CommandBuffer::TrackResource(Buffer* buffer) { mBuffers.push_back(buffer); }
-// Track a resource, and add it to the resource pool after this commandbuffer finishes executing. The resource will be deleted by the device at a later time.
-void CommandBuffer::TrackResource(Texture* texture) { mTextures.push_back(texture); }
-// Track a resource, and add it to the resource pool after this commandbuffer finishes executing. The resource will be deleted by the device at a later time.
-void CommandBuffer::TrackResource(DescriptorSet* descriptorSet) { mDescriptorSets.push_back(descriptorSet); }
+void CommandBuffer::TrackResource(Buffer* resource) { mBuffers.push_back(resource); }
+void CommandBuffer::TrackResource(Texture* resource) { mTextures.push_back(resource); }
+void CommandBuffer::TrackResource(DescriptorSet* resource) { mDescriptorSets.push_back(resource); }
+void CommandBuffer::TrackResource(Framebuffer* resource) { mFramebuffers.push_back(resource); }
+void CommandBuffer::TrackResource(RenderPass* resource) { mRenderPasses.push_back(resource); }
 
-// TODO: combine barriers
 void CommandBuffer::Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkMemoryBarrier& barrier) {
 	vkCmdPipelineBarrier(mCommandBuffer, srcStage, dstStage, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
@@ -183,6 +195,12 @@ void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags dst
 }
 void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout) {
 	if (oldLayout == newLayout) return;
+	if (newLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+		texture->mLastKnownLayout = newLayout;
+		texture->mLastKnownStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		texture->mLastKnownAccessFlags = 0;
+		return;
+	}
 	VkImageMemoryBarrier barrier = {};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.oldLayout = oldLayout;
@@ -198,7 +216,7 @@ void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags src
 	barrier.dstAccessMask = GuessAccessMask(newLayout);
 	barrier.subresourceRange.aspectMask = texture->mAspectFlags;
 	Barrier(srcStage, dstStage, barrier);
-	texture->mLastKnownLayout = barrier.newLayout;
+	texture->mLastKnownLayout = newLayout;
 	texture->mLastKnownStageFlags = dstStage;
 	texture->mLastKnownAccessFlags = barrier.dstAccessMask;
 }
@@ -220,85 +238,193 @@ void CommandBuffer::TransitionBarrier(VkImage image, const VkImageSubresourceRan
 	Barrier(srcStage, dstStage, barrier);
 }
 
-void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer) {
-	for (uint32_t i = 0; i < framebuffer->ColorBufferCount(); i++)
-		TransitionBarrier(framebuffer->ColorBuffer(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	if (framebuffer->DepthBuffer()) TransitionBarrier(framebuffer->DepthBuffer(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-	
-	renderPass->Begin(this, framebuffer);
+void CommandBuffer::BindDescriptorSet(DescriptorSet* descriptorSet, uint32_t set) {
+	descriptorSet->FlushWrites();
+	if (mGraphicsPipeline != VK_NULL_HANDLE) {
+		if (mBoundGraphicsDescriptorSets.size() <= set) mBoundGraphicsDescriptorSets.resize(set + 1);
+		mBoundGraphicsDescriptorSets[set] = descriptorSet;
+		vkCmdBindDescriptorSets(mCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, mGraphicsPipelineLayout, set, 1, *descriptorSet, 0, nullptr);
+	} else if (mComputePipeline != VK_NULL_HANDLE) {
+		if (mBoundComputeDescriptorSets.size() <= set) mBoundComputeDescriptorSets.resize(set + 1);
+		mBoundComputeDescriptorSets[set] = descriptorSet;
+		vkCmdBindDescriptorSets(mCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, mComputePipelineLayout, set, 1, *descriptorSet, 0, nullptr);
+	}
+}
+
+void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer, VkSubpassContents contents) {
+	// Transition attachments to the layouts specified by the render pass
+	set<RenderTargetIdentifier> transitioned;
+	for (const Subpass& subpass : renderPass->mSubpasses) {
+		for (const auto& kp : subpass.mColorAttachments)
+			if (transitioned.count(kp.first) == 0) {
+				transitioned.insert(kp.first);
+				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
+			}
+		for (const auto& kp : subpass.mResolveAttachments)
+			if (transitioned.count(kp.first) == 0) {
+				transitioned.insert(kp.first);
+				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
+			}
+		for (const auto& kp : subpass.mInputAttachments)
+			if (transitioned.count(kp.first) == 0) {
+				transitioned.insert(kp.first);
+				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
+			}
+		if (!subpass.mDepthAttachment.first.empty())
+			if (transitioned.count(subpass.mDepthAttachment.first) == 0) {
+				transitioned.insert(subpass.mDepthAttachment.first);
+				TransitionBarrier(framebuffer->Attachment(subpass.mDepthAttachment.first), subpass.mDepthAttachment.second.initialLayout);
+			}
+		if (!subpass.mDepthResolveAttachment.first.empty())
+			if (transitioned.count(subpass.mDepthResolveAttachment.first) == 0) {
+				transitioned.insert(subpass.mDepthResolveAttachment.first);
+				TransitionBarrier(framebuffer->Attachment(subpass.mDepthResolveAttachment.first), subpass.mDepthResolveAttachment.second.initialLayout);
+			}
+	}
+
+	// Assign clear values specified by the render pass
+	vector<VkClearValue> clearValues(renderPass->mAttachments.size());
+	for (const auto& kp : renderPass->mSubpasses[0].mColorAttachments)
+		clearValues[renderPass->mAttachmentMap.at(kp.first)].color = { 0.f, 0.f, 0.f, 0.f };
+	if (!renderPass->mSubpasses[0].mDepthAttachment.first.empty())
+		clearValues[renderPass->mAttachmentMap.at(renderPass->mSubpasses[0].mDepthAttachment.first)].depthStencil = { 1.0f, 0 };
+
+	VkRenderPassBeginInfo info = {};
+	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	info.renderPass = *renderPass;
+	info.framebuffer = *framebuffer;
+	info.renderArea = { { 0, 0 }, framebuffer->Extent() };
+	info.clearValueCount = (uint32_t)clearValues.size();
+	info.pClearValues = clearValues.data();
+	vkCmdBeginRenderPass(mCommandBuffer, &info, contents);
+
 	mCurrentRenderPass = renderPass;
+	mCurrentFramebuffer = framebuffer;
+	mCurrentSubpassIndex = 0;
+	mCurrentShaderPass = renderPass->mSubpasses[0].mShaderPass;
+	
+	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
+	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.initialLayout;
+	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.initialLayout;
+}
+void CommandBuffer::NextSubpass(VkSubpassContents contents) {
+	vkCmdNextSubpass(mCommandBuffer, contents);
+	
+	mCurrentSubpassIndex++;
+	mCurrentShaderPass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex].mShaderPass;
+
+	// Update internal attachment layouts to the layouts specified by the render pass
+	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
+	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
+	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.initialLayout;
+	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.initialLayout;
 }
 void CommandBuffer::EndRenderPass() {
-	vkCmdEndRenderPass(*this);
+	vkCmdEndRenderPass(mCommandBuffer);
+	
+	// Update internal attachment layouts to the layouts specified by the render pass
+	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
+	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
+	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
+	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
+	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.finalLayout;
+	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.finalLayout;
+
 	mCurrentRenderPass = nullptr;
-	mCurrentCamera = nullptr;
-	mCurrentMaterial = nullptr;
-	mCurrentIndexBuffer = nullptr;
-	mCurrentVertexBuffers.clear();
-	mCurrentPipeline = VK_NULL_HANDLE;
+	mCurrentFramebuffer = nullptr;
+	mCurrentShaderPass = "";
+	mCurrentSubpassIndex = -1;
+}
+
+void CommandBuffer::ClearAttachments(const vector<VkClearAttachment>& values) {
+	VkClearRect rect = {};
+	rect.layerCount = 1;
+	rect.rect = { {}, mCurrentFramebuffer->Extent() } ;
+	vkCmdClearAttachments(mCommandBuffer, (uint32_t)values.size(), values.data(), 1, &rect);
 }
 
 bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint32_t dataSize) {
-	if (mCurrentShader->mPushConstants.count(name) == 0) return false;
-	VkPushConstantRange range = mCurrentShader->mPushConstants.at(name);
-	vkCmdPushConstants(mCommandBuffer, mCurrentShader->mPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+	if (mBoundGraphicsPipeline) {
+		if (mBoundGraphicsPipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
+		VkPushConstantRange range = mBoundGraphicsPipeline->mShaderVariant->mPushConstants.at(name);
+		vkCmdPushConstants(mCommandBuffer, mGraphicsPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+		return true;
+	} else if (mBoundComputePipeline) {
+		if (mBoundComputePipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
+		VkPushConstantRange range = mBoundComputePipeline->mShaderVariant->mPushConstants.at(name);
+		vkCmdPushConstants(mCommandBuffer, mComputePipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+		return true;
+	}
+	return false;
+}
+
+void CommandBuffer::BindPipeline(ComputePipeline* pipeline) {
+	if (pipeline->mPipeline == mComputePipeline) return;
+	vkCmdBindPipeline(mCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->mPipeline);
+	mComputePipeline = pipeline->mPipeline;
+	mComputePipelineLayout = pipeline->mPipelineLayout;
+	mBoundComputePipeline = pipeline;
+	mBoundComputeDescriptorSets.clear();
+
+	mGraphicsPipeline = VK_NULL_HANDLE;
+	mGraphicsPipelineLayout = VK_NULL_HANDLE;
+	mBoundGraphicsPipeline = nullptr;
+	mBoundMaterial = nullptr;
+	mBoundGraphicsDescriptorSets.clear();
+
+}
+void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* input, VkPrimitiveTopology topology, VkCullModeFlags cullMode, VkPolygonMode polyMode) {
+	VkPipeline vkpipeline = pipeline->GetPipeline(this, input, topology, cullMode, polyMode);
+	if (vkpipeline == mGraphicsPipeline) return;
+	vkCmdBindPipeline(mCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipeline);
+	mComputePipeline = VK_NULL_HANDLE;
+	mComputePipelineLayout = VK_NULL_HANDLE;
+	mBoundComputePipeline = nullptr;
+	mBoundComputeDescriptorSets.clear();
+
+	mGraphicsPipeline = vkpipeline;
+	mGraphicsPipelineLayout = pipeline->mPipelineLayout;
+	mBoundGraphicsPipeline = pipeline;
+	mBoundMaterial = nullptr;
+	mBoundGraphicsDescriptorSets.clear();
+}
+bool CommandBuffer::BindMaterial(Material* material, const VertexInput* vertexInput, VkPrimitiveTopology topology) {
+	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass());
+	if (!pipeline) return false;
+	BindPipeline(pipeline, vertexInput, topology, material->CullMode(), material->PolygonMode());
+	if (mBoundMaterial != material) {
+		mBoundMaterial = material;
+		material->BindDescriptorParameters(this);
+	}
+	material->PushConstants(this);
 	return true;
 }
 
-VkPipelineLayout CommandBuffer::BindShader(GraphicsShader* shader, PassType pass, const VertexInput* input, Camera* camera, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode) {
-	VkPipeline pipeline = shader->GetPipeline(mCurrentRenderPass, input, topology, cullMode, blendMode, polyMode);
-	if (pipeline != mCurrentPipeline) {
-		vkCmdBindPipeline(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-		mCurrentPipeline = pipeline;
-		mCurrentShader = shader;
-		mCurrentCamera = nullptr;
-		mCurrentMaterial = nullptr;
-	}
-
-	if (camera && mCurrentCamera != camera) {
-		if (mCurrentRenderPass && shader->mDescriptorBindings.count("Camera"))
-			vkCmdBindDescriptorSets(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->mPipelineLayout, PER_CAMERA, 1, *camera->DescriptorSet(shader->mDescriptorBindings.at("Camera").second.stageFlags), 0, nullptr);
-		PushConstantRef("StereoEye", (uint32_t)EYE_LEFT);
-		mCurrentCamera = camera;
-	}
-	return shader->mPipelineLayout;
-}
-VkPipelineLayout CommandBuffer::BindMaterial(Material* material, PassType pass, const VertexInput* input, Camera* camera, VkPrimitiveTopology topology, VkCullModeFlags cullMode, BlendMode blendMode, VkPolygonMode polyMode) {
-	GraphicsShader* shader = material->GetShader(pass);
-	if (!shader) return VK_NULL_HANDLE;
-
-	if (blendMode == BLEND_MODE_MAX_ENUM) blendMode = material->BlendMode();
-	if (cullMode == VK_CULL_MODE_FLAG_BITS_MAX_ENUM) cullMode = material->CullMode();
-
-	VkPipeline pipeline = shader->GetPipeline(mCurrentRenderPass, input, topology, cullMode, blendMode, polyMode);
-	if (pipeline != mCurrentPipeline) {
-		vkCmdBindPipeline(*this, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-		mCurrentPipeline = pipeline;
-		mCurrentShader = shader;
-		mCurrentCamera = nullptr;
-		mCurrentMaterial = nullptr;
-	}
-
-	if (mCurrentCamera != camera || mCurrentMaterial != material) {
-		mCurrentCamera = camera;
-		mCurrentMaterial = material;
-		material->BindDescriptorParameters(this, pass, camera);
-	}
-	material->SetPushParameter<uint32_t>("StereoEye", 0u);
-	material->BindPushParameters(this, pass, camera);
-
-	return shader->mPipelineLayout;
-}
-
 void CommandBuffer::BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset) {
-	if (mCurrentVertexBuffers[index] == buffer) return;
+	if (mBoundVertexBuffers[index] == buffer) return;
 	VkBuffer buf = buffer == nullptr ? (VkBuffer)VK_NULL_HANDLE : (*buffer);
 	vkCmdBindVertexBuffers(mCommandBuffer, index, 1, &buf, &offset);
-	mCurrentVertexBuffers[index] = buffer;
+	mBoundVertexBuffers[index] = buffer;
 }
 void CommandBuffer::BindIndexBuffer(Buffer* buffer, VkDeviceSize offset, VkIndexType indexType) {
-	if (mCurrentIndexBuffer == buffer) return;
+	if (mBoundIndexBuffer == buffer) return;
 	VkBuffer buf = buffer == nullptr ? (VkBuffer)VK_NULL_HANDLE : (*buffer);
 	vkCmdBindIndexBuffer(mCommandBuffer, buf, offset, indexType);
-	mCurrentIndexBuffer = buffer;
+	mBoundIndexBuffer = buffer;
+}
+
+void CommandBuffer::Dispatch(const uint3& dim) {
+	vkCmdDispatch(mCommandBuffer, dim.x, dim.y, dim.z);
+}
+void CommandBuffer::DispatchAligned(const uint3& dim) {
+	if (!mBoundComputePipeline) {
+		fprintf_color(COLOR_RED, stderr, "Error: Calling DispatchAligned without any compute pipeline bound\n");
+		throw;
+	}
+	Dispatch((dim + mBoundComputePipeline->mShaderVariant->mWorkgroupSize - 1) / mBoundComputePipeline->mShaderVariant->mWorkgroupSize);
 }

@@ -1,17 +1,13 @@
-#pragma vertex vsmain
-#pragma fragment fsmain main
-#pragma fragment fsdepth depth
+#pragma pass forward/depth vsmain fsdepth
+#pragma pass forward/opaque vsmain fsmain
+
+#pragma render_queue 1000
+#pragma blend 0 false
 
 #pragma multi_compile ALPHA_CLIP
 #pragma multi_compile TEXTURED TEXTURED_COLORONLY
 
-#pragma render_queue 1000
-
-#pragma array MainTextures 8
-#pragma array NormalTextures 8
-#pragma array MaskTextures 8
 #pragma static_sampler Sampler
-#pragma static_sampler ShadowSampler maxAnisotropy=0 maxLod=0 addressMode=clamp_border borderColor=float_opaque_white compareOp=less
 
 #include <include/shadercompat.h>
 
@@ -26,22 +22,19 @@
 #define NEED_TEXCOORD
 #endif
 
-[[vk::binding(INSTANCE_BUFFER_BINDING, PER_OBJECT)]] StructuredBuffer<InstanceBuffer> Instances : register(t0);
 [[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> BaseColorTexture		: register(t4);
 [[vk::binding(BINDING_START + 1, PER_MATERIAL)]] Texture2D<float4> NormalTexture			: register(t5);
 [[vk::binding(BINDING_START + 2, PER_MATERIAL)]] Texture2D<float4> RoughnessTexture		: register(t6);
 [[vk::binding(BINDING_START + 7, PER_MATERIAL)]] SamplerState Sampler : register(s0);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
-	STRATUM_PUSH_CONSTANTS
-
+	STM_PUSH_CONSTANTS
 	float4 BaseColor;
 	float Metallic;
-	float Roughness;
-	float BumpStrength;
 	float3 Emission;
-
+	float Roughness;
 	float4 TextureST;
+	float BumpStrength;
 };
 
 #include <include/util.hlsli>
@@ -94,19 +87,8 @@ v2f vsmain(
 	return o;
 }
 
-float fsdepth(in float4 worldPos : TEXCOORD0, in float2 texcoord : TEXCOORD2) : SV_Target0 {
-#ifdef ALPHA_CLIP
-	clip((BaseColorTexture.Sample(Sampler, texcoord) * BaseColor).a - .75);
-#endif
-	return worldPos.w;
-}
-
-void fsmain(v2f i,
-	out float4 color : SV_Target0,
-	out float4 depthNormal : SV_Target1) {
-	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
-
-	float3 view = ComputeView(i.worldPos.xyz, i.screenPos);
+float4 fsmain(v2f i) : SV_Target0 {
+	float3 view = normalize(-i.worldPos.xyz);
 
 	#if defined(TEXTURED) || defined(TEXTURED_COLORONLY)
 	float4 col = BaseColorTexture.Sample(Sampler, i.texcoord) * BaseColor;
@@ -143,7 +125,12 @@ void fsmain(v2f i,
 	material.emission = Emission;
 
 	float3 eval = ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w);
-	
-	color = float4(eval, col.a);
-	depthNormal.a = col.a;
+	return float4(eval, 1);
+}
+
+float fsdepth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {
+	#ifdef ALPHA_CLIP
+	clip((BaseColorTexture.Sample(Sampler, texcoord) * BaseColor).a - .75);
+	#endif
+	return position.z;
 }

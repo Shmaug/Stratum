@@ -16,3 +16,4 @@ CTestTestfile.cmake
 *.aps
 shadertoolsconfig.json
 Plugins/Raytracing
+ThirdParty/dxc

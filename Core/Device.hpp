@@ -4,29 +4,32 @@
 
 class Device {
 public:
-	ENGINE_EXPORT ~Device();
+	STRATUM_API ~Device();
 	
 	// Allocate device memory. Will attempt to sub-allocate from larger allocations. If the 'properties' contains VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, the memory will be mapped.
-	ENGINE_EXPORT DeviceMemoryAllocation AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const std::string& tag);
-	ENGINE_EXPORT void FreeMemory(const DeviceMemoryAllocation& allocation);
+	STRATUM_API DeviceMemoryAllocation AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const std::string& tag);
+	STRATUM_API void FreeMemory(const DeviceMemoryAllocation& allocation);
 	
-	ENGINE_EXPORT Buffer* GetPooledBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	ENGINE_EXPORT DescriptorSet* GetPooledDescriptorSet(const std::string& name, VkDescriptorSetLayout layout);
-	ENGINE_EXPORT Texture* GetPooledTexture(const std::string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels = 1, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	ENGINE_EXPORT void ReturnToPool(Buffer* buffer);
-	ENGINE_EXPORT void ReturnToPool(DescriptorSet* descriptorSet);
-	ENGINE_EXPORT void ReturnToPool(Texture* texture);
-	
-	ENGINE_EXPORT void PurgePooledResources(uint32_t maxAge);
+	STRATUM_API Buffer* GetPooledBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	STRATUM_API DescriptorSet* GetPooledDescriptorSet(const std::string& name, VkDescriptorSetLayout layout);
+	STRATUM_API Texture* GetPooledTexture(const std::string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels = 1, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	// Place a resource back in the resource pool
+	STRATUM_API void PoolResource(Buffer* resource);
+	// Place a resource back in the resource pool
+	STRATUM_API void PoolResource(DescriptorSet* resource);
+	// Place a resource back in the resource pool
+	STRATUM_API void PoolResource(Texture* resource);
 
-	ENGINE_EXPORT CommandBuffer* GetCommandBuffer(const std::string& name = "Command Buffer");
-	ENGINE_EXPORT void Execute(CommandBuffer* commandBuffer);
+	STRATUM_API void PurgePooledResources(uint32_t maxAge);
+
+	STRATUM_API CommandBuffer* GetCommandBuffer(const std::string& name = "Command Buffer", VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+	STRATUM_API void Execute(CommandBuffer* commandBuffer);
 	// Finish all work being done on this device
-	ENGINE_EXPORT void Flush();
+	STRATUM_API void Flush();
 
-	ENGINE_EXPORT void SetObjectName(void* object, const std::string& name, VkObjectType type) const;
+	STRATUM_API void SetObjectName(void* object, const std::string& name, VkObjectType type) const;
 
-	ENGINE_EXPORT VkSampleCountFlagBits GetMaxUsableSampleCount();
+	STRATUM_API VkSampleCountFlagBits GetMaxUsableSampleCount();
 
 	inline VkPhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
 	inline uint32_t PhysicalDeviceIndex() const { return mPhysicalDeviceIndex; }
@@ -51,6 +54,9 @@ public:
 	inline ::AssetManager* AssetManager() const { return mAssetManager; }
 	inline ::Instance* Instance() const { return mInstance; }
 
+	inline VkDescriptorSetLayout PerCameraSetLayout() const { return mCameraSetLayout; }
+	inline VkDescriptorSetLayout PerObjectSetLayout() const { return mObjectSetLayout; }
+
 	inline operator VkDevice() const { return mDevice; }
 
 private:
@@ -62,8 +68,8 @@ private:
 		std::list<std::pair<VkDeviceSize, VkDeviceSize>> mAvailable;
 		std::list<DeviceMemoryAllocation> mAllocations;
 
-		ENGINE_EXPORT bool SubAllocate(const VkMemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const std::string& tag);
-		ENGINE_EXPORT void Deallocate(const DeviceMemoryAllocation& allocation);
+		STRATUM_API bool SubAllocate(const VkMemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const std::string& tag);
+		STRATUM_API void Deallocate(const DeviceMemoryAllocation& allocation);
 	};
 	
 	template<typename T>
@@ -76,9 +82,9 @@ private:
 	friend class CommandBuffer;
 	friend class ::Instance;
 	friend class Window;
-	ENGINE_EXPORT Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueue, uint32_t presentQueue, const std::set<std::string>& deviceExtensions, std::vector<const char*> validationLayers);
+	STRATUM_API Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueue, uint32_t presentQueue, const std::set<std::string>& deviceExtensions, std::vector<const char*> validationLayers);
 	
-	ENGINE_EXPORT void PrintAllocations();
+	STRATUM_API void PrintAllocations();
 
 	uint64_t mFrameCount;
 	uint32_t mCommandBufferCount;
@@ -88,6 +94,9 @@ private:
 
 	::Instance* mInstance;
 	::AssetManager* mAssetManager;
+	
+	VkDescriptorSetLayout mCameraSetLayout;
+	VkDescriptorSetLayout mObjectSetLayout;
 
 	VkDevice mDevice;
 	VkPhysicalDevice mPhysicalDevice;

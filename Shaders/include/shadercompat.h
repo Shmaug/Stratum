@@ -33,28 +33,24 @@ struct CameraBuffer {
 	float4x4 ViewProjection[2];
 	float4x4 InvProjection[2];
 	float4 Position[2];
-	float Near;
-	float Far;
-	float AspectRatio;
-	float OrthographicSize;
 };
 
 struct GPULight {
-	float4 CascadeSplits;
+	float3 Color;
+	uint Type;
 	float3 WorldPosition;
 	float InvSqrRange;
 	float3 Direction;
+	int ShadowDataIndex;
+	float4 CascadeSplits;
 	float SpotAngleScale;
-	float3 Color;
 	float SpotAngleOffset;
-	uint Type;
-	int ShadowIndex;
-	int2 pad;
+	uint ShadowIndex;
+	uint pad;
 };
 
 struct ShadowData {
 	float4x4 WorldToShadow; // ViewProjection matrix for the shadow render
-	float4 ShadowST;
 	float3 CameraPosition;
 	float InvProj22;
 };
@@ -64,44 +60,38 @@ struct VertexWeight {
 	uint4 Indices;
 };
 
-struct GlyphVertex {
-	int2 Endpoint;
-	int2 ControlPoint;
-	uint Degree;
-	uint pad[3];
-};
-struct TextGlyph {
+struct GlyphRect {
 	float2 Offset;
 	float2 Extent;
-	float2 ShapeOffset;
-	float2 ShapeExtent;
-	uint StartVertex;
-	uint VertexCount;
-	uint pad[2];
+	float4 TextureST;
 };
 
 #ifdef __cplusplus
 #undef uint
 #else
 
-#define STRATUM_PUSH_CONSTANTS \
-uint StereoEye; \
+#define STM_PUSH_CONSTANTS \
 float3 AmbientLight; \
-uint LightCount; \
-float2 ShadowTexelSize;
+uint stmPad0; \
+float2 ShadowTexelSize; \
+uint StereoEye; \
+uint LightCount;
 
 #define STRATUM_MATRIX_V Camera.View[StereoEye]
 #define STRATUM_MATRIX_P Camera.Projection[StereoEye]
 #define STRATUM_MATRIX_VP Camera.ViewProjection[StereoEye]
 #define STRATUM_CAMERA_POSITION Camera.Position[StereoEye].xyz
+#define STRATUM_CAMERA_NEAR Camera.Position[0].w
+#define STRATUM_CAMERA_FAR Camera.Position[1].w
 
-[[vk::binding(LIGHT_BUFFER_BINDING, 				PER_MATERIAL)]] StructuredBuffer<GPULight> Lights : register(t2);
-[[vk::binding(SHADOW_BUFFER_BINDING, 				PER_MATERIAL)]] StructuredBuffer<ShadowData> Shadows : register(t4);
-[[vk::binding(SHADOW_ATLAS_BINDING, 				PER_MATERIAL)]] Texture2D<float> ShadowAtlas : register(t3);
-[[vk::binding(ENVIRONMENT_TEXTURE_BINDING, 	PER_MATERIAL)]] Texture2D<float4> EnvironmentTexture	: register(t5);
-[[vk::binding(SHADOW_SAMPLER_BINDING, 			PER_MATERIAL)]] SamplerComparisonState ShadowSampler : register(s6);
+[[vk::binding(CAMERA_BUFFER_BINDING, 				PER_CAMERA)]] ConstantBuffer<CameraBuffer> Camera : register(b0);
+[[vk::binding(LIGHT_BUFFER_BINDING, 				PER_CAMERA)]] StructuredBuffer<GPULight> Lights : register(t0);
+[[vk::binding(SHADOW_BUFFER_BINDING, 				PER_CAMERA)]] StructuredBuffer<ShadowData> Shadows : register(t1);
+[[vk::binding(SHADOW_ATLAS_BINDING, 				PER_CAMERA)]] Texture2D<float> ShadowAtlas : register(t2);
+[[vk::binding(ENVIRONMENT_TEXTURE_BINDING, 	PER_CAMERA)]] Texture2D<float4> EnvironmentTexture	: register(t3);
+[[vk::binding(SHADOW_SAMPLER_BINDING, 			PER_CAMERA)]] SamplerComparisonState ShadowSampler : register(s0);
 
-[[vk::binding(CAMERA_BUFFER_BINDING, PER_CAMERA)]] ConstantBuffer<CameraBuffer> Camera : register(b0);
+[[vk::binding(INSTANCE_BUFFER_BINDING, PER_OBJECT)]] StructuredBuffer<InstanceBuffer> Instances : register(t0);
 
 #endif
 

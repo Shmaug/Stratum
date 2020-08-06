@@ -1,24 +1,17 @@
 #pragma once
 
-#include <Content/Material.hpp>
-#include <Content/Mesh.hpp>
+#include <Data/Material.hpp>
+#include <Data/Mesh.hpp>
 #include <Core/DescriptorSet.hpp>
 #include <Scene/Renderer.hpp>
 #include <Util/Util.hpp>
 
 class PointerRenderer : public Renderer {
 public:
-	bool mVisible;
-
-	ENGINE_EXPORT PointerRenderer(const std::string& name);
-	ENGINE_EXPORT ~PointerRenderer();
-
-	inline virtual PassType PassMask() override { return PASS_MAIN; }
-
-	inline virtual bool Visible() override { return mVisible && mRayDistance != 0 && EnabledHierarchy(); }
-	inline virtual uint32_t RenderQueue() override { return 5000; }
-	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-
+	STRATUM_API PointerRenderer(const std::string& name);
+	STRATUM_API ~PointerRenderer();
+	
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return 5000; }
 	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
 
 	inline void RayDistance(float d) { mRayDistance = d; }
@@ -35,5 +28,7 @@ protected:
 	float4 mColor;
 
 	AABB mAABB;
-	ENGINE_EXPORT virtual bool UpdateTransform() override;
+	
+	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
+	STRATUM_API virtual bool UpdateTransform() override;
 };

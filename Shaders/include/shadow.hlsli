@@ -89,7 +89,7 @@ float SampleShadowCascadePCF(uint index, float3 cameraPos, float3 worldPos, floa
 	shadowPos.xyz /= shadowPos.w;
 	float z = shadowPos.z - .01;
 
-	float2 shadowUV = saturate(shadowPos.xy * .5 + .5);
+	float2 shadowUV = shadowPos.xy * .5 + .5;
 
 	float2 sz;
 	ShadowAtlas.GetDimensions(sz.x, sz.y);
@@ -97,7 +97,7 @@ float SampleShadowCascadePCF(uint index, float3 cameraPos, float3 worldPos, floa
 
 	float attenuation = 0;
 	for (uint i = 0; i < 32; i++)
-		attenuation += ShadowAtlas.SampleCmpLevelZero(ShadowSampler, saturate(shadowUV + PoissonSamples[i] * sz) * s.ShadowST.xy + s.ShadowST.zw, z);
+		attenuation += ShadowAtlas.SampleCmpLevelZero(ShadowSampler, saturate(shadowUV + PoissonSamples[i] * sz), z);
 	return attenuation / 32;
 }
 float SampleShadowPCF(GPULight l, float3 cameraPos, float3 worldPos, float depth) {

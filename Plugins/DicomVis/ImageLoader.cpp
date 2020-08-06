@@ -46,7 +46,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			uint32_t width = x;
 			uint32_t height = y;
 			uint32_t channels = c;
-			uint32_t depth = images.size();
+			uint32_t depth = (uint32_t)images.size();
 
 			for (uint32_t i = 1; i < images.size(); i++) {
 				stbi_info(images[i].string().c_str(), &x, &y, &c);
@@ -189,7 +189,7 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 
 	// volume size in meters
 	if (size) {
-		float2 b = images[0].location;
+		float2 b = (float)images[0].location;
 		for (auto i : images) {
 			b.x = (float)fmin(i.location - i.spacing.z * .5, b.x);
 			b.y = (float)fmax(i.location + i.spacing.z * .5, b.y);

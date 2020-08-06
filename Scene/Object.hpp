@@ -1,20 +1,14 @@
 #pragma once
 
 #include <Core/CommandBuffer.hpp>
-#include <Util/Util.hpp>
-
-class Camera;
-class Scene;
-class GuiContext;
 
 // A hierarchical object in a Scene. Keeps track of a transform internally that is updated on-demand during getter functions
 class Object {
 public:
 	const std::string mName;
-	bool mEnabled;
 
-	ENGINE_EXPORT Object(const std::string& name);
-	ENGINE_EXPORT ~Object();
+	STRATUM_API Object(const std::string& name);
+	STRATUM_API virtual ~Object();
 
 	inline ::Scene* Scene() const { return mScene; }
 
@@ -30,25 +24,27 @@ public:
 	inline float4x4 ObjectToWorld() { UpdateTransform(); return mObjectToWorld; }
 	inline float4x4 WorldToObject() { UpdateTransform(); return mWorldToObject; }
 
-	inline virtual void LocalPosition(const float3& p) { mLocalPosition = p; Dirty(); }
-	inline virtual void LocalRotation(const quaternion& r) { mLocalRotation = r; Dirty(); }
-	inline virtual void LocalScale(const float3& s) { mLocalScale = s; Dirty(); }
+	inline void LocalPosition(const float3& p) { mLocalPosition = p; DirtyTransform(); }
+	inline void LocalRotation(const quaternion& r) { mLocalRotation = r; DirtyTransform(); }
+	inline void LocalScale(const float3& s) { mLocalScale = s; DirtyTransform(); }
 
-	inline virtual void LocalPosition(float x, float y, float z) { mLocalPosition.x = x; mLocalPosition.y = y; mLocalPosition.z = z; Dirty(); }
-	inline virtual void LocalScale(float x, float y, float z) { mLocalScale.x = x; mLocalScale.y = y; mLocalScale.z = z; Dirty(); }
-	inline virtual void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; Dirty(); }
-
-	ENGINE_EXPORT virtual AABB Bounds();
+	inline void LocalPosition(float x, float y, float z) { mLocalPosition.x = x; mLocalPosition.y = y; mLocalPosition.z = z; DirtyTransform(); }
+	inline void LocalScale(float x, float y, float z) { mLocalScale.x = x; mLocalScale.y = y; mLocalScale.z = z; DirtyTransform(); }
+	inline void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; DirtyTransform(); }
 	
+	inline virtual bool BypassCulling() { return true; };
+	inline virtual AABB Bounds() { UpdateTransform(); return mBounds; }
+
 	inline Object* Parent() const { return mParent; }
-	ENGINE_EXPORT void AddChild(Object* obj);
-	ENGINE_EXPORT void RemoveChild(Object* obj);
+	STRATUM_API void AddChild(Object* obj);
+	STRATUM_API void RemoveChild(Object* obj);
 
 	inline uint32_t ChildCount() const { return (uint32_t)mChildren.size(); }
 	inline Object* Child(uint32_t index) const { return mChildren[index]; }
 
-	// Returns true only if this object and all its ancestors are enabled
-	ENGINE_EXPORT bool EnabledHierarchy();
+	inline bool EnabledSelf() const { return mEnabled; };
+	STRATUM_API void EnabledSelf(bool e);
+	STRATUM_API bool EnabledHierarchy() const { return mEnabledHierarchy; }
 	
 	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
 	// Note Renderers should OR this with their PassMask()
@@ -59,17 +55,13 @@ public:
 	// If any is true, will return the first hit, otherwise will return the closest hit
 	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
 
-	// Callbacks
-	
-	inline virtual void PreUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void Update(CommandBuffer* commandBuffer) {}
-	inline virtual void PostUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {};
-
 private:
 	friend class ::Scene;
+	
 	::Scene* mScene;
+
+	bool mEnabled;
+	bool mEnabledHierarchy;
 
 	bool mTransformDirty;
 	float3 mLocalPosition;
@@ -87,9 +79,14 @@ private:
 	quaternion mWorldRotation;
 
 	Object* mParent;
-	std::vector<Object*> mChildren;
+	std::deque<Object*> mChildren;
 
 protected:
-	ENGINE_EXPORT virtual void Dirty();
-	ENGINE_EXPORT virtual bool UpdateTransform();
+	inline virtual void OnFixedUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnLateUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {}
+
+	STRATUM_API virtual void DirtyTransform();
+	STRATUM_API virtual bool UpdateTransform();
 };

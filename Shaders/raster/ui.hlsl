@@ -1,14 +1,12 @@
-#pragma vertex vsmain
-#pragma fragment fsmain
+#pragma pass forward/transparent vsmain fsmain
+
+#pragma render_queue 4000
+#pragma cull false
+#pragma blend 0 add srcAlpha oneMinusSrcAlpha
 
 #pragma multi_compile TEXTURED
 #pragma multi_compile SCREEN_SPACE
 
-#pragma render_queue 4000
-#pragma cull false
-#pragma blend alpha
-
-#pragma array Textures 64
 #pragma static_sampler Sampler
 
 #include <include/shadercompat.h>
@@ -30,21 +28,19 @@ struct GuiRect {
 [[vk::binding(BINDING_START + 2, PER_OBJECT)]] SamplerState Sampler : register(s0);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b2) {
-	STRATUM_PUSH_CONSTANTS
+	STM_PUSH_CONSTANTS
 	float2 ScreenSize;
 }
 
 #include <include/util.hlsli>
 
 struct v2f {
-	float4 position : SV_Position;
-	float4 color : COLOR0;
-	float4 texcoord : TEXCOORD0;
-	#ifndef SCREEN_SPACE
-	float4 worldPos : TEXCOORD1;
-	#endif
+	[[vk::location(0)]] float4 position : SV_Position;
+	[[vk::location(1)]] float4 color : COLOR0;
+	[[vk::location(2)]] float2 texcoord : TEXCOORD0;
+	[[vk::location(3)]] float2 clipPos : TEXCOORD1;
 	#ifdef TEXTURED
-	uint textureIndex;
+	[[vk::location(4)]] uint textureIndex : TEXCOORD2;
 	#endif
 };
 
@@ -65,15 +61,12 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	v2f o;
 	#ifdef SCREEN_SPACE
 	o.position = float4((p / ScreenSize) * 2 - 1, r.Depth, 1);
-	o.position.y = -o.position.y;
 	#else
 	float4x4 o2w = r.ObjectToWorld;
 	o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
 	o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
 	o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
-	float4 worldPos = mul(o2w, float4(p, 0, 1.0));
-	o.position = mul(STRATUM_MATRIX_VP, worldPos);
-	o.worldPos = float4(worldPos.xyz, o.position.z);
+	o.position = mul(STRATUM_MATRIX_VP, mul(o2w, float4(p, 0, 1.0)));
 	#endif
 
 	#ifdef TEXTURED
@@ -81,40 +74,27 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	#endif
 
 	#ifdef SCREEN_SPACE
-	o.texcoord.xy = float2(positions[index].x, 1 - positions[index].y) * r.TextureST.xy + r.TextureST.zw;
+	o.texcoord = float2(positions[index].x, 1 - positions[index].y) * r.TextureST.xy + r.TextureST.zw;
 	#else
-	o.texcoord.xy = positions[index] * r.TextureST.xy + r.TextureST.zw;
+	o.texcoord = positions[index] * r.TextureST.xy + r.TextureST.zw;
 	#endif
 
-	o.texcoord.zw = (p - r.ClipBounds.xy) / r.ClipBounds.zw;
-
+	o.clipPos = (p - r.ClipBounds.xy) / r.ClipBounds.zw;
 	o.color = r.Color;
-
 	return o;
 }
 
-void fsmain(v2f i,
-	out float4 color : SV_Target0,
-	out float4 depthNormal : SV_Target1) {
-
-	#ifdef SCREEN_SPACE
-	depthNormal = 0;
-	#else
-	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, 1);
-	#endif
+float4 fsmain(v2f i) : SV_Target0 {
+	float4 color = i.color;
 
 	#ifdef TEXTURED
 	#ifdef SCREEN_SPACE
-	color = Textures[i.textureIndex].Sample(Sampler, i.texcoord.xy) * i.color;
+	color *= Textures[i.textureIndex].SampleLevel(Sampler, i.texcoord, 0);
 	#else
-	color = Textures[i.textureIndex].SampleLevel(Sampler, i.texcoord.xy, 0) * i.color;
+	color *= Textures[i.textureIndex].SampleBias(Sampler, i.texcoord, -1);
 	#endif
-	#else
-	color = i.color;
 	#endif
-
-	clip(i.texcoord.zw);
-	clip(1 - i.texcoord.zw);
-
-	depthNormal.a = color.a;
+	
+	if (color.a <= 0 || any(i.clipPos < 0) || any(i.clipPos > 1)) discard;
+	return color;
 }

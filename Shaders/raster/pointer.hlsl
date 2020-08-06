@@ -1,14 +1,13 @@
-#pragma vertex vsmain
-#pragma fragment fsmain
+#pragma pass forward/opaque vsmain fsmain
 
 #pragma render_queue 5000
 #pragma cull false
-#pragma blend alpha
+#pragma blend 0 add srcAlpha oneMinusSrcAlpha
 
 #include <include/shadercompat.h>
 
 [[vk::push_constant]] cbuffer PushConstants : register(b1) {
-	STRATUM_PUSH_CONSTANTS
+	STM_PUSH_CONSTANTS
 	float4 Color;
 	float3 P0;
 	float Width;
@@ -19,8 +18,7 @@
 
 struct v2f {
 	float4 position : SV_Position;
-	float4 worldPos : TEXCOORD0;
-	float fade : TEXCOORD1;
+	float fade : TEXCOORD0;
 };
 
 v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
@@ -43,15 +41,12 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 
 	v2f o;
 	o.position = mul(STRATUM_MATRIX_VP, float4(worldPos - STRATUM_CAMERA_POSITION, 1));
-	o.worldPos = float4(worldPos.xyz, o.position.z);
 	o.fade = p.x;
 	return o;
 }
 
-void fsmain(v2f i,
-	out float4 color : SV_Target0,
-	out float4 depthNormal : SV_Target1) {
-	color = Color;
+float4 fsmain(v2f i) : SV_Target0 {
+	float4 color = Color;
 	color.a *= (1 - abs(i.fade)) * (1 - abs(i.fade));
-	depthNormal = float4(normalize(cross(ddx(i.worldPos.xyz), ddy(i.worldPos.xyz))) * i.worldPos.w, color.a);
+	return color;
 }

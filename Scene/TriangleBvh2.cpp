@@ -46,7 +46,7 @@ void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t ver
 	Node node;
 
 	todo[stackptr].mStart = 0;
-	todo[stackptr].mEnd = mTriangles.size();
+	todo[stackptr].mEnd = (uint32_t)mTriangles.size();
 	todo[stackptr].mParentOffset = 0xfffffffc;
 	stackptr++;
 
@@ -97,7 +97,7 @@ void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t ver
 
 		// Set the split dimensions
 		uint32_t split_dim = 0;
-		float3 ext = bc.Extents();
+		float3 ext = bc.HalfSize();
 		if (ext.y > ext.x) {
 			split_dim = 1;
 			if (ext.z > ext.y) split_dim = 2;

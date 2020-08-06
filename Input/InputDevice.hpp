@@ -2,8 +2,6 @@
 
 #include <Util/Util.hpp>
 
-class InputDevice;
-
 #define INPUT_POINTER_NAME_LENGTH 64
 
 // Represents a device capable of "pointing" into the world
@@ -11,6 +9,7 @@ class InputDevice;
 // an InputDevice might have multiple pointers (i.e. multiple fingers)
 class InputPointer {
 public:
+	
 	InputDevice* mDevice;
 	// Name should be consistent and unique to this pointer
 	char mName[INPUT_POINTER_NAME_LENGTH];

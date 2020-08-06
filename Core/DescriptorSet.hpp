@@ -8,6 +8,7 @@ class Buffer;
 class Sampler;
 
 struct DescriptorSetEntry {
+
 	VkDescriptorType mType;
 	VkDeviceSize mArrayIndex;
 
@@ -21,34 +22,43 @@ struct DescriptorSetEntry {
 	
 	variant_ptr<Sampler> mSamplerValue;
 
-	ENGINE_EXPORT DescriptorSetEntry();
-	ENGINE_EXPORT DescriptorSetEntry(const DescriptorSetEntry& ds);
-	ENGINE_EXPORT ~DescriptorSetEntry();
+	void* mInlineUniformData;
+	size_t mInlineUniformDataSize;
 
-	ENGINE_EXPORT bool IsNull() const;
+	STRATUM_API DescriptorSetEntry();
+	STRATUM_API DescriptorSetEntry(const DescriptorSetEntry& ds);
+	STRATUM_API ~DescriptorSetEntry();
 
-	ENGINE_EXPORT bool operator==(const DescriptorSetEntry& rhs) const;
+	STRATUM_API bool IsNull() const;
+
+	STRATUM_API DescriptorSetEntry& operator =(const DescriptorSetEntry& rhs);
+	STRATUM_API bool operator==(const DescriptorSetEntry& rhs) const;
 };
 
 class DescriptorSet {
 public:
-	ENGINE_EXPORT DescriptorSet(const std::string& name, Device* device, VkDescriptorSetLayout layout);
-	ENGINE_EXPORT ~DescriptorSet();
+	STRATUM_API DescriptorSet(const std::string& name, Device* device, VkDescriptorSetLayout layout);
+	STRATUM_API ~DescriptorSet();
 
-	ENGINE_EXPORT void CreateDescriptor(uint32_t binding, const DescriptorSetEntry& entry);
+	STRATUM_API void CreateDescriptor(uint32_t binding, const DescriptorSetEntry& entry);
 
-	ENGINE_EXPORT void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
-	ENGINE_EXPORT void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
-	ENGINE_EXPORT void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
-	ENGINE_EXPORT void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
-	ENGINE_EXPORT void CreateStorageTexelBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateInlineUniformBlock(void* data, size_t dataSize, uint32_t binding);
+	template<typename T>
+	inline void CreateInlineUniformBlock(const T& value, uint32_t binding) { CreateInlineUniformBlock((void*)&value, sizeof(T), binding); }
 
-	ENGINE_EXPORT void CreateStorageTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL);	
-	ENGINE_EXPORT void CreateSampledTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	STRATUM_API void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateStorageTexelBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
+
+	STRATUM_API void CreateStorageTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL);	
+	STRATUM_API void CreateSampledTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	STRATUM_API void CreateInputAttachmentDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	
-	ENGINE_EXPORT void CreateSamplerDescriptor(const variant_ptr<Sampler>& sampler, uint32_t binding, uint32_t index = 0);
+	STRATUM_API void CreateSamplerDescriptor(const variant_ptr<Sampler>& sampler, uint32_t binding, uint32_t arrayIndex = 0);
 
-	ENGINE_EXPORT void FlushWrites();
+	STRATUM_API void FlushWrites();
 
 	inline VkDescriptorSetLayout Layout() const { return mLayout; }
 	inline operator const VkDescriptorSet*() const { return &mDescriptorSet; }

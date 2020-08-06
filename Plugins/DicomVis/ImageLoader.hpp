@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Content/Texture.hpp>
+#include <Data/Texture.hpp>
 
 enum ImageStackType {
 	IMAGE_STACK_NONE,

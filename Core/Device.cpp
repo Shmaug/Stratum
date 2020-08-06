@@ -1,6 +1,6 @@
 #include <Core/Device.hpp>
-#include <Content/AssetManager.hpp>
-#include <Content/Texture.hpp>
+#include <Data/AssetManager.hpp>
+#include <Data/Texture.hpp>
 #include <Core/Buffer.hpp>
 #include <Core/CommandBuffer.hpp>
 #include <Core/DescriptorSet.hpp>
@@ -16,18 +16,17 @@
 
 using namespace std;
 
-inline size_t HashTextureData(const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+inline size_t HashTextureData(VkExtent3D extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount) {
 	size_t value = 0;
 	hash_combine(value, extent.width);
 	hash_combine(value, extent.height);
 	hash_combine(value, extent.depth);
 	hash_combine(value, format);
+	hash_combine(value, mipLevels);
 	hash_combine(value, sampleCount);
-	hash_combine(value, usage);
-	hash_combine(value, properties);
 	return value;
 }
-inline size_t HashTextureData(const Texture* tex) { return HashTextureData(tex->Extent(), tex->Format(), tex->MipLevels(), tex->SampleCount(), tex->Usage(), tex->MemoryProperties()); }
+inline size_t HashTextureData(const Texture* tex) { return HashTextureData(tex->Extent(), tex->Format(), tex->MipLevels(), tex->SampleCount()); }
 
 
 Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
@@ -64,12 +63,14 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 
 	#pragma region create logical device and queues
 	VkPhysicalDeviceFeatures deviceFeatures = {};
-	deviceFeatures.samplerAnisotropy = VK_TRUE;
 	deviceFeatures.fillModeNonSolid = VK_TRUE;
-	deviceFeatures.wideLines = VK_TRUE;
-	deviceFeatures.shaderStorageImageExtendedFormats = VK_TRUE;
 	deviceFeatures.sparseBinding = VK_TRUE;
+	deviceFeatures.samplerAnisotropy = VK_TRUE;
 	deviceFeatures.shaderImageGatherExtended = VK_TRUE;
+	deviceFeatures.shaderStorageImageExtendedFormats = VK_TRUE;
+	deviceFeatures.wideLines = VK_TRUE;
+	deviceFeatures.largePoints = VK_TRUE;
+	deviceFeatures.sampleRateShading = VK_TRUE;
 
 	VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures = {};
 	indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
@@ -144,6 +145,27 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &mMemoryProperties);
 
 	mAssetManager = new ::AssetManager(this);
+	
+	vector<VkDescriptorSetLayoutBinding> bindings(6);
+	bindings[0] = { CAMERA_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	bindings[1] = { LIGHT_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	bindings[2] = { SHADOW_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	bindings[3] = { SHADOW_ATLAS_BINDING, 				VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	bindings[4] = { ENVIRONMENT_TEXTURE_BINDING, 	VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	bindings[5] = { SHADOW_SAMPLER_BINDING, 			VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
+	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
+	layoutInfo.pBindings = bindings.data(); 
+	vkCreateDescriptorSetLayout(mDevice, &layoutInfo, nullptr, &mCameraSetLayout);
+	SetObjectName(mCameraSetLayout, "PER_CAMERA DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+
+	bindings.resize(1);
+	bindings[0] = { INSTANCE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr };
+	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
+	layoutInfo.pBindings = bindings.data(); 
+	vkCreateDescriptorSetLayout(mDevice, &layoutInfo, nullptr, &mObjectSetLayout);
+	SetObjectName(mObjectSetLayout, "PER_OBJECT DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
 }
 Device::~Device() {
 	Flush();
@@ -155,8 +177,11 @@ Device::~Device() {
 	for (auto& kp : mDescriptorSetPool)
 		for (auto& ds : kp.second)
 			safe_delete(ds.mResource);
-
+			
 	delete mAssetManager;
+
+	vkDestroyDescriptorSetLayout(mDevice, mCameraSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(mDevice, mObjectSetLayout, nullptr);
 	
 	size_t size = 0;
 	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, nullptr);
@@ -419,26 +444,29 @@ DescriptorSet* Device::GetPooledDescriptorSet(const string& name, VkDescriptorSe
 Texture* Device::GetPooledTexture(const string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
 	Texture* tex = nullptr;
 	mTexturePoolMutex.lock();
-	auto& textures = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount, usage, memoryProperties)];
-	if (textures.size()) {
-		auto front = textures.front();
-		tex = front.mResource;
-		textures.pop_front();
-	}
+	auto& pool = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount)];
+	auto best = pool.end();
+	for (auto it = pool.begin(); it != pool.end(); it++)
+		if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties))
+			if (best == pool.end()) {
+				tex = it->mResource;
+				pool.erase(it);
+				break;
+			}
 	mTexturePoolMutex.unlock();
 	return tex ? tex : new Texture(name, this, extent, format, mipLevels, sampleCount, usage, memoryProperties);
 }
-void Device::ReturnToPool(Buffer* buffer) {
+void Device::PoolResource(Buffer* buffer) {
 	mBufferPoolMutex.lock();
 	mBufferPool.push_back({ mFrameCount, buffer });
 	mBufferPoolMutex.unlock();
 }
-void Device::ReturnToPool(DescriptorSet* descriptorSet) {
+void Device::PoolResource(DescriptorSet* descriptorSet) {
 	mDescriptorSetPoolMutex.lock();
 	mDescriptorSetPool[descriptorSet->Layout()].push_back({ mFrameCount, descriptorSet });
 	mDescriptorSetPoolMutex.unlock();
 }
-void Device::ReturnToPool(Texture* texture) {
+void Device::PoolResource(Texture* texture) {
 	mTexturePoolMutex.lock();
 	mTexturePool[HashTextureData(texture)].push_back({ mFrameCount, texture });
 	mTexturePoolMutex.unlock();
@@ -485,7 +513,7 @@ void Device::PurgePooledResources(uint32_t maxAge) {
 	mDescriptorSetPoolMutex.unlock();
 }
 
-CommandBuffer* Device::GetCommandBuffer(const std::string& name) {
+CommandBuffer* Device::GetCommandBuffer(const std::string& name, VkCommandBufferLevel level) {
 	// get a commandpool for the current thread
 	mCommandPoolMutex.lock();
 	VkCommandPool& commandPool = mCommandPools[this_thread::get_id()];
@@ -499,17 +527,19 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name) {
 		SetObjectName(commandPool, name + " Graphics Command Pool", VK_OBJECT_TYPE_COMMAND_POOL);
 	}
 
-	auto& pool = mCommandBufferPool[commandPool];
-	if (!pool.empty()) {
-		if (pool.front().mResource->State() == CMDBUF_STATE_DONE) {
-			CommandBuffer* commandBuffer = pool.front().mResource;
-			pool.pop_front();
-			commandBuffer->Reset();
-			return commandBuffer;
+	if (level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+		auto& pool = mCommandBufferPool[commandPool];
+		if (!pool.empty()) {
+			if (pool.front().mResource->State() == CMDBUF_STATE_DONE) {
+				CommandBuffer* commandBuffer = pool.front().mResource;
+				pool.pop_front();
+				commandBuffer->Reset(name);
+				return commandBuffer;
+			}
 		}
 	}
 
-	return new CommandBuffer(this, commandPool, name);
+	return new CommandBuffer(name, this, commandPool, level);
 }
 void Device::Execute(CommandBuffer* commandBuffer) {
 	if (commandBuffer->State() != CMDBUF_STATE_RECORDING)
@@ -527,6 +557,7 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 	for (uint32_t i = 0; i < commandBuffer->mSignalSemaphores.size(); i++)
 		signalSemaphores.push_back(*commandBuffer->mSignalSemaphores[i]);
 
+	PROFILER_BEGIN("vkQueueSubmit");
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
@@ -537,6 +568,7 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &commandBuffer->mCommandBuffer;
 	vkQueueSubmit(mGraphicsQueue, 1, &submitInfo, commandBuffer->mSignalFence);
+	PROFILER_END;
 
 	commandBuffer->mState = CMDBUF_STATE_PENDING;
 

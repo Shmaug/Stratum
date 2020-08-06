@@ -9,18 +9,9 @@ void ObjectBvh2::Build(Object** objects, uint32_t objectCount) {
 	mPrimitives.clear();
 	mNodes.clear();
 
-	mRendererBounds.mMin = 1e10f;
-	mRendererBounds.mMax = -1e10f;
-
-	for (uint32_t i = 0; i < objectCount; i++) {
-		AABB aabb(objects[i]->Bounds());
-		aabb.mMin -= 1e-2f;
-		aabb.mMax += 1e-2f;
-		mPrimitives.push_back({ aabb, objects[i] });
-
-		if (dynamic_cast<Renderer*>(objects[i]))
-			mRendererBounds.Encapsulate(aabb);
-	}
+	mPrimitives.resize(objectCount);
+	for (uint32_t i = 0; i < objectCount; i++)
+		mPrimitives[i] = { objects[i]->Bounds(), objects[i] };
 
 	struct BuildTask {
 		uint32_t mParentOffset;
@@ -39,7 +30,7 @@ void ObjectBvh2::Build(Object** objects, uint32_t objectCount) {
 	Node node;
 
 	todo[stackptr].mStart = 0;
-	todo[stackptr].mEnd = mPrimitives.size();
+	todo[stackptr].mEnd = (uint32_t)mPrimitives.size();
 	todo[stackptr].mParentOffset = 0xfffffffc;
 	stackptr++;
 
@@ -90,7 +81,7 @@ void ObjectBvh2::Build(Object** objects, uint32_t objectCount) {
 
 		// Set the split dimensions
 		uint32_t split_dim = 0;
-		float3 ext = bc.Extents();
+		float3 ext = bc.HalfSize();
 		if (ext.y > ext.x) {
 			split_dim = 1;
 			if (ext.z > ext.y) split_dim = 2;

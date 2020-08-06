@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Util/Util.hpp>
 
 #ifdef __linux
 #include <vulkan/vulkan.h>
@@ -17,18 +18,13 @@ namespace x11{
 
 #include <Core/Device.hpp>
 #include <Input/MouseKeyboardInput.hpp>
-#include <Util/Util.hpp>
-
-class Instance;
-class Camera;
-class Texture;
 
 class Window {
 public:
-	ENGINE_EXPORT ~Window();
+	STRATUM_API ~Window();
 
-	ENGINE_EXPORT void Fullscreen(bool fs);
-	ENGINE_EXPORT void Resize(uint32_t w, uint32_t h);
+	STRATUM_API void Fullscreen(bool fs);
+	STRATUM_API void Resize(uint32_t w, uint32_t h);
 
 	inline VkSurfaceKHR Surface() const { return mSurface; }
 	inline VkSurfaceFormatKHR Format() const { return mFormat; }
@@ -48,8 +44,7 @@ public:
 	inline VkImageView BackBufferView(uint32_t i) const { if (!mFrameData) return VK_NULL_HANDLE; return mFrameData[i].mSwapchainImageView; }
 	inline VkExtent2D SwapchainExtent() const { return mSwapchainExtent; }
 
-	inline void TargetCamera(Camera* camera) { mTargetCamera = camera; }
-	inline Camera* TargetCamera() const { return mTargetCamera; }
+	inline Semaphore* ImageAvailableSemaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 
 	#ifdef WINDOWS
 	inline HWND Hwnd() const { return mHwnd; }
@@ -57,18 +52,17 @@ public:
 	inline ::Device* Device() const { return mDevice; }
 
 private:
-	friend class Stratum;
 	friend class Instance;
 
 	#ifdef __linux
-	ENGINE_EXPORT Window(Instance* instance, const std::string& title, MouseKeyboardInput* input, VkRect2D position, xcb_connection_t* XCBConnection, xcb_screen_t* XCBScreen);
+	STRATUM_API Window(Instance* instance, const std::string& title, MouseKeyboardInput* input, VkRect2D position, xcb_connection_t* XCBConnection, xcb_screen_t* XCBScreen);
 	#else
-	ENGINE_EXPORT Window(Instance* instance, const std::string& title, MouseKeyboardInput* input, VkRect2D position, HINSTANCE hInst);
+	STRATUM_API Window(Instance* instance, const std::string& title, MouseKeyboardInput* input, VkRect2D position, HINSTANCE hInst);
 	#endif
 
-	ENGINE_EXPORT VkImage AcquireNextImage();
+	STRATUM_API VkImage AcquireNextImage();
 	/// Waits on all semaphores in waitSemaphores
-	ENGINE_EXPORT void Present(std::vector<VkSemaphore> waitSemaphores);
+	STRATUM_API void Present(const std::vector<VkSemaphore>& waitSemaphores);
 
 	MouseKeyboardInput* mInput;
 
@@ -114,8 +108,6 @@ private:
 	std::vector<Semaphore*> mImageAvailableSemaphores;
 	uint32_t mImageAvailableSemaphoreIndex;
 
-	Camera* mTargetCamera;
-
-	ENGINE_EXPORT void CreateSwapchain(::Device* device);
-	ENGINE_EXPORT void DestroySwapchain();
+	STRATUM_API void CreateSwapchain(::Device* device);
+	STRATUM_API void DestroySwapchain();
 };

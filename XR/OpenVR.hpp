@@ -9,29 +9,29 @@
 
 class OpenVR : public XRRuntime, public InputDevice {
 public:
-    ENGINE_EXPORT OpenVR();
-    ENGINE_EXPORT virtual ~OpenVR();
+    STRATUM_API OpenVR();
+    STRATUM_API virtual ~OpenVR();
 
     // XRRuntime implementation
 
-    ENGINE_EXPORT bool Init() override;
-    ENGINE_EXPORT bool InitScene(Scene* scene) override;
+    STRATUM_API bool OnSceneInit(Scene* scene) override;
 
-    ENGINE_EXPORT void PreInstanceInit(Instance* instance);
-    ENGINE_EXPORT void PreDeviceInit(Instance* instance, VkPhysicalDevice device);
+	STRATUM_API std::set<std::string> InstanceExtensionsRequired() override;
+	STRATUM_API std::set<std::string> DeviceExtensionsRequired(VkPhysicalDevice device) override;
 
-    ENGINE_EXPORT void BeginFrame();
-    ENGINE_EXPORT void PostRender(CommandBuffer* commandBuffer);
-    ENGINE_EXPORT void EndFrame();
+    STRATUM_API void OnFrameStart() override;
+    STRATUM_API void PostRender(CommandBuffer* commandBuffer) override;
+    STRATUM_API void OnFrameEnd() override;
 
     // InputDevice implementation
 
-    inline uint32_t PointerCount() const { return mInputPointers.size(); }
+    inline uint32_t PointerCount() const { return (uint32_t)mInputPointers.size(); }
     inline const InputPointer* GetPointer(uint32_t index) const { return &mInputPointers[index]; }
     inline const InputPointer* GetPointerLast(uint32_t index) const { return &mInputPointersLast[index]; }
-    ENGINE_EXPORT void NextFrame();
+    STRATUM_API void NextFrame();
 
 private:
+    bool mInitialized;
     Scene* mScene;
     Camera* mHmdCamera;
 

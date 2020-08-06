@@ -1,4 +1,6 @@
 #include "OpenVR.hpp"
+#include <Data/AssetManager.hpp>
+#include <Input/InputManager.hpp>
 #include <Util/Tokenizer.hpp>
 #include <Util/Profiler.hpp>
 
@@ -53,26 +55,10 @@ VertexInput RenderModelVertexInput = {
 
 OpenVR::OpenVR() : mSystem(nullptr), mRenderModelInterface(nullptr), mScrollTouchCount(0), mPoseHistoryFrameCount(8) {
     memset(mTrackedObjects, 0, sizeof(Object*) * k_unMaxTrackedDeviceCount);
-}
-OpenVR::~OpenVR() {
-    for (auto& kp : mRenderModelObjects)
-        mScene->RemoveObject(kp.second);
-    for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
-        if (mTrackedObjects[i])
-            mScene->RemoveObject(mTrackedObjects[i]);
-
-    for (auto kp : mRenderModels)
-        safe_delete(kp.second.first);
-    for (auto kp : mRenderModelMaterials)
-        safe_delete(kp.second.first);
-
-    if (mSystem) VR_Shutdown();
-}
-
-bool OpenVR::Init() {
     if (!VR_IsRuntimeInstalled()) {
         printf_color(COLOR_YELLOW, "%s", "OpenVR runtime is not installed\n");
-        return false;
+        mInitialized = false;
+        return;
     }
 
     HmdError herr;
@@ -80,7 +66,8 @@ bool OpenVR::Init() {
     if (herr != VRInitError_None) {
         mSystem = nullptr;
         fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR: %s\n", VR_GetVRInitErrorAsEnglishDescription(herr));
-        return false;
+        mInitialized = false;
+        return;
     }
 
     mCompositor = VRCompositor();
@@ -88,7 +75,8 @@ bool OpenVR::Init() {
         VR_Shutdown();
         mSystem = nullptr;
         fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR compositor\n");
-        return false;
+        mInitialized = false;
+        return;
     }
 
     mCompositor->SetExplicitTimingMode(VRCompositorTimingMode_Explicit_ApplicationPerformsPostPresentHandoff);
@@ -98,7 +86,8 @@ bool OpenVR::Init() {
         VR_Shutdown();
         mSystem = nullptr;
         fprintf_color(COLOR_YELLOW, stderr, "Failed to initialize OpenVR input system\n");
-        return false;
+        mInitialized = false;
+        return;
     }
 
     mRenderModelInterface = (IVRRenderModels*)VR_GetGenericInterface(IVRRenderModels_Version, &herr);
@@ -106,7 +95,8 @@ bool OpenVR::Init() {
         VR_Shutdown();
         mSystem = nullptr;
         fprintf_color(COLOR_YELLOW, stderr, "Failed to get OpenVR render model interface: %s\n", VR_GetVRInitErrorAsEnglishDescription(herr));
-        return false;
+        mInitialized = false;
+        return;
     }
 
     ThrowIfFailed(mVRInput->SetActionManifestPath(fs::absolute("Config/actions.json").string().c_str()), "SetActionManifestPath failed for " + fs::absolute("Config/actions.json").string());
@@ -131,67 +121,67 @@ bool OpenVR::Init() {
     strcpy(mInputPointersLast[0].mName, "OpenVR Left Hand");
     strcpy(mInputPointersLast[1].mName, "OpenVR Right Hand");
 
-    return true;
+    mInitialized = true;
+}
+OpenVR::~OpenVR() {
+    for (auto& kp : mRenderModelObjects)
+        mScene->DestroyObject(kp.second);
+    for (uint32_t i = 0; i < k_unMaxTrackedDeviceCount; i++)
+        if (mTrackedObjects[i])
+            mScene->DestroyObject(mTrackedObjects[i]);
+
+    for (auto kp : mRenderModels) safe_delete(kp.second.first);
+    for (auto kp : mRenderModelMaterials) safe_delete(kp.second.first);
+
+    if (mSystem) VR_Shutdown();
 }
 
-void OpenVR::PreInstanceInit(Instance* instance) {
+set<string> OpenVR::InstanceExtensionsRequired() {
     char extensions[1024];
     VRCompositor()->GetVulkanInstanceExtensionsRequired(extensions, 1024);
-
+    set<string> result;
     Tokenizer t(extensions, { ' ' });
     string e;
-    while (t.Next(e)) instance->RequestInstanceExtension(e);
+    while (t.Next(e)) result.insert(e);
+    return result;
 }
-void OpenVR::PreDeviceInit(Instance* instance, VkPhysicalDevice device) {
+set<string> OpenVR::DeviceExtensionsRequired(VkPhysicalDevice device) {
     char extensions[1024];
     VRCompositor()->GetVulkanDeviceExtensionsRequired(device, extensions, 1024);
-
+    set<string> result;
     Tokenizer t(extensions, { ' ' });
     string e;
-    while (t.Next(e)) instance->RequestDeviceExtension(e);
+    while (t.Next(e)) result.insert(e);
+    return result;
 }
 
-bool OpenVR::InitScene(Scene* scene) {
-    mScene = scene;
-    scene->InputManager()->RegisterInputDevice(this);
+bool OpenVR::OnSceneInit(Scene* scene) {
+    if (!mInitialized) return false;
 
-    shared_ptr<PointerRenderer> leftPointer = make_shared<PointerRenderer>("Left Pointer");
-    mScene->AddObject(leftPointer);
-    mLeftPointer = leftPointer.get();
+    mScene = scene;
+    mScene->Instance()->InputManager()->RegisterInputDevice(this);
+
+    mLeftPointer = mScene->CreateObject<PointerRenderer>("Left Pointer");
     mLeftPointer->Width(.005f);
     mLeftPointer->Color(float4(.5f, .8f, 1.f, .5f));
-    mLeftPointer->mVisible = false;
+    mLeftPointer->EnabledSelf(false);
     mLeftPointer->RayDistance(1.f);
 
-    shared_ptr<PointerRenderer> rightPointer = make_shared<PointerRenderer>("Right Pointer");
-    mScene->AddObject(rightPointer);
-    mRightPointer = rightPointer.get();
+    mRightPointer = mScene->CreateObject<PointerRenderer>("Right Pointer");
     mRightPointer->Width(.005f);
     mRightPointer->Color(float4(.5f, .8f, 1.f, .5f));
-    mRightPointer->mVisible = false;
+    mRightPointer->EnabledSelf(false);
     mRightPointer->RayDistance(1.f);
 
 
-    auto mat = make_shared<Material>("Untextured", mScene->Instance()->Device()->AssetManager()->LoadShader("Shaders/pbr.stm"));
+    auto mat = make_shared<Material>("Untextured", mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stm"));
     mat->SetPushParameter("Color", float4(1));
     mat->SetPushParameter("Metallic", 0.f);
     mat->SetPushParameter("Roughness", .85f);
     mat->SetPushParameter("Emission", float3(0));
     mRenderModelMaterials.emplace((TextureID_t)-1, make_pair((Texture*)nullptr, mat));
 
-    uint32_t w, h;
-    mSystem->GetRecommendedRenderTargetSize(&w, &h);
-
-    auto camera = make_shared<Camera>("OpenVR HMD", mScene->Instance()->Device(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_4_BIT);
-    mScene->AddObject(camera);
-    mHmdCamera = camera.get();
-    mHmdCamera->Framebuffer()->Extent({ w * 2, h });
-    VkViewport vp = mHmdCamera->Viewport();
-    vp.x = 0;
-    vp.y = 0;
-    vp.width = w * 2;
-    vp.height = h;
-    mHmdCamera->Viewport(vp);
+    mHmdCamera = mScene->CreateObject<Camera>("OpenVR HMD", set<RenderTargetIdentifier> { "OpenVR HMD "});
     mHmdCamera->StereoMode(STEREO_SBS_HORIZONTAL);
     mHmdCamera->Near(.01f);
     mHmdCamera->Far(1024.f);
@@ -211,10 +201,15 @@ bool OpenVR::InitScene(Scene* scene) {
     ConvertMatrix(mSystem->GetEyeToHeadTransform(Eye_Right), pos, rot);
     mHmdCamera->EyeOffset(pos, rot, EYE_RIGHT);
 
+    
+    uint32_t w, h;
+    mSystem->GetRecommendedRenderTargetSize(&w, &h);
+    // TODO: tell scene to add a renderpass for the hmd camera
+
     return true;
 }
 
-void OpenVR::BeginFrame() {
+void OpenVR::OnFrameStart() {
     Profiler::BeginSample("OpenVR Poll Events");
     VREvent_t event;
     while (mSystem->PollNextEvent(&event, sizeof(event))) {
@@ -261,7 +256,7 @@ void OpenVR::BeginFrame() {
     err = mVRInput->GetPoseActionDataForNextFrame(mActionAimLeft, TrackingUniverseStanding, &pdata, sizeof(InputPoseActionData_t), mLeftHand);
     if (err == VRInputError_None && pdata.bActive && pdata.pose.bPoseIsValid) {
         mLeftPointer->RayDistance(fmaxf(0, mInputPointersLast[0].mGuiHitT));
-        mLeftPointer->mVisible = true;
+        mLeftPointer->EnabledSelf(true);
 
         float3 pos;
         quaternion rot;
@@ -276,20 +271,20 @@ void OpenVR::BeginFrame() {
             pos += it.first;
             rot.xyzw += it.second.xyzw;
         }
-        pos /= mPoseHistoryLeftPointer.size();
-        rot = normalize(rot / mPoseHistoryLeftPointer.size());
+        pos /= (float)mPoseHistoryLeftPointer.size();
+        rot = normalize(rot / (float)mPoseHistoryLeftPointer.size());
 
         mLeftPointer->LocalPosition(pos);
         mLeftPointer->LocalRotation(rot);
         mInputPointers[0].mWorldRay.mOrigin = pos;
         mInputPointers[0].mWorldRay.mDirection = rot * float3(0, 0, 1);
     } else
-        mLeftPointer->mVisible = false;
+        mLeftPointer->EnabledSelf(false);
 
     err = mVRInput->GetPoseActionDataForNextFrame(mActionAimRight, TrackingUniverseStanding, &pdata, sizeof(InputPoseActionData_t), mRightHand);
     if (err == VRInputError_None && pdata.bActive && pdata.pose.bPoseIsValid) {
         mRightPointer->RayDistance(fmaxf(0, mInputPointersLast[1].mGuiHitT));
-        mRightPointer->mVisible = true;
+        mRightPointer->EnabledSelf(true);
 
         float3 pos;
         quaternion rot;
@@ -304,15 +299,15 @@ void OpenVR::BeginFrame() {
             pos += it.first;
             rot.xyzw += it.second.xyzw;
         }
-        pos /= mPoseHistoryRightPointer.size();
-        rot = normalize(rot / mPoseHistoryRightPointer.size());
+        pos /= (float)mPoseHistoryRightPointer.size();
+        rot = normalize(rot / (float)mPoseHistoryRightPointer.size());
 
         mRightPointer->LocalPosition(pos);
         mRightPointer->LocalRotation(rot);
         mInputPointers[1].mWorldRay.mOrigin = pos;
         mInputPointers[1].mWorldRay.mDirection = rot * float3(0, 0, 1);
     } else
-        mRightPointer->mVisible = false;
+        mRightPointer->EnabledSelf(false);
 
     mVRInput->GetAnalogActionData(mActionTriggerValue, &adata, sizeof(InputAnalogActionData_t), mLeftHand);
     mInputPointers[0].mPrimaryAxis = adata.x;
@@ -378,11 +373,9 @@ void OpenVR::BeginFrame() {
             if (mRenderModelObjects.count(mrname))
                 mr = mRenderModelObjects.at(mrname);
             else {
-                shared_ptr<MeshRenderer> renderer = make_shared<MeshRenderer>(renderModelName);
-                mScene->AddObject(renderer);
-                mRenderModelObjects.emplace(mrname, renderer.get());
-                mTrackedObjects[info.trackedDeviceIndex]->AddChild(renderer.get());
-                mr = renderer.get();
+                mr = mScene->CreateObject<MeshRenderer>(renderModelName);;
+                mRenderModelObjects.emplace(mrname, mr);
+                mTrackedObjects[info.trackedDeviceIndex]->AddChild(mr);
             }
 
             // Load render model
@@ -402,7 +395,7 @@ void OpenVR::BeginFrame() {
                             Texture* diffuse = new Texture(to_string(kp.second), mScene->Instance()->Device(),
                                 renderModelDiffuse->rubTextureMapData, renderModelDiffuse->unWidth * renderModelDiffuse->unHeight * 4,
                                 VkExtent2D { renderModelDiffuse->unWidth, renderModelDiffuse->unHeight }, VK_FORMAT_R8G8B8A8_UNORM, 0);
-                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadShader("Shaders/pbr.stm"));
+                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stm"));
                             mat->EnableKeyword("TEXTURED_COLORONLY");
                             mat->SetSampledTexture("BaseColorTexture", diffuse, 0);
                             mat->SetPushParameter("Color", float4(1));
@@ -439,7 +432,7 @@ void OpenVR::BeginFrame() {
             RenderModel_ControllerMode_State_t state = {};
             state.bScrollWheelVisible = true;
             RenderModel_ComponentState_t cstate;
-            mr->mVisible = mRenderModelInterface->GetComponentStateForDevicePath(deviceRenderModelName, componentName, hands[i], &state, &cstate) && controllersVisible;
+            mr->EnabledSelf(controllersVisible && mRenderModelInterface->GetComponentStateForDevicePath(deviceRenderModelName, componentName, hands[i], &state, &cstate));
 
             float3 position;
             quaternion rotation;
@@ -467,13 +460,10 @@ void OpenVR::PostRender(CommandBuffer* commandBuffer) {
         else {
             // only enable the scene object if its pose is valid
             if (mTrackedObjects[i])
-                mTrackedObjects[i]->mEnabled = renderPoses[i].bPoseIsValid;
-            else if (renderPoses[i].bPoseIsValid) {
+                mTrackedObjects[i]->EnabledSelf(renderPoses[i].bPoseIsValid);
+            else if (renderPoses[i].bPoseIsValid)
                 // Create an object for tracked devices with a valid pose
-                auto o = make_shared<Object>("TrackedDevice" + to_string(i));
-                mScene->AddObject(o);
-                mTrackedObjects[i] = o.get();
-            }
+                mTrackedObjects[i] = mScene->CreateObject<Object>("TrackedDevice" + to_string(i));
         }
 
         // Update tracking from render pose
@@ -488,7 +478,7 @@ void OpenVR::PostRender(CommandBuffer* commandBuffer) {
 
     VRCompositor()->SubmitExplicitTimingData();
 }
-void OpenVR::EndFrame() {
+void OpenVR::OnFrameEnd() {
     Profiler::BeginSample("OpenVR Submit");
     VRTextureBounds_t leftBounds = {};
     leftBounds.uMax = .5f;
@@ -497,18 +487,22 @@ void OpenVR::EndFrame() {
     rightBounds.uMin = .5f;
     rightBounds.uMax = 1.f;
     rightBounds.vMax = 1.f;
+    
+    // TODO: Get scene attachment for this
+    //Texture* target = mScene->Attachment(mRenderTargetName);
+    Texture* target = nullptr;
 
     VRVulkanTextureData_t vkTexture = {};
-    vkTexture.m_nImage = (uint64_t)(mHmdCamera->Framebuffer()->ColorBuffer()->operator VkImage());
-    vkTexture.m_pDevice = *mScene->Instance()->Device();
-    vkTexture.m_pPhysicalDevice = mScene->Instance()->Device()->PhysicalDevice();
+    vkTexture.m_nImage = (uint64_t)(target->operator VkImage());
+    vkTexture.m_pDevice = *target->Device();
+    vkTexture.m_pPhysicalDevice = target->Device()->PhysicalDevice();
     vkTexture.m_pInstance = *mScene->Instance();
-    vkTexture.m_pQueue = mScene->Instance()->Device()->GraphicsQueue();
-    vkTexture.m_nQueueFamilyIndex = mScene->Instance()->Device()->GraphicsQueueFamilyIndex();
-    vkTexture.m_nWidth = mHmdCamera->Framebuffer()->ColorBuffer()->Extent().width;
-    vkTexture.m_nHeight = mHmdCamera->Framebuffer()->ColorBuffer()->Extent().height;
-    vkTexture.m_nFormat = mHmdCamera->Framebuffer()->ColorBuffer()->Format();
-    vkTexture.m_nSampleCount = mHmdCamera->Framebuffer()->ColorBuffer()->SampleCount();
+    vkTexture.m_pQueue = target->Device()->GraphicsQueue();
+    vkTexture.m_nQueueFamilyIndex = target->Device()->GraphicsQueueFamilyIndex();
+    vkTexture.m_nWidth = target->Extent().width;
+    vkTexture.m_nHeight = target->Extent().height;
+    vkTexture.m_nFormat = target->Format();
+    vkTexture.m_nSampleCount = target->SampleCount();
 
     Texture_t texture = {};
     texture.eType = TextureType_Vulkan;

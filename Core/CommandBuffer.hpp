@@ -13,8 +13,8 @@
 
 class Semaphore {
 public:
-	ENGINE_EXPORT Semaphore(Device* device);
-	ENGINE_EXPORT ~Semaphore();
+	STRATUM_API Semaphore(Device* device);
+	STRATUM_API ~Semaphore();
 	inline operator VkSemaphore() const { return mSemaphore; }
 private:
 	Device* mDevice;
@@ -23,82 +23,95 @@ private:
 
 class CommandBuffer {
 public:
-	ENGINE_EXPORT ~CommandBuffer();
+	STRATUM_API ~CommandBuffer();
 	inline operator VkCommandBuffer() const { return mCommandBuffer; }
 
 	size_t mTriangleCount;
 	
-	inline RenderPass* CurrentRenderPass() const { return mCurrentRenderPass; }
 	inline ::Device* Device() const { return mDevice; }
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	// Label a region for a tool such as RenderDoc
-	ENGINE_EXPORT void BeginLabel(const std::string& label, const float4& color = float4(1,1,1,0));
-	ENGINE_EXPORT void EndLabel();
+	STRATUM_API void BeginLabel(const std::string& label, const float4& color = float4(1,1,1,0));
+	STRATUM_API void EndLabel();
 	#endif
 
-	ENGINE_EXPORT void Reset(const std::string& name = "Command Buffer");
-	ENGINE_EXPORT void Wait();
+	STRATUM_API void Reset(const std::string& name = "Command Buffer");
+	STRATUM_API void Wait();
 	inline CommandBufferState State();
 
-	ENGINE_EXPORT void Signal(VkPipelineStageFlags, Semaphore* semaphore) { mSignalSemaphores.push_back(semaphore); };
-	ENGINE_EXPORT void WaitOn(VkPipelineStageFlags stage, Semaphore* semaphore) { mWaitSemaphores.push_back(std::make_pair(stage, semaphore)); }
+	STRATUM_API void Signal(VkPipelineStageFlags, Semaphore* semaphore) { mSignalSemaphores.push_back(semaphore); };
+	STRATUM_API void WaitOn(VkPipelineStageFlags stage, Semaphore* semaphore) { mWaitSemaphores.push_back(std::make_pair(stage, semaphore)); }
 
-	ENGINE_EXPORT Buffer* GetBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	ENGINE_EXPORT DescriptorSet* GetDescriptorSet(const std::string& name, VkDescriptorSetLayout layout);
-	ENGINE_EXPORT Texture* GetTexture(const std::string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels = 1, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	STRATUM_API Buffer* GetBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	STRATUM_API DescriptorSet* GetDescriptorSet(const std::string& name, VkDescriptorSetLayout layout);
+	STRATUM_API Texture* GetTexture(const std::string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels = 1, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, VkImageUsageFlags usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-	// Track a resource, and add it to the resource pool after this commandbuffer finishes executing
-	ENGINE_EXPORT void TrackResource(Buffer* buffer);
-	// Track a resource, and add it to the resource pool after this commandbuffer finishes executing
-	ENGINE_EXPORT void TrackResource(Texture* texture);
-	// Track a resource, and add it to the resource pool after this commandbuffer finishes executing
-	ENGINE_EXPORT void TrackResource(DescriptorSet* descriptorSet);
+	// Track a resource, and add it to the device's resource pool after this commandbuffer finishes executing
+	STRATUM_API void TrackResource(Buffer* resource);
+	// Track a resource, and add it to the device's resource pool after this commandbuffer finishes executing
+	STRATUM_API void TrackResource(Texture* resource);
+	// Track a resource, and add it to the device's resource pool after this commandbuffer finishes executing
+	STRATUM_API void TrackResource(DescriptorSet* resource);
+	// Track a resource, and add it to the device's resource pool after this commandbuffer finishes executing
+	STRATUM_API void TrackResource(Framebuffer* resource);
+	// Track a resource, and add it to the device's resource pool after this commandbuffer finishes executing
+	STRATUM_API void TrackResource(RenderPass* resource);
 
-	ENGINE_EXPORT void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkMemoryBarrier& barrier);
-	ENGINE_EXPORT void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkImageMemoryBarrier& barrier);
-	ENGINE_EXPORT void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkBufferMemoryBarrier& barrier);
-	ENGINE_EXPORT void Barrier(Texture* texture);
-	ENGINE_EXPORT void TransitionBarrier(Texture* texture, VkImageLayout newLayout);
-	ENGINE_EXPORT void TransitionBarrier(Texture* texture, VkImageLayout oldLayout, VkImageLayout newLayout);
-	ENGINE_EXPORT void TransitionBarrier(Texture* texture, VkPipelineStageFlags dstStage, VkImageLayout newLayout);
-	ENGINE_EXPORT void TransitionBarrier(Texture* texture, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout);
-	ENGINE_EXPORT void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkImageLayout oldLayout, VkImageLayout newLayout);
-	ENGINE_EXPORT void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout);
+	STRATUM_API void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkMemoryBarrier& barrier);
+	STRATUM_API void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkImageMemoryBarrier& barrier);
+	STRATUM_API void Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkBufferMemoryBarrier& barrier);
+	STRATUM_API void Barrier(Texture* texture);
+	STRATUM_API void TransitionBarrier(Texture* texture, VkImageLayout newLayout);
+	STRATUM_API void TransitionBarrier(Texture* texture, VkImageLayout oldLayout, VkImageLayout newLayout);
+	STRATUM_API void TransitionBarrier(Texture* texture, VkPipelineStageFlags dstStage, VkImageLayout newLayout);
+	STRATUM_API void TransitionBarrier(Texture* texture, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout);
+	STRATUM_API void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkImageLayout oldLayout, VkImageLayout newLayout);
+	STRATUM_API void TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout);
 
-	ENGINE_EXPORT void BeginRenderPass(RenderPass* renderPass, Framebuffer* frameBuffer);
-	ENGINE_EXPORT void EndRenderPass();
+	STRATUM_API void BindDescriptorSet(DescriptorSet* descriptorSet, uint32_t set);
 
-	ENGINE_EXPORT void BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset);
-	ENGINE_EXPORT void BindIndexBuffer(Buffer* buffer, VkDeviceSize offset, VkIndexType indexType);
+	STRATUM_API void BeginRenderPass(RenderPass* renderPass, Framebuffer* frameBuffer, VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE);
+	STRATUM_API void NextSubpass(VkSubpassContents contents = VK_SUBPASS_CONTENTS_INLINE);
+	STRATUM_API void EndRenderPass();
 
-	// Binds a shader pipeline, if it is not already bound
-	// If camera is not nullptr, attempts to bind the camera's parameters
-	ENGINE_EXPORT VkPipelineLayout BindShader(GraphicsShader* shader, PassType pass, const VertexInput* input, Camera* camera = nullptr,
-		VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
-		BlendMode blendMode = BLEND_MODE_MAX_ENUM,
-		VkPolygonMode polyMode = VK_POLYGON_MODE_MAX_ENUM);
+	STRATUM_API void ClearAttachments(const std::vector<VkClearAttachment>& value);
 
-	// Binds a material pipeline and sets its parameters, if it is not already bound
-	// If camera is not nullptr, attempts to bind the camera's parameters
-	ENGINE_EXPORT VkPipelineLayout BindMaterial(Material* material, PassType pass, const VertexInput* input, Camera* camera = nullptr,
-		VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
-		BlendMode blendMode = BLEND_MODE_MAX_ENUM,
-		VkPolygonMode polyMode = VK_POLYGON_MODE_MAX_ENUM);
+	inline RenderPass* CurrentRenderPass() const { return mCurrentRenderPass; }
+	inline Framebuffer* CurrentFramebuffer() const { return mCurrentFramebuffer; }
+	inline ShaderPassIdentifier CurrentShaderPass() const { return mCurrentShaderPass; }
+	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
 
-	// Find the range for a push constant (in the current shader's layout) named 'name' and push it
-	ENGINE_EXPORT bool PushConstant(const std::string& name, const void* data, uint32_t dataSize);
+	STRATUM_API void BindPipeline(ComputePipeline* pipeline);
+	STRATUM_API void BindPipeline(GraphicsPipeline* shader, const VertexInput* vertexInput = nullptr, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VkCullModeFlags cullModeOverride = VK_CULL_MODE_FLAG_BITS_MAX_ENUM, VkPolygonMode polyModeOverride = VK_POLYGON_MODE_MAX_ENUM);
+	STRATUM_API bool BindMaterial(Material* material, const VertexInput* vertexInput = nullptr, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+	// Find the range for a push constant (in the current pipeline's layout) named 'name' and push it
+	STRATUM_API bool PushConstant(const std::string& name, const void* data, uint32_t dataSize);
 	template<typename T>
 	inline bool PushConstantRef(const std::string& name, const T& value) { return PushConstant(name, &value, sizeof(T)); }
 
-private:
-	friend class Stratum;
-	friend class Device;
-	ENGINE_EXPORT CommandBuffer(::Device* device, VkCommandPool commandPool, const std::string& name = "Command Buffer");
+	STRATUM_API void Dispatch(const uint3& dim);
+	inline void Dispatch(const uint2& dim) { Dispatch(uint3(dim, 1)); }
+	inline void Dispatch(uint32_t x) { Dispatch(uint3(x, 1, 1)); }
+	inline void Dispatch(uint32_t x, uint32_t y) { Dispatch(uint3(x, y, 1)); }
+	inline void Dispatch(uint32_t x, uint32_t y, uint32_t z) { Dispatch(uint3(x, y, z)); }
+
+	// Helper to call Dispatch() on ceil(size / workgroupSize)
+	STRATUM_API void DispatchAligned(const uint3& size);
+	inline void DispatchAligned(const uint2& size) { DispatchAligned(uint3(size, 1)); }
+	inline void DispatchAligned(uint32_t x) { DispatchAligned(uint3(x, 1, 1)); }
+	inline void DispatchAligned(uint32_t x, uint32_t y) { DispatchAligned(uint3(x, y, 1)); }
+	inline void DispatchAligned(uint32_t x, uint32_t y, uint32_t z) { DispatchAligned(uint3(x, y, z)); }
+
+	STRATUM_API void BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset);
+	STRATUM_API void BindIndexBuffer(Buffer* buffer, VkDeviceSize offset, VkIndexType indexType);
 	
-	ENGINE_EXPORT void Clear();
+private:
+	friend class Device;
+	STRATUM_API CommandBuffer(const std::string& name, ::Device* device, VkCommandPool commandPool, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+	
+	STRATUM_API void Clear();
 
 	::Device* mDevice;
 	VkCommandPool mCommandPool;
@@ -106,22 +119,34 @@ private:
 	CommandBufferState mState;
 	VkFence mSignalFence;
 
-	// In-flight resources
+	std::vector<Semaphore*> mSignalSemaphores;
+	std::vector<std::pair<VkPipelineStageFlags, Semaphore*>> mWaitSemaphores;
+
+	// Tracked resources
 
 	std::vector<Buffer*> mBuffers;
 	std::vector<DescriptorSet*> mDescriptorSets;
 	std::vector<Texture*> mTextures;
-
-	std::vector<Semaphore*> mSignalSemaphores;
-	std::vector<std::pair<VkPipelineStageFlags, Semaphore*>> mWaitSemaphores;
+	std::vector<Framebuffer*> mFramebuffers;
+	std::vector<RenderPass*> mRenderPasses;
 
 	// Currently bound objects
 
-	VkPipeline mCurrentPipeline;
-	std::unordered_map<uint32_t, Buffer*> mCurrentVertexBuffers;
-	Buffer* mCurrentIndexBuffer;
+	ComputePipeline* mBoundComputePipeline;
+	VkPipeline mComputePipeline;
+	VkPipelineLayout mComputePipelineLayout;
+	std::vector<DescriptorSet*> mBoundComputeDescriptorSets;
+
+	Framebuffer* mCurrentFramebuffer;
 	RenderPass* mCurrentRenderPass;
-	Camera* mCurrentCamera;
-	Material* mCurrentMaterial;
-	GraphicsShader* mCurrentShader;
+	uint32_t mCurrentSubpassIndex;
+	ShaderPassIdentifier mCurrentShaderPass;
+	Material* mBoundMaterial;
+	GraphicsPipeline* mBoundGraphicsPipeline;
+	VkPipeline mGraphicsPipeline;
+	VkPipelineLayout mGraphicsPipelineLayout;
+	std::vector<DescriptorSet*> mBoundGraphicsDescriptorSets;
+
+	std::unordered_map<uint32_t, Buffer*> mBoundVertexBuffers;
+	Buffer* mBoundIndexBuffer;
 };

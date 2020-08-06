@@ -1,41 +1,30 @@
 #pragma once
 
-#include <Content/Material.hpp>
-#include <Content/Mesh.hpp>
-#include <Core/DescriptorSet.hpp>
+#include <Data/Material.hpp>
+#include <Data/Mesh.hpp>
 #include <Scene/Renderer.hpp>
-#include <Util/Util.hpp>
 
 // Renders a mesh with a material
 // The scene will attempt to batch MeshRenderers that share the same mesh and material that have an 'Instances' parameter, and use instancing to render them all at once
 class MeshRenderer : public Renderer {
 public:
-	bool mVisible;
+	STRATUM_API MeshRenderer(const std::string& name);
+	STRATUM_API ~MeshRenderer();
 
-	ENGINE_EXPORT MeshRenderer(const std::string& name);
-	ENGINE_EXPORT ~MeshRenderer();
-
-	inline virtual void Mesh(::Mesh* m) { mMesh = m; Dirty(); }
-	inline virtual void Mesh(std::shared_ptr<::Mesh> m) { mMesh = m; Dirty(); }
+	inline virtual void Mesh(::Mesh* m) { mMesh = m; DirtyTransform(); }
+	inline virtual void Mesh(std::shared_ptr<::Mesh> m) { mMesh = m; DirtyTransform(); }
 	inline virtual ::Mesh* Mesh() const { return mMesh.index() == 0 ? std::get<::Mesh*>(mMesh) : std::get<std::shared_ptr<::Mesh>>(mMesh).get(); }
 
 	inline virtual ::Material* Material() { return mMaterial.get(); }
-	ENGINE_EXPORT virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
+	inline virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
 
 	// Renderer functions
 
-	ENGINE_EXPORT virtual bool Intersect(const Ray& ray, float* t, bool any) override;
 	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
+	STRATUM_API virtual bool Intersect(const Ray& ray, float* t, bool any) override;
 
-	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
-	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
-	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
-	
-	ENGINE_EXPORT virtual bool TryCombineInstances(CommandBuffer* commandBuffer, Renderer* renderer, Buffer*& instanceBuffer, uint32_t& instanceCount) override;
-
-	ENGINE_EXPORT virtual void PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-	ENGINE_EXPORT virtual void DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, PassType pass, Buffer* instanceBuffer, uint32_t instanceCount) override;
+	inline virtual bool Visible(const std::string& pass) override { return Mesh() && mMaterial && mMaterial->GetPassPipeline(pass) && Renderer::Visible(pass); }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
 
 private:
 	std::variant<::Mesh*, std::shared_ptr<::Mesh>> mMesh;
@@ -43,5 +32,11 @@ private:
 	uint32_t mRayMask;
 	AABB mAABB;
 
-	ENGINE_EXPORT bool UpdateTransform() override;
+protected:
+	STRATUM_API virtual void OnLateUpdate(CommandBuffer* commandBuffer) override;
+	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
+	STRATUM_API virtual void OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera, Buffer* instanceBuffer, uint32_t instanceCount) override;
+	STRATUM_API virtual bool TryCombineInstances(CommandBuffer* commandBuffer, Renderer* renderer, Buffer*& instanceBuffer, uint32_t& instanceCount) override;
+
+	STRATUM_API bool UpdateTransform() override;
 };

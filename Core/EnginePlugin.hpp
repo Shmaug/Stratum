@@ -1,51 +1,38 @@
 #pragma once
 
 #include <Core/CommandBuffer.hpp>
-#include <Util/Util.hpp>
-
-class Scene;
-class GuiContext;
-class Camera;
-class Instance;
 
 class EnginePlugin {
 public:
-	bool mEnabled;
-
 	inline virtual ~EnginePlugin() {}
-
-	// Callbacks
+	// Higher priority plugins get called first
+	inline virtual int Priority() { return 50; }
 	
+protected:
+	friend class Instance;
+	friend class PluginManager;
+	friend class Scene;
+
+	inline virtual std::set<std::string> InstanceExtensionsRequired() { return {}; };
+	inline virtual std::set<std::string> DeviceExtensionsRequired(VkPhysicalDevice device) { return {}; };
+
+	inline virtual bool OnSceneInit(Scene* scene) { return true; }
 	
-	// Called before vkCreateInstance
-	// Use to request any Vulkan instance extensions
-	inline virtual void PreInstanceInit(Instance* instance) {};
-
-	// Called before vkCreateDevice
-	// Use to request any Vulkan device extensions
-	inline virtual void PreDeviceInit(Instance* instance, VkPhysicalDevice physicalDevice) {};
-
-	
-	inline virtual bool Init(Scene* scene) { return true; }
-
-	inline virtual void PreUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void FixedUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void Update(CommandBuffer* commandBuffer) {}
-	inline virtual void PostUpdate(CommandBuffer* commandBuffer) {}
-	
-	inline virtual void PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
-	inline virtual void PostEndRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
-
-	inline virtual void PreRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
-	inline virtual void PostRender(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {}
-
-	inline virtual void DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {}
+	inline virtual void OnPreUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnFixedUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnUpdate(CommandBuffer* commandBuffer) {}
+	inline virtual void OnLateUpdate(CommandBuffer* commandBuffer) {}
+	// Called before the Scene begins rendering a frame
+	inline virtual void OnPreRender(CommandBuffer* commandBuffer) {}
+	// Called before the Scene begins rendering a frame, used to easily queue GUI drawing operations
+	inline virtual void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {}
+	// Called during a Subpass for each camera that renders to an attachment that the subpass outputs
+	inline virtual void OnRenderCamera(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {}
+	// Called after the Scene ends a full RenderPass
+	inline virtual void OnPostProcess(CommandBuffer* commandBuffer, Framebuffer* framebuffer, const std::set<Camera*>& cameras) {}
 
 	// Called before the window presents the next swapchain image, after the command buffer(s) are executed
 	inline virtual void PrePresent() {}
-	
-	// Higher priority plugins get called first
-	inline virtual int Priority() { return 50; }
 };
 
 #define ENGINE_PLUGIN(plugin) extern "C" { PLUGIN_EXPORT EnginePlugin* CreatePlugin() { return new plugin(); } }

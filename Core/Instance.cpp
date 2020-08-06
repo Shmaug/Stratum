@@ -1,27 +1,90 @@
 #include <Core/Instance.hpp>
 #include <Core/Device.hpp>
 #include <Core/Window.hpp>
-#include <Scene/Camera.hpp>
-#include <Util/Profiler.hpp>
 #include <Core/PluginManager.hpp>
+#include <Input/InputManager.hpp>
 #include <XR/OpenVR.hpp>
 #include <XR/OpenXR.hpp>
+#include <Util/Profiler.hpp>
+#include <Util/Tokenizer.hpp>
 
 using namespace std;
 
 bool Instance::sDisableDebugCallback = false;
+Instance* gInstance = nullptr;
 
 // Debug messenger functions
 #ifdef ENABLE_DEBUG_LAYERS
+bool PrintValidationError(const char* msg) {
+	char func[128];
+	if (sscanf(msg, "Validation Error: [ %s ] ", func) == 0) return false;
+	msg = strchr(msg, ']') + 2;
+
+	/*
+	Validation Error: [ VUID-vkCmdDrawIndexed-None-02697 ] 
+	Object 0: handle = 0x2cfd30000000056, name = Shaders/skybox.stm, type = VK_OBJECT_TYPE_PIPELINE; 
+	Object 1: handle = 0x42bf70000000032, name = Shaders/skybox.stm PipelineLayout, type = VK_OBJECT_TYPE_PIPELINE_LAYOUT; 
+	Object 2: VK_NULL_HANDLE, type = VK_OBJECT_TYPE_PIPELINE_LAYOUT; 
+	| MessageID = 0x9888fef3 | 
+	vkCmdDrawIndexed(): VkPipeline 0x2cfd30000000056[Shaders/skybox.stm] defined with VkPipelineLayout 0x42bf70000000032[Shaders/skybox.stm PipelineLayout] is not compatible for maximum set statically used 1 with bound descriptor sets, last bound with VkPipelineLayout 0x0[] The Vulkan spec states: For each set n that is statically used by the VkPipeline bound to the pipeline bind point used by this command, a descriptor set must have been bound to n at the same pipeline bind point, with a VkPipelineLayout that is compatible for set n, with the VkPipelineLayout used to create the current VkPipeline, as described in Pipeline Layout Compatibility (https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-vkCmdDrawIndexed-None-02697)",
+	*/
+
+	uint32_t objectId;
+	uint64_t objectHandle;
+	char objectName[128];
+	char objectType[128];
+	struct VulkanObject {
+		uint32_t mObjectId;
+		uint64_t mObjectHandle;
+		string mName;
+		string mType;
+	};
+	vector<VulkanObject> objects;
+	while (sscanf(msg, "Object %u: handle = %llx name = %s type = %s", &objectId, &objectHandle, objectName, objectType) == 4) {
+		objectName[max(1u, (uint32_t)strlen(objectName)) - 1] = '\0';
+		objectName[max(1u, (uint32_t)strlen(objectType)) - 1] = '\0';
+		objects.push_back({ objectId, objectHandle, objectName, objectType });
+		msg = strchr(msg, ';') + 2;
+	}
+
+	msg = strstr(msg, "| MessageID = ");
+	if (!msg) return false;
+
+	uint64_t messageId;
+	if (sscanf(msg, "| MessageID = %llx | ", &messageId) == 0) return false;
+
+	const char* lblStart = strstr(msg, "[");
+	if (!lblStart) { fprintf_color(COLOR_RED, stderr, "%s\n", msg); return true; }
+	lblStart++;
+
+	while (lblStart) {
+		string prev(msg, lblStart - msg);
+		fprintf_color(COLOR_RED, stderr, "%s", prev.c_str());
+
+		const char* lblEnd = strstr(lblStart, "]");
+		if (!lblEnd) { fprintf_color(COLOR_RED, stderr, "%s\n", lblStart); return true; }
+
+		string lbl(lblStart, lblEnd - lblStart);
+		fprintf_color(COLOR_CYAN, stderr, "%s", lbl.c_str());
+
+		msg = lblEnd;
+		lblStart = strstr(msg, "[");
+		lblStart++;
+	}
+
+	if (msg) fprintf_color(COLOR_RED, stderr, "%s\n", msg);
+	return true;
+}
+
 VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 	if (Instance::sDisableDebugCallback) return VK_FALSE;
 
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-		fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		//if (strncmp(pCallbackData->pMessage, "Validation Error", strlen("Validation Error")) != 0 || !PrintValidationError(pCallbackData->pMessage))
+			fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 		throw pCallbackData->pMessage;
 	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-		if (strcmp("UNASSIGNED-CoreValidation-Shader-OutputNotConsumed", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
-		if (strcmp("UNASSIGNED-CoreValidation-DrawState-ClearCmdBeforeDraw", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
+		//if (strcmp("UNASSIGNED-CoreValidation-Pipeline-OutputNotConsumed", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
 		fprintf_color(COLOR_YELLOW, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 	} else
 		printf("%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
@@ -43,7 +106,6 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 #endif
 
 #ifdef WINDOWS
-std::vector<Instance*> Instance::sInstances;
 LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch (message) {
 	case WM_PAINT:
@@ -56,8 +118,7 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 	case WM_QUIT:
 	case WM_MOVE:
 	case WM_SIZE:
-		for (Instance* i : sInstances)
-			i->HandleMessage(hwnd, message, wParam, lParam);
+		gInstance->HandleMessage(hwnd, message, wParam, lParam);
 		break;
 	default:
 		return DefWindowProcA(hwnd, message, wParam, lParam);
@@ -66,17 +127,11 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 }
 #endif
 
-Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
-	: mWindow(nullptr), mWindowInput(nullptr), mDestroyPending(false), mXRRuntime(nullptr)
-	#ifdef ENABLE_DEBUG_LAYERS
-	, mDebugMessenger(VK_NULL_HANDLE)
-	#endif
-	{
-	
+Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(nullptr), mWindow(nullptr), mPluginManager(nullptr) {
+	gInstance = this;
+
 	for (int i = 0; i < argc; i++)
 		mCmdArguments.push_back(argv[i]);
-
-	vector<XRRuntime*> xrRuntimes;
 
 	bool debugMessenger = true;
 	uint32_t deviceIndex = 0;
@@ -95,60 +150,41 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 		}
 		else if (mCmdArguments[i] == "--nodebug")
 			debugMessenger = false;
-		else if (mCmdArguments[i] == "--xr") {
-			if (i + 1 < argc) {
-				if (mCmdArguments[i + 1] == "openxr")
-					xrRuntimes.push_back(new OpenXR());
-				else if (mCmdArguments[i + 1] == "openvr")
-					xrRuntimes.push_back(new OpenVR());
-			} else {
-				xrRuntimes.push_back(new OpenVR());
-				xrRuntimes.push_back(new OpenXR());
-			}
-		}
+		else if (mCmdArguments[i] == "--openxr") mXRRuntimes.push_back(new OpenXR());
+		else if (mCmdArguments[i] == "--openvr") mXRRuntimes.push_back(new OpenVR());
 	}
 
-	if (!xrRuntimes.empty()) {
-		// Try to find an XR runtime that successfully initializes
-		for (uint32_t i = 0; i < xrRuntimes.size(); i++) {
-			if (xrRuntimes[i]->Init()) {
-				mXRRuntime = xrRuntimes[i];
-				xrRuntimes[i] = nullptr;
-				break;
-			} else
-				safe_delete(xrRuntimes[i]);
-		}
-		for (uint32_t i = 0; i < xrRuntimes.size(); i++)
-			safe_delete(xrRuntimes[i]);
-	}
+	mPluginManager = new ::PluginManager();
+	mInputManager = new ::InputManager();
 
-	mInstanceExtensions  = { VK_KHR_SURFACE_EXTENSION_NAME };
-	mDeviceExtensions = {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-	};
+	set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 
 	vector<const char*> validationLayers;
 	#ifdef ENABLE_DEBUG_LAYERS
-	mInstanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	mDebugMessenger = VK_NULL_HANDLE;
+	instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	validationLayers.push_back("VK_LAYER_KHRONOS_validation");
-	validationLayers.push_back("VK_LAYER_LUNARG_core_validation");
-	validationLayers.push_back("VK_LAYER_LUNARG_standard_validation");
 	#endif
 	
 	#ifdef __linux
 	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
 	mInstanceExtensions.insert(VK_KHR_DISPLAY_EXTENSION_NAME);
 	#else
-	mInstanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+	instanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
 
-	for (EnginePlugin* p : pluginManager->Plugins())
-		p->PreInstanceInit(this);
-	if (mXRRuntime) mXRRuntime->PreInstanceInit(this);
+	mPluginManager->LoadPlugins();
+	
+	for (EnginePlugin* p : mPluginManager->Plugins()) {
+		set<string> pluginExtensions = p->InstanceExtensionsRequired();
+		for (const string& e : pluginExtensions) instanceExtensions.insert(e);
+	}
+	for (XRRuntime* xr : mXRRuntimes) {
+		set<string> xrExtensions = xr->InstanceExtensionsRequired();
+		for (const string& e : xrExtensions) instanceExtensions.insert(e);
+	}
 
 	#pragma region Create Vulkan Instance
-
 	if (validationLayers.size()) {
 		uint32_t layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -160,8 +196,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 			availableLayerSet.insert(layer.layerName);
 
 		for (auto it = validationLayers.begin(); it != validationLayers.end();) {
-			if (availableLayerSet.count(*it))
-				it++;
+			if (availableLayerSet.count(*it)) it++;
 			else {
 				fprintf_color(COLOR_YELLOW, stderr, "Removing unsupported layer: %s\n", *it);
 				it = validationLayers.erase(it);
@@ -170,28 +205,26 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	}
 
 	VkApplicationInfo appInfo = {};
+	appInfo.pApplicationName = "StratumApplication";
+	appInfo.applicationVersion = VK_MAKE_VERSION(0,0,0);
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	appInfo.pApplicationName = "Stratum";
-	appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
 	appInfo.pEngineName = "Stratum";
-	appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-	appInfo.apiVersion = VK_API_VERSION_1_1;
+	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR,STRATUM_VERSION_MINOR, 0);
+	appInfo.apiVersion = VK_API_VERSION_1_2;
 
-	vector<const char*> exts;
-	for (const string& s : mInstanceExtensions)
-		exts.push_back(s.c_str());
+	vector<const char*> instanceExts;
+	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
 
 	VkInstanceCreateInfo createInfo = {};
 	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	createInfo.pApplicationInfo = &appInfo;
-	createInfo.enabledExtensionCount = (uint32_t)exts.size();
-	createInfo.ppEnabledExtensionNames = exts.data();
+	createInfo.enabledExtensionCount = (uint32_t)instanceExts.size();
+	createInfo.ppEnabledExtensionNames = instanceExts.data();
 	createInfo.enabledLayerCount = (uint32_t)validationLayers.size();
 	createInfo.ppEnabledLayerNames = validationLayers.data();
 	printf("Creating vulkan instance... ");
 	ThrowIfFailed(vkCreateInstance(&createInfo, nullptr, &mInstance), "vkCreateInstance failed");
 	printf_color(COLOR_GREEN, "%s", "Done.\n");
-
 	#pragma endregion
 
 	#ifdef ENABLE_DEBUG_LAYERS
@@ -222,11 +255,18 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
 	VkPhysicalDevice physicalDevice = devices[deviceIndex];
 
-	for (EnginePlugin* p : pluginManager->Plugins())
-		p->PreDeviceInit(this, physicalDevice);
-	if (mXRRuntime) mXRRuntime->PreDeviceInit(this, physicalDevice);
+	set<string> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME };
 
-	mWindowInput = new MouseKeyboardInput();
+	for (EnginePlugin* p : mPluginManager->Plugins()) {
+		set<string> pluginExtensions = p->DeviceExtensionsRequired(physicalDevice);
+		for (const string& e : pluginExtensions) deviceExtensions.insert(e);
+	}
+	for (XRRuntime* xr : mXRRuntimes) {
+		set<string> xrExtensions = xr->DeviceExtensionsRequired(physicalDevice);
+		for (const string& e : xrExtensions) deviceExtensions.insert(e);
+	}
+
+	mMouseKeyboardInput = new MouseKeyboardInput();
 
 	#ifdef __linux
 	// create xcb connection
@@ -249,7 +289,7 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 
 		for (uint32_t q = 0; q < queueFamilyCount; q++){
 			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)){
-				mWindow = new ::Window(this, "Stratum", mWindowInput, windowPosition, mXCBConnection, screen);
+				mWindow = new ::Window(this, applicationName, mMouseKeyboardInput, windowPosition, mXCBConnection, screen);
 				break;
 			}
 		}
@@ -295,35 +335,34 @@ Instance::Instance(int argc, char** argv, PluginManager* pluginManager)
 	rID[1].hwndTarget = NULL;
 	if (RegisterRawInputDevices(rID, 2, sizeof(RAWINPUTDEVICE)) == FALSE)
 		fprintf_color(COLOR_RED, stderr, "Failed to register raw input device(s)\n");
-	sInstances.push_back(this);
-	mWindow = new ::Window(this, "Stratum", mWindowInput, windowPosition, hInstance);
+	mWindow = new ::Window(this, createInfo.pApplicationInfo->pApplicationName, mMouseKeyboardInput, windowPosition, hInstance);
 	#endif
+	mInputManager->RegisterInputDevice(mMouseKeyboardInput);
 	
 	if (fullscreen) mWindow->Fullscreen(true);
 
 	uint32_t graphicsQueue, presentQueue;
 	FindQueueFamilies(physicalDevice, mWindow->Surface(), graphicsQueue, presentQueue);
 
-	mDevice = new ::Device(this, physicalDevice, deviceIndex, graphicsQueue, presentQueue, mDeviceExtensions, validationLayers);
-
+	mDevice = new ::Device(this, physicalDevice, deviceIndex, graphicsQueue, presentQueue, deviceExtensions, validationLayers);
 	mWindow->CreateSwapchain(mDevice);
 }
 Instance::~Instance() {
-	safe_delete(mXRRuntime);
-	safe_delete(mWindow);
-	safe_delete(mWindowInput);
-
 	#ifdef __linux
 	xcb_key_symbols_free(mXCBKeySymbols);
 	xcb_disconnect(mXCBConnection);
 	#else
-	for (auto it = sInstances.begin(); it != sInstances.end();)
-		if (*it == this)
-			it = sInstances.erase(it);
-		else
-			it++;
+	UnregisterClassA("Stratum", GetModuleHandleA(NULL));
 	#endif
 
+	for (XRRuntime* xr : mXRRuntimes) safe_delete(xr);
+	safe_delete(mPluginManager);
+
+	mInputManager->UnregisterInputDevice(mMouseKeyboardInput);
+	safe_delete(mInputManager);
+	safe_delete(mMouseKeyboardInput);
+
+	safe_delete(mWindow);
 	safe_delete(mDevice);
 
 	#ifdef ENABLE_DEBUG_LAYERS
@@ -331,7 +370,12 @@ Instance::~Instance() {
 	#endif
 
 	vkDestroyInstance(mInstance, nullptr);
+
+	#ifdef PROFILER_ENABLE
+	Profiler::ClearAll();
+	#endif
 }
+
 
 #ifdef WINDOWS
 void Instance::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -365,47 +409,47 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen){
-			mWindowInput->mCurrent.mCursorPos = float2((float)mn->event_x, (float)mn->event_y);
+			mMouseKeyboardInput->mCurrent.mCursorPos = float2((float)mn->event_x, (float)mn->event_y);
 			if (mWindow->mXCBWindow == mn->event)
 				if (mWindow->mTargetCamera){
-					float2 uv = mWindowInput->mCurrent.mCursorPos / float2((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
-					mWindowInput->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
+					float2 uv = mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
+					mMouseKeyboardInput->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
 				}
 		}
 		break;
 
 	case XCB_KEY_PRESS:
 		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindowInput->mCurrent.mKeys[kc] = true;
-		if ((kc == KEY_LALT || kc == KEY_ENTER) && mWindowInput->KeyDown(KEY_ENTER) && mWindowInput->KeyDown(KEY_LALT))
+		mMouseKeyboardInput->mCurrent.mKeys[kc] = true;
+		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboardInput->KeyDown(KEY_ENTER) && mMouseKeyboardInput->KeyDown(KEY_LALT))
 			mWindow->Fullscreen(!mWindow->Fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
 		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindowInput->mCurrent.mKeys[kc] = false;
+		mMouseKeyboardInput->mCurrent.mKeys[kc] = false;
 		break;
 
 	case XCB_BUTTON_PRESS:
 		if (bp->detail == 4){
-			mWindowInput->mCurrent.mScrollDelta += 1.0f;
+			mMouseKeyboardInput->mCurrent.mScrollDelta += 1.0f;
 			break;
 		}
 		if (bp->detail == 5){
-			mWindowInput->mCurrent.mScrollDelta =- 1.0f;
+			mMouseKeyboardInput->mCurrent.mScrollDelta =- 1.0f;
 			break;
 		}
 	case XCB_BUTTON_RELEASE:
 		switch (bp->detail){
 		case 1:
-			mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mWindowInput->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboardInput->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 2:
-			mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 3:
-			mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mWindowInput->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboardInput->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		}
 		break;
@@ -460,10 +504,10 @@ bool Instance::PollEvents() {
 	}
 	
 
-	mWindowInput->mCurrent.mCursorDelta = mWindowInput->mCurrent.mCursorPos - mWindowInput->mLast.mCursorPos;
-	mWindowInput->mWindowWidth = mWindow->mClientRect.extent.width;
-	mWindowInput->mWindowHeight = mWindow->mClientRect.extent.height;
-	return !mDestroyPending;
+	mMouseKeyboardInput->mCurrent.mCursorDelta = mMouseKeyboardInput->mCurrent.mCursorPos - mMouseKeyboardInput->mLast.mCursorPos;
+	mMouseKeyboardInput->mWindowWidth = mWindow->mClientRect.extent.width;
+	mMouseKeyboardInput->mWindowHeight = mWindow->mClientRect.extent.height;
+	if (mDestroyPending) return false;
 
 	#elif defined(WINDOWS)
 	while (true) {
@@ -485,42 +529,42 @@ bool Instance::PollEvents() {
 			RAWINPUT* raw = (RAWINPUT*)lpb;
 
 			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				mWindowInput->mCurrent.mCursorDelta += float2(raw->data.mouse.lLastX, raw->data.mouse.lLastY);
-				mWindowInput->mMousePointer.mPrimaryAxis += raw->data.mouse.lLastX;
-				mWindowInput->mMousePointer.mSecondaryAxis += raw->data.mouse.lLastY;
+				mMouseKeyboardInput->mCurrent.mCursorDelta += float2((float)raw->data.mouse.lLastX, (float)raw->data.mouse.lLastY);
+				mMouseKeyboardInput->mMousePointer.mPrimaryAxis += raw->data.mouse.lLastX;
+				mMouseKeyboardInput->mMousePointer.mSecondaryAxis += raw->data.mouse.lLastY;
 
-				if (mWindowInput->mLockMouse) {
+				if (mMouseKeyboardInput->mLockMouse) {
 					RECT rect;
 					GetWindowRect(msg.hwnd, &rect);
 					SetCursorPos((rect.right + rect.left) / 2, (rect.bottom + rect.top) / 2);
 				}
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
-					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = true;
-					mWindowInput->mMousePointer.mPrimaryButton = true;
+					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = true;
+					mMouseKeyboardInput->mMousePointer.mPrimaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP) {
-					mWindowInput->mCurrent.mKeys[MOUSE_LEFT] = false;
-					mWindowInput->mMousePointer.mPrimaryButton = false;
+					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = false;
+					mMouseKeyboardInput->mMousePointer.mPrimaryButton = false;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) {
-					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
-					mWindowInput->mMousePointer.mSecondaryButton = true;
+					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
+					mMouseKeyboardInput->mMousePointer.mSecondaryButton = true;
 				}
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP) {
-					mWindowInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
-					mWindowInput->mMousePointer.mSecondaryButton = false;
+					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
+					mMouseKeyboardInput->mMousePointer.mSecondaryButton = false;
 				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_X1] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_X1] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mWindowInput->mCurrent.mKeys[MOUSE_X2] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mWindowInput->mCurrent.mKeys[MOUSE_X2] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X1] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X1] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X2] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X2] = false;
 
 				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
-					mWindowInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
-					mWindowInput->mMousePointer.mScrollDelta.x += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+					mMouseKeyboardInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
+					mMouseKeyboardInput->mMousePointer.mScrollDelta.x += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				}
 			}
 			if (raw->header.dwType == RIM_TYPEKEYBOARD) {
@@ -528,11 +572,11 @@ bool Instance::PollEvents() {
 				if (key == VK_SHIFT) key = VK_LSHIFT;
 				if (key == VK_MENU) key = VK_LMENU;
 				if (key == VK_CONTROL) key = VK_LCONTROL;
-				mWindowInput->mCurrent.mKeys[(KeyCode)key] = (raw->data.keyboard.Flags & RI_KEY_BREAK) == 0;
+				mMouseKeyboardInput->mCurrent.mKeys[(KeyCode)key] = (raw->data.keyboard.Flags & RI_KEY_BREAK) == 0;
 
 				if ((raw->data.keyboard.Flags & RI_KEY_BREAK) == 0 &&
 					((KeyCode)raw->data.keyboard.VKey == KEY_LALT || (KeyCode)raw->data.keyboard.VKey == KEY_ENTER) &&
-					mWindowInput->KeyDown(KEY_LALT) && mWindowInput->KeyDown(KEY_ENTER)) {
+					mMouseKeyboardInput->KeyDown(KEY_LALT) && mMouseKeyboardInput->KeyDown(KEY_ENTER)) {
 					if (mWindow->mHwnd == msg.hwnd)
 						mWindow->Fullscreen(!mWindow->Fullscreen());
 				}
@@ -554,14 +598,48 @@ bool Instance::PollEvents() {
 	POINT pt;
 	GetCursorPos(&pt);
 	ScreenToClient(mWindow->mHwnd, &pt);
-	mWindowInput->mCurrent.mCursorPos = float2((float)pt.x, (float)pt.y);
-	if (mWindow->mTargetCamera) {
-		float2 uv = mWindowInput->mCurrent.mCursorPos / float2((float)mWindow->mSwapchainExtent.width, (float)mWindow->mSwapchainExtent.height);
-		mWindowInput->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
-	}
-	mWindowInput->mWindowWidth = mWindow->mClientRect.extent.width;
-	mWindowInput->mWindowHeight = mWindow->mClientRect.extent.height;
-
+	mMouseKeyboardInput->mCurrent.mCursorPos = float2((float)pt.x, (float)pt.y);
+	mMouseKeyboardInput->mWindowWidth = mWindow->mClientRect.extent.width;
+	mMouseKeyboardInput->mWindowHeight = mWindow->mClientRect.extent.height;
+	#endif
+	
 	return true;
+}
+
+bool Instance::BeginFrame() {
+	#ifdef PROFILER_ENABLE
+	Profiler::BeginFrame(mDevice->FrameCount());
+	#endif
+
+	PROFILER_BEGIN("Poll Events");
+	for (InputDevice* d : mInputManager->InputDevices()) d->NextFrame();
+	if (!PollEvents()) { // Window was closed
+		PROFILER_END;
+		return false;
+	}
+	PROFILER_END;
+
+	PROFILER_BEGIN("Acquire Image");
+	mWindow->AcquireNextImage();
+	PROFILER_END;
+	
+	// TODO: replace mScene->mCameras[0]
+	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));
+	for (XRRuntime* xr : mXRRuntimes) xr->OnFrameStart();
+	
+	return true;
+}
+void Instance::EndFrame(const std::vector<VkSemaphore>& waitSemaphores) {
+	PROFILER_BEGIN("PrePresent");
+	for (XRRuntime* xr : mXRRuntimes) xr->OnFrameEnd();
+	for (EnginePlugin* p : mPluginManager->Plugins()) p->PrePresent();
+	PROFILER_END;
+
+	mWindow->Present(waitSemaphores);
+
+	mDevice->PurgePooledResources(8);
+
+	#ifdef PROFILER_ENABLE
+	Profiler::EndFrame();
 	#endif
 }

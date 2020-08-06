@@ -1,6 +1,13 @@
-include("build/ucm.cmake")
+include("${STRATUM_HOME}/build/ucm.cmake")
 
 set(CMAKE_CXX_STANDARD 17)
+
+add_compile_definitions(XR_USE_GRAPHICS_API_VULKAN)
+if (${ENABLE_DEBUG_LAYERS})
+	add_compile_definitions(ENABLE_DEBUG_LAYERS)
+endif()
+
+include_directories("${STRATUM_HOME}" "${STRATUM_HOME}/ThirdParty/assimp/include")
 
 if(WIN32)
 	if(DEFINED ENV{VULKAN_SDK})
@@ -10,15 +17,10 @@ if(WIN32)
 	endif()
 
 	ucm_set_runtime(DYNAMIC)
+	
 	add_compile_definitions(WINDOWS WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
-	if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+	if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
 		add_compile_definitions(_CRTDBG_MAP_ALLOC)
-	endif()
-
-	if (MSVC)
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4267 /wd4244 /wd26451 /wd26812")
-		if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-		endif()
 	endif()
 
 	include_directories("$ENV{VULKAN_SDK}/include")
@@ -28,13 +30,6 @@ if(WIN32)
 		link_libraries("$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")
 	endif()
 endif()
-
-add_compile_definitions(XR_USE_GRAPHICS_API_VULKAN)
-if (${ENABLE_DEBUG_LAYERS})
-	add_compile_definitions(ENABLE_DEBUG_LAYERS)
-endif()
-
-include_directories("${STRATUM_HOME}" "${STRATUM_HOME}/ThirdParty/assimp/include")
 
 function(link_plugin TARGET_NAME)
 	add_dependencies(${TARGET_NAME} Stratum)

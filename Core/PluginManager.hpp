@@ -1,14 +1,16 @@
 #pragma once
 
 #include <Core/EnginePlugin.hpp>
-#include <vector>
 
-class Scene;
-class EnginePlugin;
+#ifdef WINDOWS
+typedef HMODULE PluginHandle;
+#else
+typedef void* PluginHandle;
+#endif
 
 class PluginManager {
 public:
-	ENGINE_EXPORT ~PluginManager();
+	STRATUM_API ~PluginManager();
 
 	const std::vector<EnginePlugin*>& Plugins() const { return mPlugins; }
 	
@@ -21,22 +23,12 @@ public:
 	}
 	
 private:
-	friend class Stratum;
+	friend class Instance;
+	friend class Scene;
 
-	#ifdef WINDOWS
-	typedef HMODULE PluginHandle;
-	#else
-	typedef void* PluginHandle;
-	#endif
+	STRATUM_API void LoadPlugins(const std::string& folder = "Plugins/");
+	STRATUM_API void UnloadPlugins();
 
 	std::vector<PluginHandle> mPluginModules;
 	std::vector<EnginePlugin*> mPlugins;
-
-	ENGINE_EXPORT EnginePlugin* CreatePlugin(PluginHandle handle);
-	ENGINE_EXPORT void UnloadPlugin(PluginHandle handle);
-	ENGINE_EXPORT PluginHandle LoadPlugin(const std::string& filename, bool errmsg);
-	
-	ENGINE_EXPORT void LoadPlugins();
-	ENGINE_EXPORT void InitPlugins(Scene* scene);
-	ENGINE_EXPORT void UnloadPlugins();
 };

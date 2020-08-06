@@ -1,6 +1,12 @@
 #pragma once
 
 #ifdef WINDOWS
+
+#ifdef _DEBUG
+#include <stdlib.h>
+#include <crtdbg.h>
+#endif
+
 #include <winsock2.h>
 #include <Windows.h>
 #include <ws2tcpip.h>
@@ -22,24 +28,25 @@
 #include <cstring>
 #include <stdexcept>
 #include <variant>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
 #include <chrono>
 
-#include <unordered_map>
 #include <vector>
+#include <stack>
 #include <queue>
+#include <unordered_map>
 #include <set>
 #include <list>
 #include <forward_list>
 
 #include <vulkan/vulkan.h>
 
-#include <Math/Geometry.hpp>
 #include <Util/Enums.hpp>
-#include <Util/Helpers.hpp>
 #include <Util/StratumForward.hpp>
+#include <Util/HelperTypes.hpp>
 
 #ifdef __GNUC__
 #include <experimental/filesystem>
@@ -49,28 +56,17 @@ namespace fs = std::experimental::filesystem;
 namespace fs = std::filesystem;
 #endif
 
-#define STRATUM_VERSION VK_MAKE_VERSION(1,0,0)
-
 #ifdef WINDOWS
-#ifdef ENGINE_CORE
-#define ENGINE_EXPORT __declspec(dllexport)
+#ifdef STRATUM_CORE
+#define STRATUM_API __declspec(dllexport)
 #define PLUGIN_EXPORT
 #else
-#define ENGINE_EXPORT __declspec(dllimport)
-#ifdef IMPORT_PLUGIN
-#define PLUGIN_EXPORT __declspec(dllimport)
-#else
+#define STRATUM_API __declspec(dllimport)
 #define PLUGIN_EXPORT __declspec(dllexport)
 #endif
-#endif
 #else
-#ifdef ENGINE_CORE
-#define ENGINE_EXPORT
+#define STRATUM_API
 #define PLUGIN_EXPORT
-#else
-#define ENGINE_EXPORT
-#define PLUGIN_EXPORT
-#endif
 #endif
 
 #define safe_delete(x) if (x != nullptr) { delete x; x = nullptr; }
@@ -247,67 +243,6 @@ inline void fprintf_color(ConsoleColor color, _IO_FILE* str, const char* format,
 }
 
 
-template <typename T>
-inline T AlignUpWithMask(T value, size_t mask) {
-	return (T)(((size_t)value + mask) & ~mask);
-}
-template <typename T>
-inline T AlignDownWithMask(T value, size_t mask) {
-	return (T)((size_t)value & ~mask);
-}
-template <typename T>
-inline T AlignUp(T value, size_t alignment) {
-	return AlignUpWithMask(value, alignment - 1);
-}
-template <typename T>
-inline T AlignDown(T value, size_t alignment) {
-	return AlignDownWithMask(value, alignment - 1);
-}
-
-template <typename T>
-inline bool IsPowerOfTwo(T value) {
-	return 0 == (value & (value - 1));
-}
-
-
-inline bool ReadFile(const std::string& filename, std::string& dest) {
-	std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-	if (!file.is_open()) {
-		std::cerr << "Failed to open file " << filename.c_str() << std::endl;
-		return false;
-	}
-
-	size_t fileSize = (size_t)file.tellg();
-	dest.resize(fileSize);
-
-	file.seekg(0);
-	file.read(const_cast<char*>(dest.data()), fileSize);
-
-	file.close();
-
-	return true;
-}
-inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
-	std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-	if (!file.is_open()) {
-		std::cerr << "Failed to open file " << filename.c_str() << std::endl;
-		return false;
-	}
-
-	size_t fileSize = (size_t)file.tellg();
-	dest.resize(fileSize);
-
-	file.seekg(0);
-	file.clear();
-	file.read(reinterpret_cast<char*>(dest.data()), fileSize);
-
-	file.close();
-
-	return true;
-}
-
 inline void ThrowIfFailed(VkResult result, const std::string& message) {
 	if (result != VK_SUCCESS) {
 		const char* code = "<unknown>";
@@ -341,10 +276,104 @@ inline void ThrowIfFailed(VkResult result, const std::string& message) {
 			case VK_ERROR_NOT_PERMITTED_EXT: code = "VK_ERROR_NOT_PERMITTED_EXT"; break;
 		}
 		fprintf_color(COLOR_RED, stderr, "%s: %s\n", message.c_str(), code);
-		//throw;
+		throw;
 	}
 }
 
+
+template <typename T>
+inline T AlignUpWithMask(T value, size_t mask) {
+	return (T)(((size_t)value + mask) & ~mask);
+}
+template <typename T>
+inline T AlignDownWithMask(T value, size_t mask) {
+	return (T)((size_t)value & ~mask);
+}
+template <typename T>
+inline T AlignUp(T value, size_t alignment) {
+	return AlignUpWithMask(value, alignment - 1);
+}
+template <typename T>
+inline T AlignDown(T value, size_t alignment) {
+	return AlignDownWithMask(value, alignment - 1);
+}
+
+template <typename T>
+inline bool IsPowerOfTwo(T value) {
+	return 0 == (value & (value - 1));
+}
+
+
+inline bool ReadFile(const std::string& filename, std::string& dest) {
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) return false;
+	size_t fileSize = (size_t)file.tellg();
+	dest.resize(fileSize);
+	file.seekg(0);
+	file.read(const_cast<char*>(dest.data()), fileSize);
+	file.close();
+	return true;
+}
+inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) return false;
+	size_t fileSize = (size_t)file.tellg();
+	dest.resize(fileSize);
+	file.seekg(0);
+	file.clear();
+	file.read(reinterpret_cast<char*>(dest.data()), fileSize);
+	file.close();
+	return true;
+}
+inline char* ReadFile(const std::string& filename, size_t& fileSize) {
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) return nullptr;
+	fileSize = (size_t)file.tellg();
+	if (fileSize == 0) return nullptr;
+	char* data = new char[fileSize];
+	file.seekg(0);
+	file.clear();
+	file.read(data, fileSize);
+	file.close();
+	return data;
+}
+
+template<typename T>
+inline void ReadValue(std::istream& stream, T& value) {
+	stream.read(reinterpret_cast<char*>(&value), sizeof(T));
+}
+inline void ReadString(std::istream& stream, std::string& dest) {
+	uint64_t sz;
+	ReadValue<uint64_t>(stream, sz);
+	if (sz == 0) dest = "";
+	else {
+		dest.resize(sz);
+		stream.read(dest.data(), sz);
+	}
+}
+template<typename Tx>
+inline void ReadVector(std::istream& stream, std::vector<Tx>& value) {
+	uint64_t size;
+	ReadValue<uint64_t>(stream, size);
+	if (size) {
+		value.resize(size);
+		stream.read(reinterpret_cast<char*>(value.data()), sizeof(Tx)*size);
+	}
+}
+
+template<typename T>
+inline void WriteValue(std::ostream& stream, const T& value) {
+	stream.write(reinterpret_cast<const char*>(&value), sizeof(T));
+}
+inline void WriteString(std::ostream& stream, const std::string& value) {
+	WriteValue<uint64_t>(stream, value.size());
+	if (!value.empty()) stream.write(value.data(), value.size());
+}
+template<typename Tx>
+inline void WriteVector(std::ostream& stream, const std::vector<Tx>& value) {
+	WriteValue<uint64_t>(stream, value.size());
+	if (!value.empty()) stream.write(reinterpret_cast<const char*>(value.data()), sizeof(Tx)*value.size());
+}
 
 inline VkAccessFlags GuessAccessMask(VkImageLayout layout) {
 	switch (layout) {
@@ -571,8 +600,21 @@ inline const VkDeviceSize FormatSize(VkFormat format) {
 	return 0;
 }
 
-inline static bool HasStencilComponent(VkFormat format) {
-	return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+inline bool HasDepthComponent(VkFormat format) {
+	return
+		format == VK_FORMAT_D16_UNORM ||
+		format == VK_FORMAT_X8_D24_UNORM_PACK32 ||
+		format == VK_FORMAT_D32_SFLOAT ||
+		format == VK_FORMAT_D16_UNORM_S8_UINT ||
+		format == VK_FORMAT_D24_UNORM_S8_UINT ||
+		format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+inline bool HasStencilComponent(VkFormat format) {
+	return
+		format == VK_FORMAT_S8_UINT ||
+		format == VK_FORMAT_D16_UNORM_S8_UINT ||
+		format == VK_FORMAT_D24_UNORM_S8_UINT ||
+		format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
 inline const char* FormatToString(VkFormat format) {
@@ -790,66 +832,109 @@ inline const char* TopologyToString(VkPrimitiveTopology topology) {
 	return "";
 }
 
-inline PassType atopass(const std::string& str) {
-	if (str == "main")	return PASS_MAIN;
-	if (str == "depth")	return PASS_DEPTH;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown pass type: %s (expected one of 'main' 'depth')\n", str.c_str());
-	return PASS_MAIN;
+template<typename T>
+std::string PrintKeys(const std::unordered_map<std::string, T>& map) {
+	std::string str = "";
+	for (const auto& kp : map) str += + "\"" + kp.first + "\", ";
+	if (map.size()) str = str.substr(0, str.length()-1); // remove trailing space
+	return str;
 }
 inline VkCompareOp atocmp(const std::string& str) {
-	if (str == "less")		return VK_COMPARE_OP_LESS;
-	if (str == "greater")	return VK_COMPARE_OP_GREATER;
-	if (str == "lequal")	return VK_COMPARE_OP_LESS_OR_EQUAL;
-	if (str == "gequal")	return VK_COMPARE_OP_GREATER_OR_EQUAL;
-	if (str == "equal")		return VK_COMPARE_OP_EQUAL;
-	if (str == "nequal")	return VK_COMPARE_OP_NOT_EQUAL;
-	if (str == "never")		return VK_COMPARE_OP_NEVER;
-	if (str == "always")	return VK_COMPARE_OP_ALWAYS;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown comparison: %s (expected one of: 'less' 'greater' 'lequal' 'gequal' 'equal' 'nequal' 'never' 'always')\n", str.c_str());
-	return VK_COMPARE_OP_LESS_OR_EQUAL;
+	static const std::unordered_map<std::string, VkCompareOp> map {
+		{ "less",	VK_COMPARE_OP_LESS },
+		{ "greater",	VK_COMPARE_OP_GREATER },
+		{ "lequal",	VK_COMPARE_OP_LESS_OR_EQUAL },
+		{ "gequal",	VK_COMPARE_OP_GREATER_OR_EQUAL },
+		{ "equal",	VK_COMPARE_OP_EQUAL },
+		{ "nequal",	VK_COMPARE_OP_NOT_EQUAL },
+		{ "never",	VK_COMPARE_OP_NEVER },
+		{ "always",	VK_COMPARE_OP_ALWAYS }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown comparison: %s (expected one of: '%s')\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
 }
-inline VkColorComponentFlags atomask(const std::string& str) {
+inline VkColorComponentFlags atocolormask(const std::string& str) {
 	VkColorComponentFlags mask = 0;
 	for (uint32_t i = 0; i < str.length(); i++) {
 		if (str[i] == 'r') mask |= VK_COLOR_COMPONENT_R_BIT;
 		else if (str[i] == 'g') mask |= VK_COLOR_COMPONENT_G_BIT;
 		else if (str[i] == 'b') mask |= VK_COLOR_COMPONENT_B_BIT;
 		else if (str[i] == 'a') mask |= VK_COLOR_COMPONENT_A_BIT;
-		fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown color channel: %c (expected a concatenation of: 'r' 'g' 'b' 'a')\n", str[i]);
+		fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown color channel: %c (expected a concatenation of: 'r' 'g' 'b' 'a')\n", str[i]);
 	}
 	return mask;
 }
+inline VkBlendOp atoblendop(const std::string& str) {
+	static const std::unordered_map<std::string, VkBlendOp> map {
+		 { "add", VK_BLEND_OP_ADD },
+		 { "subtract", VK_BLEND_OP_SUBTRACT },
+		 { "reverseSubtract", VK_BLEND_OP_REVERSE_SUBTRACT },
+		 { "min", VK_BLEND_OP_MIN },
+		 { "max", VK_BLEND_OP_MAX }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown blend op: %s (expected one of: %s)\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
+}
+inline VkBlendFactor atoblendfactor(const std::string& str) {
+	static const std::unordered_map<std::string, VkBlendFactor> map {
+		{ "zero", VK_BLEND_FACTOR_ZERO },
+		{ "one", VK_BLEND_FACTOR_ONE },
+		{ "srcColor", VK_BLEND_FACTOR_SRC_COLOR },
+		{ "dstColor", VK_BLEND_FACTOR_DST_COLOR },
+  	{ "src1Color", VK_BLEND_FACTOR_SRC1_COLOR },
+		{ "oneMinusSrcColor", VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR },
+		{ "oneMinusDstColor", VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR },
+  	{ "oneMinusSrc1Color", VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR },
+		{ "srcAlpha", VK_BLEND_FACTOR_SRC_ALPHA },
+		{ "dstAlpha", VK_BLEND_FACTOR_DST_ALPHA },
+  	{ "src1Alpha", VK_BLEND_FACTOR_SRC1_ALPHA },
+		{ "oneMinusSrcAlpha", VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA },
+		{ "oneMinusDstAlpha", VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA },
+  	{ "oneMinusSrc1Alpha", VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA },
+		{ "srcAlphaSaturate", VK_BLEND_FACTOR_SRC_ALPHA_SATURATE }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown blend factor: %s (expected one of: %s)\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
+}
 inline VkFilter atofilter(const std::string& str) {
-	if (str == "nearest") return VK_FILTER_NEAREST;
-	if (str == "linear")  return VK_FILTER_LINEAR;
-	if (str == "cubic")   return VK_FILTER_CUBIC_IMG;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown filter: %s (expected one of: 'nearest' 'linear' 'cubic')\n", str.c_str());
-	return VK_FILTER_LINEAR;
+	static const std::unordered_map<std::string, VkFilter> map {
+		{ "nearest", VK_FILTER_NEAREST },
+		{ "linear", VK_FILTER_LINEAR },
+		{ "cubic", VK_FILTER_CUBIC_IMG }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown filter: %s (expected one of: %s)\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
 }
 inline VkSamplerAddressMode atoaddressmode(const std::string& str) {
-	if (str == "repeat")		    		return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	if (str == "mirrored_repeat")   return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-	if (str == "clamp_edge")	    	return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	if (str == "clamp_border")	    return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-	if (str == "mirror_clamp_edge") return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown sampler address mode: %s (expected one of: 'repeat' 'mirrored_repeat' 'clamp_edge' 'clamp_border' 'mirror_clamp_edge')\n", str.c_str());
-	return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	static const std::unordered_map<std::string, VkSamplerAddressMode> map {
+		{ "repeat", VK_SAMPLER_ADDRESS_MODE_REPEAT },
+		{ "mirroredRepeat", VK_SAMPLER_ADDRESS_MODE_REPEAT },
+		{ "clampEdge", VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE },
+		{ "clampBorder", VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER },
+		{ "mirrorClampEdge", VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE },
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown sampler address mode: %s (expected one of: %s)\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
 }
 inline VkBorderColor atobordercolor(const std::string& str) {
-	if (str == "float_transparent_black") return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-	if (str == "int_transparent_black")	  return VK_BORDER_COLOR_INT_TRANSPARENT_BLACK;
-	if (str == "float_opaque_black")	  	return VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-	if (str == "int_opaque_black")		  	return VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-	if (str == "float_opaque_white")	  	return VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-	if (str == "int_opaque_white")		  	return VK_BORDER_COLOR_INT_OPAQUE_WHITE;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown border color: %s (expected one of: 'float_transparent_black' 'int_transparent_black' 'float_opaque_black' 'int_opaque_black' 'float_opaque_white' 'int_opaque_white')\n", str.c_str());
-	return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	static const std::unordered_map<std::string, VkBorderColor> map {
+		{ "floatTransparentBlack", VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK },
+		{ "intTransparentBlack", VK_BORDER_COLOR_INT_TRANSPARENT_BLACK },
+		{ "floatOpaqueBlack", VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK },
+		{ "intOpaqueBlack", VK_BORDER_COLOR_INT_OPAQUE_BLACK },
+		{ "floatOpaqueWhite", VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE },
+		{ "intOpaqueWhite", VK_BORDER_COLOR_INT_OPAQUE_WHITE }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown border color: %s (expected one of: %s)\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
 }
 inline VkSamplerMipmapMode atomipmapmode(const std::string& str) {
-	if (str == "nearest") return VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	if (str == "linear") return VK_SAMPLER_MIPMAP_MODE_LINEAR;
-	fprintf_color(COLOR_YELLOW, stderr, "Warning: Unknown mipmap mode: %s (expected one of: 'nearest' 'linear')\n", str.c_str());
-	return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	static const std::unordered_map<std::string, VkSamplerMipmapMode> map {
+		{ "nearest", VK_SAMPLER_MIPMAP_MODE_NEAREST },
+		{ "linear", VK_SAMPLER_MIPMAP_MODE_LINEAR }
+	};
+	if (!map.count(str)) fprintf_color(COLOR_YELLOW, stderr, "Error: Unknown mipmap mode: %s (expected one of: '%s')\n", str.c_str(), PrintKeys(map).c_str());
+	return map.at(str);
 }
 
 inline VkExtent2D To2D(const VkExtent3D& e) { return { e.width, e.height }; }
@@ -887,4 +972,24 @@ inline bool FindQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface, uin
 	}
 
 	return g && p;
+}
+
+template<typename T>
+inline void ExecuteParallel(uint32_t iterations, T func) {
+	uint32_t threadCount = min(iterations, (uint32_t)std::thread::hardware_concurrency());
+	if (threadCount) {
+		uint32_t counter = 0;
+		std::vector<std::thread> threads;
+		for (uint32_t j = 0; j < threadCount; j++) {
+			threads.push_back(std::thread([&,j]() {
+				for (uint32_t i = j; i < iterations; i += threadCount) {
+					func(i);
+					counter++;
+				}
+			}));
+		}
+		while (counter < iterations) std::this_thread::sleep_for(16ms);
+		for (uint32_t i = 0; i < threads.size(); i++) if (threads[i].joinable()) threads[i].join();
+	} else
+		for (uint32_t i = 0; i < iterations; i++) func(i);
 }

@@ -24,18 +24,15 @@ public:
 	const std::vector<Node>& Nodes() const { return mNodes; }
 	Object* GetObject(uint32_t index) const { return mPrimitives[index].mObject; }
 
-	inline AABB RendererBounds() { return mRendererBounds; }
-
-	ENGINE_EXPORT void Build(Object** objects, uint32_t objectCount);
-	ENGINE_EXPORT void FrustumCheck(const float4 frustum[6], std::vector<Object*>& objects, uint32_t mask);
-	ENGINE_EXPORT Object* Intersect(const Ray& ray, float* t, bool any, uint32_t mask);
+	STRATUM_API void Build(Object** objects, uint32_t objectCount);
+	STRATUM_API void FrustumCheck(const float4 frustum[6], std::vector<Object*>& objects, uint32_t mask);
+	STRATUM_API Object* Intersect(const Ray& ray, float* t, bool any, uint32_t mask);
 
 private:
 	struct Primitive {
 		AABB mBounds;
 		Object* mObject;
 	};
-	AABB mRendererBounds;
 	std::vector<Node> mNodes;
 	std::vector<Primitive> mPrimitives;
 };

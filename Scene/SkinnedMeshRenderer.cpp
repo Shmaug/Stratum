@@ -1,5 +1,8 @@
+#include <Data/AssetManager.hpp>
 #include <Scene/SkinnedMeshRenderer.hpp>
 #include <Scene/Scene.hpp>
+#include <Scene/Camera.hpp>
+#include <Scene/Bone.hpp>
 #include <Util/Profiler.hpp>
 
 using namespace std;
@@ -26,8 +29,8 @@ Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 	return mBoneMap.count(boneName) ? mBoneMap.at(boneName) : nullptr;
 }
 
-void SkinnedMeshRenderer::PostUpdate(CommandBuffer* commandBuffer) {
-	Shader* skinner = commandBuffer->Device()->AssetManager()->LoadShader("Shaders/skinner.stm");
+void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
+	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stm");
 	::Mesh* m = this->Mesh();
 
 	mVertexBuffer = commandBuffer->GetBuffer(mName + " VertexBuffer", m->VertexBuffer()->Size(), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -65,25 +68,23 @@ void SkinnedMeshRenderer::PostUpdate(CommandBuffer* commandBuffer) {
 			if (ti > 3) break;
 		}
 
-		ComputeShader* s = skinner->GetCompute("blend", {});
-		vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipeline);
+		ComputePipeline* s = skinner->GetCompute("blend", {});
 	
 		DescriptorSet* ds = commandBuffer->GetDescriptorSet("Blend", s->mDescriptorSetLayouts[0]);
-		ds->CreateStorageBufferDescriptor(mVertexBuffer, s->mDescriptorBindings.at("Vertices").second.binding);
-		ds->CreateStorageBufferDescriptor(targets[0], s->mDescriptorBindings.at("BlendTarget0").second.binding);
-		ds->CreateStorageBufferDescriptor(targets[1], s->mDescriptorBindings.at("BlendTarget1").second.binding);
-		ds->CreateStorageBufferDescriptor(targets[2], s->mDescriptorBindings.at("BlendTarget2").second.binding);
-		ds->CreateStorageBufferDescriptor(targets[3], s->mDescriptorBindings.at("BlendTarget3").second.binding);
-		ds->FlushWrites();
-		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+		ds->CreateStorageBufferDescriptor(mVertexBuffer, s->GetDescriptorLocation("Vertices"));
+		ds->CreateStorageBufferDescriptor(targets[0], s->GetDescriptorLocation("BlendTarget0"));
+		ds->CreateStorageBufferDescriptor(targets[1], s->GetDescriptorLocation("BlendTarget1"));
+		ds->CreateStorageBufferDescriptor(targets[2], s->GetDescriptorLocation("BlendTarget2"));
+		ds->CreateStorageBufferDescriptor(targets[3], s->GetDescriptorLocation("BlendTarget3"));
+		commandBuffer->BindDescriptorSet(ds, 0);
 
+		commandBuffer->BindPipeline(s);
 		commandBuffer->PushConstantRef("VertexCount", m->VertexCount());
 		commandBuffer->PushConstantRef("VertexStride", m->VertexSize());
 		commandBuffer->PushConstantRef("NormalOffset", (uint32_t)offsetof(StdVertex, normal));
 		commandBuffer->PushConstantRef("TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
 		commandBuffer->PushConstantRef("BlendFactors", weights);
-
-		vkCmdDispatch(*commandBuffer, ( + 63) / 64, 1, 1);
+		commandBuffer->DispatchAligned(m->VertexCount());
 
 		if (mRig.size()){
 			barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
@@ -100,64 +101,62 @@ void SkinnedMeshRenderer::PostUpdate(CommandBuffer* commandBuffer) {
 		for (uint32_t i = 0; i < mRig.size(); i++)
 			skin[i] = (WorldToObject() * mRig[i]->ObjectToWorld()) * mRig[i]->mInverseBind; // * vertex;
 
-		ComputeShader* s = skinner->GetCompute("skin", {});
-		vkCmdBindPipeline(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipeline);
+		ComputePipeline* s = skinner->GetCompute("skin", {});
+		commandBuffer->BindPipeline(s);
 
 		DescriptorSet* ds = commandBuffer->GetDescriptorSet("Skinning", s->mDescriptorSetLayouts[0]);
-		ds->CreateStorageBufferDescriptor(mVertexBuffer, s->mDescriptorBindings.at("Vertices").second.binding);
-		ds->CreateStorageBufferDescriptor(m->WeightBuffer().get(), s->mDescriptorBindings.at("Weights").second.binding);
-		ds->CreateStorageBufferDescriptor(poseBuffer, s->mDescriptorBindings.at("Pose").second.binding);
-		ds->FlushWrites();
-		vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, s->mPipelineLayout, 0, 1, *ds, 0, nullptr);
+		ds->CreateStorageBufferDescriptor(mVertexBuffer, s->GetDescriptorLocation("Vertices"));
+		ds->CreateStorageBufferDescriptor(m->WeightBuffer().get(), s->GetDescriptorLocation("Weights"));
+		ds->CreateStorageBufferDescriptor(poseBuffer, s->GetDescriptorLocation("Pose"));
+		commandBuffer->BindDescriptorSet(ds, 0);
 
 		commandBuffer->PushConstantRef("VertexCount", m->VertexCount());
 		commandBuffer->PushConstantRef("VertexStride", m->VertexSize());
 		commandBuffer->PushConstantRef("NormalOffset", (uint32_t)offsetof(StdVertex, normal));
 		commandBuffer->PushConstantRef("TangentOffset", (uint32_t)offsetof(StdVertex, tangent));
 
-		vkCmdDispatch(*commandBuffer, (m->VertexCount() + 63) / 64, 1, 1);
+		commandBuffer->DispatchAligned(m->VertexCount());
 	}
 
 	barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 	barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, barrier);
+	mMaterial->OnLateUpdate(commandBuffer);
 }
 
-void SkinnedMeshRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
+void SkinnedMeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	::Mesh* mesh = this->Mesh();
 
-	VkCullModeFlags cull = (pass == PASS_DEPTH) ? VK_CULL_MODE_NONE : VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
-	VkPipelineLayout layout = commandBuffer->BindMaterial(mMaterial.get(), pass, mesh->VertexInput(), camera, mesh->Topology(), cull);
-	if (!layout) return;
-	GraphicsShader* shader = mMaterial->GetShader(pass);
+	commandBuffer->BindMaterial(mMaterial.get(), mesh->VertexInput(), mesh->Topology());
+	GraphicsPipeline* pipeline = mMaterial->GetPassPipeline(commandBuffer->CurrentShaderPass());
 
-	// TODO: Cache object descriptorset?
-
-	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
-	buf->ObjectToWorld = ObjectToWorld();
-	buf->WorldToObject = WorldToObject();
-	DescriptorSet* objDS = commandBuffer->GetDescriptorSet(mName, shader->mDescriptorSetLayouts[PER_OBJECT]);
-	objDS->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
-	objDS->FlushWrites();
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *objDS, 0, nullptr);
+	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT] != VK_NULL_HANDLE) {
+		// TODO: Cache object descriptorset?
+		Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+		InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
+		buf->ObjectToWorld = ObjectToWorld();
+		buf->WorldToObject = WorldToObject();
+		DescriptorSet* perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
+		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
+		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
+	}
 	
-
+	Scene()->PushSceneConstants(commandBuffer);
+	
 	commandBuffer->BindVertexBuffer(mVertexBuffer, 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
+	camera->SetViewportScissor(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 	commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
-
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
+		camera->SetViewportScissor(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
 	}
 }
 
-void SkinnedMeshRenderer::DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {
+void SkinnedMeshRenderer::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {
 	if (mRig.size()){
 		for (auto b : mRig) {
 			gui->WireSphere(b->WorldPosition(), .01f, float4(0.25f, 1.f, 0.25f, 1.f));

@@ -39,7 +39,7 @@ Buffer::~Buffer() {
 }
 
 void Buffer::Upload(const void* data, VkDeviceSize size) {
-	if (!data) return;
+	if (!data || size == 0) return;
 	if (size > mSize) throw runtime_error("Data size out of bounds");
 	if (mMemoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
 		memcpy(MappedData(), data, size);
@@ -68,7 +68,7 @@ void Buffer::CopyFrom(const Buffer& other) {
 		Allocate();
 	}
 
-	auto commandBuffer = mDevice->GetCommandBuffer();
+	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
 
 	VkBufferMemoryBarrier barrier = {};
 	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -76,12 +76,7 @@ void Buffer::CopyFrom(const Buffer& other) {
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.buffer = other;
 	barrier.size = mSize;
-	vkCmdPipelineBarrier(*commandBuffer,
-		VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		0,
-		0, nullptr,
-		1, &barrier,
-		0, nullptr);
+	commandBuffer->Barrier(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier);
 
 	VkBufferCopy copyRegion = {};
 	copyRegion.size = mSize;

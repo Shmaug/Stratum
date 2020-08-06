@@ -1,17 +1,13 @@
 #pragma once
 
-#include <Content/Material.hpp>
-#include <Content/Mesh.hpp>
-#include <Core/DescriptorSet.hpp>
+#include <Data/Material.hpp>
+#include <Data/Mesh.hpp>
 #include <Scene/Renderer.hpp>
-#include <Util/Util.hpp>
 
 class ClothRenderer : public Renderer {
 public:
-bool mVisible;
-
-	ENGINE_EXPORT ClothRenderer(const std::string& name);
-	ENGINE_EXPORT ~ClothRenderer();
+	STRATUM_API ClothRenderer(const std::string& name);
+	STRATUM_API ~ClothRenderer();
 
 	inline void Drag(float d) { mDrag = d; }
 	inline float Drag() const { return mDrag; }
@@ -30,22 +26,16 @@ bool mVisible;
 
 	inline virtual void AddSphereCollider(Object* obj, float radius) { mSphereColliders.push_back(std::make_pair(obj, radius)); }
 
-	ENGINE_EXPORT virtual void Mesh(::Mesh* m);
-	ENGINE_EXPORT virtual void Mesh(std::shared_ptr<::Mesh> m);
+	STRATUM_API virtual void Mesh(::Mesh* m);
+	STRATUM_API virtual void Mesh(std::shared_ptr<::Mesh> m);
 	inline virtual ::Mesh* Mesh() const { return mMesh.index() == 0 ? std::get<::Mesh*>(mMesh) : std::get<std::shared_ptr<::Mesh>>(mMesh).get(); }
 
 	inline virtual ::Material* Material() { return mMaterial.get(); }
-	ENGINE_EXPORT virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
+	STRATUM_API virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
 
-	// Renderer functions
 
-	inline virtual PassType PassMask() override { return mMaterial ? mMaterial->PassMask() : Renderer::PassMask(); }
-	inline virtual bool Visible() override { return mVisible && Mesh() && mMaterial && EnabledHierarchy(); }
-	inline virtual uint32_t RenderQueue() override { return mMaterial ? mMaterial->RenderQueue() : Renderer::RenderQueue(); }
-	
-	ENGINE_EXPORT virtual void FixedUpdate(CommandBuffer* commandBuffer) override;
-	ENGINE_EXPORT virtual void PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
-	ENGINE_EXPORT virtual void Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) override;
+	inline virtual bool Visible(const std::string& pass) override { return Mesh() && mMaterial && Renderer::Visible(pass); }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
 
 private:
 	std::shared_ptr<::Material> mMaterial;
@@ -68,6 +58,11 @@ private:
 	float mStiffness;
 	float mDamping;
 	float3 mGravity;
+	
+protected:
+	STRATUM_API virtual void OnFixedUpdate(CommandBuffer* commandBuffer) override;
+	STRATUM_API virtual void OnLateUpdate(CommandBuffer* commandBuffer) override;
+	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
 
-	ENGINE_EXPORT bool UpdateTransform() override;
+	STRATUM_API bool UpdateTransform() override;
 };

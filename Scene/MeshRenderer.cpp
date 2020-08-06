@@ -1,15 +1,13 @@
 #include <Scene/MeshRenderer.hpp>
 #include <Scene/Scene.hpp>
+#include <Scene/Camera.hpp>
 #include <Util/Profiler.hpp>
-
-#include <Shaders/include/shadercompat.h>
 
 #define INSTANCE_BATCH_SIZE 1024
 
 using namespace std;
 
-MeshRenderer::MeshRenderer(const string& name)
-	: Object(name), mVisible(true), mMesh(nullptr), mRayMask(0) {}
+MeshRenderer::MeshRenderer(const string& name) : Object(name), mMesh(nullptr), mRayMask(0) {}
 MeshRenderer::~MeshRenderer() {}
 
 bool MeshRenderer::UpdateTransform() {
@@ -19,6 +17,10 @@ bool MeshRenderer::UpdateTransform() {
 	else
 		mAABB = Mesh()->Bounds() * ObjectToWorld();
 	return true;
+}
+
+void MeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
+	mMaterial->OnLateUpdate(commandBuffer);
 }
 
 bool MeshRenderer::TryCombineInstances(CommandBuffer* commandBuffer, Renderer* renderer, Buffer*& instanceBuffer, uint32_t& instanceCount) {
@@ -39,47 +41,42 @@ bool MeshRenderer::TryCombineInstances(CommandBuffer* commandBuffer, Renderer* r
 	return true;
 }
 
-void MeshRenderer::PreBeginRenderPass(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
-		Scene()->SetEnvironmentParameters(mMaterial.get());
-		mMaterial->PreBeginRenderPass(commandBuffer, pass);
-}
-
-void MeshRenderer::DrawInstanced(CommandBuffer* commandBuffer, Camera* camera, PassType pass, Buffer* instanceBuffer, uint32_t instanceCount) {
+void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera, Buffer* instanceBuffer, uint32_t instanceCount) {
 	::Mesh* mesh = Mesh();
 
-	VkCullModeFlags cull = (pass == PASS_DEPTH) ? VK_CULL_MODE_NONE : VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
-	VkPipelineLayout layout = commandBuffer->BindMaterial(mMaterial.get(), pass, mesh->VertexInput(), camera, mesh->Topology(), cull);
-	if (!layout) return;
-	auto shader = mMaterial->GetShader(pass);
-	
-	// TODO: Cache object descriptorset?
-	
-	DescriptorSet* objDS = commandBuffer->GetDescriptorSet(mName, shader->mDescriptorSetLayouts[PER_OBJECT]);
-	objDS->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING);
-	objDS->FlushWrites();
-	vkCmdBindDescriptorSets(*commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, PER_OBJECT, 1, *objDS, 0, nullptr);
+	commandBuffer->BindMaterial(mMaterial.get(), mesh->VertexInput(), mesh->Topology());
+	GraphicsPipeline* pipeline = mMaterial->GetPassPipeline(commandBuffer->CurrentShaderPass());
 
+	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
+		commandBuffer->BindDescriptorSet(perCamera, PER_CAMERA);
+	
+	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT] != VK_NULL_HANDLE) {
+		DescriptorSet* perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
+		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING);
+		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
+	}
+
+	Scene()->PushSceneConstants(commandBuffer);
 	
 	commandBuffer->BindVertexBuffer(mesh->VertexBuffer().get(), 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetStereoViewport(commandBuffer, EYE_LEFT);
+	camera->SetViewportScissor(commandBuffer, EYE_LEFT);
 	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 	commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
-	
 	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetStereoViewport(commandBuffer, EYE_RIGHT);
+		camera->SetViewportScissor(commandBuffer, EYE_RIGHT);
 		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
 	}
 }
 
-void MeshRenderer::Draw(CommandBuffer* commandBuffer, Camera* camera, PassType pass) {
+void MeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
 	buf->ObjectToWorld = ObjectToWorld();
 	buf->WorldToObject = WorldToObject();
-	DrawInstanced(commandBuffer, camera, pass, instanceBuffer, 1);
+	OnDrawInstanced(commandBuffer, camera, perCamera, instanceBuffer, 1);
 }
 
 bool MeshRenderer::Intersect(const Ray& ray, float* t, bool any) {

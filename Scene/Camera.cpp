@@ -1,106 +1,18 @@
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
-#include <Shaders/include/shadercompat.h>
 
 #include <Util/Profiler.hpp>
  
 using namespace std;
 
-void Camera::CreateDescriptorSet() {
-	vector<VkShaderStageFlags> combos {
-		VK_SHADER_STAGE_VERTEX_BIT,
-		VK_SHADER_STAGE_FRAGMENT_BIT,
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-	};
-
-	VkDeviceSize sz = AlignUp<VkDeviceSize>(sizeof(CameraBuffer), mDevice->Limits().minUniformBufferOffsetAlignment);
-	mUniformBuffer = new Buffer(mName + " Uniforms", mDevice, mDevice->Instance()->Window()->BackBufferCount()*sz, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	
-	mFrameData.resize(mDevice->Instance()->Window()->BackBufferCount());
-	for (uint32_t i = 0; i < mFrameData.size(); i++) {
-		FrameData& fd = mFrameData[i];
-		fd.mMappedUniformBuffer = (uint8_t*)mUniformBuffer->MappedData() + i*sz;
-		for (auto& s : combos) {
-			VkDescriptorSetLayoutBinding binding = {};
-			binding.stageFlags = s;
-			binding.binding = CAMERA_BUFFER_BINDING;
-			binding.descriptorCount = 1;
-			binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			VkDescriptorSetLayoutCreateInfo dslayoutinfo = {};
-			dslayoutinfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-			dslayoutinfo.bindingCount = 1;
-			dslayoutinfo.pBindings = &binding;
-			VkDescriptorSetLayout layout;
-			vkCreateDescriptorSetLayout(*mDevice, &dslayoutinfo, nullptr, &layout);
-			mDevice->SetObjectName(layout, mName + " DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
-			
-			::DescriptorSet* ds = new ::DescriptorSet(mName + " DescriptorSet", mDevice, layout);
-			ds->CreateUniformBufferDescriptor(mUniformBuffer, i*sz, sz, CAMERA_BUFFER_BINDING);
-			ds->FlushWrites();
-			fd.mDescriptorSets.emplace(s, ds);
-		}
-	}
-	mViewport.x = 0;
-	mViewport.y = 0;
-	mViewport.width = (float)mFramebuffer->Extent().width;
-	mViewport.height = (float)mFramebuffer->Extent().height;
-	mViewport.minDepth = 0.f;
-	mViewport.maxDepth = 1.f;
-}
-
-Camera::Camera(const string& name, ::Device* device, VkFormat renderFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount, :: ClearFlags clearFlags)
-	: Object(name), mDevice(device), mDeleteFramebuffer(true), mClearFlags(clearFlags),
-	mOrthographic(false), mOrthographicSize(3), mFieldOfView(PI/4), mNear(.03f), mFar(500.f), mRenderPriority(100), mStereoMode(STEREO_NONE) {
-
+Camera::Camera(const string& name, const set<RenderTargetIdentifier>& renderTargets)
+	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView(PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(STEREO_NONE) {
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-
-	vector<VkFormat> colorFormats{ renderFormat, VK_FORMAT_R16G16B16A16_SFLOAT };
-	mFramebuffer = new ::Framebuffer(name, mDevice, { 1600, 900 }, colorFormats, depthFormat, sampleCount);
-
-	mViewport.x = 0;
-	mViewport.y = 0;
-	mViewport.width = (float)mFramebuffer->Extent().width;
-	mViewport.height = (float)mFramebuffer->Extent().height;
-
-	VkClearValue c = {};
-	c.color.float32[0] = 1.f;
-	c.color.float32[1] = 1.f;
-	c.color.float32[2] = 1.f;
-	c.color.float32[3] = 1.f;
-	mFramebuffer->ClearValue(1, c);
-
-	CreateDescriptorSet();
 }
-Camera::Camera(const string& name, ::Framebuffer* framebuffer, :: ClearFlags clearFlags)
-		: Object(name), mDevice(framebuffer->Device()), mFramebuffer(framebuffer), mDeleteFramebuffer(false), mClearFlags(clearFlags),
-	mOrthographic(false), mOrthographicSize(3), mFieldOfView(PI/4), mNear(.03f), mFar(500.f), mRenderPriority(100), mStereoMode(STEREO_NONE) {
-
-	mViewport.x = 0;
-	mViewport.y = 0;
-	mViewport.width = (float)mFramebuffer->Extent().width;
-	mViewport.height = (float)mFramebuffer->Extent().height;
-
-	mEyeOffsetTranslate[0] = 0;
-	mEyeOffsetTranslate[1] = 0;
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-	
-	CreateDescriptorSet();
-}
-
-Camera::~Camera() {
-	for (uint32_t i = 0; i < mDevice->Instance()->Window()->BackBufferCount(); i++) {
-		for (auto& s : mFrameData[i].mDescriptorSets) {
-			vkDestroyDescriptorSetLayout(*mDevice, s.second->Layout(), nullptr);
-			safe_delete(s.second);
-		}
-	}
-	safe_delete(mUniformBuffer);
-	if (mDeleteFramebuffer) safe_delete(mFramebuffer);
-}
+Camera::~Camera() {}
 
 float4 Camera::WorldToClip(const float3& worldPos, StereoEye eye) {
 	UpdateTransform();
@@ -117,7 +29,7 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	float2 clip = 2.f * uv - 1.f;
 	Ray ray;
 	if (mOrthographic) {
-		clip.x *= Aspect();
+		clip.x *= mAspectRatio;
 		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + WorldRotation() * float3(clip * mOrthographicSize, mNear);
 		ray.mDirection = WorldRotation() * float3(0, 0, 1);
 	} else {
@@ -128,9 +40,9 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	return ray;
 }
 
-void Camera::UpdateUniformBuffer() {
+void Camera::WriteUniformBuffer(void* bufferData) {
 	UpdateTransform();
-	CameraBuffer& buf = *(CameraBuffer*)mFrameData[mDevice->Instance()->Window()->BackBufferIndex()].mMappedUniformBuffer;
+	CameraBuffer& buf = *(CameraBuffer*)bufferData;
 	buf.View[0] = mView[0];
 	buf.View[1] = mView[1];
 	buf.Projection[0] = mProjection[0];
@@ -139,20 +51,11 @@ void Camera::UpdateUniformBuffer() {
 	buf.ViewProjection[1] = mViewProjection[1];
 	buf.InvProjection[0] = mInvProjection[0];
 	buf.InvProjection[1] = mInvProjection[1];
-	buf.Position[0] = ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1);
-	buf.Position[1] = ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1);
-	buf.Near = mNear;
-	buf.Far = mFar;
-	buf.AspectRatio = Aspect();
-	buf.OrthographicSize = mOrthographic ? mOrthographicSize : 0;
+	buf.Position[0] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1)).xyz, mNear);
+	buf.Position[1] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1)).xyz, mFar);
 }
-void Camera::SetViewportScissor(CommandBuffer* commandBuffer) {
-	VkRect2D scissor { { 0, 0 }, mFramebuffer->Extent() };
-	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
-	vkCmdSetViewport(*commandBuffer, 0, 1, &mViewport);
-}
-void Camera::SetStereoViewport(CommandBuffer* commandBuffer, StereoEye eye) {
-	VkViewport vp = mViewport;
+void Camera::SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye) {
+	VkViewport vp = { 0.f, 0.f, (float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height, 0.f, 1.f };
 	if (mStereoMode == STEREO_SBS_HORIZONTAL) {
 		vp.width /= 2;
 		vp.x = eye == EYE_LEFT ? 0 : vp.width;
@@ -160,8 +63,25 @@ void Camera::SetStereoViewport(CommandBuffer* commandBuffer, StereoEye eye) {
 		vp.height /= 2;
 		vp.y = eye == EYE_LEFT ? 0 : vp.height;
 	}
+	// make viewport go from y-down (vulkan) to y-up
+	vp.y += vp.height;
+	vp.height = -vp.height;
 	vkCmdSetViewport(*commandBuffer, 0, 1, &vp);
 	commandBuffer->PushConstantRef("StereoEye", (uint32_t)eye);
+
+	VkRect2D scissor { { 0, 0 }, commandBuffer->CurrentFramebuffer()->Extent() };
+	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
+}
+
+bool Camera::RendersToSubpass(RenderPass* renderPass, uint32_t subpassIndex) {
+	const Subpass& subpass = renderPass->GetSubpass(subpassIndex);
+	if (mRenderTargets.count(subpass.mDepthAttachment.first)) return true;
+	for (auto& kp : subpass.mResolveAttachments)
+			if (mRenderTargets.count(kp.first))
+				return true;
+	for (auto& kp : subpass.mColorAttachments)
+			if (mRenderTargets.count(kp.first)) return true;
+	return false;
 }
 
 bool Camera::UpdateTransform() {
@@ -174,9 +94,9 @@ bool Camera::UpdateTransform() {
 	mView[1] = float4x4::Look(0, q1 * float3(0, 0, 1), q1 * float3(0, 1, 0));
 
 	if (mOrthographic)
-		mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * Aspect(), mOrthographicSize, mNear, mFar);
+		mProjection[0] = mProjection[1] = float4x4::Orthographic(mOrthographicSize * mAspectRatio, mOrthographicSize, mNear, mFar);
 	else if (mFieldOfView)
-		mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, Aspect(), mNear, mFar);
+		mProjection[0] = mProjection[1] = float4x4::PerspectiveFov(mFieldOfView, mAspectRatio, mNear, mFar);
 	// else Projection has been set manually
 
 	mViewProjection[0] = mProjection[0] * mView[0];
@@ -222,8 +142,9 @@ bool Camera::UpdateTransform() {
 	return true;
 }
 
-void Camera::DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* camera) {
+void Camera::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {
 	if (camera == this) return;
+	
 	gui->WireSphere(WorldPosition(), mNear, 1.f);
 
 	float3 f0 = ClipToWorld(float3(-1, -1, 0));
@@ -243,7 +164,7 @@ void Camera::DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* came
 		f2, f6, f7, f3, f2,
 		f6, f4, f5, f7, f3, f1
 	};
-	gui->PolyLine(float4x4(1), points.data(), points.size(), color, 1.f);
+	gui->PolyLine(float4x4(1), points.data(), (uint32_t)points.size(), color, 1.f);
 
 	if (mStereoMode != STEREO_NONE) {
 		f0 = ClipToWorld(float3(-1, -1, 0), EYE_RIGHT);
@@ -259,6 +180,6 @@ void Camera::DrawGui(CommandBuffer* commandBuffer, GuiContext* gui, Camera* came
 		vector<float3> points2 {
 			f0, f4, f5, f1, f0, f2, 
 		};
-		gui->PolyLine(float4x4(1), points2.data(), points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
+		gui->PolyLine(float4x4(1), points2.data(), (uint32_t)points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
 	}
 }

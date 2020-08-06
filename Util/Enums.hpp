@@ -15,14 +15,6 @@ enum AnimationTangent {
 	ANIMATION_TANGENT_STEP,
 };
 
-enum BlendMode {
-	BLEND_MODE_OPAQUE = 0,
-	BLEND_MODE_ALPHA = 1,
-	BLEND_MODE_ADDITIVE = 2,
-	BLEND_MODE_MULTIPLY = 3,
-	BLEND_MODE_MAX_ENUM = 0x7FFFFFFF
-};
-
 enum ClearFlags {
 	CLEAR_NONE = 0,
 	CLEAR_DEPTH = 1,
@@ -56,12 +48,6 @@ enum ConsoleColor {
 enum LayoutAxis {
 	LAYOUT_HORIZONTAL = 0,
 	LAYOUT_VERTICAL = 1
-};
-
-enum PassType {
-	PASS_MAIN = 1 << 24,
-	PASS_DEPTH = 1 << 25,
-	PASS_MASK_MAX_ENUM = 1 << 31
 };
 
 enum StereoEye {
