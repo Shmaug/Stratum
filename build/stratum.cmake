@@ -71,7 +71,7 @@ function(add_shader_target TARGET_NAME FOLDER_PATH)
 
 	foreach(SHADER ${SHADER_SOURCES})
 		get_filename_component(FILE_NAME ${SHADER} NAME_WE)
-		set(SPIRV "${PROJECT_BINARY_DIR}/bin/Shaders/${FILE_NAME}.stm")
+		set(SPIRV "${PROJECT_BINARY_DIR}/bin/Shaders/${FILE_NAME}.stmb")
 
 		add_custom_command(
 			OUTPUT ${SPIRV}

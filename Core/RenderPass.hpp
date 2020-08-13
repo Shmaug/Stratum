@@ -2,45 +2,35 @@
 
 #include <Core/Device.hpp>
 
+enum AttachmentType {
+	ATTACHMENT_UNUSED,
+	ATTACHMENT_COLOR,
+	ATTACHMENT_DEPTH_STENCIL,
+	ATTACHMENT_RESOLVE,
+	ATTACHMENT_INPUT,
+	ATTACHMENT_PRESERVE,
+};
+
 struct SubpassAttachment {
-	VkFormat format;
-	VkSampleCountFlagBits samples;
-	VkImageLayout initialLayout;
-	VkImageLayout finalLayout;
-	VkAttachmentLoadOp loadOp;
-	VkAttachmentStoreOp storeOp;
-	inline operator VkAttachmentDescription2() const {
-			VkAttachmentDescription2 d = {};
-			d.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
-			d.format = format;
-			d.samples = samples;
-			d.loadOp = loadOp;
-			d.storeOp = storeOp;
-			d.stencilLoadOp = loadOp;
-			d.stencilStoreOp = storeOp;
-			d.initialLayout = initialLayout;
-			d.finalLayout = finalLayout;
-			return d;
-		}
+	AttachmentType mType;
+	VkFormat mFormat;
+	VkSampleCountFlagBits mSamples;
+	VkAttachmentLoadOp mLoadOp;
+	VkAttachmentStoreOp mStoreOp;
 };
 
 struct Subpass {
 	ShaderPassIdentifier mShaderPass;
-	std::unordered_map<RenderTargetIdentifier, SubpassAttachment> mInputAttachments;
-	std::unordered_map<RenderTargetIdentifier, SubpassAttachment> mColorAttachments;
-	std::unordered_map<RenderTargetIdentifier, SubpassAttachment> mResolveAttachments;
-	std::vector<RenderTargetIdentifier> mPreserveAttachments;
-	std::pair<RenderTargetIdentifier, SubpassAttachment> mDepthAttachment;
-	std::pair<RenderTargetIdentifier, SubpassAttachment> mDepthResolveAttachment;
-	// If these are found within the same RenderPass, SubpassDependencies are created. If not, then the scene will use them to determine the order of RenderPass execution
-	std::unordered_map<RenderTargetIdentifier, VkSubpassDependency2> mAttachmentDependencies;
+	std::unordered_map<RenderTargetIdentifier, SubpassAttachment> mAttachments;
+	// Generally for dependencies between renderpasses or other situations where dependencies cant be resolved automatically
+	std::unordered_map<RenderTargetIdentifier, std::pair<VkPipelineStageFlags, VkAccessFlags>> mAttachmentDependencies;
 };
 
 class RenderPass {
 public:
 	const std::string mName;
 
-	STRATUM_API RenderPass(const std::string& name, ::Device* device, const std::vector<Subpass>& subpasses, const std::vector<VkSubpassDependency2>& dependencies);
+	STRATUM_API RenderPass(const std::string& name, ::Device* device, const std::vector<Subpass>& subpasses);
 	STRATUM_API ~RenderPass();
 
 	inline const Subpass& GetSubpass(uint32_t index) const { return mSubpasses[index]; }
@@ -80,12 +70,11 @@ namespace std {
 	struct hash<SubpassAttachment> {
 		inline size_t operator()(const SubpassAttachment& a) {
 			size_t h = 0;
-			hash_combine(h, a.format);
-			hash_combine(h, a.samples);
-			hash_combine(h, a.initialLayout);
-			hash_combine(h, a.finalLayout);
-			hash_combine(h, a.loadOp);
-			hash_combine(h, a.storeOp);
+			hash_combine(h, a.mType);
+			hash_combine(h, a.mFormat);
+			hash_combine(h, a.mSamples);
+			hash_combine(h, a.mLoadOp);
+			hash_combine(h, a.mStoreOp);
 			return h;
 		}
 	};
@@ -95,12 +84,7 @@ namespace std {
 		inline size_t operator()(const Subpass& p) {
 			size_t h = 0;
 			hash_combine(h, p.mShaderPass);
-			for (const auto& kp : p.mInputAttachments) { hash_combine(h, kp.first); hash_combine(h, kp.second); }
-			for (const auto& kp : p.mColorAttachments) { hash_combine(h, kp.first); hash_combine(h, kp.second); }
-			for (const auto& kp : p.mResolveAttachments) { hash_combine(h, kp.first); hash_combine(h, kp.second); }
-			for (const auto& a : p.mPreserveAttachments) { hash_combine(h, a); }
-			hash_combine(h, p.mDepthAttachment.first);
-			hash_combine(h, p.mDepthAttachment.second);
+			for (const auto& kp : p.mAttachments) { hash_combine(h, kp.first); hash_combine(h, kp.second); }
 			return h;
 		}
 	};

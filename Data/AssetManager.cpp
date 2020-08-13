@@ -49,17 +49,17 @@ Pipeline* AssetManager::LoadPipeline(const string& filename) {
 	mMutex.unlock();
 	return get<Pipeline*>(asset);
 }
-Texture* AssetManager::LoadTexture(const string& filename, bool srgb) {
+Texture* AssetManager::LoadTexture(const string& filename, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[filename + to_string(srgb)];
-	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(filename, mDevice, filename, srgb);
+	Asset& asset = mAssets[filename + to_string(flags)];
+	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(filename, mDevice, filename, flags);
 	mMutex.unlock();
 	return get<Texture*>(asset);
 }
-Texture* AssetManager::LoadCubemap(const string& posx, const string& negx, const string& posy, const string& negy, const string& posz, const string& negz, bool srgb) {
+Texture* AssetManager::LoadCubemap(const string& posx, const string& negx, const string& posy, const string& negy, const string& posz, const string& negz, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string(srgb)];
-	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, posx, negx, posy, negy, posz, negz, srgb);
+	Asset& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string(flags)];
+	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, posx, negx, posy, negy, posz, negz, flags);
 	mMutex.unlock();
 	return get<Texture*>(asset);
 }

@@ -43,7 +43,7 @@ Sampler::~Sampler() {
 }
 
 
-uint8_t* load(const string& filename, bool srgb, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, VkFormat& format) {
+uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, VkFormat& format) {
 	uint8_t* pixels = nullptr;
 	pixelSize = 0;
 	x, y, channels;
@@ -53,11 +53,9 @@ uint8_t* load(const string& filename, bool srgb, uint32_t& pixelSize, int32_t& x
 	if (stbi_is_16_bit(filename.c_str())) {
 		pixels = (uint8_t*)stbi_load_16(filename.c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(uint16_t);
-		srgb = false;
 	} else if (stbi_is_hdr(filename.c_str())) {
 		pixels = (uint8_t*)stbi_loadf(filename.c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(float);
-		srgb = false;
 	} else {
 		pixels = (uint8_t*)stbi_load(filename.c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(uint8_t);
@@ -68,29 +66,40 @@ uint8_t* load(const string& filename, bool srgb, uint32_t& pixelSize, int32_t& x
 	}
 	if (desiredChannels > 0) channels = desiredChannels;
 
-	if (srgb) {
-		const VkFormat formatMap[4] {
-			VK_FORMAT_R8_SRGB, VK_FORMAT_R8G8_SRGB, VK_FORMAT_R8G8B8_UNORM, VK_FORMAT_R8G8B8A8_UNORM,
-		};
-		format = formatMap[channels - 1];
-	} else {
-		const VkFormat formatMap[4][4]{
-			{ VK_FORMAT_R8_UNORM  , VK_FORMAT_R8G8_UNORM   , VK_FORMAT_R8G8B8_UNORM    , VK_FORMAT_R8G8B8A8_UNORM      },
-			{ VK_FORMAT_R16_UNORM , VK_FORMAT_R16G16_UNORM , VK_FORMAT_R16G16B16_UNORM , VK_FORMAT_R16G16B16A16_UNORM  },
-			{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
-			{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
-		};
-		format = formatMap[pixelSize - 1][channels - 1];
+	VkFormat formatMap[4][4] {
+		{ VK_FORMAT_R8_UNORM , VK_FORMAT_R8G8_UNORM , VK_FORMAT_R8G8B8_UNORM , VK_FORMAT_R8G8B8A8_UNORM },
+		{ VK_FORMAT_R16_UNORM , VK_FORMAT_R16G16_UNORM , VK_FORMAT_R16G16B16_UNORM , VK_FORMAT_R16G16B16A16_UNORM  },
+		{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
+		{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
+	};
+
+	if (flags & TEXTURE_LOAD_SRGB) {
+		formatMap[0][0] = VK_FORMAT_R8_SRGB;
+		formatMap[0][1] = VK_FORMAT_R8G8_SRGB;
+		formatMap[0][2] = VK_FORMAT_R8G8B8_SRGB;
+		formatMap[0][3] = VK_FORMAT_R8G8B8A8_SRGB;
 	}
+	if (flags & TEXTURE_LOAD_SIGNED) {
+		formatMap[0][0] = VK_FORMAT_R8_SNORM;
+		formatMap[0][1] = VK_FORMAT_R8G8_SNORM;
+		formatMap[0][2] = VK_FORMAT_R8G8B8_SNORM;
+		formatMap[0][3] = VK_FORMAT_R8G8B8A8_SNORM;
+		formatMap[1][0] = VK_FORMAT_R16_SNORM;
+		formatMap[1][1] = VK_FORMAT_R16G16_SNORM;
+		formatMap[1][2] = VK_FORMAT_R16G16B16_SNORM;
+		formatMap[1][3] = VK_FORMAT_R16G16B16A16_SNORM;
+	}
+
+	format = formatMap[pixelSize - 1][channels - 1];
 
 	return pixels;
 }
 
 
-Texture::Texture(const string& name, ::Device* device, const string& filename, bool srgb) : mName(name), mDevice(device), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(0) {
+Texture::Texture(const string& name, ::Device* device, const string& filename, TextureLoadFlags flags) : mName(name), mDevice(device), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(0) {
 	int32_t x, y, channels;
 	uint32_t size;
-	uint8_t* pixels = load(filename, srgb, size, x, y, channels, mFormat);
+	uint8_t* pixels = load(filename, flags, size, x, y, channels, mFormat);
 
 	mExtent = { (uint32_t)x, (uint32_t)y, 1 };
 	mArrayLayers = 1;
@@ -126,18 +135,18 @@ Texture::Texture(const string& name, ::Device* device, const string& filename, b
 	
 	//printf("Loaded %s: %dx%d %s\n", filename.c_str(), mExtent.width, mExtent.height, FormatToString(mFormat));
 }
-Texture::Texture(const string& name, ::Device* device, const string& px, const string& nx, const string& py, const string& ny, const string& pz, const string& nz, bool srgb)
+Texture::Texture(const string& name, ::Device* device, const string& px, const string& nx, const string& py, const string& ny, const string& pz, const string& nz, TextureLoadFlags flags)
 	: mName(name), mDevice(device), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) {
 	int32_t x, y, channels;
 	uint32_t size;
 	
 	uint8_t* pixels[6] {
-		load(px, srgb, size, x, y, channels, mFormat),
-		load(nx, srgb, size, x, y, channels, mFormat),
-		load(py, srgb, size, x, y, channels, mFormat),
-		load(ny, srgb, size, x, y, channels, mFormat),
-		load(pz, srgb, size, x, y, channels, mFormat),
-		load(nz, srgb, size, x, y, channels, mFormat)
+		load(px, flags, size, x, y, channels, mFormat),
+		load(nx, flags, size, x, y, channels, mFormat),
+		load(py, flags, size, x, y, channels, mFormat),
+		load(ny, flags, size, x, y, channels, mFormat),
+		load(pz, flags, size, x, y, channels, mFormat),
+		load(nz, flags, size, x, y, channels, mFormat)
 	};
 
 	mExtent = { (uint32_t)x, (uint32_t)y, 1 };

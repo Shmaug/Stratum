@@ -21,26 +21,32 @@ class Texture {
 public:
 	const std::string mName;
 
-	// Construt from pixel data and metadata. Will generate mip maps if mipLevels = 0
+	// Construct from file
+	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& filename, TextureLoadFlags flags = TEXTURE_LOAD_SRGB);
+
+	// Construct cubemap from file
+	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, TextureLoadFlags flags = TEXTURE_LOAD_SRGB);
+
+	// Construct from pixel data and metadata. Will generate mip maps if mipLevels = 0
 	STRATUM_API Texture(const std::string& name, Device* device, const void* data, VkDeviceSize dataSize, 
 		const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-	// Construt from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
+	// Construct from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
 	STRATUM_API Texture(const std::string& name, Device* device, 
 		const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	
-	// Construt from pixel data and metadata. Will generate mip maps if mipLevels = 0
+	// Construct from pixel data and metadata. Will generate mip maps if mipLevels = 0
 	STRATUM_API Texture(const std::string& name, Device* device, const void* data, VkDeviceSize dataSize,
 		const VkExtent2D& extent, VkFormat format, uint32_t mipLevels = 0, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	
-	// Construt from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
+	// Construct from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
 	STRATUM_API Texture(const std::string& name, Device* device, 
 		const VkExtent2D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples = VK_SAMPLE_COUNT_1_BIT,
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT, VkMemoryPropertyFlags properties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	
+
 	STRATUM_API ~Texture();
 
 	inline ::Device* Device() const { return mDevice; };
@@ -66,9 +72,6 @@ private:
 	friend class CommandBuffer;
 	friend class AssetManager;
 	friend class RenderPass;
-	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& filename, bool srgb = true);
-	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, bool srgb = true);
-
 	::Device* mDevice;
 	DeviceMemoryAllocation mMemory;
 	

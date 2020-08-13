@@ -20,15 +20,6 @@ bool PrintValidationError(const char* msg) {
 	if (sscanf(msg, "Validation Error: [ %s ] ", func) == 0) return false;
 	msg = strchr(msg, ']') + 2;
 
-	/*
-	Validation Error: [ VUID-vkCmdDrawIndexed-None-02697 ] 
-	Object 0: handle = 0x2cfd30000000056, name = Shaders/skybox.stm, type = VK_OBJECT_TYPE_PIPELINE; 
-	Object 1: handle = 0x42bf70000000032, name = Shaders/skybox.stm PipelineLayout, type = VK_OBJECT_TYPE_PIPELINE_LAYOUT; 
-	Object 2: VK_NULL_HANDLE, type = VK_OBJECT_TYPE_PIPELINE_LAYOUT; 
-	| MessageID = 0x9888fef3 | 
-	vkCmdDrawIndexed(): VkPipeline 0x2cfd30000000056[Shaders/skybox.stm] defined with VkPipelineLayout 0x42bf70000000032[Shaders/skybox.stm PipelineLayout] is not compatible for maximum set statically used 1 with bound descriptor sets, last bound with VkPipelineLayout 0x0[] The Vulkan spec states: For each set n that is statically used by the VkPipeline bound to the pipeline bind point used by this command, a descriptor set must have been bound to n at the same pipeline bind point, with a VkPipelineLayout that is compatible for set n, with the VkPipelineLayout used to create the current VkPipeline, as described in Pipeline Layout Compatibility (https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-vkCmdDrawIndexed-None-02697)",
-	*/
-
 	uint32_t objectId;
 	uint64_t objectHandle;
 	char objectName[128];
@@ -255,7 +246,11 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
 	VkPhysicalDevice physicalDevice = devices[deviceIndex];
 
-	set<string> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME };
+	set<string> deviceExtensions = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
+	};
 
 	for (EnginePlugin* p : mPluginManager->Plugins()) {
 		set<string> pluginExtensions = p->DeviceExtensionsRequired(physicalDevice);

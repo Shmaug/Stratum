@@ -9,8 +9,8 @@ public:
 	STRATUM_API ~AssetManager();
 
 	STRATUM_API Pipeline*	LoadPipeline(const std::string& filename);
-	STRATUM_API Texture*	LoadTexture(const std::string& filename, bool srgb = true);
-	STRATUM_API Texture*  LoadCubemap(const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, bool srgb = true);
+	STRATUM_API Texture*	LoadTexture(const std::string& filename, TextureLoadFlags flags = TEXTURE_LOAD_SRGB);
+	STRATUM_API Texture*  LoadCubemap(const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, TextureLoadFlags flags = TEXTURE_LOAD_SRGB);
 	STRATUM_API Mesh*		  LoadMesh(const std::string& filename, float scale = 1.f);
 	STRATUM_API Font*		  LoadFont(const std::string& filename);
 

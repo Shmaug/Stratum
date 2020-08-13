@@ -18,8 +18,44 @@ using namespace std;
 
 const string gSampleText = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
 const uint32_t gBitmapPadding = 16;
-const double gBitmapScale = 6;
+const double gBitmapScale = 8;
 
+void WriteGlyphCache(const string& filename, const unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
+	ofstream file(filename, ios::binary);
+	WriteValue<uint32_t>(file, gBitmapPadding);
+	WriteValue<double>(file, gBitmapScale);
+	WriteValue<uint32_t>(file, (uint32_t)bitmaps.size());
+	for (const auto& kp : bitmaps) {
+		WriteValue<uint32_t>(file, kp.first);
+		WriteValue<uint32_t>(file, (uint32_t)kp.second.width());
+		WriteValue<uint32_t>(file, (uint32_t)kp.second.height());
+		file.write((const char*)(const float*)kp.second, sizeof(float) * 4*kp.second.width() * kp.second.height());
+	}
+}
+void ReadGlyphCache(const string& filename, unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
+	ifstream file(filename, ios::binary);
+	if (!file.is_open()) return;
+	uint32_t pad, count;
+	double scale;
+	ReadValue<uint32_t>(file, pad);
+	ReadValue<double>(file, scale);
+	ReadValue<uint32_t>(file, count);
+	if (scale != gBitmapScale || pad != gBitmapPadding) return;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t c,w,h;
+		ReadValue<uint32_t>(file, c);
+		ReadValue<uint32_t>(file, w);
+		ReadValue<uint32_t>(file, h);
+		if (!file) return;
+		bitmaps.emplace(c, msdfgen::Bitmap<float, 4>(w, h));
+		file.read((char*)(float*)bitmaps.at(c), sizeof(float) * 4*w * h);
+		if (!file && i+1 != count) {
+			bitmaps.erase(c);
+			return;
+		}
+	}
+	printf("Loaded %s\n", filename.c_str());
+}
 
 msdfgen::Point2 msdfpt(const double2& p) {
 	return msdfgen::Point2(p.x, p.y);
@@ -73,10 +109,19 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 	mAscent = (float)metrics.ascenderY;
 	mDescent = (float)metrics.descenderY;
 	mLineGap = (float)metrics.lineHeight;
+
+	string cacheFolder = "cache/";
+	bool rmcache = false;
+
+	for (auto arg : device->Instance()->CommandLineArguments())
+		if (arg == "--rmcache") rmcache = true;
+
+	string cacheFile = cacheFolder + fs::path(filename).filename().replace_extension("stmb").string();
 	
 	uint64_t area = 0;
-
 	unordered_map<uint32_t, msdfgen::Bitmap<float, 4>> bitmaps;
+	ReadGlyphCache(cacheFile, bitmaps);
+	bool writeCache = false;
 
 	for (char c : gSampleText) {
 		double advance;
@@ -96,20 +141,28 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 		glyph.mTextureExtent = { (uint32_t)fabs(glyph.mExtent.x*gBitmapScale), (uint32_t)fabs(glyph.mExtent.y*gBitmapScale) };
 		glyph.mTextureOffset = 0;
 
-		// TODO: cache the msdfgen algorithm as it's painfully slow
-		
+		if (bitmaps.count(c)) {
+			area += bitmaps.at(c).width() * bitmaps.at(c).height();
+			continue;
+		}
 		if (glyph.mTextureExtent.x == 0 || glyph.mTextureExtent.y == 0) continue;
+		bitmaps.emplace(c, msdfgen::Bitmap<float, 4>(glyph.mTextureExtent.x + 2*gBitmapPadding, glyph.mTextureExtent.y + 2*gBitmapPadding));
+		msdfgen::Bitmap<float, 4>& bitmap = bitmaps.at(c);
+		area += bitmap.width() * bitmap.height();
+
 		shape.normalize();
 		msdfgen::edgeColoringSimple(shape, 3.0);
-		msdfgen::Bitmap<float, 4> bitmap(glyph.mTextureExtent.x + 2*gBitmapPadding, glyph.mTextureExtent.y + 2*gBitmapPadding);
 		msdfgen::generateMTSDF(bitmap, shape, length(glyph.mExtent), gBitmapScale, -msdfgen::Vector2(bounds.l, bounds.b) + gBitmapPadding/gBitmapScale);
 		msdfgen::distanceSignCorrection(bitmap, shape, gBitmapScale, -msdfgen::Vector2(bounds.l, bounds.b) + gBitmapPadding/gBitmapScale);
-		area += bitmap.width() * bitmap.height();
-		bitmaps.emplace(c, bitmap);
+		writeCache = true;
 	}
+	
+	if (fs::exists(cacheFolder) && rmcache) fs::remove(cacheFolder);
+	else if (!rmcache) fs::create_directory(cacheFolder);
+	if (!rmcache) WriteGlyphCache(cacheFile, bitmaps);
 
 	// Place bitmaps
-
+	
 	VkExtent2D extent = { 0, 32 };
 	extent.width = (uint32_t)sqrt((double)area);
 	// next power of 2

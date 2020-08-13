@@ -117,8 +117,10 @@ float4 fsmain(v2f i) : SV_Target0 {
 	float4 msdf = SDFs[SdfIndex].SampleLevel(Sampler, i.texcoord, 0);
 	float d = median(msdf.rgb);
 	float w = fwidth(d);
+	float f2 = lerp(0.5 - w, 0.5 + w, d);
+	float fac = smoothstep(0.5 - w, 0.5 + w, d);
 	float4 color = Color;
-	color.a *= smoothstep(0.5 - w, 0.5 + w, d);
+	color.a *= fac;
 	if (color.a <= 0 || any(i.clipPos < 0) || any(i.clipPos > 1)) discard;
 	return color;
 }

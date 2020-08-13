@@ -18,7 +18,7 @@ bool PointerRenderer::UpdateTransform() {
 }
 
 void PointerRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/pointer.stm")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
+	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/pointer.stmb")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
 	commandBuffer->BindPipeline(pipeline, nullptr, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
 	float3 p0 = WorldPosition();

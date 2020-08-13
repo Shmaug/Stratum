@@ -65,3 +65,8 @@ enum StereoMode {
 enum TextAnchor {
 	TEXT_ANCHOR_MIN, TEXT_ANCHOR_MID, TEXT_ANCHOR_MAX
 };
+
+enum TextureLoadFlags {
+	TEXTURE_LOAD_SRGB,
+	TEXTURE_LOAD_SIGNED
+};

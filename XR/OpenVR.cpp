@@ -174,7 +174,7 @@ bool OpenVR::OnSceneInit(Scene* scene) {
     mRightPointer->RayDistance(1.f);
 
 
-    auto mat = make_shared<Material>("Untextured", mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stm"));
+    auto mat = make_shared<Material>("Untextured", mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stmb"));
     mat->SetPushParameter("Color", float4(1));
     mat->SetPushParameter("Metallic", 0.f);
     mat->SetPushParameter("Roughness", .85f);
@@ -395,7 +395,7 @@ void OpenVR::OnFrameStart() {
                             Texture* diffuse = new Texture(to_string(kp.second), mScene->Instance()->Device(),
                                 renderModelDiffuse->rubTextureMapData, renderModelDiffuse->unWidth * renderModelDiffuse->unHeight * 4,
                                 VkExtent2D { renderModelDiffuse->unWidth, renderModelDiffuse->unHeight }, VK_FORMAT_R8G8B8A8_UNORM, 0);
-                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stm"));
+                            shared_ptr<Material> mat = make_shared<Material>(renderModelName, mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stmb"));
                             mat->EnableKeyword("TEXTURED_COLORONLY");
                             mat->SetSampledTexture("BaseColorTexture", diffuse, 0);
                             mat->SetPushParameter("Color", float4(1));

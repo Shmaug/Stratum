@@ -30,7 +30,7 @@ Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 }
 
 void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
-	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stm");
+	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stmb");
 	::Mesh* m = this->Mesh();
 
 	mVertexBuffer = commandBuffer->GetBuffer(mName + " VertexBuffer", m->VertexBuffer()->Size(), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);

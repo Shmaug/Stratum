@@ -142,44 +142,29 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	mShadowSampler = new Sampler("ShadowSampler", mInstance->Device(), samplerInfo);
 
 
-	VkFormat format = mInstance->Window()->Format().format;
+	VkFormat renderFormat = mInstance->Window()->Format().format;
 	VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_8_BIT;
 	
 	Subpass shadowSubpass = {};
 	shadowSubpass.mShaderPass = "forward/depth";
-	shadowSubpass.mDepthAttachment.first = "stm_shadow_atlas";
-	shadowSubpass.mDepthAttachment.second = { VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
+	shadowSubpass.mAttachments["stm_shadow_atlas"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
 
 
 	Subpass depthPrepass = {};
 	depthPrepass.mShaderPass = "forward/depth";
-	depthPrepass.mDepthAttachment.first = "stm_main_depth";
-	depthPrepass.mDepthAttachment.second = { VK_FORMAT_D32_SFLOAT, sampleCount, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
+	depthPrepass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, sampleCount, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
 
 	Subpass opaqueSubpass = {};
 	opaqueSubpass.mShaderPass = "forward/opaque";
-	opaqueSubpass.mColorAttachments["stm_main_render"] = { format, sampleCount, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
-	opaqueSubpass.mDepthAttachment = depthPrepass.mDepthAttachment;
-	opaqueSubpass.mDepthAttachment.second.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-	opaqueSubpass.mAttachmentDependencies["stm_shadow_atlas"] = {};
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].srcSubpass = 0;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].dstSubpass = 1;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-	opaqueSubpass.mAttachmentDependencies["stm_main_depth"].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	opaqueSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
+	opaqueSubpass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, sampleCount, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE };
+	opaqueSubpass.mAttachmentDependencies["stm_shadow_atlas"] = { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT };
 	
 	Subpass transparentSubpass = {};
 	transparentSubpass.mShaderPass = "forward/transparent";
-	transparentSubpass.mColorAttachments["stm_main_render"] = { format, sampleCount, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE };
-	transparentSubpass.mResolveAttachments["stm_main_resolve"] = { format, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE };
-	transparentSubpass.mDepthAttachment = opaqueSubpass.mDepthAttachment;
-	transparentSubpass.mDepthResolveAttachment.first = "stm_main_depth_resolve";
-	transparentSubpass.mDepthResolveAttachment.second = { VK_FORMAT_R32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE };
-	transparentSubpass.mAttachmentDependencies["stm_main_depth"] = opaqueSubpass.mAttachmentDependencies["stm_main_depth"];
-	transparentSubpass.mAttachmentDependencies["stm_main_depth"].srcSubpass = 1;
-	transparentSubpass.mAttachmentDependencies["stm_main_depth"].dstSubpass = 2;
+	transparentSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE };
+	transparentSubpass.mAttachments["stm_main_resolve"] = { ATTACHMENT_RESOLVE, renderFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE };
+	transparentSubpass.mAttachments["stm_main_depth"] = opaqueSubpass.mAttachments["stm_main_depth"];
 
 	AssignRenderNode("Shadows", { shadowSubpass });
 	AssignRenderNode("Main", { depthPrepass, opaqueSubpass, transparentSubpass });
@@ -188,7 +173,6 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	SetAttachmentInfo("stm_main_render", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 	SetAttachmentInfo("stm_main_depth", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 	SetAttachmentInfo("stm_main_resolve", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-	SetAttachmentInfo("stm_main_depth_resolve", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
 	// init skybox
 
@@ -214,7 +198,7 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	
 	mSkybox = CreateObject<MeshRenderer>("Skybox");
 	mSkybox->Mesh(make_shared<Mesh>("SkyCube", mInstance->Device(), verts, indices, 8, (uint32_t)sizeof(float3), 36, &Float3VertexInput, VK_INDEX_TYPE_UINT16));
-	mSkybox->Material(make_shared<Material>("Skybox", mInstance->Device()->AssetManager()->LoadPipeline("Shaders/skybox.stm")));
+	mSkybox->Material(make_shared<Material>("Skybox", mInstance->Device()->AssetManager()->LoadPipeline("Shaders/skybox.stmb")));
 	mSkybox->LocalScale(1e5f);
 
 	for (XRRuntime* xr : mInstance->XRRuntimes()) xr->OnSceneInit(this);
@@ -240,6 +224,7 @@ Scene::~Scene() {
 }
 
 void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const VkExtent2D& extent, VkImageUsageFlags usage) {
+	// TODO: support specification of finalLayout
 	mAttachmentInfo[name] = { extent, usage };
 	mRenderGraphDirty = true;
 }
@@ -247,7 +232,6 @@ void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const VkExtent
 void Scene::MainRenderExtent(const VkExtent2D& extent) {
 	SetAttachmentInfo("stm_main_render", { extent }, GetAttachmentInfo("stm_main_render").second);
 	SetAttachmentInfo("stm_main_depth", { extent }, GetAttachmentInfo("stm_main_depth").second);
-	SetAttachmentInfo("stm_main_depth_resolve", { extent }, GetAttachmentInfo("stm_main_depth_resolve").second);
 	SetAttachmentInfo("stm_main_resolve", { extent }, GetAttachmentInfo("stm_main_resolve").second);
 }
 
@@ -274,29 +258,33 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 
 	unordered_map<RenderTargetIdentifier, Texture*> newAttachments;
 	for (auto& kp : mRenderNodes) {
-		if (!kp.second.mRenderPass) {
-			kp.second.mNonSubpassDependencies.clear();
-			vector<VkSubpassDependency2> subpassDependencies;
+		auto& node = kp.second;
+
+		if (!node.mRenderPass) {
+			node.mNonSubpassDependencies.clear();
 			vector<Subpass> subpasses;
-			for (auto& subpass : kp.second.mSubpasses) {
+			for (auto& subpass : node.mSubpasses) {
 				for (auto& dep : subpass.mAttachmentDependencies) {
-					if (dep.second.srcSubpass == 0 && dep.second.srcSubpass == dep.second.dstSubpass) {
-						kp.second.mNonSubpassDependencies.insert(dep.first); // external dependency
-						continue;
-					}
-					subpassDependencies.push_back(dep.second);
+					bool subpassDependency = false;
+					for (auto& srcSubpass : node.mSubpasses)
+						if (srcSubpass.mAttachments.count(dep.first) && (srcSubpass.mAttachments.at(dep.first).mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL | ATTACHMENT_RESOLVE | ATTACHMENT_PRESERVE))) {
+								subpassDependency = true;
+								break;
+							}
+					if (!subpassDependency)
+						node.mNonSubpassDependencies.insert(dep.first);
 				}
 				subpasses.push_back(subpass);
 			}
-			kp.second.mRenderPass = new RenderPass(kp.first, mInstance->Device(), subpasses, subpassDependencies);
+			node.mRenderPass = new RenderPass(kp.first, mInstance->Device(), subpasses);
 		}
 
 		// populate newAttachments
-		for (uint32_t i = 0; i < kp.second.mRenderPass->AttachmentCount(); i++) {
-			const RenderTargetIdentifier& attachment = kp.second.mRenderPass->AttachmentName(i);
+		for (uint32_t i = 0; i < node.mRenderPass->AttachmentCount(); i++) {
+			const RenderTargetIdentifier& attachment = node.mRenderPass->AttachmentName(i);
 			
 			VkExtent2D extent = { 1024, 1024 };
-			VkImageUsageFlags usage = HasDepthComponent(kp.second.mRenderPass->Attachment(i).format) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			VkImageUsageFlags usage = HasDepthComponent(node.mRenderPass->Attachment(i).format) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 			if (mAttachmentInfo.count(attachment)) {
 				extent = mAttachmentInfo.at(attachment).first;
 				usage = mAttachmentInfo.at(attachment).second;
@@ -310,26 +298,26 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 					continue;
 				} else {
 					// mismatch in framebuffer dimensions... need to make a new framebuffer
-					commandBuffer->TrackResource(kp.second.mFramebuffer);
-					kp.second.mFramebuffer = nullptr;
+					commandBuffer->TrackResource(node.mFramebuffer);
+					node.mFramebuffer = nullptr;
 				}
 			}
 			// ...or just create a new one if not
-			newAttachments.emplace(attachment, new Texture(attachment, mInstance->Device(), extent, kp.second.mRenderPass->Attachment(i).format, 1, kp.second.mRenderPass->Attachment(i).samples, usage));
+			newAttachments.emplace(attachment, new Texture(attachment, mInstance->Device(), extent, node.mRenderPass->Attachment(i).format, 1, node.mRenderPass->Attachment(i).samples, usage));
 		}
 
 		// release previous framebuffer if invalid
-		if (kp.second.mFramebuffer && kp.second.mFramebuffer->AttachmentCount() != kp.second.mRenderPass->AttachmentCount()) {
-			commandBuffer->TrackResource(kp.second.mFramebuffer);
-			kp.second.mFramebuffer = nullptr;
+		if (node.mFramebuffer && node.mFramebuffer->AttachmentCount() != node.mRenderPass->AttachmentCount()) {
+			commandBuffer->TrackResource(node.mFramebuffer);
+			node.mFramebuffer = nullptr;
 		}
 
 		// create framebuffer if needed
-		if (!kp.second.mFramebuffer) {
-			vector<Texture*> attachments(kp.second.mRenderPass->AttachmentCount());
-			for (uint32_t i = 0; i < kp.second.mRenderPass->AttachmentCount(); i++)
-				attachments[i] = newAttachments.at(kp.second.mRenderPass->AttachmentName(i));
-			kp.second.mFramebuffer = new Framebuffer(kp.first, kp.second.mRenderPass, attachments);
+		if (!node.mFramebuffer) {
+			vector<Texture*> attachments(node.mRenderPass->AttachmentCount());
+			for (uint32_t i = 0; i < node.mRenderPass->AttachmentCount(); i++)
+				attachments[i] = newAttachments.at(node.mRenderPass->AttachmentName(i));
+			node.mFramebuffer = new Framebuffer(kp.first, node.mRenderPass, attachments);
 		}
 	}
 
@@ -347,17 +335,14 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 	mAttachments = newAttachments;
 
 	// Create new render graph
-	for (auto& kp : mRenderNodes) {
-		mRenderGraph.push_back(&kp.second);
-	}
+	for (auto& kp : mRenderNodes) mRenderGraph.push_back(&kp.second);
 	sort(mRenderGraph.begin(), mRenderGraph.end(), [&](const RenderGraphNode* a, const RenderGraphNode* b) {
 		// b < a if a depends on b
 		for (const RenderTargetIdentifier& dep : a->mNonSubpassDependencies)
-			for (const Subpass& subpass : b->mSubpasses) {
-				for (const auto& kp : subpass.mColorAttachments) if (kp.first == dep) return false;
-				for (const auto& kp : subpass.mResolveAttachments) if (kp.first == dep) return false;
-				if (!subpass.mDepthAttachment.first.empty() && subpass.mDepthAttachment.first == dep) return false;
-			}
+			for (const Subpass& subpass : b->mSubpasses)
+				for (const auto& kp : subpass.mAttachments)
+					if (kp.first == dep && (kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL | ATTACHMENT_RESOLVE)))
+						return false;
 		return true;
 	});
 
@@ -526,6 +511,7 @@ void Scene::Render(CommandBuffer* commandBuffer) {
 		}
 		
 		commandBuffer->EndRenderPass();
+
 		for (EnginePlugin* p : mInstance->PluginManager()->Plugins())
 			p->OnPostProcess(commandBuffer, rp->mFramebuffer, passCameras);
 	

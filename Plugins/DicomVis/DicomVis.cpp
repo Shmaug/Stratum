@@ -246,8 +246,8 @@ protected:
 		mZoom = 3.f;
 		
 		mMainCamera = mScene->CreateObject<Camera>("Camera", set<RenderTargetIdentifier> { "stm_main_render", "stm_main_resolve" "stm_main_depth" });
-		mMainCamera->Near(.01f);
-		mMainCamera->Far(800.f);
+		mMainCamera->Near(.00625f);
+		mMainCamera->Far(1024.f);
 		mMainCamera->FieldOfView(radians(65.f));
 		mMainCamera->LocalPosition(0, 1.6f, -mZoom);
 
@@ -292,7 +292,7 @@ protected:
 			if (mRawVolumeColored) kw.emplace("NON_BAKED_RGBA");
 			else if (mColorize) kw.emplace("NON_BAKED_R_COLORIZE");
 			else kw.emplace("NON_BAKED_R");
-			ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stm")->GetCompute("BakeVolume", kw);
+			ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stmb")->GetCompute("BakeVolume", kw);
 			commandBuffer->BindPipeline(pipeline);
 
 			DescriptorSet* ds = commandBuffer->GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
@@ -317,7 +317,7 @@ protected:
 				else if (mColorize) kw.emplace("NON_BAKED_R_COLORIZE");
 				else kw.emplace("NON_BAKED_R");
 			}
-			ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stm")->GetCompute("BakeGradient", kw);
+			ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stmb")->GetCompute("BakeGradient", kw);
 			commandBuffer->BindPipeline(pipeline);
 
 			DescriptorSet* ds = commandBuffer->GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
@@ -356,6 +356,7 @@ protected:
 			gui->BeginWorldLayout(LAYOUT_VERTICAL, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
 		else
 			gui->BeginScreenLayout(LAYOUT_VERTICAL, fRect2D(10, (float)mScene->Instance()->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
+
 
 		gui->LayoutTitle("Load Dataset");
 		gui->LayoutSeparator();
@@ -396,11 +397,10 @@ protected:
 	PLUGIN_EXPORT void OnPostProcess(CommandBuffer* commandBuffer, Framebuffer* framebuffer, const set<Camera*>& cameras) override {
 		if (!mRawVolume || cameras.empty()) return;
 
-
 		Texture* noiseTexture = commandBuffer->Device()->AssetManager()->NoiseTexture();
 
 		commandBuffer->TransitionBarrier(mScene->GetAttachment("stm_main_resolve"), VK_IMAGE_LAYOUT_GENERAL);
-		commandBuffer->TransitionBarrier(mScene->GetAttachment("stm_main_depth_resolve"), VK_IMAGE_LAYOUT_GENERAL);
+		commandBuffer->TransitionBarrier(mScene->GetAttachment("stm_main_depth"), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		commandBuffer->TransitionBarrier(noiseTexture, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		Camera* camera = *cameras.begin();
@@ -408,7 +408,7 @@ protected:
 		mVolumeUniforms.VolumeResolution = uint3(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
 		mVolumeUniforms.InvVolumeScale = 1.f / mVolumeUniforms.VolumeScale;
 		mVolumeUniforms.InvVolumeRotation = inverse(mVolumeUniforms.VolumeRotation);
-		Buffer* uniformBuffer = commandBuffer->GetBuffer("Volume Uniforms", sizeof(VolumeUniformBuffer), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+		Buffer* uniformBuffer = commandBuffer->GetBuffer("Volume Uniforms", sizeof(VolumeUniformBuffer), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 		uniformBuffer->Upload(&mVolumeUniforms, sizeof(VolumeUniformBuffer));
 
 		set<string> kw;
@@ -420,21 +420,19 @@ protected:
 		}
 	
 		uint2 res(framebuffer->Extent().width, framebuffer->Extent().height);
-		float4x4 invVP[2] { camera->InverseViewProjection(EYE_LEFT), camera->InverseViewProjection(EYE_RIGHT) };
 		float3 camPos[2] {
 			(camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_LEFT), 1)).xyz,
 			(camera->ObjectToWorld() * float4(camera->EyeOffsetTranslate(EYE_RIGHT), 1)).xyz
 		};
-		uint2 writeOffset(0);
 
 		if (mLighting) kw.emplace("LIGHTING");
 		if (mGradient) kw.emplace("GRADIENT_TEXTURE");
-		ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/volume.stm")->GetCompute("Render", kw);
+		ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/volume.stmb")->GetCompute("Render", kw);
 		commandBuffer->BindPipeline(pipeline);
 
 		DescriptorSet* ds = commandBuffer->GetDescriptorSet("Draw Volume", pipeline->mDescriptorSetLayouts[0]);
 		ds->CreateStorageTextureDescriptor(mScene->GetAttachment("stm_main_resolve"), pipeline->GetDescriptorLocation("RenderTarget"));
-		ds->CreateStorageTextureDescriptor(mScene->GetAttachment("stm_main_depth_resolve"), pipeline->GetDescriptorLocation("DepthBuffer"));
+		ds->CreateSampledTextureDescriptor(mScene->GetAttachment("stm_main_depth"), pipeline->GetDescriptorLocation("DepthBuffer"));
 		ds->CreateUniformBufferDescriptor(uniformBuffer, pipeline->GetDescriptorLocation("VolumeUniforms"));
 		// RenderDoc doesn't like captures involving inline uniform blocks...
 		//ds->CreateInlineUniformBlock(&mVolumeUniforms, sizeof(VolumeUniformBuffer), pipeline->GetDescriptorLocation("VolumeUniforms"));
@@ -449,38 +447,38 @@ protected:
 			ds->CreateStorageTextureDescriptor(mGradient, pipeline->GetDescriptorLocation("Gradient"));
 		commandBuffer->BindDescriptorSet(ds, 0);
 
+	
+		commandBuffer->PushConstantRef("CameraPosition", camPos[0]);
+		commandBuffer->PushConstantRef("CameraNear", camera->Near());
+		commandBuffer->PushConstantRef("CameraFar", camera->Far());
+		commandBuffer->PushConstantRef("InvViewProj", camera->InverseViewProjection(EYE_LEFT));
+		commandBuffer->PushConstantRef("WriteOffset", uint2(0, 0));
+
 		switch (camera->StereoMode()) {
 		case STEREO_NONE:
-			commandBuffer->PushConstantRef("InvViewProj", invVP[0]);
 			commandBuffer->PushConstantRef("ScreenResolution", res);
-			commandBuffer->PushConstantRef("WriteOffset", writeOffset);
-			commandBuffer->PushConstantRef("CameraPosition", camPos[0]);
 			commandBuffer->DispatchAligned(res);
 			break;
 		case STEREO_SBS_HORIZONTAL:
 			res.x /= 2;
-			commandBuffer->PushConstantRef("InvViewProj", invVP[0]);
+			// left eye
 			commandBuffer->PushConstantRef("ScreenResolution", res);
-			commandBuffer->PushConstantRef("WriteOffset", writeOffset);
-			commandBuffer->PushConstantRef("CameraPosition", camPos[0]);
 			commandBuffer->DispatchAligned(res);
-			writeOffset.x = res.x;
-			commandBuffer->PushConstantRef("InvViewProj", invVP[1]);
-			commandBuffer->PushConstantRef("WriteOffset", writeOffset);
+			// right eye
+			commandBuffer->PushConstantRef("InvViewProj", camera->InverseViewProjection(EYE_RIGHT));
 			commandBuffer->PushConstantRef("CameraPosition", camPos[1]);
+			commandBuffer->PushConstantRef("WriteOffset", uint2(res.x, 0));
 			commandBuffer->DispatchAligned(res);
 			break;
 		case STEREO_SBS_VERTICAL:
 			res.y /= 2;
-			commandBuffer->PushConstantRef("InvViewProj", invVP[0]);
+			// left eye
 			commandBuffer->PushConstantRef("ScreenResolution", res);
-			commandBuffer->PushConstantRef("WriteOffset", writeOffset);
-			commandBuffer->PushConstantRef("CameraPosition", camPos[0]);
 			commandBuffer->DispatchAligned(res);
-			writeOffset.y = res.y;
-			commandBuffer->PushConstantRef("InvViewProj", invVP[1]);
-			commandBuffer->PushConstantRef("WriteOffset", writeOffset);
+			// right eye
+			commandBuffer->PushConstantRef("InvViewProj", camera->InverseViewProjection(EYE_RIGHT));
 			commandBuffer->PushConstantRef("CameraPosition", camPos[1]);
+			commandBuffer->PushConstantRef("WriteOffset", uint2(0, res.y));
 			commandBuffer->DispatchAligned(res);
 			break;
 		}

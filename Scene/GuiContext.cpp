@@ -82,8 +82,8 @@ void GuiContext::OnPreRender(CommandBuffer* commandBuffer) {
 void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	float2 screenSize = float2((float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height);
 
-	Pipeline* font = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/font.stm");
-	Pipeline* ui = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/ui.stm");
+	Pipeline* font = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/font.stmb");
+	Pipeline* ui = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/ui.stmb");
 
 	Buffer* glyphBuffer = nullptr;
 	Buffer* glyphTransforms = nullptr;
@@ -214,7 +214,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 			}
 		}
 		if (mScreenLines.size()) {
-			GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/line.stm")->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE" });
+			GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/line.stmb")->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE" });
 			if (pipeline) {
 				commandBuffer->BindPipeline(pipeline, nullptr, VK_PRIMITIVE_TOPOLOGY_LINE_STRIP);
 

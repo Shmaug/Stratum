@@ -105,7 +105,7 @@ void ClothRenderer::OnFixedUpdate(CommandBuffer* commandBuffer) {
 	b.size = mEdgeBuffer->Size();
 	commandBuffer->Barrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, b);
 
-	Pipeline* shader = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/cloth.stm");
+	Pipeline* shader = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/cloth.stmb");
 
 	Buffer* sphereBuffer = commandBuffer->GetBuffer("Cloth Spheres", sizeof(float4) * max(1u, (uint32_t)mSphereColliders.size()), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 	for (uint32_t i = 0; i < mSphereColliders.size(); i++)

@@ -239,7 +239,12 @@ VkPipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const Ver
 		multisampleState.sampleShadingEnable = mShaderVariant->mSampleShading;
 		multisampleState.alphaToCoverageEnable = VK_FALSE;
 		multisampleState.alphaToOneEnable = VK_FALSE;
-		multisampleState.rasterizationSamples = subpass.mDepthAttachment.first.empty() ? subpass.mColorAttachments.begin()->second.samples : subpass.mDepthAttachment.second.samples;
+		multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		for (auto& kp : subpass.mAttachments)
+			if (kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL)) {
+				multisampleState.rasterizationSamples = kp.second.mSamples;
+				break;
+			}
 
 		VkGraphicsPipelineCreateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

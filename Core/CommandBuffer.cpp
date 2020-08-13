@@ -211,7 +211,7 @@ void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags src
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = texture->MipLevels();
 	barrier.subresourceRange.baseArrayLayer = 0;
-	barrier.subresourceRange.layerCount = 1;
+	barrier.subresourceRange.layerCount = texture->ArrayLayers();
 	barrier.srcAccessMask = texture->mLastKnownAccessFlags;
 	barrier.dstAccessMask = GuessAccessMask(newLayout);
 	barrier.subresourceRange.aspectMask = texture->mAspectFlags;
@@ -253,41 +253,17 @@ void CommandBuffer::BindDescriptorSet(DescriptorSet* descriptorSet, uint32_t set
 
 void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer, VkSubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
-	set<RenderTargetIdentifier> transitioned;
-	for (const Subpass& subpass : renderPass->mSubpasses) {
-		for (const auto& kp : subpass.mColorAttachments)
-			if (transitioned.count(kp.first) == 0) {
-				transitioned.insert(kp.first);
-				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
-			}
-		for (const auto& kp : subpass.mResolveAttachments)
-			if (transitioned.count(kp.first) == 0) {
-				transitioned.insert(kp.first);
-				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
-			}
-		for (const auto& kp : subpass.mInputAttachments)
-			if (transitioned.count(kp.first) == 0) {
-				transitioned.insert(kp.first);
-				TransitionBarrier(framebuffer->Attachment(kp.first), kp.second.initialLayout);
-			}
-		if (!subpass.mDepthAttachment.first.empty())
-			if (transitioned.count(subpass.mDepthAttachment.first) == 0) {
-				transitioned.insert(subpass.mDepthAttachment.first);
-				TransitionBarrier(framebuffer->Attachment(subpass.mDepthAttachment.first), subpass.mDepthAttachment.second.initialLayout);
-			}
-		if (!subpass.mDepthResolveAttachment.first.empty())
-			if (transitioned.count(subpass.mDepthResolveAttachment.first) == 0) {
-				transitioned.insert(subpass.mDepthResolveAttachment.first);
-				TransitionBarrier(framebuffer->Attachment(subpass.mDepthResolveAttachment.first), subpass.mDepthResolveAttachment.second.initialLayout);
-			}
-	}
+	// Image states are untracked during a renderpass
+	for (uint32_t i = 0; i < renderPass->AttachmentCount(); i++)
+		TransitionBarrier(framebuffer->Attachment(renderPass->AttachmentName(i)), renderPass->Attachment(i).initialLayout);
 
 	// Assign clear values specified by the render pass
 	vector<VkClearValue> clearValues(renderPass->mAttachments.size());
-	for (const auto& kp : renderPass->mSubpasses[0].mColorAttachments)
-		clearValues[renderPass->mAttachmentMap.at(kp.first)].color = { 0.f, 0.f, 0.f, 0.f };
-	if (!renderPass->mSubpasses[0].mDepthAttachment.first.empty())
-		clearValues[renderPass->mAttachmentMap.at(renderPass->mSubpasses[0].mDepthAttachment.first)].depthStencil = { 1.0f, 0 };
+	for (const auto& kp : renderPass->mSubpasses[0].mAttachments)
+		if (kp.second.mType == ATTACHMENT_DEPTH_STENCIL)
+			clearValues[renderPass->mAttachmentMap.at(kp.first)].depthStencil = { 1.0f, 0 };
+		else
+			clearValues[renderPass->mAttachmentMap.at(kp.first)].color = { 0.f, 0.f, 0.f, 0.f };
 
 	VkRenderPassBeginInfo info = {};
 	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -302,39 +278,23 @@ void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebu
 	mCurrentFramebuffer = framebuffer;
 	mCurrentSubpassIndex = 0;
 	mCurrentShaderPass = renderPass->mSubpasses[0].mShaderPass;
-	
-	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
-	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.initialLayout;
-	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.initialLayout;
 }
 void CommandBuffer::NextSubpass(VkSubpassContents contents) {
 	vkCmdNextSubpass(mCommandBuffer, contents);
-	
 	mCurrentSubpassIndex++;
 	mCurrentShaderPass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex].mShaderPass;
-
-	// Update internal attachment layouts to the layouts specified by the render pass
-	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
-	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.initialLayout;
-	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.initialLayout;
-	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.initialLayout;
 }
 void CommandBuffer::EndRenderPass() {
 	vkCmdEndRenderPass(mCommandBuffer);
-	
-	// Update internal attachment layouts to the layouts specified by the render pass
-	const Subpass& subpass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex];
-	for (const auto& kp : subpass.mInputAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
-	for (const auto& kp : subpass.mColorAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
-	for (const auto& kp : subpass.mResolveAttachments) mCurrentFramebuffer->Attachment(kp.first)->mLastKnownLayout = kp.second.finalLayout;
-	if (!subpass.mDepthAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthAttachment.first)->mLastKnownLayout = subpass.mDepthAttachment.second.finalLayout;
-	if (!subpass.mDepthResolveAttachment.first.empty()) mCurrentFramebuffer->Attachment(subpass.mDepthResolveAttachment.first)->mLastKnownLayout = subpass.mDepthResolveAttachment.second.finalLayout;
 
+	// Update tracked image layouts
+	for (uint32_t i = 0; i < mCurrentRenderPass->AttachmentCount(); i++){
+		Texture* attachment = mCurrentFramebuffer->Attachment(mCurrentRenderPass->AttachmentName(i));
+		attachment->mLastKnownLayout = mCurrentRenderPass->Attachment(i).finalLayout;
+		attachment->mLastKnownStageFlags = GuessStage(mCurrentRenderPass->Attachment(i).finalLayout);
+		attachment->mLastKnownAccessFlags = GuessAccessMask(mCurrentRenderPass->Attachment(i).finalLayout);
+	}
+	
 	mCurrentRenderPass = nullptr;
 	mCurrentFramebuffer = nullptr;
 	mCurrentShaderPass = "";
