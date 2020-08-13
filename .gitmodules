@@ -17,6 +17,3 @@
 [submodule "ThirdParty/msdfgen"]
 	path = ThirdParty/msdfgen
 	url = https://github.com/Chlumsky/msdfgen
-[submodule "ThirdParty/freetype"]
-	path = ThirdParty/freetype
-	url = git://git.sv.nongnu.org/freetype/freetype2.git

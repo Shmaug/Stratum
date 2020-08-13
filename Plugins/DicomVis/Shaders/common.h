@@ -10,16 +10,16 @@ struct VolumeUniformBuffer {
 #endif
 	quaternion VolumeRotation;
 	quaternion InvVolumeRotation;
-	float2 RemapRange;
-	float2 HueRange;
-	float3 VolumePosition;
-	float Density;
 	float3 VolumeScale;
-	uint MaskValue;
+	float Density;
 	float3 InvVolumeScale;
 	float StepSize;
-	uint3 VolumeResolution;
+	float3 VolumePosition;
 	uint FrameIndex;
+	float2 RemapRange;
+	float2 HueRange;
+	uint3 VolumeResolution;
+	uint MaskValue;
 }
 #ifdef __cplusplus
 ;

@@ -207,7 +207,7 @@ Device::~Device() {
 }
 
 bool Device::Allocation::SubAllocate(const VkMemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const string& tag) {
-if (mAvailable.empty()) return false;
+	if (mAvailable.empty()) return false;
 
 	VkDeviceSize blockSize = 0;
 	VkDeviceSize memLocation = 0;

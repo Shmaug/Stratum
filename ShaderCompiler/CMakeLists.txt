@@ -15,12 +15,9 @@ target_include_directories(ShaderCompiler PUBLIC
   "${STRATUM_HOME}/ThirdParty/SPIRV-Cross/include")
   
 if(WIN32)
-	target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/shaderc/lib/shaderc_combined.lib")
+	target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/shaderc/lib/shaderc_combined.lib" "${STRATUM_HOME}/ThirdParty/SPIRV-Cross/lib/spirv-cross-core.lib")
 	if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 		add_compile_definitions(_CRTDBG_MAP_ALLOC)
-		target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/SPIRV-Cross/lib/spirv-cross-cored.lib")
-	else()
-		target_link_libraries(ShaderCompiler "${STRATUM_HOME}/ThirdParty/SPIRV-Cross/lib/spirv-cross-core.lib")
 	endif()
 else()
 	target_link_libraries(ShaderCompiler
