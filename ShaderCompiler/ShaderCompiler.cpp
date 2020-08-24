@@ -3,7 +3,7 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "ShaderCompiler.hpp"
+#include <Core/Shader.hpp>
 
 #include <shaderc/shaderc.hpp>
 #include <spirv_cross/spirv_cross.hpp>
@@ -12,14 +12,14 @@
 using namespace std;
 using namespace shaderc;
 
-shaderc_shader_kind vk_to_shaderc(VkShaderStageFlags stage) {
+shaderc_shader_kind vk_to_shaderc(vk::ShaderStageFlagBits stage) {
 	switch (stage) {
-		case VK_SHADER_STAGE_VERTEX_BIT: return shaderc_vertex_shader;
-		case VK_SHADER_STAGE_FRAGMENT_BIT: return shaderc_fragment_shader;
-		case VK_SHADER_STAGE_GEOMETRY_BIT: return shaderc_geometry_shader;
-		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: return shaderc_tess_control_shader;
-		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: return shaderc_tess_evaluation_shader;
-		case VK_SHADER_STAGE_COMPUTE_BIT: return shaderc_compute_shader;
+		case vk::ShaderStageFlagBits::eVertex: return shaderc_vertex_shader;
+		case vk::ShaderStageFlagBits::eFragment: return shaderc_fragment_shader;
+		case vk::ShaderStageFlagBits::eGeometry: return shaderc_geometry_shader;
+		case vk::ShaderStageFlagBits::eTessellationControl: return shaderc_tess_control_shader;
+		case vk::ShaderStageFlagBits::eTessellationEvaluation: return shaderc_tess_evaluation_shader;
+		case vk::ShaderStageFlagBits::eCompute: return shaderc_compute_shader;
 	}
 	return shaderc_vertex_shader;
 }
@@ -90,7 +90,7 @@ struct CompilerContext {
 	Shader* mResult;
 };
 
-#define DIRECTIVE_ERR(...) { fprintf_color(COLOR_RED, stderr, "%s(%u): Error: '%s': ", ctx.mFilename.c_str(), ctx.mLineNumber, directiveName.c_str()); fprintf_color(COLOR_RED, stderr, __VA_ARGS__); return false; }
+#define DIRECTIVE_ERR(...) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s(%u): Error: '%s': ", ctx.mFilename.c_str(), ctx.mLineNumber, directiveName.c_str()); fprintf_color(ConsoleColorBits::eRed, stderr, __VA_ARGS__); return false; }
 
 bool DirectiveAssemblyOutput(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a filename\n");
@@ -112,19 +112,16 @@ bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vec
 
 		if (v->mBlendStates.size() <= index)
 			for (uint32_t i = 0; i < 1 + index - v->mBlendStates.size(); i++) {
-				VkPipelineColorBlendAttachmentState defaultBlendState = {};
-				defaultBlendState.blendEnable = VK_FALSE;
-				defaultBlendState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-				defaultBlendState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-				defaultBlendState.colorBlendOp = VK_BLEND_OP_ADD;
-				defaultBlendState.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-				defaultBlendState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-				defaultBlendState.alphaBlendOp = VK_BLEND_OP_ADD;
-				defaultBlendState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT  | VK_COLOR_COMPONENT_A_BIT;
+				vk::PipelineColorBlendAttachmentState defaultBlendState = {};
+				defaultBlendState.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+				defaultBlendState.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+				defaultBlendState.srcAlphaBlendFactor = vk::BlendFactor::eSrcAlpha;
+				defaultBlendState.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+				defaultBlendState.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 				v->mBlendStates.push_back(defaultBlendState);
 			}
 
-		VkPipelineColorBlendAttachmentState& blendState = v->mBlendStates[index];
+		vk::PipelineColorBlendAttachmentState& blendState = v->mBlendStates[index];
 		if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a blend op, or 'false'\n");
 		if (*ctx.mCurrentWord == "false") {
 			blendState.blendEnable = VK_FALSE;
@@ -150,9 +147,9 @@ bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vec
 }
 bool DirectiveCull(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
-	if (*ctx.mCurrentWord == "front") 			for (auto& v : dest) v->mCullMode = VK_CULL_MODE_FRONT_BIT;
-	else if (*ctx.mCurrentWord == "back") 	for (auto& v : dest) v->mCullMode = VK_CULL_MODE_BACK_BIT;
-	else if (*ctx.mCurrentWord == "false") 	for (auto& v : dest) v->mCullMode = VK_CULL_MODE_NONE;
+	if (*ctx.mCurrentWord == "front") 			for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eFront;
+	else if (*ctx.mCurrentWord == "back") 	for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eBack;
+	else if (*ctx.mCurrentWord == "false") 	for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eNone;
 	else DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
 	return true;
 }
@@ -163,9 +160,9 @@ bool DirectiveDepthOp(CompilerContext& ctx, const string& directiveName, const v
 }
 bool DirectiveFill(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
-	if (*ctx.mCurrentWord == "solid") 		 	for (auto& v : dest) v->mPolygonMode = VK_POLYGON_MODE_FILL;
-	else if (*ctx.mCurrentWord == "line")  	for (auto& v : dest) v->mPolygonMode = VK_POLYGON_MODE_LINE;
-	else if (*ctx.mCurrentWord == "point") 	for (auto& v : dest) v->mPolygonMode = VK_POLYGON_MODE_POINT;
+	if (*ctx.mCurrentWord == "solid") 		 	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::eFill;
+	else if (*ctx.mCurrentWord == "line")  	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::eLine;
+	else if (*ctx.mCurrentWord == "point") 	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::ePoint;
 	else DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
 	return true;
 }
@@ -179,7 +176,7 @@ bool DirectiveKernel(CompilerContext& ctx, const string& directiveName, const ve
 	ctx.mResult->mVariants.push_back({});
 	auto& v = ctx.mResult->mVariants.back();
 	v.mShaderPass = "";
-	v.mModules.push_back({ *ctx.mCurrentWord, VK_SHADER_STAGE_COMPUTE_BIT, {} });
+	v.mModules.push_back({ *ctx.mCurrentWord, vk::ShaderStageFlagBits::eCompute, {} });
 	return true;
 }
 bool DirectiveMultiCompile(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
@@ -220,8 +217,8 @@ bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vect
 	ctx.mResult->mVariants.push_back({});
 	auto& v = ctx.mResult->mVariants.back();
 	v.mShaderPass = shaderPass;
-	v.mModules.push_back({ vs, VK_SHADER_STAGE_VERTEX_BIT, {} });
-	v.mModules.push_back({ fs, VK_SHADER_STAGE_FRAGMENT_BIT, {} });
+	v.mModules.push_back({ vs, vk::ShaderStageFlagBits::eVertex, {} });
+	v.mModules.push_back({ fs, vk::ShaderStageFlagBits::eFragment, {} });
 	return true;
 }
 bool DirectiveRenderQueue(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
@@ -239,20 +236,19 @@ bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, c
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an sampler name\n");
 	string name = *ctx.mCurrentWord;
 
-	VkSamplerCreateInfo samplerInfo = {};
-	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	samplerInfo.magFilter = VK_FILTER_LINEAR;
-	samplerInfo.minFilter = VK_FILTER_LINEAR;
-	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	vk::SamplerCreateInfo samplerInfo = {};
+	samplerInfo.magFilter = vk::Filter::eLinear;
+	samplerInfo.minFilter = vk::Filter::eLinear;
+	samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+	samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
 	samplerInfo.anisotropyEnable = VK_TRUE;
 	samplerInfo.maxAnisotropy = 2;
-	samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+	samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
 	samplerInfo.unnormalizedCoordinates = VK_FALSE;
 	samplerInfo.compareEnable = VK_FALSE;
-	samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-	samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerInfo.compareOp = vk::CompareOp::eAlways;
+	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
 	samplerInfo.minLod = 0;
 	samplerInfo.maxLod = 12;
 	samplerInfo.mipLodBias = 0;
@@ -267,8 +263,8 @@ bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, c
 		else if (id == "minFilter")			samplerInfo.minFilter = atofilter(val);
 		else if (id == "filter")				samplerInfo.minFilter = samplerInfo.magFilter = atofilter(val);
 		else if (id == "compareOp") {
-			VkCompareOp cmp = atocmp(val);
-			samplerInfo.compareEnable = cmp == VK_COMPARE_OP_MAX_ENUM ? VK_FALSE : VK_TRUE;
+			vk::CompareOp cmp = atocmp(val);
+			samplerInfo.compareEnable = VK_TRUE;
 			samplerInfo.compareOp = cmp;
 		}
 		else if (id == "addressModeU")	samplerInfo.addressModeU = atoaddressmode(val);
@@ -361,7 +357,7 @@ int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const 
 			}
 			ctx.mFilename = prevFilename;
 			if (!gCompilerDirectives.at(*cur)(ctx, *cur, variants)) {
-				fprintf_color(COLOR_RED, stderr, "%s(%u): Error: Unknown directive '%s'\n", ctx.mFilename.c_str(), ctx.mLineNumber, cur->c_str());
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s(%u): Error: Unknown directive '%s'\n", ctx.mFilename.c_str(), ctx.mLineNumber, cur->c_str());
 				return 1;
 			}
 
@@ -374,7 +370,7 @@ int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const 
 			
 			Includer includer(includePaths);
 			shaderc_include_result* includeResult = includer.GetInclude(includePath.c_str(), includeType, filename.c_str(), includeDepth);
-			if (includeResult->source_name_length > 0)
+			if (includeResult->content_length)
 				ParseCompilerDirectives(ctx, includeResult->source_name, includeResult->content, includePaths, includeDepth + 1, selectorStack);
 			includer.ReleaseInclude(includeResult);
 			
@@ -410,17 +406,17 @@ int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const 
 
 	return 0;
 }
-int SpirvReflection(CompilerContext& ctx, ShaderVariant& destVariant, SpirvModule& spirv) {
+int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, SpirvModule& spirv) {
 	spirv_cross::Compiler* compiler = new spirv_cross::Compiler(spirv.mSpirvBinary.data(), spirv.mSpirvBinary.size());
 	spirv_cross::ShaderResources resources = compiler->get_shader_resources();
 	
-	auto RegisterResource = [&](const spirv_cross::Resource& resource, VkDescriptorType type) {
+	auto RegisterResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
 		auto& binding = destVariant.mDescriptorSetBindings[resource.name];
 		binding.mSet = compiler->get_decoration(resource.id, spv::DecorationDescriptorSet);
 		binding.mBinding.stageFlags |= spirv.mStage;
 		binding.mBinding.binding = compiler->get_decoration(resource.id, spv::DecorationBinding);
 		if (ctx.mInlineUniformBlocks.count(resource.name)) {
-			binding.mBinding.descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT;
+			binding.mBinding.descriptorType = vk::DescriptorType::eInlineUniformBlockEXT;
 			binding.mBinding.descriptorCount = (uint32_t)compiler->get_declared_struct_size(compiler->get_type(resource.type_id));
 		} else {
 		binding.mBinding.descriptorCount = compiler->get_type(resource.type_id).array.empty() ? 1 : compiler->get_type(resource.type_id).array[0];
@@ -428,14 +424,14 @@ int SpirvReflection(CompilerContext& ctx, ShaderVariant& destVariant, SpirvModul
 		}
 	};
 	
-	for (const auto& r : resources.separate_images) 	RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-	for (const auto& r : resources.storage_images) 		RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-	for (const auto& r : resources.sampled_images) 		RegisterResource(r, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-	for (const auto& r : resources.storage_buffers) 	RegisterResource(r, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-	for (const auto& r : resources.separate_samplers) RegisterResource(r, VK_DESCRIPTOR_TYPE_SAMPLER);
-	for (const auto& r : resources.uniform_buffers) 	RegisterResource(r, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-	for (const auto& r : resources.subpass_inputs) 		RegisterResource(r, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT);
-	for (const auto& r : resources.acceleration_structures) 		RegisterResource(r, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
+	for (const auto& r : resources.separate_images) 	RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
+	for (const auto& r : resources.storage_images) 		RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
+	for (const auto& r : resources.sampled_images) 		RegisterResource(r, vk::DescriptorType::eCombinedImageSampler);
+	for (const auto& r : resources.storage_buffers) 	RegisterResource(r, vk::DescriptorType::eStorageBuffer);
+	for (const auto& r : resources.separate_samplers) RegisterResource(r, vk::DescriptorType::eSampler);
+	for (const auto& r : resources.uniform_buffers) 	RegisterResource(r, vk::DescriptorType::eUniformBuffer);
+	for (const auto& r : resources.subpass_inputs) 		RegisterResource(r, vk::DescriptorType::eInputAttachment);
+	for (const auto& r : resources.acceleration_structures) 		RegisterResource(r, vk::DescriptorType::eAccelerationStructureKHR);
 	for (const auto& r : resources.push_constant_buffers) {
 		spirv_cross::SPIRType type = compiler->get_type(r.base_type_id);
 		for (uint32_t i = 0; i < type.member_types.size(); i++) {
@@ -486,7 +482,7 @@ int SpirvReflection(CompilerContext& ctx, ShaderVariant& destVariant, SpirvModul
 		}
 	}
 
-	if (spirv.mStage == VK_SHADER_STAGE_COMPUTE_BIT) {
+	if (spirv.mStage == vk::ShaderStageFlagBits::eCompute) {
 		auto entryPoints = compiler->get_entry_points_and_stages();
 		for (const auto& e : entryPoints) {
 			auto& ep = compiler->get_entry_point(e.name, e.execution_model);
@@ -514,13 +510,13 @@ int CompileSpirv(const string& filename, const set<string>& macros, const string
 		if (fs::exists(spvFile)) fs::remove(spvFile);
 		string cmd = "dxc -spirv ";
 		switch (dest.mStage) {
-			case VK_SHADER_STAGE_COMPUTE_BIT:
+			case vk::ShaderStageFlagBits::eCompute:
 				cmd += "-T cs_6_6 ";
 				break;
-			case VK_SHADER_STAGE_VERTEX_BIT:
+			case vk::ShaderStageFlagBits::eVertex:
 				cmd += "-T vs_6_6 ";
 				break;
-			case VK_SHADER_STAGE_FRAGMENT_BIT:
+			case vk::ShaderStageFlagBits::eFragment:
 				cmd += "-T ps_6_6 ";
 				break;
 			default:
@@ -571,9 +567,9 @@ int CompileSpirv(const string& filename, const set<string>& macros, const string
 		string line;
 		while (getline(ss, line)) {
 			if (const char* error = strstr(line.c_str(), "error: "))
-				fprintf_color(COLOR_RED, stderr, "%s\n", error + 7);
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", error + 7);
 			else
-				fprintf_color(COLOR_RED, stderr, "%s\n", line.c_str());
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", line.c_str());
 		}
 	}
 	dest.mSpirvBinary.clear();
@@ -589,7 +585,7 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 
 	string source;
 	if (!ReadFile(filename, source)) {
-		fprintf_color(COLOR_RED, stderr, "%s: Error: Failed to open file for reading\n", filename.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Error: Failed to open file for reading\n", filename.c_str());
 		return 1;
 	}
 	if (int result = ParseCompilerDirectives(context, filename, source, includePaths)) return result;
@@ -597,15 +593,17 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 	shaderc_compilation_status status = shaderc_compilation_status_success;
 	Compiler* compiler = new Compiler();
 
+
 	for (auto& variant : destShader.mVariants) {
 		set<string> macros = context.mMacros;
 		for (const string& kw : variant.mKeywords) macros.insert(kw);
 		for (uint32_t i = 0; i < variant.mModules.size(); i++) {
+			
 			set<string> m = macros;
 			m.insert("ENTRYP_" + variant.mModules[i].mEntryPoint);
 			if (int result = CompileSpirv(context.mFilename, m, context.mOptimizationLevel, includePaths, variant.mModules[i])) return result;
 			if (int result = SpirvReflection(context, variant, variant.mModules[i])) return result;
-
+			
 			// do assembly output
 			for (const auto& assemblyOutput : context.mAssemblyOutputs)
 				if (variant.mModules[i].mEntryPoint == assemblyOutput.mEntryPoint) {
@@ -622,6 +620,7 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 						printf("Wrote assembly file: %s\n", assemblyOutput.mFilename.c_str());
 					}
 				}
+
 		}
 	}
 

@@ -21,5 +21,5 @@ else()
 	target_link_libraries(DicomVis "libz.so" "libofstd.so" "liboflog.so" "libdcmdata.so" "libdcmimgle.so")
 endif()
 
-add_shader_target(DicomShaders "Shaders/")
+add_shader_target(DicomShaders "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/")
 add_dependencies(DicomVis DicomShaders)

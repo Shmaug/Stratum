@@ -1,10 +1,6 @@
 #pragma once
 
-#include <Data/Material.hpp>
-#include <Data/Mesh.hpp>
-#include <Core/DescriptorSet.hpp>
-#include <Scene/Renderer.hpp>
-#include <Util/Util.hpp>
+#include <Scene/Renderers/Renderer.hpp>
 
 class PointerRenderer : public Renderer {
 public:

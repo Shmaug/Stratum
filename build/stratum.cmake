@@ -1,5 +1,3 @@
-include("${STRATUM_HOME}/build/ucm.cmake")
-
 set(CMAKE_CXX_STANDARD 17)
 
 add_compile_definitions(XR_USE_GRAPHICS_API_VULKAN)
@@ -7,7 +5,11 @@ if (${ENABLE_DEBUG_LAYERS})
 	add_compile_definitions(ENABLE_DEBUG_LAYERS)
 endif()
 
-include_directories("${STRATUM_HOME}" "${STRATUM_HOME}/ThirdParty/assimp/include")
+include_directories(
+	"${STRATUM_HOME}"
+	"${STRATUM_HOME}/ThirdParty/assimp/include"
+	"${STRATUM_HOME}/ThirdParty/msdfgen/include"
+	"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/include")
 
 if(WIN32)
 	if(DEFINED ENV{VULKAN_SDK})
@@ -16,13 +18,13 @@ if(WIN32)
 		message(FATAL_ERROR "Error: VULKAN_SDK not set!")
 	endif()
 
-	ucm_set_runtime(DYNAMIC)
-	
+	add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR)
 	add_compile_definitions(WINDOWS WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 	if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
 		add_compile_definitions(_CRTDBG_MAP_ALLOC)
 	endif()
 
+	link_directories("${STRATUM_HOME}/ThirdParty/msdfgen/freetype/win64")
 	include_directories("$ENV{VULKAN_SDK}/include")
 	link_libraries("Ws2_32.lib" "$ENV{VULKAN_SDK}/lib/vulkan-1.lib")
 
@@ -30,6 +32,7 @@ if(WIN32)
 		link_libraries("$ENV{VULKAN_SDK}/lib/VkLayer_utils.lib")
 	endif()
 endif()
+
 
 function(link_plugin TARGET_NAME)
 	add_dependencies(${TARGET_NAME} Stratum)

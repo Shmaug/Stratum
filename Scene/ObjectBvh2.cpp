@@ -1,7 +1,5 @@
 #include <Scene/ObjectBvh2.hpp>
-
 #include <Scene/Scene.hpp>
-#include <Scene/Renderer.hpp>
 
 using namespace std;
 

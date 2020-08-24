@@ -1,27 +1,23 @@
 #pragma once
 
-#include "XRRuntime.hpp"
+#include <Scene/Scene.hpp>
+#include <Scene/Renderers/PointerRenderer.hpp>
 
-#include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-#include "PointerRenderer.hpp"
-#include <Scene/MeshRenderer.hpp>
-#include <Scene/Scene.hpp>
-
-class OpenXR : public XRRuntime {
+class XR {
 public:
-    STRATUM_API OpenXR();
-    STRATUM_API ~OpenXR();
+    STRATUM_API XR();
+    STRATUM_API ~XR();
     
-    STRATUM_API bool OnSceneInit(Scene* scene) override;
+    STRATUM_API bool OnSceneInit(Scene* scene);
 
-    STRATUM_API std::set<std::string> InstanceExtensionsRequired() override;
-    STRATUM_API std::set<std::string> DeviceExtensionsRequired(VkPhysicalDevice device) override;
+    STRATUM_API std::set<std::string> InstanceExtensionsRequired();
+    STRATUM_API std::set<std::string> DeviceExtensionsRequired(vk::PhysicalDevice device);
 
-    STRATUM_API void OnFrameStart() override;
-    STRATUM_API void PostRender(CommandBuffer* commandBuffer) override;
-    STRATUM_API void OnFrameEnd() override;
+    STRATUM_API void OnFrameStart();
+    STRATUM_API void PostRender(CommandBuffer* commandBuffer);
+    STRATUM_API void OnFrameEnd();
 
 private:
     bool mInitialized;
@@ -29,7 +25,7 @@ private:
     XrSystemId mSystem;
     XrSession mSession;
 
-    VkFormat mSwapchainFormat;
+    vk::Format mSwapchainFormat;
     std::vector<XrSwapchain> mSwapchains;
     std::vector<XrSwapchainImageVulkanKHR*> mSwapchainImages;
     uint32_t mViewCount;

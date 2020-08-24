@@ -1,8 +1,6 @@
 #pragma once
 
-#include <Data/Material.hpp>
-#include <Data/Mesh.hpp>
-#include <Scene/Renderer.hpp>
+#include <Scene/Renderers/Renderer.hpp>
 
 class ClothRenderer : public Renderer {
 public:

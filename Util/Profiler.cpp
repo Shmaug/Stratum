@@ -1,8 +1,4 @@
 #include <Util/Profiler.hpp>
-#include <Data/Font.hpp>
-#include <Data/AssetManager.hpp>
-#include <Input/InputManager.hpp>
-#include <Scene/GuiContext.hpp>
 #include <Scene/Scene.hpp>
 
 #include <sstream>
@@ -45,7 +41,7 @@ void Profiler::EndSample() {
 	if (!mCurrentSample) return;
 
 	if (!mCurrentSample->mParent) {
-		fprintf_color(COLOR_RED, stderr, "%s\n", "Error: Attempt to end nonexistant Profiler sample!");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", "Error: Attempt to end nonexistant Profiler sample!");
 		throw;
 	}
 	mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
@@ -66,7 +62,7 @@ void Profiler::EndFrame() {
 	if (!mCurrentSample) return;
 
 	while (mCurrentSample->mParent) {
-		fprintf_color(COLOR_YELLOW, stderr, "%s\n", "Warning: Profiler sample %s was never ended!", mCurrentSample->mLabel.c_str());
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s\n", "Warning: Profiler sample %s was never ended!", mCurrentSample->mLabel.c_str());
 		mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
 		mCurrentSample = mCurrentSample->mParent;
 	}
@@ -109,13 +105,13 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 
 	fRect2D windowRect(0, 0, s.x, toolbarHeight + mGraphHeight);
 
-	gui->BeginScreenLayout(LAYOUT_VERTICAL, windowRect);
+	gui->BeginScreenLayout(LayoutAxis::eVertical, windowRect);
 
 	#pragma region toolbar
 	// Print memory allocations and descriptor set usage
-	VkDeviceSize memSize = 0;
+	vk::DeviceSize memSize = 0;
 	for (uint32_t i = 0; i < device->MemoryProperties().memoryHeapCount; i++)
-		if (device->MemoryProperties().memoryHeaps[i].flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+		if (device->MemoryProperties().memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal)
 			memSize += device->MemoryProperties().memoryHeaps[i].size;
 	snprintf(buf, 256, "%u descriptor sets\t%u command buffers\t%u/%u allocations\t%.3f / %.3f mb (%.1f%%)\t %u FPS",
 		device->DescriptorSetCount(),
@@ -123,9 +119,9 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 		device->MemoryAllocationCount(), device->Limits().maxMemoryAllocationCount,
 		device->MemoryUsage() / (1024.f * 1024.f), memSize / (1024.f * 1024.f), 100.f * (float)device->MemoryUsage() / (float)memSize,
 		framerate );
-	gui->LayoutLabel(buf, TEXT_ANCHOR_MAX);
+	gui->LayoutLabel(buf, TextAnchor::eMax);
 	
-	gui->BeginSubLayout(LAYOUT_HORIZONTAL, gui->mLayoutTheme.mControlSize + gui->mLayoutTheme.mControlPadding*2);
+	gui->BeginSubLayout(LayoutAxis::eHorizontal, gui->mLayoutTheme.mControlSize + gui->mLayoutTheme.mControlPadding*2);
 	gui->mLayoutTheme.mControlSize = 140;
 	if (gui->LayoutTextButton(mEnabled ? "PAUSE PROFILER" : "RESUME PROFILER")) mEnabled = !mEnabled;
 	gui->mLayoutTheme = theme;
@@ -139,7 +135,7 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 	float depth = gui->LayoutDepth() - 0.001f;
 
 	gui->mLayoutTheme.mBackgroundColor.rgb *= 0.8f;
-	fRect2D graphRect = gui->BeginSubLayout(LAYOUT_VERTICAL, 128);
+	fRect2D graphRect = gui->BeginSubLayout(LayoutAxis::eVertical, 128);
 	gui->EndLayout();
 	gui->mLayoutTheme = theme;
 
@@ -162,13 +158,13 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 		graphWindowMax = floorf(graphWindowMax + 0.5f);
 		// min/max graph labels
 		snprintf(buf, 256, "%ums", (uint32_t)graphWindowMax);
-		gui->DrawString(graphRect.mOffset + float2(2, graphRect.mExtent.y - 10), depth, font, 14, buf, graphTextColor, TEXT_ANCHOR_MIN, clipRect);
+		gui->DrawString(graphRect.mOffset + float2(2, graphRect.mExtent.y - 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
 		snprintf(buf, 256, "%ums", (uint32_t)graphWindowMin);
-		gui->DrawString(graphRect.mOffset + float2(2, 10), depth, font, 14, buf, graphTextColor, TEXT_ANCHOR_MIN, clipRect);
+		gui->DrawString(graphRect.mOffset + float2(2, 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
 		// Horizontal graph lines
 		for (uint32_t i = 1; i < 3; i++) {
 			snprintf(buf, 256, "%.1fms", graphWindowMax * i / 3.f);
-			gui->DrawString(graphRect.mOffset + float2(2, graphRect.mExtent.y * (i / 3.f)), depth, font, 14, buf, graphTextColor, TEXT_ANCHOR_MIN, clipRect);
+			gui->DrawString(graphRect.mOffset + float2(2, graphRect.mExtent.y * (i / 3.f)), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
 			gui->Rect(fRect2D(graphRect.mOffset.x + 32, graphRect.mOffset.y + graphRect.mExtent.y * (i / 3.f) - 1, graphRect.mExtent.x - 32, 1), depth, graphAxisColor, nullptr, 0, clipRect);
 		}
 		

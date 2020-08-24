@@ -28,22 +28,22 @@ void PluginManager::LoadPlugins(const string& pluginFolder) {
 		// load plugin DLLs
 		if (p.path().extension().string() == PLUGIN_EXTENSION) {
 			PluginHandle handle = LoadPluginLibrary(p.path().string().c_str());
-			if (handle == NULL_PLUGIN) { fprintf_color(COLOR_RED, stderr, "%s: Failed to load plugin module\n", p.path().string().c_str()); continue; }
+			if (handle == NULL_PLUGIN) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to load plugin module\n", p.path().string().c_str()); continue; }
 			EnginePlugin*(*createPlugin)(void) = (EnginePlugin*(*)(void))GetPluginFunction(handle, "CreatePlugin");
 			if (!createPlugin) {
-				fprintf_color(COLOR_RED, stderr, "%s: Failed to find CreatePlugin() function\n", p.path().string().c_str());
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to find CreatePlugin() function\n", p.path().string().c_str());
 				UnloadPluginLibrary(handle);
 				continue;
 			}
 			EnginePlugin* plugin = createPlugin();
 			if (!plugin) {
-				fprintf_color(COLOR_RED, stderr, "%s: Failed to create plugin\n", p.path().string().c_str());
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to create plugin\n", p.path().string().c_str());
 				UnloadPluginLibrary(handle);
 				continue;
 			}			
 			mPluginModules.push_back(handle);
 			mPlugins.push_back(plugin);
-			printf_color(COLOR_BLUE, "Loaded %s\n", p.path().string().c_str());
+			printf_color(ConsoleColorBits::eBlue, "Loaded %s\n", p.path().string().c_str());
 		}
 	}
 

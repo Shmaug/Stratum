@@ -3,50 +3,51 @@
 #include <Util/Util.hpp>
 
 class Buffer {
+private:
+	vk::Buffer mBuffer;
+
 public:
 	const std::string mName;
 
-	STRATUM_API Buffer(const std::string& name, ::Device* device, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	STRATUM_API Buffer(const std::string& name, ::Device* device, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkFormat viewFormat, VkMemoryPropertyFlags memoryFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	STRATUM_API Buffer(const std::string& name, ::Device* device, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	STRATUM_API Buffer(const std::string& name, ::Device* device, VkDeviceSize size, VkBufferUsageFlags usage, VkFormat viewFormat, VkMemoryPropertyFlags memoryFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	STRATUM_API Buffer(const std::string& name, ::Device* device, const void* data, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API Buffer(const std::string& name, ::Device* device, const void* data, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Format viewFormat, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API Buffer(const std::string& name, ::Device* device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API Buffer(const std::string& name, ::Device* device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Format viewFormat, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	STRATUM_API Buffer(const Buffer& src);
 	STRATUM_API ~Buffer();
 
 	// Upload data from the host to the device
 	// If this buffer is not host visible, then a staging buffer will be created and the data will be copied with Buffer::CopyFrom()
-	// If this buffer is not host visible and does not have the VK_BUFFER_USAGE_TRANSFER_DST_BIT flag, then the buffer will be re-created with VK_BUFFER_USAGE_TRANSFER_DST_BIT
+	// If this buffer is not host visible and does not have the vk::BufferUsageFlagBits::eTransferDst flag, then the buffer will be re-created with vk::BufferUsageFlagBits::eTransferDst
 	// If this buffer is host visible, then the data is immediately memcpy'd
-	STRATUM_API void Upload(const void* data, VkDeviceSize size);
+	STRATUM_API void Upload(const void* data, vk::DeviceSize size);
 
 	inline void* MappedData() const { return mMemory.mMapped; }
 
-	inline VkDeviceSize Size() const { return mSize; }
-	inline VkBufferUsageFlags Usage() const { return mUsageFlags; }
-	inline VkMemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
+	inline vk::DeviceSize Size() const { return mSize; }
+	inline vk::BufferUsageFlags Usage() const { return mUsageFlags; }
+	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
 	inline const DeviceMemoryAllocation& Memory() const { return mMemory; }
 
 	STRATUM_API void CopyFrom(const Buffer& other);
 	Buffer& operator=(const Buffer& other) = delete;
 
-	// The view used for a texel buffer. Can be VK_NULL_HANDLE if the buffer is not a texel buffer.
-	inline const VkBufferView& View() const { return mView; }
-
+	// The view used for a texel buffer. Can be nullptr if the buffer is not a texel buffer.
+	inline const vk::BufferView& View() const { return mView; }
 	inline ::Device* Device() const { return mDevice; }
-	inline operator VkBuffer() const { return mBuffer; }
+	inline operator vk::Buffer() const { return mBuffer; }
 
 private:
-	::Device* mDevice;
-	VkBuffer mBuffer;
+	::Device* mDevice = nullptr;
 	DeviceMemoryAllocation mMemory;
 
-	VkBufferView mView;
-	VkFormat mViewFormat;
+	vk::BufferView mView;
+	vk::Format mViewFormat = vk::Format::eUndefined;
 
-	VkDeviceSize mSize;
+	vk::DeviceSize mSize = 0;
 
-	VkBufferUsageFlags mUsageFlags;
-	VkMemoryPropertyFlags mMemoryProperties;
+	vk::BufferUsageFlags mUsageFlags;
+	vk::MemoryPropertyFlags mMemoryProperties;
 
 	STRATUM_API void Allocate();
 };

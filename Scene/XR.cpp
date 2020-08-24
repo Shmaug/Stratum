@@ -1,41 +1,22 @@
-#include "OpenXR.hpp"
-#include <Scene/Scene.hpp>
+#include <Scene/XR.hpp>
 #include <Util/Tokenizer.hpp>
 
 using namespace std;
 
-bool OpenXR::XR_FAILED_MSG(XrResult result, const string& errmsg) {
+bool XR::XR_FAILED_MSG(XrResult result, const string& errmsg) {
 	if (XR_FAILED(result)) {
 		char resultString[XR_MAX_RESULT_STRING_SIZE];
 		xrResultToString(mInstance, result, resultString);
-		fprintf_color(COLOR_RED, stderr, "%s: %s\n", errmsg.c_str(), resultString);
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", errmsg.c_str(), resultString);
 		return true;
 	}
 	return false;
 }
 
-OpenXR::OpenXR() :
-	mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(XR_NULL_HANDLE), mActionSet(XR_NULL_HANDLE),
-	mGrabAction(XR_NULL_HANDLE), mPoseAction(XR_NULL_HANDLE),
-	mScene(nullptr), mHmdCamera(nullptr) {
+XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(XR_NULL_HANDLE), mActionSet(XR_NULL_HANDLE),
+	mGrabAction(XR_NULL_HANDLE), mPoseAction(XR_NULL_HANDLE), mScene(nullptr), mHmdCamera(nullptr) {
+
 	uint32_t tmp;
-
-	uint32_t extensionCount;
-	xrEnumerateInstanceExtensionProperties(nullptr, 0, &extensionCount, nullptr);
-	vector<XrExtensionProperties> extensions(extensionCount);
-	if (extensionCount) {
-		for (uint32_t i = 0; i < extensionCount; i++)
-			extensions[i].type = XR_TYPE_EXTENSION_PROPERTIES;
-		xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &tmp, extensions.data());
-		printf("Found %u OpenXR extensions:\n", extensionCount);
-		for (uint32_t i = 0; i < extensionCount; i++)
-			printf("\t%s\n", extensions[i].extensionName);
-	} else {
-		printf("Found 0 OpenXR extensions.\n");
-		mInitialized = false;
-		return;
-	}
-
 	uint32_t apiLayerCount;
 	xrEnumerateApiLayerProperties(0, &apiLayerCount, NULL);
 	vector<XrApiLayerProperties> apiLayerProperties(apiLayerCount);
@@ -71,7 +52,7 @@ OpenXR::OpenXR() :
 		mInitialized = false;
 		return;
 	}
-	printf_color(COLOR_GREEN, "OpenXR Instance created: %s.\n", instanceProperties.runtimeName);
+	printf_color(ConsoleColorBits::eGreen, "OpenXR Instance created: %s.\n", instanceProperties.runtimeName);
 
 	XrSystemGetInfo systeminfo = {};
 	systeminfo.type = XR_TYPE_SYSTEM_GET_INFO;
@@ -87,11 +68,11 @@ OpenXR::OpenXR() :
 		mInitialized = false;
 		return;
 	}
-	printf_color(COLOR_GREEN, "OpenXR system found: %s.\n", mSystemProperties.systemName);
+	printf_color(ConsoleColorBits::eGreen, "OpenXR system found: %s.\n", mSystemProperties.systemName);
 }
-OpenXR::~OpenXR() { Cleanup(); }
+XR::~XR() { Cleanup(); }
 
-void OpenXR::Cleanup() {
+void XR::Cleanup() {
 	if (mHmdCamera) mScene->DestroyObject(mHmdCamera);
 
 	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) delete[] mSwapchainImages[i];
@@ -123,7 +104,7 @@ void OpenXR::Cleanup() {
 	mHmdCamera = nullptr;
 }
 
-set<string> OpenXR::InstanceExtensionsRequired() {
+set<string> XR::InstanceExtensionsRequired() {
 	PFN_xrVoidFunction func;
 	if (XR_FAILED_MSG(xrGetInstanceProcAddr(mInstance, "xrGetVulkanInstanceExtensionsKHR", &func), "Failed to get address of xrGetVulkanInstanceExtensionsKHR")) return {};
 	PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensions = (PFN_xrGetVulkanInstanceExtensionsKHR)func;
@@ -139,7 +120,7 @@ set<string> OpenXR::InstanceExtensionsRequired() {
 	while (t.Next(e)) result.insert(e);
 	return result;
 }
-set<string> OpenXR::DeviceExtensionsRequired(VkPhysicalDevice device) {
+set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	PFN_xrVoidFunction func;
 	if (XR_FAILED_MSG(xrGetInstanceProcAddr(mInstance, "xrGetVulkanDeviceExtensionsKHR", &func), "Failed to get address of xrGetVulkanDeviceExtensionsKHR")) return {};
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensions = (PFN_xrGetVulkanDeviceExtensionsKHR)func;
@@ -156,7 +137,7 @@ set<string> OpenXR::DeviceExtensionsRequired(VkPhysicalDevice device) {
 	return result;
 }
 
-bool OpenXR::OnSceneInit(Scene* scene) {
+bool XR::OnSceneInit(Scene* scene) {
 	if (!mInitialized) return false;
 	
 	mScene = scene;
@@ -182,38 +163,38 @@ bool OpenXR::OnSceneInit(Scene* scene) {
 	if (mViewCount != 2 ||
 		views[0].recommendedSwapchainSampleCount != views[1].recommendedSwapchainSampleCount ||
 		views[0].recommendedImageRectWidth != views[1].recommendedImageRectWidth || views[0].recommendedImageRectHeight != views[1].recommendedImageRectHeight) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Unsupported OpenXR view configuration.\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Unsupported OpenXR view configuration.\n");
 		Cleanup();
 		return false;
 	}
 
 	uint32_t sampleCountInt = 1;
-	VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
+	vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
 	switch (views[0].recommendedSwapchainSampleCount) {
 		case 1:
-			sampleCount = VK_SAMPLE_COUNT_1_BIT;
+			sampleCount = vk::SampleCountFlagBits::e1;
 			sampleCountInt = 1;
 			break;
 		case 2:
-			sampleCount = VK_SAMPLE_COUNT_2_BIT;
+			sampleCount = vk::SampleCountFlagBits::e2;
 			sampleCountInt = 2;
 			break;
 		case 4:
-			sampleCount = VK_SAMPLE_COUNT_4_BIT;
+			sampleCount = vk::SampleCountFlagBits::e4;
 			sampleCountInt = 4;
 			break;
 		case 8:
-			sampleCount = VK_SAMPLE_COUNT_8_BIT;
+			sampleCount = vk::SampleCountFlagBits::e8;
 			sampleCountInt = 8;
 			break;
 		case 16:
 		case 32:
 		case 64:
-			sampleCount = VK_SAMPLE_COUNT_16_BIT;
+			sampleCount = vk::SampleCountFlagBits::e16;
 			sampleCountInt = 16;
 			break;
 		default:
-			fprintf_color(COLOR_YELLOW, stderr, "Unsupported OpenXR recommended sample count: %u.\n", views[0].recommendedSwapchainSampleCount);
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "Unsupported OpenXR recommended sample count: %u.\n", views[0].recommendedSwapchainSampleCount);
 			break;
 	}
 	#pragma endregion
@@ -227,13 +208,13 @@ bool OpenXR::OnSceneInit(Scene* scene) {
 	vector<int64_t> formats(formatCount);
 	xrEnumerateSwapchainFormats(mSession, formatCount, &tmp, formats.data());
 
-	mSwapchainFormat = (VkFormat)formats[0];
+	mSwapchainFormat = (vk::Format)formats[0];
 	for (uint32_t i = 0; i < formatCount; i++)
-		if ((VkFormat)formats[i] == VK_FORMAT_R8G8B8A8_UNORM) {
-			mSwapchainFormat = (VkFormat)formats[i];
+		if ((vk::Format)formats[i] == vk::Format::eR8G8B8A8Unorm) {
+			mSwapchainFormat = (vk::Format)formats[i];
 			break;
-		} else if ((VkFormat)formats[i] == VK_FORMAT_B8G8R8A8_UNORM)
-			mSwapchainFormat = (VkFormat)formats[i];
+		} else if ((vk::Format)formats[i] == vk::Format::eB8G8R8A8Unorm)
+			mSwapchainFormat = (vk::Format)formats[i];
 	
 
 	uint32_t maxSwapchainLength = 0;
@@ -247,7 +228,7 @@ bool OpenXR::OnSceneInit(Scene* scene) {
 		info.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
 		info.width = views[i].recommendedImageRectWidth;
 		info.height = views[i].recommendedImageRectHeight;
-		info.format = mSwapchainFormat;
+		info.format = (VkFormat)mSwapchainFormat;
 		info.sampleCount = 1;
 		info.faceCount = 1;
 		info.arraySize = 1;
@@ -385,17 +366,17 @@ bool OpenXR::OnSceneInit(Scene* scene) {
 	#pragma endregion
 
 	mHmdCamera = mScene->CreateObject<Camera>(mSystemProperties.systemName, set<RenderTargetIdentifier> { "OpenXR HMD" });
-	mHmdCamera->StereoMode(STEREO_SBS_HORIZONTAL);
+	mHmdCamera->StereoMode(StereoMode::eHorizontal);
 
 	return true;
 }
 
-void OpenXR::CreateSession() {
+void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = *mScene->Instance();
+	binding.instance = (vk::Instance)*mScene->Instance();
 	binding.physicalDevice = mScene->Instance()->Device()->PhysicalDevice();
-	binding.device = *mScene->Instance()->Device();
+	binding.device = (vk::Device)*mScene->Instance()->Device();
 	binding.queueFamilyIndex = mScene->Instance()->Device()->PresentQueueFamilyIndex();
 	binding.queueIndex = mScene->Instance()->Device()->PresentQueueIndex();
 
@@ -404,7 +385,7 @@ void OpenXR::CreateSession() {
 	sessioninfo.systemId = mSystem;
 	sessioninfo.next = &binding;
 	if (XR_FAILED_MSG(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return;
-	printf_color(COLOR_GREEN, "%s", "OpenXR Session created.\n");
+	printf_color(ConsoleColorBits::eGreen, "%s", "OpenXR Session created.\n");
 
 
 	uint32_t spaceCount, tmp;
@@ -449,7 +430,7 @@ void OpenXR::CreateSession() {
 	}
 }
 
-void OpenXR::OnFrameStart() {
+void XR::OnFrameStart() {
 	if (!mInstance || !mSession) return;
 
 	mFrameState = {};
@@ -485,14 +466,14 @@ void OpenXR::OnFrameStart() {
     	case XR_SESSION_STATE_STOPPING:
     	case XR_SESSION_STATE_EXITING:
 		case XR_SESSION_STATE_LOSS_PENDING:
-			printf_color(COLOR_YELLOW, "%s", "xrSession state lost\n");
+			printf_color(ConsoleColorBits::eYellow, "%s", "xrSession state lost\n");
 			Cleanup();
 			return;
 		}
 		break;
 	}
 	case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-		printf_color(COLOR_YELLOW, "%s", "xrInstance lost\n");
+		printf_color(ConsoleColorBits::eYellow, "%s", "xrInstance lost\n");
 		Cleanup();
 		return;
 	}
@@ -558,7 +539,7 @@ void OpenXR::OnFrameStart() {
 	}
 }
 
-void OpenXR::PostRender(CommandBuffer* commandBuffer) {
+void XR::PostRender(CommandBuffer* commandBuffer) {
 	#pragma region Locate views (eyes) within mReferenceSpace
 	uint32_t tmp;
 	vector<XrView> views(mViewCount);
@@ -579,7 +560,7 @@ void OpenXR::PostRender(CommandBuffer* commandBuffer) {
 	vector<float3> positions(mViewCount);
 	vector<quaternion> rotations(mViewCount);
 
-	StereoEye eyes[2] { EYE_LEFT, EYE_RIGHT };
+	StereoEye eyes[2] { StereoEye::eLeft, StereoEye::eRight };
 
 	float n = mHmdCamera->Near();
 
@@ -608,11 +589,11 @@ void OpenXR::PostRender(CommandBuffer* commandBuffer) {
 
 	// TODO: Copy render result into right and left respectively
 	//mHmdCamera->WriteUniformBuffer();
-	VkImage right = mSwapchainImages[0][mProjectionViews[0].subImage.imageArrayIndex].image;
-	VkImage left = mSwapchainImages[1][mProjectionViews[1].subImage.imageArrayIndex].image;
+	vk::Image right = mSwapchainImages[0][mProjectionViews[0].subImage.imageArrayIndex].image;
+	vk::Image left = mSwapchainImages[1][mProjectionViews[1].subImage.imageArrayIndex].image;
 }
 
-void OpenXR::OnFrameEnd() {
+void XR::OnFrameEnd() {
 	for (uint32_t i = 0; i < mViewCount; i++) {
 		XrSwapchainImageReleaseInfo swapchainImageReleaseInfo = {};
 		swapchainImageReleaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;

@@ -33,21 +33,21 @@ public:
 	// Construct from existing vertex/index buffer
 	STRATUM_API Mesh(const std::string& name, ::Device* device, const AABB& bounds, TriangleBvh2* bvh,
 		std::shared_ptr<Buffer> vertexBuffer, std::shared_ptr<Buffer> indexBuffer, uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount,
-		const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+		const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList);
 	// Construct from existing vertex/index/weight buffer
 	STRATUM_API Mesh(const std::string& name, ::Device* device, const AABB& bounds, TriangleBvh2* bvh,
 		std::shared_ptr<Buffer> vertexBuffer, std::shared_ptr<Buffer> indexBuffer, std::shared_ptr<Buffer> weightBuffer,
 		uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount,
-		const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	// Construct from vertices/indices. Constructs a triangle bvh if the topology is VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+		const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList);
+	// Construct from vertices/indices. Constructs a triangle bvh if the topology is eTriangleList
 	STRATUM_API Mesh(const std::string& name, ::Device* device,
 		const void* vertices, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount,
-		const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	// Construct from vertices/indices/weights/shapekeys. Constructs a triangle bvh if the topology is VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+		const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList);
+	// Construct from vertices/indices/weights/shapekeys. Constructs a triangle bvh if the topology is eTriangleList
 	STRATUM_API Mesh(const std::string& name, ::Device* device,
 		const void* vertices, const VertexWeight* weights, const std::vector<std::pair<std::string, const void*>>&  shapeKeys, 
 		const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount,
-		const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+		const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList);
 	STRATUM_API ~Mesh();
 
 	// Creates a cube, using StdVertex vertices
@@ -64,13 +64,13 @@ public:
 	inline std::shared_ptr<Buffer> WeightBuffer() const { return mWeightBuffer; }
 	inline std::shared_ptr<Buffer> ShapeKey(const std::string& name) const { return (mShapeKeys.count(name) == 0) ? nullptr : mShapeKeys.at(name); }
 
-	inline VkPrimitiveTopology Topology() const { return mTopology; }
+	inline vk::PrimitiveTopology Topology() const { return mTopology; }
 	inline uint32_t BaseVertex() const { return mBaseVertex; }
 	inline uint32_t VertexCount() const { return mVertexCount; }
 	inline uint32_t VertexSize() const { return (uint32_t)mVertexSize; }
 	inline uint32_t BaseIndex() const { return mBaseIndex; }
 	inline uint32_t IndexCount() const { return mIndexCount; }
-	inline VkIndexType IndexType() const { return mIndexType; }
+	inline vk::IndexType IndexType() const { return mIndexType; }
 
 	// The bvh CAN be nullptr if nullptr was passed into the mesh upon creation
 	inline TriangleBvh2* BVH() const { return mBvh; }
@@ -86,16 +86,16 @@ private:
 	// Construct from a scene file (and assimp). Constructs a triangle bvh as well
 	STRATUM_API Mesh(const std::string& name, ::Device* device, const std::string& filename, float scale = 1.f);
 
-	TriangleBvh2* mBvh;
+	TriangleBvh2* mBvh = nullptr;
 
-	const ::VertexInput* mVertexInput;
-	uint32_t mBaseVertex;
-	uint32_t mVertexCount;
-	VkDeviceSize mVertexSize;
-	uint32_t mBaseIndex;
-	uint32_t mIndexCount;
-	VkIndexType mIndexType;
-	VkPrimitiveTopology mTopology;
+	const ::VertexInput* mVertexInput = nullptr;
+	uint32_t mBaseVertex = 0;
+	uint32_t mVertexCount = 0;
+	vk::DeviceSize mVertexSize = 0;
+	uint32_t mBaseIndex = 0;
+	uint32_t mIndexCount = 0;
+	vk::IndexType mIndexType = vk::IndexType::eUint32;
+	vk::PrimitiveTopology mTopology = vk::PrimitiveTopology::eTriangleList;
 	
 	std::unordered_map<std::string, Animation*> mAnimations;
 

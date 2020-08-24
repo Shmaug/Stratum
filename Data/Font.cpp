@@ -163,7 +163,7 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 
 	// Place bitmaps
 	
-	VkExtent2D extent = { 0, 32 };
+	vk::Extent2D extent = { 0, 32 };
 	extent.width = (uint32_t)sqrt((double)area);
 	// next power of 2
 	extent.width--;
@@ -203,7 +203,7 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 				dst[x] = (uint8_t)(fminf(fmaxf(kp.second.operator()(0, y)[x], -1), 1)*127);
 		}
 
-	mSDF = new Texture(mName, device, data, 4*extent.width*extent.height, extent, VK_FORMAT_R8G8B8A8_SNORM);
+	mSDF = new Texture(mName, device, data, 4*extent.width*extent.height, extent, vk::Format::eR8G8B8A8Snorm);
 	delete[] data;
 
 	msdfgen::destroyFont(font);
@@ -231,10 +231,10 @@ void Font::GenerateGlyphs(vector<GlyphRect>& result, AABB& bounds, const string&
 		uint32_t codepoint = (uint32_t)str[i];
 		
 		if (codepoint == '\n') {
-			if (horizontalAnchor == TEXT_ANCHOR_MID)
+			if (horizontalAnchor == TextAnchor::eMid)
 				for (size_t j = lineStart; j < result.size(); j++)
 					result[j].Offset.x -= (currentPoint - offset.x) * .5f;
-			else if (horizontalAnchor == TEXT_ANCHOR_MAX)
+			else if (horizontalAnchor == TextAnchor::eMax)
 				for (size_t j = lineStart; j < result.size(); j++)
 					result[j].Offset.x -= (currentPoint - offset.x);
 			currentPoint = offset.x;
@@ -274,10 +274,10 @@ void Font::GenerateGlyphs(vector<GlyphRect>& result, AABB& bounds, const string&
 		prev = &glyph;
 	}
 
-	if (horizontalAnchor == TEXT_ANCHOR_MID)
+	if (horizontalAnchor == TextAnchor::eMid)
 		for (uint32_t i = (uint32_t)lineStart; i < result.size(); i++)
 			result[i].Offset.x -= (currentPoint - offset.x) * .5f;
-	else if (horizontalAnchor == TEXT_ANCHOR_MAX)
+	else if (horizontalAnchor == TextAnchor::eMax)
 		for (uint32_t i = (uint32_t)lineStart; i < result.size(); i++)
 			result[i].Offset.x -= (currentPoint - offset.x);
 }

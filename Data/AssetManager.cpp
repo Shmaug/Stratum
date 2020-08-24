@@ -13,11 +13,11 @@ AssetManager::AssetManager(Device* device) : mDevice(device) {
 	uint8_t bumpPixels[4] = { 0x80, 0x80, 0xFF, 0xFF };
 	uint8_t noisePixels[4 * 256*256];
 	for (uint32_t i = 0; i < 4*256*256; i++) noisePixels[i] = rand() % 0xFF;
-	mWhiteTexture = new Texture("White", device, whitePixels, 4, { 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, 1);
-	mBlackTexture = new Texture("Black", device, blackPixels, 4, { 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, 1);
-	mTransparentBlackTexture = new Texture("TransparentBlack", device, transparentBlackPixels, 4, { 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, 1);
-	mBumpTexture = new Texture("Bump", device, bumpPixels, 4, { 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, 1);
-	mNoiseTexture = new Texture("RGBA Noise", device, noisePixels, 4*256*256, { 256, 256, 1 }, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+	mWhiteTexture = new Texture("White", device, whitePixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
+	mBlackTexture = new Texture("Black", device, blackPixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
+	mTransparentBlackTexture = new Texture("TransparentBlack", device, transparentBlackPixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
+	mBumpTexture = new Texture("Bump", device, bumpPixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
+	mNoiseTexture = new Texture("RGBA Noise", device, noisePixels, 4*256*256, { 256, 256, 1 }, vk::Format::eR8G8B8A8Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage);
 }
 AssetManager::~AssetManager() {
 	delete mWhiteTexture;
@@ -51,14 +51,14 @@ Pipeline* AssetManager::LoadPipeline(const string& filename) {
 }
 Texture* AssetManager::LoadTexture(const string& filename, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[filename + to_string(flags)];
+	Asset& asset = mAssets[filename + to_string((uint32_t)flags)];
 	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(filename, mDevice, filename, flags);
 	mMutex.unlock();
 	return get<Texture*>(asset);
 }
 Texture* AssetManager::LoadCubemap(const string& posx, const string& negx, const string& posy, const string& negy, const string& posz, const string& negz, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string(flags)];
+	Asset& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string((uint32_t)flags)];
 	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, posx, negx, posy, negy, posz, negz, flags);
 	mMutex.unlock();
 	return get<Texture*>(asset);

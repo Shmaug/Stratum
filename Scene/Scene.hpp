@@ -1,12 +1,14 @@
 #pragma once
 
 #include <Core/RenderPass.hpp>
+#include <Data/Animation.hpp>
+#include <Data/AssetManager.hpp>
+#include <Data/Font.hpp>
+#include <Data/Material.hpp>
+#include <Data/Mesh.hpp>
 #include <Data/Texture.hpp>
-#include <Scene/Camera.hpp>
-#include <Scene/Renderer.hpp>
+#include <Input/InputManager.hpp>
 #include <Scene/GuiContext.hpp>
-#include <Scene/Light.hpp>
-#include <Scene/Object.hpp>
 #include <Scene/ObjectBvh2.hpp>
 
 // Holds scene Objects. In general, plugins will add objects during their lifetime, and remove objects during or at the end of their lifetime.
@@ -40,8 +42,8 @@ public:
 	inline Object* Raycast(const Ray& worldRay, float* t = nullptr, bool any = false, uint32_t mask = 0xFFFFFFFF) { return BVH()->Intersect(worldRay, t, any, mask); }
 
 	// Setters
-	STRATUM_API void SetAttachmentInfo(const RenderTargetIdentifier& name, const VkExtent2D& extent, VkImageUsageFlags usage);
-	STRATUM_API void MainRenderExtent(const VkExtent2D& extent);
+	STRATUM_API void SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Extent2D& extent, vk::ImageUsageFlags usage);
+	STRATUM_API void MainRenderExtent(const vk::Extent2D& extent);
 
 	inline void AmbientLight(const float3& t) { mAmbientLight = t; }
 	inline void EnvironmentTexture(Texture* t) { mEnvironmentTexture = t; }
@@ -51,7 +53,7 @@ public:
 	// Getters
 	inline bool HasAttachment(const RenderTargetIdentifier& name) const { return mAttachments.count(name); }
 	inline Texture* GetAttachment(const RenderTargetIdentifier& name) const { return mAttachments.at(name); }
-	STRATUM_API std::pair<VkExtent2D, VkImageUsageFlags> GetAttachmentInfo(const RenderTargetIdentifier& name) const { return mAttachmentInfo.at(name); };
+	STRATUM_API std::pair<vk::Extent2D, vk::ImageUsageFlags> GetAttachmentInfo(const RenderTargetIdentifier& name) const { return mAttachmentInfo.at(name); };
 
 	inline float3 AmbientLight() const { return mAmbientLight; }
 	inline Texture* EnvironmentTexture() const { return mEnvironmentTexture; }
@@ -96,9 +98,13 @@ private:
 	bool mRenderGraphDirty;
 	std::vector<RenderGraphNode*> mRenderGraph;
 	std::unordered_map<RenderTargetIdentifier, Texture*> mAttachments;
-	std::unordered_map<RenderTargetIdentifier, std::pair<VkExtent2D, VkImageUsageFlags>> mAttachmentInfo;
+	std::unordered_map<RenderTargetIdentifier, std::pair<vk::Extent2D, vk::ImageUsageFlags>> mAttachmentInfo;
 	std::unordered_map<Camera*, GuiContext*> mGuiContexts;
 	
+	ObjectBvh2* mBvh;
+	uint64_t mLastBvhBuild;
+	bool mBvhDirty;
+
 	MeshRenderer* mSkybox;
 
 	uint32_t mLightCount;
@@ -107,10 +113,6 @@ private:
 	Texture* mShadowAtlas;
 	Texture* mEnvironmentTexture;
 	float3 mAmbientLight;
-
-	ObjectBvh2* mBvh;
-	uint64_t mLastBvhBuild;
-	bool mBvhDirty;
 
 	// fps calculation
 	std::chrono::high_resolution_clock mClock;

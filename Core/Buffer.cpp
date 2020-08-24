@@ -5,55 +5,54 @@
 
 using namespace std;
 
-Buffer::Buffer(const std::string& name, ::Device* device, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
-	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties), mBuffer(VK_NULL_HANDLE), mView(VK_NULL_HANDLE), mViewFormat(VK_FORMAT_UNDEFINED), mMemory({}) {
+Buffer::Buffer(const std::string& name, ::Device* device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
+	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties) {
 	Allocate();
 }
-Buffer::Buffer(const std::string& name, ::Device* device, VkDeviceSize size, VkBufferUsageFlags usage, VkFormat viewFormat, VkMemoryPropertyFlags properties)
-	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties), mBuffer(VK_NULL_HANDLE), mView(VK_NULL_HANDLE), mViewFormat(viewFormat), mMemory({}) {
+Buffer::Buffer(const std::string& name, ::Device* device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Format viewFormat, vk::MemoryPropertyFlags properties)
+	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties){
 	Allocate();
 }
-Buffer::Buffer(const std::string& name, ::Device* device, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
-	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties), mBuffer(VK_NULL_HANDLE), mView(VK_NULL_HANDLE), mViewFormat(VK_FORMAT_UNDEFINED), mMemory({}) {
-	if ((properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0)
-		mUsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+Buffer::Buffer(const std::string& name, ::Device* device, const void* data, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties)
+	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties) {
+	if (!(properties & vk::MemoryPropertyFlagBits::eHostVisible))
+		mUsageFlags |= vk::BufferUsageFlagBits::eTransferDst;
 	Allocate();
 	Upload(data, size);
 }
-Buffer::Buffer(const std::string& name, ::Device* device, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkFormat viewFormat, VkMemoryPropertyFlags properties)
-	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties), mBuffer(VK_NULL_HANDLE), mView(VK_NULL_HANDLE), mViewFormat(viewFormat), mMemory({}) {
-	if ((properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0)
-		mUsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+Buffer::Buffer(const std::string& name, ::Device* device, const void* data, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Format viewFormat, vk::MemoryPropertyFlags properties)
+	: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(properties) {
+	if (!(properties & vk::MemoryPropertyFlagBits::eHostVisible))
+		mUsageFlags |= vk::BufferUsageFlagBits::eTransferDst;
 	Allocate();
 	Upload(data, size);
 }
 Buffer::Buffer(const Buffer& src)
-	: mName(src.mName), mDevice(src.mDevice), mSize(0), mUsageFlags(src.mUsageFlags | VK_BUFFER_USAGE_TRANSFER_DST_BIT), mMemoryProperties(src.mMemoryProperties),
-	mBuffer(VK_NULL_HANDLE), mView(VK_NULL_HANDLE), mViewFormat(src.mViewFormat), mMemory({}) {
+	: mName(src.mName), mDevice(src.mDevice), mUsageFlags(src.mUsageFlags | vk::BufferUsageFlagBits::eTransferDst), mMemoryProperties(src.mMemoryProperties), mViewFormat(src.mViewFormat) {
 	CopyFrom(src);
 }
 Buffer::~Buffer() {
-	if (mView) vkDestroyBufferView(*mDevice, mView, nullptr);
-	if (mBuffer) vkDestroyBuffer(*mDevice, mBuffer, nullptr);
+	mDevice->Destroy(mView);
+	mDevice->Destroy(mBuffer);
 	mDevice->FreeMemory(mMemory);
 }
 
-void Buffer::Upload(const void* data, VkDeviceSize size) {
+void Buffer::Upload(const void* data, vk::DeviceSize size) {
 	if (!data || size == 0) return;
 	if (size > mSize) throw runtime_error("Data size out of bounds");
-	if (mMemoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+	if (mMemoryProperties & vk::MemoryPropertyFlagBits::eHostVisible) {
 		memcpy(MappedData(), data, size);
 	} else {
-		if ((mUsageFlags & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0) {
-			mUsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		if (!(mUsageFlags & vk::BufferUsageFlagBits::eTransferDst)) {
+			mUsageFlags |= vk::BufferUsageFlagBits::eTransferDst;
 			
-			if (mView) vkDestroyBufferView(*mDevice, mView, nullptr);
-			if (mBuffer) vkDestroyBuffer(*mDevice, mBuffer, nullptr);
+			if (mView) mDevice->Destroy(mView);
+			if (mBuffer) mDevice->Destroy(mBuffer);
 			mDevice->FreeMemory(mMemory);
 			mSize = size;
 			Allocate();
 		}
-		Buffer uploadBuffer(mName + " upload", mDevice, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		Buffer uploadBuffer(mName + " upload", mDevice, size, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		memcpy(uploadBuffer.MappedData(), data, size);
 		CopyFrom(uploadBuffer);
 	}
@@ -61,8 +60,8 @@ void Buffer::Upload(const void* data, VkDeviceSize size) {
 
 void Buffer::CopyFrom(const Buffer& other) {
 	if (mSize != other.mSize) {
-		if (mView) vkDestroyBufferView(*mDevice, mView, nullptr);
-		if (mBuffer) vkDestroyBuffer(*mDevice, mBuffer, nullptr);
+		if (mView) mDevice->Destroy(mView);
+		if (mBuffer) mDevice->Destroy(mBuffer);
 		mDevice->FreeMemory(mMemory);
 		mSize = other.mSize;
 		Allocate();
@@ -70,43 +69,41 @@ void Buffer::CopyFrom(const Buffer& other) {
 
 	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
 
-	VkBufferMemoryBarrier barrier = {};
-	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	vk::BufferMemoryBarrier barrier = {};
+	barrier.srcAccessMask = vk::AccessFlagBits::eHostWrite;
+	barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
 	barrier.buffer = other;
 	barrier.size = mSize;
-	commandBuffer->Barrier(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, barrier);
+	commandBuffer->Barrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eTransfer, barrier);
 
-	VkBufferCopy copyRegion = {};
+	vk::BufferCopy copyRegion = {};
 	copyRegion.size = mSize;
-	vkCmdCopyBuffer(*commandBuffer, other.mBuffer, mBuffer, 1, &copyRegion);
+	commandBuffer->operator vk::CommandBuffer().copyBuffer(other.mBuffer, mBuffer, 1, &copyRegion);
 	mDevice->Execute(commandBuffer);
 	commandBuffer->Wait();
 }
 
 void Buffer::Allocate() {
-	VkBufferCreateInfo bufferInfo = {};
-	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vk::Device device = *mDevice;
+
+	vk::BufferCreateInfo bufferInfo;
 	bufferInfo.size = mSize;
 	bufferInfo.usage = mUsageFlags;
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	ThrowIfFailed(vkCreateBuffer(*mDevice, &bufferInfo, nullptr, &mBuffer), "vkCreateBuffer failed for " + mName);
-	mDevice->SetObjectName(mBuffer, mName, VK_OBJECT_TYPE_BUFFER);
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+	mBuffer = device.createBuffer(bufferInfo);
+	mDevice->SetObjectName(mBuffer, mName);
 
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(*mDevice, mBuffer, &memRequirements);
+	vk::MemoryRequirements memRequirements = device.getBufferMemoryRequirements(mBuffer);
 	mMemory = mDevice->AllocateMemory(memRequirements, mMemoryProperties, mName);
-	vkBindBufferMemory(*mDevice, mBuffer, mMemory.mDeviceMemory, mMemory.mOffset);
+	device.bindBufferMemory(mBuffer, mMemory.mDeviceMemory, mMemory.mOffset);
 
-	if (mViewFormat != VK_FORMAT_UNDEFINED) {
-		VkBufferViewCreateInfo viewInfo = {};
-		viewInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+	if (mViewFormat != vk::Format::eUndefined) {
+		vk::BufferViewCreateInfo viewInfo = {};
 		viewInfo.buffer = mBuffer;
 		viewInfo.offset = 0;
 		viewInfo.range = mSize;
 		viewInfo.format = mViewFormat;
-		ThrowIfFailed(vkCreateBufferView(*mDevice, &viewInfo, nullptr, &mView), "vkCreateBufferView failed for " + mName);
-		mDevice->SetObjectName(mView, mName, VK_OBJECT_TYPE_BUFFER_VIEW);
+		mView = device.createBufferView(viewInfo);
+		mDevice->SetObjectName(mView, mName + "View");
 	}
 }

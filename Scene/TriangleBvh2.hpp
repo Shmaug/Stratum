@@ -27,7 +27,7 @@ public:
 
 	inline AABB Bounds() { return mNodes.size() ? mNodes[0].mBounds : AABB(); }
 	
-	STRATUM_API void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, VkIndexType indexType);
+	STRATUM_API void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType);
 	STRATUM_API bool Intersect(const Ray& ray, float* t, bool any);
 
 private:

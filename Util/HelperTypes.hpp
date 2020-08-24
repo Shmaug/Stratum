@@ -84,9 +84,9 @@ struct fRect2D {
 
 // Represents a usable region of device memory
 struct DeviceMemoryAllocation {
-	VkDeviceMemory mDeviceMemory;
-	VkDeviceSize mOffset;
-	VkDeviceSize mSize;
+	vk::DeviceMemory mDeviceMemory;
+	vk::DeviceSize mOffset;
+	vk::DeviceSize mSize;
 	uint32_t mMemoryType;
 	void* mMapped;
 	std::string mTag;
@@ -96,11 +96,11 @@ struct DeviceMemoryAllocation {
 // Defines a vertex input. Hashes itself once at creation, then remains immutable.
 struct VertexInput {
 public:
-	const std::vector<VkVertexInputBindingDescription> mBindings;
+	const std::vector<vk::VertexInputBindingDescription> mBindings;
 	// Note: In order to hash and compare correctly, attributes must appear in order of location.
-	const std::vector<VkVertexInputAttributeDescription> mAttributes;
+	const std::vector<vk::VertexInputAttributeDescription> mAttributes;
 
-	VertexInput(const std::vector<VkVertexInputBindingDescription>& bindings, const std::vector<VkVertexInputAttributeDescription>& attribs)
+	VertexInput(const std::vector<vk::VertexInputBindingDescription>& bindings, const std::vector<vk::VertexInputAttributeDescription>& attribs)
 		: mBindings(bindings), mAttributes(attribs) {
 		std::size_t h = 0;
 		for (const auto& b : mBindings) {
@@ -144,11 +144,11 @@ struct PipelineInstance {
 	const uint64_t mRenderPassHash;
 	const uint32_t mSubpassIndex;
 	const VertexInput* mVertexInput;
-	const VkPrimitiveTopology mTopology;
-	const VkCullModeFlags mCullMode;
-	const VkPolygonMode mPolygonMode;
+	const vk::PrimitiveTopology mTopology;
+	const vk::CullModeFlags mCullMode;
+	const vk::PolygonMode mPolygonMode;
 
-	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, const VertexInput* vertexInput, VkPrimitiveTopology topology, VkCullModeFlags cullMode, VkPolygonMode polyMode)
+	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, const VertexInput* vertexInput, vk::PrimitiveTopology topology, vk::CullModeFlags cullMode, vk::PolygonMode polyMode)
 		: mRenderPassHash(renderPassHash), mSubpassIndex(subpassIndex), mVertexInput(vertexInput), mTopology(topology), mCullMode(cullMode), mPolygonMode(polyMode) {
 			// Compute hash once upon creation
 			mHash = 0;
@@ -168,6 +168,15 @@ private:
 };
 
 namespace std {
+	template<typename BitType>
+	struct hash<vk::Flags<BitType>> {
+		inline std::size_t operator()(const vk::Flags<BitType>& v) const {
+			size_t h = 0;
+			hash_combine(h, (vk::Flags<BitType>::MaskType)v);
+			return h;
+		}
+	};
+
 	template<>
 	struct hash<fRect2D> {
 		inline std::size_t operator()(const fRect2D& v) const {

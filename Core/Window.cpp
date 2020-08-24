@@ -8,14 +8,13 @@
 
 using namespace std;
 
+Window::Window(Instance* instance, const string& title, MouseKeyboardInput* input, vk::Rect2D position
 #ifdef __linux
-Window::Window(Instance* instance, const string& title, MouseKeyboardInput* input, VkRect2D position, xcb_connection_t* XCBConnection, xcb_screen_t* XCBScreen)
+, xcb_connection_t* XCBConnection, xcb_screen_t* XCBScreen
 #else
-Window::Window(Instance* instance, const string& title, MouseKeyboardInput* input, VkRect2D position, HINSTANCE hInstance)
+, HINSTANCE hInstance
 #endif
-	: mInstance(instance), mDevice(nullptr), mTitle(title), mSwapchainExtent({}), mFullscreen(false), mClientRect(position), mInput(input),
-	mSwapchain(VK_NULL_HANDLE), mPhysicalDevice(VK_NULL_HANDLE), mImageCount(0), mFormat({}), mVSync(false),
-	mBackBufferIndex(0), mImageAvailableSemaphoreIndex(0), mFrameData(nullptr), mDirectDisplay(VK_NULL_HANDLE) {
+	) : mInstance(instance), mTitle(title), mClientRect(position), mInput(input) {
 	#ifdef __linux
 	mXCBConnection = XCBConnection;
 	mXCBScreen = XCBScreen;
@@ -61,14 +60,15 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 	xcb_flush(mXCBConnection);
 
 	VkXcbSurfaceCreateInfoKHR info = {};
-	info.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
 	info.connection = mXCBConnection;
 	info.window = mXCBWindow;
-	ThrowIfFailed(vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface), "vkCreateXcbSurfaceKHR Failed");
+	mSurface = ((vk::Instance)*mInstance).vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface);
 
 	#else
 
 	mWindowedRect = {};
+
+	SetProcessDPIAware();
 
 	mHwnd = CreateWindowExA(
 		NULL,
@@ -84,17 +84,16 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 		hInstance,
 		nullptr );
 	if (!mHwnd) {
-		fprintf_color(COLOR_RED, stderr, "Failed to create window\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to create window\n");
 		throw;
 	}
 
 	ShowWindow(mHwnd, SW_SHOW);
-
-	VkWin32SurfaceCreateInfoKHR info = {};
-	info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+	
+	vk::Win32SurfaceCreateInfoKHR info = {};
 	info.hinstance = hInstance;
 	info.hwnd = mHwnd;
-	ThrowIfFailed(vkCreateWin32SurfaceKHR(*mInstance, &info, nullptr, &mSurface), "vkCreateWin32SurfaceKHR Failed");
+	mSurface = ((vk::Instance)*mInstance).createWin32SurfaceKHR(info);
 
 	RECT cr;
 	GetClientRect(mHwnd, &cr);
@@ -104,10 +103,10 @@ Window::Window(Instance* instance, const string& title, MouseKeyboardInput* inpu
 }
 Window::~Window() {
 	DestroySwapchain();
-	vkDestroySurfaceKHR(*mInstance, mSurface, nullptr);
+	((vk::Instance)*mInstance).destroy(mSurface);
 
 	if (mDirectDisplay) {
-		PFN_vkReleaseDisplayEXT vkReleaseDisplay = (PFN_vkReleaseDisplayEXT)vkGetInstanceProcAddr(*mInstance, "vkReleaseDisplayEXT");
+		PFN_vkReleaseDisplayEXT vkReleaseDisplay = (PFN_vkReleaseDisplayEXT)vkGetInstanceProcAddr((vk::Instance)*mInstance, "vkReleaseDisplayEXT");
 		vkReleaseDisplay(mPhysicalDevice, mDirectDisplay);
 	}
 	
@@ -119,32 +118,30 @@ Window::~Window() {
 	#endif
 }
 
-VkImage Window::AcquireNextImage() {
-	if (mSwapchain == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+vk::Image Window::AcquireNextImage() {
+	if (!mSwapchain) return nullptr;
 
-	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % (uint32_t)mImageAvailableSemaphores.size();
-	VkResult err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mBackBufferIndex);
-	if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
+	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
+	auto result = ((vk::Device)*mDevice).acquireNextImageKHR(mSwapchain, std::numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
+	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
 		CreateSwapchain(mDevice);
-		if (mSwapchain == VK_NULL_HANDLE) return VK_NULL_HANDLE; // swapchain failed to create (happens when window is minimized, etc)
-		err = vkAcquireNextImageKHR(*mDevice, mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], VK_NULL_HANDLE, &mBackBufferIndex);
+		if (!mSwapchain) return nullptr; // swapchain failed to create (happens when window is minimized, etc)
+		result = ((vk::Device)*mDevice).acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
 	}
-
-	if (mFrameData == nullptr) return VK_NULL_HANDLE;
-	return mFrameData[mBackBufferIndex].mSwapchainImage;
+	mBackBufferIndex = result.value;
+	return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].first;
 }
 
-void Window::Present(const vector<VkSemaphore>& waitSemaphores) {
-	if (mSwapchain == VK_NULL_HANDLE) return;
+void Window::Present(const vector<vk::Semaphore>& waitSemaphores) {
+	if (!mSwapchain) return;
 
-	VkPresentInfoKHR presentInfo = {};
-	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	vk::PresentInfoKHR presentInfo = {};
 	presentInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
 	presentInfo.pWaitSemaphores = waitSemaphores.data();
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &mSwapchain;
 	presentInfo.pImageIndices = &mBackBufferIndex;
-	vkQueuePresentKHR(mDevice->PresentQueue(), &presentInfo);
+	mDevice->PresentQueue().presentKHR(presentInfo);
 	mDevice->mFrameCount++;
 }
 
@@ -171,7 +168,7 @@ void Window::Resize(uint32_t w, uint32_t h) {
 	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	SetWindowPos(mHwnd, HWND_TOPMOST, x, y, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
 	#else
-	fprintf_color(COLOR_RED, stderr, "Error: Window resize not impleneted on linux\n");
+	fprintf_color(ConsoleColorBits::eRed, stderr, "Error: Window resize not impleneted on linux\n");
 	#endif
 }
 
@@ -236,37 +233,23 @@ void Window::Fullscreen(bool fs) {
 void Window::CreateSwapchain(::Device* device) {
 	if (mSwapchain) DestroySwapchain();
 	mDevice = device;
-	mDevice->SetObjectName(mSurface, mTitle + " Surface", VK_OBJECT_TYPE_SURFACE_KHR);
+	mDevice->SetObjectName(mSurface, "WindowSurface");
 	if (!mPhysicalDevice) mPhysicalDevice = mDevice->PhysicalDevice();
 	
 	#pragma region create swapchain
 	// query support
-	VkSurfaceCapabilitiesKHR capabilities;
-	vector<VkSurfaceFormatKHR> formats;
-	vector<VkPresentModeKHR> presentModes;
 
-	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(mPhysicalDevice, mSurface, &capabilities);
-
-	uint32_t formatCount;
-	vkGetPhysicalDeviceSurfaceFormatsKHR(mPhysicalDevice, mSurface, &formatCount, nullptr);
-	formats.resize(formatCount);
-	vkGetPhysicalDeviceSurfaceFormatsKHR(mDevice->PhysicalDevice(), mSurface, &formatCount, formats.data());
-	
-	uint32_t presentModeCount;
-	vkGetPhysicalDeviceSurfacePresentModesKHR(mPhysicalDevice, mSurface, &presentModeCount, nullptr);
-	presentModes.resize(presentModeCount);
-	vkGetPhysicalDeviceSurfacePresentModesKHR(mDevice->PhysicalDevice(), mSurface, &presentModeCount, presentModes.data());
+	vk::SurfaceCapabilitiesKHR capabilities = mPhysicalDevice.getSurfaceCapabilitiesKHR(mSurface);
+	vector<vk::SurfaceFormatKHR> formats = mPhysicalDevice.getSurfaceFormatsKHR(mSurface);
+	vector<vk::PresentModeKHR> presentModes = mPhysicalDevice.getSurfacePresentModesKHR(mSurface);
 
 	uint32_t graphicsFamily, presentFamily;
 	if (!FindQueueFamilies(mPhysicalDevice, mSurface, graphicsFamily, presentFamily)) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Error: Failed to find queue families\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Error: Failed to find queue families\n");
 		throw;
 	}
-	
-	VkBool32 sfcSupport;
-	vkGetPhysicalDeviceSurfaceSupportKHR(mPhysicalDevice, presentFamily, mSurface, &sfcSupport);
-	if (!sfcSupport) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Error: Surface not supported by device!");
+	if (!mPhysicalDevice.getSurfaceSupportKHR(presentFamily, mSurface)) {
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Error: Surface not supported by device!");
 		throw;
 	}
 
@@ -274,52 +257,43 @@ void Window::CreateSwapchain(::Device* device) {
 
 	// get the size of the swapchain
 	mSwapchainExtent = capabilities.currentExtent;
-	if (mSwapchainExtent.width == numeric_limits<uint32_t>::max() || mSwapchainExtent.height == numeric_limits<uint32_t>::max() || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
+	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mDevice->Limits().maxImageDimension2D || mSwapchainExtent.height > mDevice->Limits().maxImageDimension2D)
 		return;
 
-	// find a preferrable surface format 
 	mFormat = formats[0];
-	for (const auto& availableFormat : formats)
-		if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM) {
-			mFormat = availableFormat;
-			break;
-		}
-
-	// find the best present mode
-	VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-	if (!mVSync) {
-		for (const auto& availablePresentMode : presentModes)
-			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-				presentMode = availablePresentMode;
-				break;
-			} else if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
-				presentMode = availablePresentMode;
+	for (const vk::SurfaceFormatKHR& format : formats) {
+		if (format.format == vk::Format::eB8G8R8A8Unorm)
+			mFormat = format;
 	}
-	// find the preferrable number of back buffers
-	mImageCount = capabilities.minImageCount + 1;
 
-	VkSwapchainCreateInfoKHR createInfo = {};
-	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
+	for (const vk::PresentModeKHR& mode : presentModes) {
+		if (mode == vk::PresentModeKHR::eMailbox ||
+		   (!mVSync && mode == vk::PresentModeKHR::eImmediate))
+			presentMode = mode;
+	}
+
+	vk::SwapchainCreateInfoKHR createInfo = {};
 	createInfo.surface = mSurface;
-	createInfo.minImageCount = mImageCount;
+	createInfo.minImageCount = capabilities.minImageCount + 1;
 	createInfo.imageFormat = mFormat.format;
 	createInfo.imageColorSpace = mFormat.colorSpace;
 	createInfo.imageExtent = mSwapchainExtent;
 	createInfo.imageArrayLayers = 1;
-	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
 	if (graphicsFamily != presentFamily) {
-		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
 		createInfo.queueFamilyIndexCount = 2;
 		createInfo.pQueueFamilyIndices = queueFamilyIndices;
 	} else
-		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	createInfo.preTransform = capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : capabilities.currentTransform;
-	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	std::vector<VkCompositeAlphaFlagBitsKHR> compositeAlphaFlags = {
-		VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-		VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
-		VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
-		VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+		createInfo.imageSharingMode = vk::SharingMode::eExclusive;
+	createInfo.preTransform = capabilities.supportedTransforms & vk::SurfaceTransformFlagBitsKHR::eIdentity ? vk::SurfaceTransformFlagBitsKHR::eIdentity : capabilities.currentTransform;
+	createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+	std::vector<vk::CompositeAlphaFlagBitsKHR> compositeAlphaFlags = {
+		vk::CompositeAlphaFlagBitsKHR::eOpaque,
+		vk::CompositeAlphaFlagBitsKHR::ePostMultiplied,
+		vk::CompositeAlphaFlagBitsKHR::ePostMultiplied,
+		vk::CompositeAlphaFlagBitsKHR::eInherit
 	};
 	for (auto& compositeAlphaFlag : compositeAlphaFlags) {
 		if (capabilities.supportedCompositeAlpha & compositeAlphaFlag) {
@@ -329,51 +303,40 @@ void Window::CreateSwapchain(::Device* device) {
 	}
 	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE;
-	ThrowIfFailed(vkCreateSwapchainKHR(*mDevice, &createInfo, nullptr, &mSwapchain), "vkCreateSwapchainKHR failed");
-	mDevice->SetObjectName(mSwapchain, mTitle + " Swapchain", VK_OBJECT_TYPE_SWAPCHAIN_KHR);
+	mSwapchain = ((vk::Device)*mDevice).createSwapchainKHR(createInfo);
+	mDevice->SetObjectName(mSwapchain, "WindowSwapchain");
 	#pragma endregion
 
 	// get the back buffers
-	vector<VkImage> images;
-	vkGetSwapchainImagesKHR(*mDevice, mSwapchain, &mImageCount, nullptr);
-	images.resize(mImageCount);
-	vkGetSwapchainImagesKHR(*mDevice, mSwapchain, &mImageCount, images.data());
-
-	mFrameData = new FrameData[mImageCount];
-
-	mImageAvailableSemaphores.resize(mImageCount);
+	vector<vk::Image> images = ((vk::Device)*mDevice).getSwapchainImagesKHR(mSwapchain);
+	mSwapchainImages.resize(images.size());
+	mImageAvailableSemaphores.resize(images.size());
+	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
-
 
 	CommandBuffer* commandBuffer = device->GetCommandBuffer();
 	
 	// create per-frame image views and semaphores
-	for (uint32_t i = 0; i < mImageCount; i++) {
-		mFrameData[i] = FrameData();
-		mFrameData[i].mSwapchainImage = images[i];
-		mDevice->SetObjectName(images[i], mTitle + " Image " + to_string(i), VK_OBJECT_TYPE_IMAGE);
+	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) {
+		mSwapchainImages[i].first = images[i];
+		mDevice->SetObjectName(mSwapchainImages[i].first, "SwapchainImage" + to_string(i));
 
-		commandBuffer->TransitionBarrier(mFrameData[i].mSwapchainImage, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		commandBuffer->TransitionBarrier(mSwapchainImages[i].first, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
 
-		VkImageViewCreateInfo createInfo = {};
-		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		createInfo.image = mFrameData[i].mSwapchainImage;
-		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		vk::ImageViewCreateInfo createInfo = {};
+		createInfo.image = mSwapchainImages[i].first;
+		createInfo.viewType = vk::ImageViewType::e2D;
 		createInfo.format = mFormat.format;
-		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		createInfo.subresourceRange.baseMipLevel = 0;
-		createInfo.subresourceRange.levelCount = 1;
-		createInfo.subresourceRange.baseArrayLayer = 0;
-		createInfo.subresourceRange.layerCount = 1;
-		ThrowIfFailed(vkCreateImageView(*mDevice, &createInfo, nullptr, &mFrameData[i].mSwapchainImageView), "vkCreateImageView failed for swapchain");
-		mDevice->SetObjectName(mFrameData[i].mSwapchainImageView, mTitle + " Image View " + to_string(i), VK_OBJECT_TYPE_IMAGE_VIEW);
+		createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+		createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+		createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+		createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+		createInfo.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+		mSwapchainImages[i].second = ((vk::Device)*mDevice).createImageView(createInfo);
+		mDevice->SetObjectName(mSwapchainImages[i].second, "SwapchainView" + to_string(i));
 		
 		mImageAvailableSemaphores[i] = new Semaphore(mDevice);
-		mDevice->SetObjectName(mImageAvailableSemaphores[i]->operator VkSemaphore(), mTitle + " Image Avaiable Semaphore " + to_string(i), VK_OBJECT_TYPE_SEMAPHORE);
+		mDevice->SetObjectName(mImageAvailableSemaphores[i]->operator vk::Semaphore(), "SwapchainImageAvaiableSemaphore" + to_string(i));
 	}
 	
 	device->Execute(commandBuffer);
@@ -383,16 +346,14 @@ void Window::CreateSwapchain(::Device* device) {
 void Window::DestroySwapchain() {
 	mDevice->Flush();
 
-	for (uint32_t i = 0; i < mImageCount; i++) {
-		if (mFrameData[i].mSwapchainImageView != VK_NULL_HANDLE)
-			vkDestroyImageView(*mDevice, mFrameData[i].mSwapchainImageView, nullptr);
-		mFrameData[i].mSwapchainImageView = VK_NULL_HANDLE;
+	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) {
+		if (mSwapchainImages[i].second) mDevice->Destroy(mSwapchainImages[i].second);
+		mSwapchainImages[i].second = nullptr;
 		delete mImageAvailableSemaphores[i];
 	}
 	mImageAvailableSemaphores.clear();
 
-	if (mSwapchain != VK_NULL_HANDLE)
-		vkDestroySwapchainKHR(*mDevice, mSwapchain, nullptr);
-	safe_delete_array(mFrameData);
-	mSwapchain = VK_NULL_HANDLE;
+	if (mSwapchain) mDevice->Destroy(mSwapchain);
+	mSwapchainImages.clear();
+	mSwapchain = nullptr;
 }

@@ -8,9 +8,6 @@
 [submodule "ThirdParty/OpenXR-SDK"]
 	path = ThirdParty/OpenXR-SDK
 	url = https://github.com/KhronosGroup/OpenXR-SDK
-[submodule "ThirdParty/openvr"]
-	path = ThirdParty/openvr
-	url = https://github.com/ValveSoftware/openvr
 [submodule "ThirdParty/SPIRV-Cross"]
 	path = ThirdParty/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross

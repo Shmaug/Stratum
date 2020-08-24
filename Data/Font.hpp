@@ -11,7 +11,7 @@ public:
 	inline float Ascent(float pixelHeight) const { return mAscent*pixelHeight/mEmSize; }
 	inline float Descent(float pixelHeight) const { return mDescent*pixelHeight/mEmSize; }
 	inline float LineSpace(float pixelHeight) const { return mLineGap*pixelHeight/mEmSize; }
-	STRATUM_API void GenerateGlyphs(std::vector<GlyphRect>& glyphs, AABB& bounds, const std::string& str, float pixelHeight, const float2& offset = 0, TextAnchor horizontalAnchor = TEXT_ANCHOR_MIN) const;
+	STRATUM_API void GenerateGlyphs(std::vector<GlyphRect>& glyphs, AABB& bounds, const std::string& str, float pixelHeight, const float2& offset = 0, TextAnchor horizontalAnchor = TextAnchor::eMin) const;
 	inline Texture* SDF() const { return mSDF; }
 
 private:

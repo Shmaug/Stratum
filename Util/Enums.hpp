@@ -1,72 +1,71 @@
 #pragma once
 
-enum AnimationExtrapolate {
-	EXTRAPOLATE_CONSTANT,
-	EXTRAPOLATE_LINEAR,
-	EXTRAPOLATE_CYCLE,
-	EXTRAPOLATE_CYCLE_OFFSET,
-	EXTRAPOLATE_BOUNCE,
-};
-enum AnimationTangent {
-	ANIMATION_TANGENT_MANUAL,
-	ANIMATION_TANGENT_FLAT,
-	ANIMATION_TANGENT_LINEAR,
-	ANIMATION_TANGENT_SMOOTH,
-	ANIMATION_TANGENT_STEP,
-};
+#include <vulkan/vulkan.hpp>
 
-enum ClearFlags {
-	CLEAR_NONE = 0,
-	CLEAR_DEPTH = 1,
-	CLEAR_COLOR = 2,
-	CLEAR_COLOR_DEPTH = 3,
-	CLEAR_SKYBOX = 7
+enum class AnimationExtrapolateMode {
+	eConstant,
+	eLinear,
+	eCycle,
+	eCycleOffset,
+	eBounce,
+};
+enum class AnimationTangentMode {
+	eManual,
+	eFlat,
+	eLinear,
+	eSmooth,
+	eStep,
 };
 
-enum CommandBufferState {
-	CMDBUF_STATE_RECORDING,
-	CMDBUF_STATE_PENDING,
-	CMDBUF_STATE_DONE
+enum class ClearFlagBits {
+	eNone = 0,
+	eDepth = 1,
+	eColor  = 2,
+	eColorDepth = eColor | eDepth,
+	eSkybox = 4 | eColorDepth
+};
+using ClearFlags = vk::Flags<ClearFlagBits>;
+
+enum class CommandBufferState {
+	eRecording,
+	ePending,
+	eDone
 };
 
-enum ConsoleColor {
-	COLOR_RED,
-	COLOR_GREEN,
-	COLOR_BLUE,
-	COLOR_YELLOW,
-	COLOR_CYAN,
-	COLOR_MAGENTA,
+enum class ConsoleColorBits {
+	eWhite    = 0,
+	eRed   		= 1,
+	eBlue  		= 2,
+	eGreen 		= 4,
+	eYellow   = eRed | eGreen,
+	eCyan			= eGreen | eBlue,
+	eMagenta  = eRed | eBlue,
+	eBold = 8
+};
+using ConsoleColor = vk::Flags<ConsoleColorBits>;
 
-	COLOR_RED_BOLD,
-	COLOR_GREEN_BOLD,
-	COLOR_BLUE_BOLD,
-	COLOR_YELLOW_BOLD,
-	COLOR_CYAN_BOLD,
-	COLOR_MAGENTA_BOLD
+enum class LayoutAxis : uint32_t {
+	eHorizontal = 0,
+	eVertical = 1
 };
 
-enum LayoutAxis {
-	LAYOUT_HORIZONTAL = 0,
-	LAYOUT_VERTICAL = 1
+enum class StereoEye : uint32_t {
+	eNone = 0,
+	eLeft = 0,
+	eRight = 1
 };
 
-enum StereoEye {
-	EYE_NONE = 0,
-	EYE_LEFT = 0,
-	EYE_RIGHT = 1
+enum class StereoMode : uint32_t {
+	eNone = 0,
+	eVertical = 1,
+	eHorizontal = 2
 };
 
-enum StereoMode {
-	STEREO_NONE = 0,
-	STEREO_SBS_VERTICAL = 1,
-	STEREO_SBS_HORIZONTAL = 2
+enum class TextAnchor {
+	eMin, eMid, eMax
 };
 
-enum TextAnchor {
-	TEXT_ANCHOR_MIN, TEXT_ANCHOR_MID, TEXT_ANCHOR_MAX
-};
-
-enum TextureLoadFlags {
-	TEXTURE_LOAD_SRGB,
-	TEXTURE_LOAD_SIGNED
+enum class TextureLoadFlags {
+	eSrgb,
+	eSigned
 };

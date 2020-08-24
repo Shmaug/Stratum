@@ -3,7 +3,6 @@
 #include <Util/Util.hpp>
 
 #ifdef __linux
-#include <vulkan/vulkan.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_keysyms.h>
 #include <vulkan/vulkan_xcb.h>
@@ -15,46 +14,46 @@ namespace x11{
 #endif
 
 #include <Input/MouseKeyboardInput.hpp>
-#include <XR/XRRuntime.hpp>
+#include <openxr/openxr.h>
 
 class Instance {
-public:
-	static bool sDisableDebugCallback;
+private:
+	vk::Instance mInstance;
 
+public:
 	STRATUM_API Instance(int argc, char** argv);
 	STRATUM_API ~Instance();
 
 	// Poll events, advance swapchain. Returns false if the program should exit
 	STRATUM_API bool BeginFrame();
 	// Present swapchain
-	STRATUM_API void EndFrame(const std::vector<VkSemaphore>& waitSemaphores);
+	STRATUM_API void EndFrame(const std::vector<vk::Semaphore>& waitSemaphores);
 
 	inline const std::vector<std::string>& CommandLineArguments() const { return mCmdArguments; }
 	
 	inline ::Device* Device() const { return mDevice; }
 	inline ::Window* Window() const { return mWindow; }
-	inline const std::vector<XRRuntime*>& XRRuntimes() const { return mXRRuntimes; }
 
 	inline ::PluginManager* PluginManager() const { return mPluginManager; }
 	inline ::InputManager* InputManager() const { return mInputManager; }
-	inline operator VkInstance() const { return mInstance; }
+	inline operator vk::Instance() const { return mInstance; }
 
 private:
-	VkInstance mInstance;
-	::Device* mDevice;
-	::Window* mWindow;
-	::PluginManager* mPluginManager;
-	::InputManager* mInputManager;
-	MouseKeyboardInput* mMouseKeyboardInput;
-	std::vector<XRRuntime*> mXRRuntimes;
+	::Device* mDevice = nullptr;
+	::Window* mWindow = nullptr;
+	::PluginManager* mPluginManager = nullptr;
+	::InputManager* mInputManager = nullptr;
+	MouseKeyboardInput* mMouseKeyboardInput = nullptr;
+
+	XrInstance xrInstance = XR_NULL_HANDLE;
 
 	#ifdef ENABLE_DEBUG_LAYERS
-	VkDebugUtilsMessengerEXT mDebugMessenger;
+	vk::DebugUtilsMessengerEXT mDebugMessenger;
 	#endif
 
 	std::vector<std::string> mCmdArguments;
 
-	bool mDestroyPending;
+	bool mDestroyPending = false;
 	#ifdef __linux
 	STRATUM_API void ProcessEvent(xcb_generic_event_t* event);
 	STRATUM_API xcb_generic_event_t* PollEvent();
@@ -68,4 +67,7 @@ private:
 	#endif
 
 	STRATUM_API bool PollEvents();
+	
+public:
+	static bool sDisableDebugCallback;
 };

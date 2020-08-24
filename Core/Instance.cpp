@@ -3,8 +3,6 @@
 #include <Core/Window.hpp>
 #include <Core/PluginManager.hpp>
 #include <Input/InputManager.hpp>
-#include <XR/OpenVR.hpp>
-#include <XR/OpenXR.hpp>
 #include <Util/Profiler.hpp>
 #include <Util/Tokenizer.hpp>
 
@@ -45,54 +43,41 @@ bool PrintValidationError(const char* msg) {
 	if (sscanf(msg, "| MessageID = %llx | ", &messageId) == 0) return false;
 
 	const char* lblStart = strstr(msg, "[");
-	if (!lblStart) { fprintf_color(COLOR_RED, stderr, "%s\n", msg); return true; }
+	if (!lblStart) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", msg); return true; }
 	lblStart++;
 
 	while (lblStart) {
 		string prev(msg, lblStart - msg);
-		fprintf_color(COLOR_RED, stderr, "%s", prev.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", prev.c_str());
 
 		const char* lblEnd = strstr(lblStart, "]");
-		if (!lblEnd) { fprintf_color(COLOR_RED, stderr, "%s\n", lblStart); return true; }
+		if (!lblEnd) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", lblStart); return true; }
 
 		string lbl(lblStart, lblEnd - lblStart);
-		fprintf_color(COLOR_CYAN, stderr, "%s", lbl.c_str());
+		fprintf_color(ConsoleColorBits::eCyan, stderr, "%s", lbl.c_str());
 
 		msg = lblEnd;
 		lblStart = strstr(msg, "[");
 		lblStart++;
 	}
 
-	if (msg) fprintf_color(COLOR_RED, stderr, "%s\n", msg);
+	if (msg) fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", msg);
 	return true;
 }
-
-VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
+VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 	if (Instance::sDisableDebugCallback) return VK_FALSE;
 
+	ConsoleColorBits c = ConsoleColorBits::eWhite;
+
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-		//if (strncmp(pCallbackData->pMessage, "Validation Error", strlen("Validation Error")) != 0 || !PrintValidationError(pCallbackData->pMessage))
-			fprintf_color(COLOR_RED, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 		throw pCallbackData->pMessage;
-	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-		//if (strcmp("UNASSIGNED-CoreValidation-Pipeline-OutputNotConsumed", pCallbackData->pMessageIdName) == 0) return VK_FALSE;
-		fprintf_color(COLOR_YELLOW, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
-	} else
+	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+	else
 		printf("%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 
 	return VK_FALSE;
-}
-VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
-	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-	if (func != nullptr)
-		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
-	else
-		return VK_ERROR_EXTENSION_NOT_PRESENT;
-}
-void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator) {
-	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
-	if (func != nullptr)
-		func(instance, debugMessenger, pAllocator);
 }
 #endif
 
@@ -118,15 +103,17 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 }
 #endif
 
-Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(nullptr), mWindow(nullptr), mPluginManager(nullptr) {
+Instance::Instance(int argc, char** argv) {
 	gInstance = this;
+
+	vector<XrExtensionProperties> xrExtensions;
 
 	for (int i = 0; i < argc; i++)
 		mCmdArguments.push_back(argv[i]);
 
 	bool debugMessenger = true;
 	uint32_t deviceIndex = 0;
-	VkRect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
+	vk::Rect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
 	bool fullscreen = false;
 	for (int i = 0; i < argc; i++) {
 		if (mCmdArguments[i] == "--device") {
@@ -141,8 +128,20 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 		}
 		else if (mCmdArguments[i] == "--nodebug")
 			debugMessenger = false;
-		else if (mCmdArguments[i] == "--openxr") mXRRuntimes.push_back(new OpenXR());
-		else if (mCmdArguments[i] == "--openvr") mXRRuntimes.push_back(new OpenVR());
+		else if (mCmdArguments[i] == "--xr") {
+			uint32_t tmp;
+			uint32_t xrExtensionCount;
+			xrEnumerateInstanceExtensionProperties(nullptr, 0, &xrExtensionCount, nullptr);
+			if (xrExtensionCount) {
+				xrExtensions.resize(xrExtensionCount);
+				for (uint32_t i = 0; i < xrExtensionCount; i++)
+					xrExtensions[i].type = XR_TYPE_EXTENSION_PROPERTIES;
+				xrEnumerateInstanceExtensionProperties(nullptr, xrExtensionCount, &tmp, xrExtensions.data());
+				printf("Found %u OpenXR extensions.\n", xrExtensionCount);
+			} else {
+				printf_color(ConsoleColorBits::eYellow, "No OpenXR extensions found\n");
+			}
+		}
 	}
 
 	mPluginManager = new ::PluginManager();
@@ -152,7 +151,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 
 	vector<const char*> validationLayers;
 	#ifdef ENABLE_DEBUG_LAYERS
-	mDebugMessenger = VK_NULL_HANDLE;
+	mDebugMessenger = nullptr;
 	instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	validationLayers.push_back("VK_LAYER_KHRONOS_validation");
 	#endif
@@ -170,35 +169,27 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 		set<string> pluginExtensions = p->InstanceExtensionsRequired();
 		for (const string& e : pluginExtensions) instanceExtensions.insert(e);
 	}
-	for (XRRuntime* xr : mXRRuntimes) {
-		set<string> xrExtensions = xr->InstanceExtensionsRequired();
-		for (const string& e : xrExtensions) instanceExtensions.insert(e);
-	}
 
 	#pragma region Create Vulkan Instance
 	if (validationLayers.size()) {
-		uint32_t layerCount;
-		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-		vector<VkLayerProperties> availableLayers(layerCount);
-		vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+		vector<vk::LayerProperties> availableLayers = vk::enumerateInstanceLayerProperties();
 
 		set<string> availableLayerSet;
-		for (const VkLayerProperties& layer : availableLayers)
+		for (const vk::LayerProperties& layer : availableLayers)
 			availableLayerSet.insert(layer.layerName);
 
 		for (auto it = validationLayers.begin(); it != validationLayers.end();) {
 			if (availableLayerSet.count(*it)) it++;
 			else {
-				fprintf_color(COLOR_YELLOW, stderr, "Removing unsupported layer: %s\n", *it);
+				fprintf_color(ConsoleColorBits::eYellow, stderr, "Removing unsupported layer: %s\n", *it);
 				it = validationLayers.erase(it);
 			}
 		}
 	}
 
-	VkApplicationInfo appInfo = {};
+	vk::ApplicationInfo appInfo = {};
 	appInfo.pApplicationName = "StratumApplication";
 	appInfo.applicationVersion = VK_MAKE_VERSION(0,0,0);
-	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	appInfo.pEngineName = "Stratum";
 	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR,STRATUM_VERSION_MINOR, 0);
 	appInfo.apiVersion = VK_API_VERSION_1_2;
@@ -206,45 +197,44 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 	vector<const char*> instanceExts;
 	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
 
-	VkInstanceCreateInfo createInfo = {};
-	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	vk::InstanceCreateInfo createInfo = {};
 	createInfo.pApplicationInfo = &appInfo;
 	createInfo.enabledExtensionCount = (uint32_t)instanceExts.size();
 	createInfo.ppEnabledExtensionNames = instanceExts.data();
 	createInfo.enabledLayerCount = (uint32_t)validationLayers.size();
 	createInfo.ppEnabledLayerNames = validationLayers.data();
 	printf("Creating vulkan instance... ");
-	ThrowIfFailed(vkCreateInstance(&createInfo, nullptr, &mInstance), "vkCreateInstance failed");
-	printf_color(COLOR_GREEN, "%s", "Done.\n");
+	mInstance = vk::createInstance(createInfo);
+	printf_color(ConsoleColorBits::eGreen, "%s", "Done.\n");
 	#pragma endregion
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	if (debugMessenger) {
-		VkDebugUtilsMessengerCreateInfoEXT msgr = {};
-		msgr.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-		msgr.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-		msgr.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+		#ifdef ENABLE_DEBUG_LAYERS
+		auto vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(mInstance, "vkCreateDebugUtilsMessengerEXT");
+		#endif
+
+		vk::DebugUtilsMessengerCreateInfoEXT msgr = {};
+		msgr.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
+		msgr.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
 		msgr.pfnUserCallback = DebugCallback;
 		printf("Creating debug messenger... ");
-		VkResult result = CreateDebugUtilsMessengerEXT(mInstance, &msgr, nullptr, &mDebugMessenger);
-		if (result == VK_SUCCESS)
-			printf_color(COLOR_GREEN, "%s", "Success.\n");
+		vk::Result result = (vk::Result)vkCreateDebugUtilsMessengerEXT(mInstance, reinterpret_cast<VkDebugUtilsMessengerCreateInfoEXT*>(&msgr), nullptr, reinterpret_cast<VkDebugUtilsMessengerEXT*>(&mDebugMessenger));
+		if (result == vk::Result::eSuccess)
+			printf_color(ConsoleColorBits::eGreen, "%s", "Success.\n");
 		else {
-			printf_color(COLOR_RED, "%s", "Failed.\n");
-			mDebugMessenger = VK_NULL_HANDLE;
+			printf_color(ConsoleColorBits::eRed, "%s", "Failed.\n");
+			mDebugMessenger = nullptr;
 		}
 	}
 	#endif
 
-	uint32_t deviceCount;
-	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, nullptr), "vkEnumeratePhysicalDevices failed");
-	if (deviceIndex >= deviceCount) {
-		fprintf_color(COLOR_RED, stderr, "Device index out of bounds: %u\n", deviceIndex);
+	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
+	if (deviceIndex >= devices.size()) {
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Device index out of bounds: %u\n", deviceIndex);
 		throw;
 	}
-	vector<VkPhysicalDevice> devices(deviceCount);
-	ThrowIfFailed(vkEnumeratePhysicalDevices(mInstance, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
-	VkPhysicalDevice physicalDevice = devices[deviceIndex];
+	vk::PhysicalDevice physicalDevice = devices[deviceIndex];
 
 	set<string> deviceExtensions = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -256,10 +246,6 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 		set<string> pluginExtensions = p->DeviceExtensionsRequired(physicalDevice);
 		for (const string& e : pluginExtensions) deviceExtensions.insert(e);
 	}
-	for (XRRuntime* xr : mXRRuntimes) {
-		set<string> xrExtensions = xr->DeviceExtensionsRequired(physicalDevice);
-		for (const string& e : xrExtensions) deviceExtensions.insert(e);
-	}
 
 	mMouseKeyboardInput = new MouseKeyboardInput();
 
@@ -267,7 +253,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 	// create xcb connection
 	mXCBConnection = xcb_connect(nullptr, nullptr);
 	if (int err = xcb_connection_has_error(mXCBConnection)){
-		fprintf_color(COLOR_RED, stderr, "Failed to connect to xcb: %d\n", err);
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to connect to xcb: %d\n", err);
 		throw;
 	}
 	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
@@ -279,7 +265,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 		// find suitable physical device
 		uint32_t queueFamilyCount;
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-		vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
+		vector<vk::QueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
 
 		for (uint32_t q = 0; q < queueFamilyCount; q++){
@@ -291,7 +277,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 		if (mWindow) break;
 	}
 	if (!mWindow) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find a device with XCB presentation support!\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Failed to find a device with XCB presentation support!\n");
 		throw;
 	}
 	#else
@@ -313,7 +299,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 	windowClass.hIconSm = ::LoadIcon(hInstance, NULL); //  MAKEINTRESOURCE(APPLICATION_ICON));
 	HRESULT hr = ::RegisterClassExA(&windowClass);
 	if (FAILED(hr)) {
-		fprintf_color(COLOR_RED, stderr, "Failed to register window class\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to register window class\n");
 		throw;
 	}
 	// register raw input devices
@@ -329,7 +315,7 @@ Instance::Instance(int argc, char** argv) : mDestroyPending(false), mDevice(null
 	rID[1].dwFlags = 0;
 	rID[1].hwndTarget = NULL;
 	if (RegisterRawInputDevices(rID, 2, sizeof(RAWINPUTDEVICE)) == FALSE)
-		fprintf_color(COLOR_RED, stderr, "Failed to register raw input device(s)\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to register raw input device(s)\n");
 	mWindow = new ::Window(this, createInfo.pApplicationInfo->pApplicationName, mMouseKeyboardInput, windowPosition, hInstance);
 	#endif
 	mInputManager->RegisterInputDevice(mMouseKeyboardInput);
@@ -350,7 +336,6 @@ Instance::~Instance() {
 	UnregisterClassA("Stratum", GetModuleHandleA(NULL));
 	#endif
 
-	for (XRRuntime* xr : mXRRuntimes) safe_delete(xr);
 	safe_delete(mPluginManager);
 
 	mInputManager->UnregisterInputDevice(mMouseKeyboardInput);
@@ -361,7 +346,10 @@ Instance::~Instance() {
 	safe_delete(mDevice);
 
 	#ifdef ENABLE_DEBUG_LAYERS
-	if (mDebugMessenger != VK_NULL_HANDLE) DestroyDebugUtilsMessengerEXT(mInstance, mDebugMessenger, nullptr);
+	if (mDebugMessenger) {
+		auto vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(mInstance, "vkDestroyDebugUtilsMessengerEXT");
+		vkDestroyDebugUtilsMessengerEXT(mInstance, mDebugMessenger, nullptr);
+	}
 	#endif
 
 	vkDestroyInstance(mInstance, nullptr);
@@ -520,7 +508,7 @@ bool Instance::PollEvents() {
 			GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
 			uint8_t* lpb = new uint8_t[dwSize];
 			if (GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER)) != dwSize)
-				fprintf_color(COLOR_YELLOW, stderr, "Incorrect GetRawInputData size\n");
+				fprintf_color(ConsoleColorBits::eYellow, stderr, "Incorrect GetRawInputData size\n");
 			RAWINPUT* raw = (RAWINPUT*)lpb;
 
 			if (raw->header.dwType == RIM_TYPEMOUSE) {
@@ -619,14 +607,11 @@ bool Instance::BeginFrame() {
 	PROFILER_END;
 	
 	// TODO: replace mScene->mCameras[0]
-	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));
-	for (XRRuntime* xr : mXRRuntimes) xr->OnFrameStart();
-	
+	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));	
 	return true;
 }
-void Instance::EndFrame(const std::vector<VkSemaphore>& waitSemaphores) {
+void Instance::EndFrame(const std::vector<vk::Semaphore>& waitSemaphores) {
 	PROFILER_BEGIN("PrePresent");
-	for (XRRuntime* xr : mXRRuntimes) xr->OnFrameEnd();
 	for (EnginePlugin* p : mPluginManager->Plugins()) p->PrePresent();
 	PROFILER_END;
 

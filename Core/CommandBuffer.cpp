@@ -1,70 +1,55 @@
 #include <Core/CommandBuffer.hpp>
 #include <Core/Buffer.hpp>
-#include <Core/RenderPass.hpp>
 #include <Core/Framebuffer.hpp>
-#include <Data/Material.hpp>
 #include <Core/Pipeline.hpp>
-#include <Data/Texture.hpp>
-#include <Scene/Camera.hpp>
+#include <Core/RenderPass.hpp>
+#include <Scene/Scene.hpp>
 #include <Util/Profiler.hpp>
-#include <Util/Util.hpp>
 
 using namespace std;
 
-Semaphore::Semaphore(Device* device) : mDevice(device) {
-	VkSemaphoreCreateInfo info = {};
-	info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	ThrowIfFailed(vkCreateSemaphore(*mDevice, &info, nullptr, &mSemaphore), "vkCreateSemaphore failed");
-}
-Semaphore::~Semaphore() {
-	vkDestroySemaphore(*mDevice, mSemaphore, nullptr);
-}
+CommandBuffer::CommandBuffer( const string& name, ::Device* device, vk::CommandPool commandPool, vk::CommandBufferLevel level) : mDevice(device), mCommandPool(commandPool) {
+	#ifdef ENABLE_DEBUG_LAYERS
+	vkCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetInstanceProcAddr((vk::Instance)*mDevice->Instance(), "vkCmdBeginDebugUtilsLabelEXT");
+	vkCmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetInstanceProcAddr((vk::Instance)*mDevice->Instance(), "vkCmdEndDebugUtilsLabelEXT");
+	#endif
 
-
-CommandBuffer::CommandBuffer( const string& name, ::Device* device, VkCommandPool commandPool, VkCommandBufferLevel level) : mDevice(device), mCommandPool(commandPool) {
-	
-	VkCommandBufferAllocateInfo allocInfo = {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	vk::CommandBufferAllocateInfo allocInfo;
 	allocInfo.commandPool = mCommandPool;
 	allocInfo.level = level;
 	allocInfo.commandBufferCount = 1;
-	ThrowIfFailed(vkAllocateCommandBuffers(*mDevice, &allocInfo, &mCommandBuffer), "vkAllocateCommandBuffers failed");
-	mDevice->SetObjectName(mCommandBuffer, name, VK_OBJECT_TYPE_COMMAND_BUFFER);
+	mCommandBuffer = ((vk::Device)*mDevice).allocateCommandBuffers({ allocInfo })[0];
+	mDevice->SetObjectName(mCommandBuffer, name);
 
 	mDevice->mCommandBufferCount++;
 
-	VkFenceCreateInfo fenceInfo = {};
-	fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	ThrowIfFailed(vkCreateFence(*mDevice, &fenceInfo, nullptr, &mSignalFence), "vkCreateFence failed");
-	mDevice->SetObjectName(mSignalFence, name, VK_OBJECT_TYPE_FENCE);
+	mSignalFence = ((vk::Device)*mDevice).createFence({});
+	mDevice->SetObjectName(mSignalFence, name);
 	
 	Clear();
 
-	VkCommandBufferBeginInfo beginInfo = {};
-	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	ThrowIfFailed(vkBeginCommandBuffer(mCommandBuffer, &beginInfo), "vkBeginCommandBuffer failed");
-	mState = CMDBUF_STATE_RECORDING;
+	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+	mCommandBuffer.begin(&beginInfo);
+	mState = CommandBufferState::eRecording;
 }
 CommandBuffer::~CommandBuffer() {
-	if (State() == CMDBUF_STATE_PENDING)
-		fprintf_color(COLOR_YELLOW, stderr, "Warning: Destructing a CommandBuffer that is in CMDBUF_STATE_PENDING\n");
+	if (State() == CommandBufferState::ePending)
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Destructing a CommandBuffer that is in CommandBufferState::ePending\n");
 	Clear();
-	vkFreeCommandBuffers(*mDevice, mCommandPool, 1, &mCommandBuffer);
-	vkDestroyFence(*mDevice, mSignalFence, nullptr);
+	((vk::Device)*mDevice).freeCommandBuffers(mCommandPool, 1, &mCommandBuffer);
+	mDevice->Destroy(mSignalFence);
 	mDevice->mCommandBufferCount--;
 }
 
 #ifdef ENABLE_DEBUG_LAYERS
 void CommandBuffer::BeginLabel(const string& text, const float4& color) {
-	VkDebugUtilsLabelEXT label = {};
-	label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+	vk::DebugUtilsLabelEXT label = {};
 	memcpy(label.color, &color, sizeof(color));
 	label.pLabelName = text.c_str();
-	mDevice->CmdBeginDebugUtilsLabelEXT(mCommandBuffer, &label);
+	vkCmdBeginDebugUtilsLabelEXT(mCommandBuffer, reinterpret_cast<VkDebugUtilsLabelEXT*>(&label));
 }
 void CommandBuffer::EndLabel() {
-	mDevice->CmdEndDebugUtilsLabelEXT(mCommandBuffer);
+	vkCmdEndDebugUtilsLabelEXT(mCommandBuffer);
 }
 #endif
 
@@ -85,8 +70,8 @@ void CommandBuffer::Clear() {
 	mTriangleCount = 0;
 
 	mBoundComputePipeline = nullptr;
-	mComputePipeline = VK_NULL_HANDLE;
-	mComputePipelineLayout = VK_NULL_HANDLE;
+	mComputePipeline = nullptr;
+	mComputePipelineLayout = nullptr;
 
 	mCurrentFramebuffer = nullptr;
 	mCurrentRenderPass = nullptr;
@@ -94,8 +79,8 @@ void CommandBuffer::Clear() {
 	mCurrentShaderPass = "";
 	mBoundMaterial = nullptr;
 	mBoundGraphicsPipeline = nullptr;
-	mGraphicsPipeline = VK_NULL_HANDLE;
-	mGraphicsPipelineLayout = VK_NULL_HANDLE;
+	mGraphicsPipeline = nullptr;
+	mGraphicsPipelineLayout = nullptr;
 
 	mBoundGraphicsDescriptorSets.clear();
 	mBoundComputeDescriptorSets.clear();
@@ -104,49 +89,41 @@ void CommandBuffer::Clear() {
 	mBoundVertexBuffers.clear();
 }
 void CommandBuffer::Reset(const string& name) {
-	ThrowIfFailed(vkResetCommandBuffer(mCommandBuffer, 0), "vkResetCommandBuffer failed");
-	mDevice->SetObjectName(mCommandBuffer, name, VK_OBJECT_TYPE_COMMAND_BUFFER);
-	ThrowIfFailed(vkResetFences(*mDevice, 1, &mSignalFence), "vkResetFences failed");
-	mDevice->SetObjectName(mSignalFence, name, VK_OBJECT_TYPE_FENCE);
+	mCommandBuffer.reset({});
+	mDevice->SetObjectName(mCommandBuffer, name);
+	((vk::Device)*mDevice).resetFences({ mSignalFence });
+	mDevice->SetObjectName(mSignalFence, name);
 
-	VkCommandBufferBeginInfo beginInfo = {};
-	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	ThrowIfFailed(vkBeginCommandBuffer(mCommandBuffer, &beginInfo), "vkBeginCommandBuffer failed");
-	mState = CMDBUF_STATE_RECORDING;
+	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+	mState = CommandBufferState::eRecording;
 
 	Clear();
 }
 void CommandBuffer::Wait() {
-	if (mState == CMDBUF_STATE_PENDING) {
-		ThrowIfFailed(vkWaitForFences(*mDevice, 1, &mSignalFence, true, numeric_limits<uint64_t>::max()), "vkWaitForFences failed");
+	if (mState == CommandBufferState::ePending) {
+		((vk::Device)*mDevice).waitForFences({ mSignalFence }, true, numeric_limits<uint64_t>::max());
 		Clear();
 	}
 }
 CommandBufferState CommandBuffer::State() {
-	if (mState == CMDBUF_STATE_PENDING) {
-		VkResult status = vkGetFenceStatus(*mDevice, mSignalFence);
-		if (status == VK_SUCCESS) {
-			mState = CMDBUF_STATE_DONE;
-			return mState;
-		} 
-		else if (status == VK_NOT_READY) return mState;
-		else ThrowIfFailed(status, "vkGetFenceStatus failed");
+	if (mState == CommandBufferState::ePending) {
+		vk::Result status = ((vk::Device)*mDevice).getFenceStatus(mSignalFence);
+		if (status == vk::Result::eSuccess) mState = CommandBufferState::eDone;
 	}
 	return mState;
 }
 
-Buffer* CommandBuffer::GetBuffer(const std::string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+Buffer* CommandBuffer::GetBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	Buffer* b = mDevice->GetPooledBuffer(name, size, usage, memoryProperties);
 	mBuffers.push_back(b);
 	return b;
 }
-DescriptorSet* CommandBuffer::GetDescriptorSet(const std::string& name, VkDescriptorSetLayout layout) {
+DescriptorSet* CommandBuffer::GetDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout) {
 	DescriptorSet* ds = mDevice->GetPooledDescriptorSet(name, layout);
 	mDescriptorSets.push_back(ds);
 	return ds;
 }
-Texture* CommandBuffer::GetTexture(const std::string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+Texture* CommandBuffer::GetTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	Texture* tex = mDevice->GetPooledTexture(name, extent, format, mipLevels, sampleCount, usage, memoryProperties);
 	mTextures.push_back(tex);
 	return tex;
@@ -158,18 +135,17 @@ void CommandBuffer::TrackResource(DescriptorSet* resource) { mDescriptorSets.pus
 void CommandBuffer::TrackResource(Framebuffer* resource) { mFramebuffers.push_back(resource); }
 void CommandBuffer::TrackResource(RenderPass* resource) { mRenderPasses.push_back(resource); }
 
-void CommandBuffer::Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkMemoryBarrier& barrier) {
-	vkCmdPipelineBarrier(mCommandBuffer, srcStage, dstStage, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+void CommandBuffer::Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier) {
+	mCommandBuffer.pipelineBarrier(srcStage, dstStage, vk::DependencyFlags(), { barrier }, {}, {});
 }
-void CommandBuffer::Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkBufferMemoryBarrier& barrier) {
-	vkCmdPipelineBarrier(mCommandBuffer, srcStage, dstStage, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+void CommandBuffer::Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& barrier) {
+	mCommandBuffer.pipelineBarrier(srcStage, dstStage, vk::DependencyFlags(), {}, { barrier }, {});
 }
-void CommandBuffer::Barrier(VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, const VkImageMemoryBarrier& barrier) {
-	vkCmdPipelineBarrier(mCommandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+void CommandBuffer::Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& barrier) {
+	mCommandBuffer.pipelineBarrier(srcStage, dstStage, vk::DependencyFlags(), {}, {}, { barrier });
 }
 void CommandBuffer::Barrier(Texture* texture) {
-	VkImageMemoryBarrier barrier = {};
-	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	vk::ImageMemoryBarrier barrier = {};
 	barrier.oldLayout = texture->mLastKnownLayout;
 	barrier.newLayout = texture->mLastKnownLayout;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -184,25 +160,24 @@ void CommandBuffer::Barrier(Texture* texture) {
 	barrier.subresourceRange.aspectMask = texture->mAspectFlags;
 	Barrier(texture->mLastKnownStageFlags, texture->mLastKnownStageFlags, barrier);
 }
-void CommandBuffer::TransitionBarrier(Texture* texture, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(Texture* texture, vk::ImageLayout newLayout) {
 	TransitionBarrier(texture, texture->mLastKnownStageFlags, GuessStage(newLayout), texture->mLastKnownLayout, newLayout);
 }
-void CommandBuffer::TransitionBarrier(Texture* texture, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(Texture* texture, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	TransitionBarrier(texture, GuessStage(oldLayout), GuessStage(newLayout), oldLayout, newLayout);
 }
-void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags dstStage, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(Texture* texture, vk::PipelineStageFlags dstStage, vk::ImageLayout newLayout) {
 	TransitionBarrier(texture, texture->mLastKnownStageFlags, dstStage, texture->mLastKnownLayout, newLayout);
 }
-void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(Texture* texture, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	if (oldLayout == newLayout) return;
-	if (newLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+	if (newLayout == vk::ImageLayout::eUndefined) {
 		texture->mLastKnownLayout = newLayout;
-		texture->mLastKnownStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		texture->mLastKnownAccessFlags = 0;
+		texture->mLastKnownStageFlags = vk::PipelineStageFlagBits::eTopOfPipe;
+		texture->mLastKnownAccessFlags = {};
 		return;
 	}
-	VkImageMemoryBarrier barrier = {};
-	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	vk::ImageMemoryBarrier barrier = {};
 	barrier.oldLayout = oldLayout;
 	barrier.newLayout = newLayout;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -220,13 +195,12 @@ void CommandBuffer::TransitionBarrier(Texture* texture, VkPipelineStageFlags src
 	texture->mLastKnownStageFlags = dstStage;
 	texture->mLastKnownAccessFlags = barrier.dstAccessMask;
 }
-void CommandBuffer::TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	TransitionBarrier(image, subresourceRange, GuessStage(oldLayout), GuessStage(newLayout), oldLayout, newLayout);
 }
-void CommandBuffer::TransitionBarrier(VkImage image, const VkImageSubresourceRange& subresourceRange, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage, VkImageLayout oldLayout, VkImageLayout newLayout) {
+void CommandBuffer::TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	if (oldLayout == newLayout) return;
-	VkImageMemoryBarrier barrier = {};
-	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	vk::ImageMemoryBarrier barrier = {};
 	barrier.oldLayout = oldLayout;
 	barrier.newLayout = newLayout;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -240,52 +214,52 @@ void CommandBuffer::TransitionBarrier(VkImage image, const VkImageSubresourceRan
 
 void CommandBuffer::BindDescriptorSet(DescriptorSet* descriptorSet, uint32_t set) {
 	descriptorSet->FlushWrites();
-	if (mGraphicsPipeline != VK_NULL_HANDLE) {
+	if (!mCurrentRenderPass) descriptorSet->TransitionTextures(this);
+	if (mGraphicsPipeline) {
 		if (mBoundGraphicsDescriptorSets.size() <= set) mBoundGraphicsDescriptorSets.resize(set + 1);
 		mBoundGraphicsDescriptorSets[set] = descriptorSet;
-		vkCmdBindDescriptorSets(mCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, mGraphicsPipelineLayout, set, 1, *descriptorSet, 0, nullptr);
-	} else if (mComputePipeline != VK_NULL_HANDLE) {
+		mCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mGraphicsPipelineLayout, set, { *descriptorSet }, {});
+	} else if (mComputePipeline) {
 		if (mBoundComputeDescriptorSets.size() <= set) mBoundComputeDescriptorSets.resize(set + 1);
 		mBoundComputeDescriptorSets[set] = descriptorSet;
-		vkCmdBindDescriptorSets(mCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, mComputePipelineLayout, set, 1, *descriptorSet, 0, nullptr);
+		mCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mComputePipelineLayout, set, { *descriptorSet }, {});
 	}
 }
 
-void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer, VkSubpassContents contents) {
+void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < renderPass->AttachmentCount(); i++)
 		TransitionBarrier(framebuffer->Attachment(renderPass->AttachmentName(i)), renderPass->Attachment(i).initialLayout);
 
 	// Assign clear values specified by the render pass
-	vector<VkClearValue> clearValues(renderPass->mAttachments.size());
+	vector<vk::ClearValue> clearValues(renderPass->mAttachments.size());
 	for (const auto& kp : renderPass->mSubpasses[0].mAttachments)
 		if (kp.second.mType == ATTACHMENT_DEPTH_STENCIL)
 			clearValues[renderPass->mAttachmentMap.at(kp.first)].depthStencil = { 1.0f, 0 };
 		else
-			clearValues[renderPass->mAttachmentMap.at(kp.first)].color = { 0.f, 0.f, 0.f, 0.f };
+			clearValues[renderPass->mAttachmentMap.at(kp.first)].color.setFloat32({ 0.f, 0.f, 0.f, 0.f });
 
-	VkRenderPassBeginInfo info = {};
-	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	vk::RenderPassBeginInfo info = {};
 	info.renderPass = *renderPass;
 	info.framebuffer = *framebuffer;
 	info.renderArea = { { 0, 0 }, framebuffer->Extent() };
 	info.clearValueCount = (uint32_t)clearValues.size();
 	info.pClearValues = clearValues.data();
-	vkCmdBeginRenderPass(mCommandBuffer, &info, contents);
+	mCommandBuffer.beginRenderPass(&info, contents);
 
 	mCurrentRenderPass = renderPass;
 	mCurrentFramebuffer = framebuffer;
 	mCurrentSubpassIndex = 0;
 	mCurrentShaderPass = renderPass->mSubpasses[0].mShaderPass;
 }
-void CommandBuffer::NextSubpass(VkSubpassContents contents) {
-	vkCmdNextSubpass(mCommandBuffer, contents);
+void CommandBuffer::NextSubpass(vk::SubpassContents contents) {
+	mCommandBuffer.nextSubpass(contents);
 	mCurrentSubpassIndex++;
 	mCurrentShaderPass = mCurrentRenderPass->mSubpasses[mCurrentSubpassIndex].mShaderPass;
 }
 void CommandBuffer::EndRenderPass() {
-	vkCmdEndRenderPass(mCommandBuffer);
+	mCommandBuffer.endRenderPass();
 
 	// Update tracked image layouts
 	for (uint32_t i = 0; i < mCurrentRenderPass->AttachmentCount(); i++){
@@ -301,23 +275,23 @@ void CommandBuffer::EndRenderPass() {
 	mCurrentSubpassIndex = -1;
 }
 
-void CommandBuffer::ClearAttachments(const vector<VkClearAttachment>& values) {
-	VkClearRect rect = {};
+void CommandBuffer::ClearAttachments(const vector<vk::ClearAttachment>& values) {
+	vk::ClearRect rect = {};
 	rect.layerCount = 1;
 	rect.rect = { {}, mCurrentFramebuffer->Extent() } ;
-	vkCmdClearAttachments(mCommandBuffer, (uint32_t)values.size(), values.data(), 1, &rect);
+	mCommandBuffer.clearAttachments((uint32_t)values.size(), values.data(), 1, &rect);
 }
 
 bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint32_t dataSize) {
 	if (mBoundGraphicsPipeline) {
 		if (mBoundGraphicsPipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
-		VkPushConstantRange range = mBoundGraphicsPipeline->mShaderVariant->mPushConstants.at(name);
-		vkCmdPushConstants(mCommandBuffer, mGraphicsPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+		vk::PushConstantRange range = mBoundGraphicsPipeline->mShaderVariant->mPushConstants.at(name);
+		mCommandBuffer.pushConstants(mGraphicsPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
 		return true;
 	} else if (mBoundComputePipeline) {
 		if (mBoundComputePipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
-		VkPushConstantRange range = mBoundComputePipeline->mShaderVariant->mPushConstants.at(name);
-		vkCmdPushConstants(mCommandBuffer, mComputePipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+		vk::PushConstantRange range = mBoundComputePipeline->mShaderVariant->mPushConstants.at(name);
+		mCommandBuffer.pushConstants(mComputePipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
 		return true;
 	}
 	return false;
@@ -325,25 +299,25 @@ bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint
 
 void CommandBuffer::BindPipeline(ComputePipeline* pipeline) {
 	if (pipeline->mPipeline == mComputePipeline) return;
-	vkCmdBindPipeline(mCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->mPipeline);
+	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->mPipeline);
 	mComputePipeline = pipeline->mPipeline;
 	mComputePipelineLayout = pipeline->mPipelineLayout;
 	mBoundComputePipeline = pipeline;
 	mBoundComputeDescriptorSets.clear();
 
-	mGraphicsPipeline = VK_NULL_HANDLE;
-	mGraphicsPipelineLayout = VK_NULL_HANDLE;
+	mGraphicsPipeline = nullptr;
+	mGraphicsPipelineLayout = nullptr;
 	mBoundGraphicsPipeline = nullptr;
 	mBoundMaterial = nullptr;
 	mBoundGraphicsDescriptorSets.clear();
 
 }
-void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* input, VkPrimitiveTopology topology, VkCullModeFlags cullMode, VkPolygonMode polyMode) {
-	VkPipeline vkpipeline = pipeline->GetPipeline(this, input, topology, cullMode, polyMode);
+void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* input, vk::PrimitiveTopology topology, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
+	vk::Pipeline vkpipeline = pipeline->GetPipeline(this, input, topology, cullModeOverride, polyModeOverride);
 	if (vkpipeline == mGraphicsPipeline) return;
-	vkCmdBindPipeline(mCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipeline);
-	mComputePipeline = VK_NULL_HANDLE;
-	mComputePipelineLayout = VK_NULL_HANDLE;
+	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vkpipeline);
+	mComputePipeline = nullptr;
+	mComputePipelineLayout = nullptr;
 	mBoundComputePipeline = nullptr;
 	mBoundComputeDescriptorSets.clear();
 
@@ -353,7 +327,7 @@ void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* 
 	mBoundMaterial = nullptr;
 	mBoundGraphicsDescriptorSets.clear();
 }
-bool CommandBuffer::BindMaterial(Material* material, const VertexInput* vertexInput, VkPrimitiveTopology topology) {
+bool CommandBuffer::BindMaterial(Material* material, const VertexInput* vertexInput, vk::PrimitiveTopology topology) {
 	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass());
 	if (!pipeline) return false;
 	BindPipeline(pipeline, vertexInput, topology, material->CullMode(), material->PolygonMode());
@@ -365,25 +339,27 @@ bool CommandBuffer::BindMaterial(Material* material, const VertexInput* vertexIn
 	return true;
 }
 
-void CommandBuffer::BindVertexBuffer(Buffer* buffer, uint32_t index, VkDeviceSize offset) {
+void CommandBuffer::BindVertexBuffer(Buffer* buffer, uint32_t index, vk::DeviceSize offset) {
 	if (mBoundVertexBuffers[index] == buffer) return;
-	VkBuffer buf = buffer == nullptr ? (VkBuffer)VK_NULL_HANDLE : (*buffer);
-	vkCmdBindVertexBuffers(mCommandBuffer, index, 1, &buf, &offset);
+	vk::Buffer buf = nullptr;
+	if (buffer) buf = *buffer;
+	mCommandBuffer.bindVertexBuffers(index, 1, &buf, &offset);
 	mBoundVertexBuffers[index] = buffer;
 }
-void CommandBuffer::BindIndexBuffer(Buffer* buffer, VkDeviceSize offset, VkIndexType indexType) {
+void CommandBuffer::BindIndexBuffer(Buffer* buffer, vk::DeviceSize offset, vk::IndexType indexType) {
 	if (mBoundIndexBuffer == buffer) return;
-	VkBuffer buf = buffer == nullptr ? (VkBuffer)VK_NULL_HANDLE : (*buffer);
-	vkCmdBindIndexBuffer(mCommandBuffer, buf, offset, indexType);
+	vk::Buffer buf = nullptr;
+	if (buffer) buf = *buffer;
+	mCommandBuffer.bindIndexBuffer(buf, offset, indexType);
 	mBoundIndexBuffer = buffer;
 }
 
 void CommandBuffer::Dispatch(const uint3& dim) {
-	vkCmdDispatch(mCommandBuffer, dim.x, dim.y, dim.z);
+	mCommandBuffer.dispatch(dim.x, dim.y, dim.z);
 }
 void CommandBuffer::DispatchAligned(const uint3& dim) {
 	if (!mBoundComputePipeline) {
-		fprintf_color(COLOR_RED, stderr, "Error: Calling DispatchAligned without any compute pipeline bound\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Error: Calling DispatchAligned without any compute pipeline bound\n");
 		throw;
 	}
 	Dispatch((dim + mBoundComputePipeline->mShaderVariant->mWorkgroupSize - 1) / mBoundComputePipeline->mShaderVariant->mWorkgroupSize);

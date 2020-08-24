@@ -46,24 +46,24 @@ struct AnimationKeyframe {
 	float mTime;
 	float mTangentIn;
 	float mTangentOut;
-	AnimationTangent mTangentModeIn;
-	AnimationTangent mTangentModeOut;
+	AnimationTangentMode mTangentModeIn;
+	AnimationTangentMode mTangentModeOut;
 };
 class AnimationChannel {
 public:
-	inline AnimationChannel() : mExtrapolateIn(EXTRAPOLATE_CONSTANT), mExtrapolateOut(EXTRAPOLATE_CONSTANT) {};
-	STRATUM_API AnimationChannel(const std::vector<AnimationKeyframe>& keyframes, AnimationExtrapolate in, AnimationExtrapolate out);
+	inline AnimationChannel() {};
+	STRATUM_API AnimationChannel(const std::vector<AnimationKeyframe>& keyframes, AnimationExtrapolateMode in, AnimationExtrapolateMode out);
 	STRATUM_API float Sample(float t) const;
 
-	inline AnimationExtrapolate ExtrapolateIn() const { return mExtrapolateIn; }
-	inline AnimationExtrapolate ExtrapolateOut() const { return mExtrapolateOut; }
+	inline AnimationExtrapolateMode ExtrapolateIn() const { return mExtrapolateIn; }
+	inline AnimationExtrapolateMode ExtrapolateOut() const { return mExtrapolateOut; }
 	inline uint32_t KeyframeCount() const { return (uint32_t)mKeyframes.size(); }
 	inline AnimationKeyframe Keyframe(uint32_t index) const { return mKeyframes[index]; }
 	inline float4 CurveCoefficient(uint32_t index) const { return mCoefficients[index]; }
 
 private:
-	AnimationExtrapolate mExtrapolateIn;
-	AnimationExtrapolate mExtrapolateOut;
+	AnimationExtrapolateMode mExtrapolateIn   = AnimationExtrapolateMode::eConstant;
+	AnimationExtrapolateMode mExtrapolateOut  = AnimationExtrapolateMode::eConstant;
 	std::vector<float4> mCoefficients;
 	std::vector<AnimationKeyframe> mKeyframes;
 };

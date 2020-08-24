@@ -1,9 +1,4 @@
 #include <Data/Mesh.hpp>
-
-#include <regex>
-#include <thread>
-#include <shared_mutex>
-
 #include <Scene/Bone.hpp>
 #include <Scene/TriangleBvh2.hpp>
 
@@ -29,25 +24,25 @@ const ::VertexInput StdVertex::VertexInput {
 		{
 			0, // location
 			0, // binding
-			VK_FORMAT_R32G32B32_SFLOAT, // format
+			vk::Format::eR32G32B32Sfloat, // format
 			offsetof(StdVertex, position) // offset
 		},
 		{
 			1, // location
 			0, // binding
-			VK_FORMAT_R32G32B32_SFLOAT, // format
+			vk::Format::eR32G32B32Sfloat, // format
 			offsetof(StdVertex, normal) // offset
 		},
 		{
 			2, // location
 			0, // binding
-			VK_FORMAT_R32G32B32A32_SFLOAT, // format
+			vk::Format::eR32G32B32A32Sfloat, // format
 			offsetof(StdVertex, tangent) // offset
 		},
 		{
 			3, // location
 			0, // binding
-			VK_FORMAT_R32G32_SFLOAT, // format
+			vk::Format::eR32G32Sfloat, // format
 			offsetof(StdVertex, uv) // offset
 		}
 	}
@@ -65,7 +60,7 @@ const ::VertexInput Float3VertexInput{
 		{
 			0, // location
 			0, // binding
-			VK_FORMAT_R32G32B32_SFLOAT, // format
+			vk::Format::eR32G32B32Sfloat, // format
 			0 // offset
 		}
 	}
@@ -156,13 +151,11 @@ inline Bone* AddBone(AnimationRig& rig, aiNode* node, const aiScene* scene, aiNo
 	return bone;
 }
 
-Mesh::Mesh(const string& name) : mName(name), mVertexInput(nullptr), mBvh(nullptr), mIndexCount(0), mVertexCount(0), mBaseVertex(0), mVertexSize(0), mBaseIndex(0), mIndexType(VK_INDEX_TYPE_UINT16) {}
-Mesh::Mesh(const string& name, ::Device* device, const string& filename, float scale)
-	: mName(name), mVertexInput(nullptr), mBvh(nullptr), mBaseVertex(0), mBaseIndex(0), mTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST) {
-
+Mesh::Mesh(const string& name) : mName(name) {}
+Mesh::Mesh(const string& name, ::Device* device, const string& filename, float scale) : mName(name) {
 	const aiScene* scene = aiImportFile(filename.c_str(), aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_FlipUVs | aiProcess_MakeLeftHanded);
 	if (!scene) {
-		fprintf_color(COLOR_RED, stderr, "Failed to open %s: %s\n", filename.c_str(), aiGetErrorString());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to open %s: %s\n", filename.c_str(), aiGetErrorString());
 		throw;
 	}
 	vector<StdVertex> vertices;
@@ -322,15 +315,15 @@ Mesh::Mesh(const string& name, ::Device* device, const string& filename, float s
 			}
 		}
 
-		mWeightBuffer = make_shared<Buffer>(mName + " Weights", device, vertexWeights.size() * sizeof(VertexWeight), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+		mWeightBuffer = make_shared<Buffer>(mName + " Weights", device, vertexWeights.size() * sizeof(VertexWeight), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}
 	
 	if (use32bit) {
 		mIndexCount = (uint32_t)indices32.size();
-		mIndexType = VK_INDEX_TYPE_UINT32;
+		mIndexType = vk::IndexType::eUint32;
 	} else {
 		mIndexCount = (uint32_t)indices16.size();
-		mIndexType = VK_INDEX_TYPE_UINT16;
+		mIndexType = vk::IndexType::eUint16;
 	}
 
 	aiReleaseImport(scene);
@@ -342,22 +335,22 @@ Mesh::Mesh(const string& name, ::Device* device, const string& filename, float s
 
 	mBvh = new TriangleBvh2();
 	if (use32bit)
-		mBvh->Build(vertices.data(), 0, vertexCount, sizeof(StdVertex), indices32.data(), (uint32_t)indices32.size(), VK_INDEX_TYPE_UINT32);
+		mBvh->Build(vertices.data(), 0, vertexCount, sizeof(StdVertex), indices32.data(), (uint32_t)indices32.size(), vk::IndexType::eUint32);
 	else
-		mBvh->Build(vertices.data(), 0, vertexCount, sizeof(StdVertex), indices16.data(), (uint32_t)indices16.size(), VK_INDEX_TYPE_UINT16);
+		mBvh->Build(vertices.data(), 0, vertexCount, sizeof(StdVertex), indices16.data(), (uint32_t)indices16.size(), vk::IndexType::eUint16);
 
 	if (!uniqueBones.size())
 		mWeightBuffer = nullptr;
-	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices.data(), sizeof(StdVertex) * vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices.data(), sizeof(StdVertex) * vertices.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
 	if (use32bit)
-		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices32.data(), sizeof(uint32_t) * indices32.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices32.data(), sizeof(uint32_t) * indices32.size(), vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc);
 	else
-		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices16.data(), sizeof(uint16_t) * indices16.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+		mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices16.data(), sizeof(uint16_t) * indices16.size(), vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc);
 
 	printf("Loaded %s / %d verts %d tris / %.2fx%.2fx%.2f\n", filename.c_str(), (int)vertices.size(), (int)(use32bit ? indices32.size() : indices16.size()) / 3, mx.x - mn.x, mx.y - mn.y, mx.z - mn.z);
 }
 Mesh::Mesh(const string& name, ::Device* device, const AABB& bounds, TriangleBvh2* bvh, shared_ptr<Buffer> vertexBuffer, shared_ptr<Buffer> indexBuffer,
-	uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount, const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology)
+	uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount, const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology)
 	: mName(name), mVertexInput(vertexInput), mBvh(bvh), mBaseIndex(baseIndex), mIndexCount(indexCount), mIndexType(indexType), mBaseVertex(baseVertex), mVertexCount(vertexCount), mBounds(bounds), mTopology(topology) {
 	
 	mVertexBuffer = vertexBuffer;
@@ -365,10 +358,10 @@ Mesh::Mesh(const string& name, ::Device* device, const AABB& bounds, TriangleBvh
 	mWeightBuffer = nullptr;
 	mVertexSize = 0;
 	for (const auto& a : vertexInput->mAttributes)
-		mVertexSize = max(mVertexSize, a.offset + FormatSize(a.format));
+		mVertexSize = max(mVertexSize, a.offset + ElementSize(a.format));
 }
 Mesh::Mesh(const string& name, ::Device* device, const AABB& bounds, TriangleBvh2* bvh, shared_ptr<Buffer> vertexBuffer, shared_ptr<Buffer> indexBuffer, shared_ptr<Buffer> weightBuffer,
-	uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount, const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology)
+	uint32_t baseVertex, uint32_t vertexCount, uint32_t baseIndex, uint32_t indexCount, const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology)
 	: mName(name), mVertexInput(vertexInput), mBvh(bvh), mBaseIndex(baseIndex), mIndexCount(indexCount), mIndexType(indexType), mBaseVertex(baseVertex), mVertexCount(vertexCount), mBounds(bounds), mTopology(topology) {
 
 	mVertexBuffer = vertexBuffer;
@@ -376,15 +369,15 @@ Mesh::Mesh(const string& name, ::Device* device, const AABB& bounds, TriangleBvh
 	mWeightBuffer = weightBuffer;
 	mVertexSize = 0;
 	for (const auto& a : vertexInput->mAttributes)
-		mVertexSize = max(mVertexSize, a.offset + FormatSize(a.format));
+		mVertexSize = max(mVertexSize, a.offset + ElementSize(a.format));
 }
-Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount, const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology)
+Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount, const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology)
 	: mName(name), mVertexInput(vertexInput), mBvh(nullptr), mIndexCount(indexCount), mIndexType(indexType), mVertexCount(vertexCount), mVertexSize(vertexSize), mBaseVertex(0), mBaseIndex(0), mTopology(topology) {
 	
 	float3 mn, mx;
 	for (uint32_t i = 0; i < indexCount; i++) {
 		uint32_t index;
-		if (mIndexType == VK_INDEX_TYPE_UINT32)
+		if (mIndexType == vk::IndexType::eUint32)
 			index = ((uint32_t*)indices)[i];
 		else
 			index = ((uint16_t*)indices)[i];
@@ -398,24 +391,24 @@ Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const voi
 		}
 	}
 
-	uint32_t indexSize = mIndexType == VK_INDEX_TYPE_UINT32 ? sizeof(uint32_t) : sizeof(uint16_t);
+	uint32_t indexSize = mIndexType == vk::IndexType::eUint32 ? sizeof(uint32_t) : sizeof(uint16_t);
 
-	if (mTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST) {
+	if (mTopology == vk::PrimitiveTopology::eTriangleList) {
 		mBvh = new TriangleBvh2();
 		mBvh->Build(vertices, 0, vertexCount, vertexSize, indices, indexCount, mIndexType);
 	}
 
 	mBounds = AABB(mn, mx);
-	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-	mIndexBuffer  = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
+	mIndexBuffer  = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
 }
-Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const VertexWeight* weights, const vector<pair<string, const void*>>&  shapeKeys, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount, const ::VertexInput* vertexInput, VkIndexType indexType, VkPrimitiveTopology topology)
-	: mName(name), mVertexInput(vertexInput), mBvh(nullptr), mIndexCount(indexCount), mIndexType(indexType), mVertexCount(vertexCount), mVertexSize(vertexSize), mBaseVertex(0), mBaseIndex(0), mTopology(topology) {
+Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const VertexWeight* weights, const vector<pair<string, const void*>>&  shapeKeys, const void* indices, uint32_t vertexCount, uint32_t vertexSize, uint32_t indexCount, const ::VertexInput* vertexInput, vk::IndexType indexType, vk::PrimitiveTopology topology)
+	: mName(name), mVertexInput(vertexInput),  mIndexCount(indexCount), mIndexType(indexType), mVertexCount(vertexCount), mVertexSize(vertexSize), mTopology(topology) {
 
 	float3 mn, mx;
 	for (uint32_t i = 0; i < indexCount; i++) {
 		uint32_t index;
-		if (mIndexType == VK_INDEX_TYPE_UINT32)
+		if (mIndexType == vk::IndexType::eUint32)
 			index = ((uint32_t*)indices)[i];
 		else
 			index = ((uint16_t*)indices)[i];
@@ -429,20 +422,20 @@ Mesh::Mesh(const string& name, ::Device* device, const void* vertices, const Ver
 		}
 	}
 
-	uint32_t indexSize = mIndexType == VK_INDEX_TYPE_UINT32 ? sizeof(uint32_t) : sizeof(uint16_t);
+	uint32_t indexSize = mIndexType == vk::IndexType::eUint32 ? sizeof(uint32_t) : sizeof(uint16_t);
 
-	if (mTopology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST) {
+	if (mTopology == vk::PrimitiveTopology::eTriangleList) {
 		mBvh = new TriangleBvh2();
 		mBvh->Build(vertices, 0, vertexCount, vertexSize, indices, indexCount, mIndexType);
 	}
 
 	mBounds = AABB(mn, mx);
-	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-	mWeightBuffer = make_shared<Buffer>(name + " Weight Buffer", device, weights, sizeof(VertexWeight) * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-	mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+	mVertexBuffer = make_shared<Buffer>(name + " Vertex Buffer", device, vertices, vertexSize * vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc);
+	mWeightBuffer = make_shared<Buffer>(name + " Weight Buffer", device, weights, sizeof(VertexWeight) * vertexCount, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc);
+	mIndexBuffer = make_shared<Buffer>(name + " Index Buffer", device, indices, indexSize * indexCount, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
 
 	for (auto i : shapeKeys)
-		mShapeKeys.emplace(i.first, make_shared<Buffer>(name + i.first, device, i.second, vertexSize * vertexCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
+		mShapeKeys.emplace(i.first, make_shared<Buffer>(name + i.first, device, i.second, vertexSize * vertexCount, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc));
 }
 
 Mesh* Mesh::CreatePlaneX(const string& name, Device* device, float s, float v) {
@@ -456,7 +449,7 @@ Mesh* Mesh::CreatePlaneX(const string& name, Device* device, float s, float v) {
 	const uint32_t indices[6]{
 		0,2,1,2,3,1
 	};
-	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, vk::IndexType::eUint32);
 }
 Mesh* Mesh::CreatePlaneY(const string& name, Device* device, float s, float v) {
 	float3 dpdu(2*s / v, 0, 0);
@@ -469,7 +462,7 @@ Mesh* Mesh::CreatePlaneY(const string& name, Device* device, float s, float v) {
 	const uint32_t indices[6]{
 		0,1,2,3,2,1
 	};
-	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, vk::IndexType::eUint32);
 }
 Mesh* Mesh::CreatePlaneZ(const string& name, Device* device, float s, float v) {
 	float3 dpdu(2*s / v, 0, 0);
@@ -482,7 +475,7 @@ Mesh* Mesh::CreatePlaneZ(const string& name, Device* device, float s, float v) {
 	const uint32_t indices[6]{
 		0,2,1,2,3,1
 	};
-	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+	return new Mesh(name, device, verts, indices, 4, sizeof(StdVertex), 6, &StdVertex::VertexInput, vk::IndexType::eUint32);
 }
 Mesh* Mesh::CreateCube(const string& name, Device* device, float r, float v) {
 	float dpdu = 2*r / v;
@@ -531,7 +524,7 @@ Mesh* Mesh::CreateCube(const string& name, Device* device, float r, float v) {
 		16, 18, 17, 18, 19, 17,
 		20, 22, 21, 22, 23, 21
 	};
-	return new Mesh(name, device, verts, indices, 24, sizeof(StdVertex), 36, &StdVertex::VertexInput, VK_INDEX_TYPE_UINT32);
+	return new Mesh(name, device, verts, indices, 24, sizeof(StdVertex), 36, &StdVertex::VertexInput, vk::IndexType::eUint32);
 }
 
 bool Mesh::Intersect(const Ray& ray, float* t, bool any) {

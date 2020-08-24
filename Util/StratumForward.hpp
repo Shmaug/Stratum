@@ -1,18 +1,3 @@
-// Data
-
-class Animation;
-class Asset;
-class AssetManager;
-class Font;
-class Material;
-class Mesh;
-class Pipeline;
-class PipelineVariant;
-class GraphicsPipeline;
-class ComputePipeline;
-class Texture;
-class Sampler;
-
 // Core
 
 class Buffer;
@@ -27,6 +12,21 @@ class PluginManager;
 class RenderPass;
 class Socket;
 class Window;
+
+// Data
+
+class Animation;
+class Asset;
+class AssetManager;
+class Font;
+class Material;
+class Mesh;
+class Pipeline;
+class PipelineVariant;
+class GraphicsPipeline;
+class ComputePipeline;
+class Texture;
+class Sampler;
 
 // Input
 

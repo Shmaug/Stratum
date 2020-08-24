@@ -1,31 +1,26 @@
 #pragma once
 
-#include <Util/Util.hpp>
-
-class Device;
-class Texture;
-class Buffer;
-class Sampler;
+#include "Core/Buffer.hpp"
 
 struct DescriptorSetEntry {
-
-	VkDescriptorType mType;
-	VkDeviceSize mArrayIndex;
-
-	variant_ptr<Buffer> mBufferValue;
-	VkDeviceSize mBufferOffset;
-	VkDeviceSize mBufferRange;
-
-	variant_ptr<Texture> mTextureValue;
-	VkImageView mImageView;
-	VkImageLayout mImageLayout;
-	
+	vk::DescriptorType mType = {};
+	vk::DeviceSize mArrayIndex = 0;
+	struct {
+		variant_ptr<Buffer> mBufferValue;
+		vk::DeviceSize mBufferOffset = 0;
+		vk::DeviceSize mBufferRange = 0;
+	};
+	struct {
+		variant_ptr<Texture> mTextureValue;
+		vk::ImageView mImageView;
+		vk::ImageLayout mImageLayout;
+	};
 	variant_ptr<Sampler> mSamplerValue;
 
-	void* mInlineUniformData;
-	size_t mInlineUniformDataSize;
+	void* mInlineUniformData = nullptr;
+	size_t mInlineUniformDataSize = 0;
 
-	STRATUM_API DescriptorSetEntry();
+	inline DescriptorSetEntry() {}
 	STRATUM_API DescriptorSetEntry(const DescriptorSetEntry& ds);
 	STRATUM_API ~DescriptorSetEntry();
 
@@ -36,40 +31,52 @@ struct DescriptorSetEntry {
 };
 
 class DescriptorSet {
+private:
+	vk::DescriptorSet mDescriptorSet;
+	
 public:
-	STRATUM_API DescriptorSet(const std::string& name, Device* device, VkDescriptorSetLayout layout);
+	STRATUM_API DescriptorSet(const std::string& name, Device* device, vk::DescriptorSetLayout layout);
 	STRATUM_API ~DescriptorSet();
 
+
 	STRATUM_API void CreateDescriptor(uint32_t binding, const DescriptorSetEntry& entry);
+
 
 	STRATUM_API void CreateInlineUniformBlock(void* data, size_t dataSize, uint32_t binding);
 	template<typename T>
 	inline void CreateInlineUniformBlock(const T& value, uint32_t binding) { CreateInlineUniformBlock((void*)&value, sizeof(T), binding); }
 
-	STRATUM_API void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
 	STRATUM_API void CreateUniformBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
-	STRATUM_API void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
+	STRATUM_API void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t binding, uint32_t arrayIndex = 0);
 	STRATUM_API void CreateStorageBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
 	STRATUM_API void CreateStorageTexelBufferDescriptor(const variant_ptr<Buffer>& buffer, uint32_t binding, uint32_t arrayIndex = 0);
 
-	STRATUM_API void CreateStorageTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL);	
-	STRATUM_API void CreateSampledTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-	STRATUM_API void CreateInputAttachmentDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, VkImageView view = VK_NULL_HANDLE, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	STRATUM_API void CreateStorageTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eGeneral, vk::ImageView view = nullptr);	
+	STRATUM_API void CreateSampledTextureDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageView view = nullptr);
+	STRATUM_API void CreateInputAttachmentDescriptor(const variant_ptr<Texture>& texture, uint32_t binding, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageView view = nullptr);
 	
 	STRATUM_API void CreateSamplerDescriptor(const variant_ptr<Sampler>& sampler, uint32_t binding, uint32_t arrayIndex = 0);
+	
+
+	STRATUM_API void CreateTextureDescriptor(const std::string& bindingName, const variant_ptr<Texture>& texture, PipelineVariant* pipeline, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eGeneral, vk::ImageView view = nullptr);
+	STRATUM_API void CreateBufferDescriptor(const std::string& bindingName, const variant_ptr<Buffer>& buffer, vk::DeviceSize offset, vk::DeviceSize range, PipelineVariant* pipeline, uint32_t arrayIndex = 0);
+	inline void CreateBufferDescriptor(const std::string& bindingName, const variant_ptr<Buffer>& buffer, PipelineVariant* pipeline, uint32_t arrayIndex = 0) { CreateBufferDescriptor(bindingName, buffer, 0, buffer->Size(), pipeline, arrayIndex); }
+	STRATUM_API void CreateSamplerDescriptor(const std::string& bindingName, const variant_ptr<Sampler>& sampler, PipelineVariant* pipeline, uint32_t arrayIndex = 0);
+
 
 	STRATUM_API void FlushWrites();
+	STRATUM_API void TransitionTextures(CommandBuffer* commandBuffer);
 
-	inline VkDescriptorSetLayout Layout() const { return mLayout; }
-	inline operator const VkDescriptorSet*() const { return &mDescriptorSet; }
-	inline operator VkDescriptorSet() const { return mDescriptorSet; }
+	inline vk::DescriptorSetLayout Layout() const { return mLayout; }
+	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }
+	inline operator vk::DescriptorSet() const { return mDescriptorSet; }
 
 private:
 	friend class Device;
+	Device* mDevice = nullptr;
+	vk::DescriptorSetLayout mLayout;
+	
 	std::unordered_map<uint64_t/*<binding,arrayIndex>*/, DescriptorSetEntry> mBoundDescriptors;
 	std::unordered_map<uint64_t/*<binding,arrayIndex>*/, DescriptorSetEntry> mPendingWrites;
-	
-	Device* mDevice;
-	VkDescriptorSet mDescriptorSet;
-	VkDescriptorSetLayout mLayout;
 };

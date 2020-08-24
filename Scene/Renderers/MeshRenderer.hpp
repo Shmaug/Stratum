@@ -1,8 +1,8 @@
 #pragma once
 
+#include <Scene/Renderers/Renderer.hpp>
 #include <Data/Material.hpp>
 #include <Data/Mesh.hpp>
-#include <Scene/Renderer.hpp>
 
 // Renders a mesh with a material
 // The scene will attempt to batch MeshRenderers that share the same mesh and material that have an 'Instances' parameter, and use instancing to render them all at once

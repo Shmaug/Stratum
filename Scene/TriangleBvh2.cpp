@@ -4,7 +4,7 @@
 
 using namespace std;
 
-void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, VkIndexType indexType) {
+void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType) {
 	mTriangles.clear();
 	mNodes.clear();
 
@@ -19,7 +19,7 @@ void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t ver
 	uint32_t* indices32 = (uint32_t*)indices;
 
 	for (uint32_t i = 0; i < indexCount; i += 3) {
-		uint3 tri = indexType == VK_INDEX_TYPE_UINT16 ?
+		uint3 tri = indexType == vk::IndexType::eUint16 ?
 			uint3(indices16[i], indices16[i+1], indices16[i+2]) :
 			uint3(indices32[i], indices32[i+1], indices32[i+2]);
 		mTriangles.push_back(tri);

@@ -3,23 +3,25 @@
 #pragma pack(push)
 #pragma pack(1)
 struct VolumeUniformBuffer {
+
 #else
 #define quaternion float4
 //#pragma inline_uniform_block VolumeUniforms
-[[vk::binding(8, 0)]] cbuffer VolumeUniforms : register(b0) {
+
+[[vk::binding(3, 0)]] cbuffer VolumeUniforms : register(b0) {
 #endif
 	quaternion VolumeRotation;
 	quaternion InvVolumeRotation;
 	float3 VolumeScale;
 	float Density;
 	float3 InvVolumeScale;
-	float StepSize;
+	uint MaskValue;
 	float3 VolumePosition;
 	uint FrameIndex;
 	float2 RemapRange;
 	float2 HueRange;
 	uint3 VolumeResolution;
-	uint MaskValue;
+	uint pad;
 }
 #ifdef __cplusplus
 ;
@@ -28,7 +30,25 @@ struct VolumeUniformBuffer {
 #else
 #undef quaternion
 
-#pragma static_sampler Sampler maxLod=0 addressMode=clampBorder borderColor=floatTransparentBlack
+// Is the mask colored?
+#pragma multi_compile MASK
+#pragma multi_compile SINGLE_CHANNEL
+#pragma multi_compile GRADIENT_TEXTURE
+
+#ifndef PI
+#define PI (3.1415926535897932)
+#endif
+#ifndef INV_PI
+#define INV_PI (1.0 / PI)
+#endif
+
+#ifdef SINGLE_CHANNEL
+[[vk::binding(0, 0)]] RWTexture3D<float> Volume : register(t0);
+#else
+[[vk::binding(0, 0)]] RWTexture3D<float4> Volume : register(t0);
+#endif
+[[vk::binding(1, 0)]] RWTexture3D<float4> Gradient : register(u2);
+[[vk::binding(2, 0)]] RWTexture3D<uint> RawMask : register(t1);
 
 float3 HuetoRGB(float hue) {
 	return saturate(float3(abs(hue * 6 - 3) - 1, 2 - abs(hue * 6 - 2), 2 - abs(hue * 6 - 4)));
@@ -54,15 +74,13 @@ float ChromaKey(float3 hsv, float3 key) {
 	return saturate(length(d) - 1);
 }
 
-float ThresholdDensity(float x) {
-	x = (x - RemapRange.x) / (RemapRange.y - RemapRange.x);
-	return saturate(x);// * saturate(x);
-}
-float4 ComputeColor(float4 c) {
-	#if defined(NON_BAKED_RGBA) || defined(NON_BAKED_R_COLORIZE) || defined(NON_BAKED_R)
+float4 SampleColor(uint3 index){
+	float4 c = Volume[index];
+
+	#ifndef BAKED
 	// non-baked volume, do processing
 
-	#ifdef NON_BAKED_R_COLORIZE
+	#ifdef COLORIZE
 	c.rgb = HSVtoRGB(float3(HueRange.x + c.a * (HueRange.y - HueRange.x), .5, 1));
 
 	#elif defined(NON_BAKED_RGBA)
@@ -71,12 +89,10 @@ float4 ComputeColor(float4 c) {
 	c.a *= ChromaKey(hsv, RGBtoHSV(float3(0.07059, 0.07843, 0.10589))) * saturate(4 * hsv.z);
 	#endif
 
-	c.a *= ThresholdDensity(c.a);
+	c.a *= saturate((c.a - RemapRange.x) / (RemapRange.y - RemapRange.x));
 	#endif
-	return c;
-}
-float4 ApplyMask(float4 c, uint3 index) {
-	#ifdef MASK_COLOR
+
+	#ifdef MASK
 	static const float3 maskColors[8] = {
 		float3(1.0, 0.1, 0.1),
 		float3(0.1, 1.0, 0.1),
@@ -93,36 +109,17 @@ float4 ApplyMask(float4 c, uint3 index) {
 	uint value = RawMask[index] & MaskValue;
 	if (value) c.rgb = maskColors[firstbitlow(value)];
 	#endif
-	return c;
-}
 
-float4 SampleColor(uint3 index){
-	float4 c = Volume[index];
-	c = ComputeColor(c);
-	c = ApplyMask(c, index);
 	return c;
 }
-float4 SampleColor(float3 uvw) {
-	float4 c = Volume.SampleLevel(Sampler, uvw, 0);
-	c = ComputeColor(c);
-	c = ApplyMask(c, clamp(uint3(uvw * VolumeResolution + 0.5), 0, VolumeResolution - 1));
-	return c;
-}
-float4 SampleColor(float3 uvw, int3 offset) {
-	float4 c = Volume.SampleLevel(Sampler, uvw, 0, offset);
-	c = ComputeColor(c);
-	c = ApplyMask(c, clamp(uint3(uvw * VolumeResolution + 0.5) + offset, 0, VolumeResolution - 1));
-	return c;
-}
-
-float3 SampleGradient(float3 uvw) {
+float3 SampleGradient(uint3 index) {
 	#ifdef GRADIENT_TEXTURE
-	return Gradient[clamp(uint3(uvw * VolumeResolution + 0.5), 0, VolumeResolution - 1)].xyz;
+	return Gradient[index].xyz;
 	#else
 	return float3(
-		SampleColor(uvw, int3(1, 0, 0)).a - SampleColor(uvw, int3(-1, 0, 0)).a,
-		SampleColor(uvw, int3(0, 1, 0)).a - SampleColor(uvw, int3(0, -1, 0)).a,
-		SampleColor(uvw, int3(0, 0, 1)).a - SampleColor(uvw, int3(0, 0, -1)).a);
+		SampleColor(index + int3(1, 0, 0)).a - SampleColor(index + int3(-1, 0, 0)).a,
+		SampleColor(index + int3(0, 1, 0)).a - SampleColor(index + int3(0, -1, 0)).a,
+		SampleColor(index + int3(0, 0, 1)).a - SampleColor(index + int3(0, 0, -1)).a);
 	#endif
 }
 #endif

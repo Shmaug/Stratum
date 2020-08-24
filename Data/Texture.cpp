@@ -11,14 +11,12 @@
 
 using namespace std;
 
-Sampler::Sampler(const string& name, Device* device, const VkSamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
-	ThrowIfFailed(vkCreateSampler(*mDevice, &samplerInfo, nullptr, &mSampler), "vkCreateSampler failed");
-	mDevice->SetObjectName(mSampler, mName, VK_OBJECT_TYPE_SAMPLER);
+Sampler::Sampler(const string& name, Device* device, const vk::SamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
+	mSampler = ((vk::Device)*mDevice).createSampler(samplerInfo);
+	mDevice->SetObjectName(mSampler, mName);
 }
-Sampler::Sampler(const string& name, Device* device, float maxLod, VkFilter filter, VkSamplerAddressMode addressMode, float maxAnisotropy)
-	: mName(name), mDevice(device) {
-	VkSamplerCreateInfo samplerInfo = {};
-	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+Sampler::Sampler(const string& name, Device* device, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : mName(name), mDevice(device) {
+	vk::SamplerCreateInfo samplerInfo = {};
 	samplerInfo.magFilter = filter;
 	samplerInfo.minFilter = filter;
 	samplerInfo.addressModeU = addressMode;
@@ -26,24 +24,24 @@ Sampler::Sampler(const string& name, Device* device, float maxLod, VkFilter filt
 	samplerInfo.addressModeW = addressMode;
 	samplerInfo.anisotropyEnable = maxAnisotropy > 0 ? VK_TRUE : VK_FALSE;
 	samplerInfo.maxAnisotropy = maxAnisotropy;
-	samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+	samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
 	samplerInfo.unnormalizedCoordinates = VK_FALSE;
 	samplerInfo.compareEnable = VK_FALSE;
-	samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-	samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerInfo.compareOp = vk::CompareOp::eAlways;
+	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
 	samplerInfo.minLod = 0;
 	samplerInfo.maxLod = (float)maxLod;
 	samplerInfo.mipLodBias = 0;
 
-	ThrowIfFailed(vkCreateSampler(*mDevice, &samplerInfo, nullptr, &mSampler), "vkCreateSampler failed");
-	mDevice->SetObjectName(mSampler, mName, VK_OBJECT_TYPE_SAMPLER);
+	mSampler = ((vk::Device)*mDevice).createSampler(samplerInfo);
+	mDevice->SetObjectName(mSampler, mName);
 }
 Sampler::~Sampler() {
-	vkDestroySampler(*mDevice, mSampler, nullptr);
+	mDevice->Destroy(mSampler);
 }
 
 
-uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, VkFormat& format) {
+uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
 	uint8_t* pixels = nullptr;
 	pixelSize = 0;
 	x, y, channels;
@@ -61,33 +59,32 @@ uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSiz
 		pixelSize = sizeof(uint8_t);
 	}
 	if (!pixels) {
-		fprintf_color(COLOR_RED, stderr, "Failed to load image: %s\n", filename.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load image: %s\n", filename.c_str());
 		throw;
 	}
 	if (desiredChannels > 0) channels = desiredChannels;
 
-	VkFormat formatMap[4][4] {
-		{ VK_FORMAT_R8_UNORM , VK_FORMAT_R8G8_UNORM , VK_FORMAT_R8G8B8_UNORM , VK_FORMAT_R8G8B8A8_UNORM },
-		{ VK_FORMAT_R16_UNORM , VK_FORMAT_R16G16_UNORM , VK_FORMAT_R16G16B16_UNORM , VK_FORMAT_R16G16B16A16_UNORM  },
-		{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
-		{ VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT },
+	vk::Format formatMap[4][4] {
+		{ vk::Format::eR8Unorm , vk::Format::eR8G8Unorm , vk::Format::eR8G8B8Unorm , vk::Format::eR8G8B8A8Unorm },
+		{ vk::Format::eR16Unorm , vk::Format::eR16G16Unorm , vk::Format::eR16G16B16Unorm , vk::Format::eR16G16B16A16Unorm  },
+		{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat, vk::Format::eR32G32B32A32Sfloat },
+		{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat, vk::Format::eR32G32B32A32Sfloat },
 	};
 
-	if (flags & TEXTURE_LOAD_SRGB) {
-		formatMap[0][0] = VK_FORMAT_R8_SRGB;
-		formatMap[0][1] = VK_FORMAT_R8G8_SRGB;
-		formatMap[0][2] = VK_FORMAT_R8G8B8_SRGB;
-		formatMap[0][3] = VK_FORMAT_R8G8B8A8_SRGB;
-	}
-	if (flags & TEXTURE_LOAD_SIGNED) {
-		formatMap[0][0] = VK_FORMAT_R8_SNORM;
-		formatMap[0][1] = VK_FORMAT_R8G8_SNORM;
-		formatMap[0][2] = VK_FORMAT_R8G8B8_SNORM;
-		formatMap[0][3] = VK_FORMAT_R8G8B8A8_SNORM;
-		formatMap[1][0] = VK_FORMAT_R16_SNORM;
-		formatMap[1][1] = VK_FORMAT_R16G16_SNORM;
-		formatMap[1][2] = VK_FORMAT_R16G16B16_SNORM;
-		formatMap[1][3] = VK_FORMAT_R16G16B16A16_SNORM;
+	if (flags == TextureLoadFlags::eSrgb) {
+		formatMap[0][0] = vk::Format::eR8Srgb;
+		formatMap[0][1] = vk::Format::eR8G8Srgb;
+		formatMap[0][2] = vk::Format::eR8G8B8Srgb;
+		formatMap[0][3] = vk::Format::eR8G8B8A8Srgb;
+	} else if (flags == TextureLoadFlags::eSigned) {
+		formatMap[0][0] = vk::Format::eR8Snorm;
+		formatMap[0][1] = vk::Format::eR8G8Snorm;
+		formatMap[0][2] = vk::Format::eR8G8B8Snorm;
+		formatMap[0][3] = vk::Format::eR8G8B8A8Snorm;
+		formatMap[1][0] = vk::Format::eR16Snorm;
+		formatMap[1][1] = vk::Format::eR16G16Snorm;
+		formatMap[1][2] = vk::Format::eR16G16B16Snorm;
+		formatMap[1][3] = vk::Format::eR16G16B16A16Snorm;
 	}
 
 	format = formatMap[pixelSize - 1][channels - 1];
@@ -96,7 +93,7 @@ uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSiz
 }
 
 
-Texture::Texture(const string& name, ::Device* device, const string& filename, TextureLoadFlags flags) : mName(name), mDevice(device), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(0) {
+Texture::Texture(const string& name, ::Device* device, const string& filename, TextureLoadFlags flags) : mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal) {
 	int32_t x, y, channels;
 	uint32_t size;
 	uint8_t* pixels = load(filename, flags, size, x, y, channels, mFormat);
@@ -104,13 +101,13 @@ Texture::Texture(const string& name, ::Device* device, const string& filename, T
 	mExtent = { (uint32_t)x, (uint32_t)y, 1 };
 	mArrayLayers = 1;
 	mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
-	mSampleCount = VK_SAMPLE_COUNT_1_BIT;
-	mUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	mMemoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	mSampleCount = vk::SampleCountFlagBits::e1;
+	mUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+	mMemoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal;
 
 	Create();
 
-	VkBufferImageCopy copyRegion = {};
+	vk::BufferImageCopy copyRegion = {};
 	copyRegion.bufferOffset = 0;
 	copyRegion.bufferRowLength = 0;
 	copyRegion.bufferImageHeight = 0;
@@ -121,14 +118,14 @@ Texture::Texture(const string& name, ::Device* device, const string& filename, T
 	copyRegion.imageOffset = { 0, 0, 0 };
 	copyRegion.imageExtent = mExtent;
 
-	VkDeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
+	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
 
 	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	uploadBuffer->Upload(pixels, dataSize);
 
-	commandBuffer->TransitionBarrier(this, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	vkCmdCopyBufferToImage(*commandBuffer, *uploadBuffer, mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+	commandBuffer->TransitionBarrier(this, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+	((vk::CommandBuffer)*commandBuffer).copyBufferToImage(*uploadBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, 1, &copyRegion);
 	GenerateMipMaps(commandBuffer);
 	mDevice->Execute(commandBuffer);
 	stbi_image_free(pixels);
@@ -136,7 +133,7 @@ Texture::Texture(const string& name, ::Device* device, const string& filename, T
 	//printf("Loaded %s: %dx%d %s\n", filename.c_str(), mExtent.width, mExtent.height, FormatToString(mFormat));
 }
 Texture::Texture(const string& name, ::Device* device, const string& px, const string& nx, const string& py, const string& ny, const string& pz, const string& nz, TextureLoadFlags flags)
-	: mName(name), mDevice(device), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) {
+	: mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal), mCreateFlags(vk::ImageCreateFlagBits::eCubeCompatible) {
 	int32_t x, y, channels;
 	uint32_t size;
 	
@@ -152,13 +149,13 @@ Texture::Texture(const string& name, ::Device* device, const string& px, const s
 	mExtent = { (uint32_t)x, (uint32_t)y, 1 };
 	mArrayLayers = 6;
 	mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
-	mSampleCount = VK_SAMPLE_COUNT_1_BIT;
-	mUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	mMemoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	mSampleCount = vk::SampleCountFlagBits::e1;
+	mUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+	mMemoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal;
 
 	Create();
 
-	VkBufferImageCopy copyRegion = {};
+	vk::BufferImageCopy copyRegion = {};
 	copyRegion.bufferOffset = 0;
 	copyRegion.bufferRowLength = 0;
 	copyRegion.bufferImageHeight = 0;
@@ -169,15 +166,15 @@ Texture::Texture(const string& name, ::Device* device, const string& px, const s
 	copyRegion.imageOffset = { 0, 0, 0 };
 	copyRegion.imageExtent = { mExtent.width, mExtent.height, 1 };
 
-	VkDeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
+	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
 
 	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	for (uint32_t j = 0; j < mArrayLayers; j++)
 		memcpy((uint8_t*)uploadBuffer->MappedData() + j * dataSize, pixels[j], dataSize);
 
-	commandBuffer->TransitionBarrier(this, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	vkCmdCopyBufferToImage(*commandBuffer, *uploadBuffer, mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+	commandBuffer->TransitionBarrier(this, vk::ImageLayout::eTransferDstOptimal);
+	((vk::CommandBuffer)*commandBuffer).copyBufferToImage(*uploadBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, { copyRegion });
 	GenerateMipMaps(commandBuffer);
 	mDevice->Execute(commandBuffer);
 
@@ -188,23 +185,22 @@ Texture::Texture(const string& name, ::Device* device, const string& px, const s
 }
 
 // 3d extent / pixel data
-Texture::Texture(const string& name, ::Device* device, const void* data, VkDeviceSize dataSize, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples,
-		VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
-		: mName(name), mDevice(device), mExtent(extent), mArrayLayers(1), mMipLevels(mipLevels), mFormat(format), mSampleCount(numSamples), mUsage(usage), mMemoryProperties(properties), mMemory({}), mTiling(VK_IMAGE_TILING_OPTIMAL), mCreateFlags(0) {
+Texture::Texture(const string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
+		: mName(name), mDevice(device), mExtent(extent), mArrayLayers(1), mMipLevels(mipLevels), mFormat(format), mSampleCount(numSamples), mUsage(usage), mMemoryProperties(properties), mTiling(vk::ImageTiling::eOptimal) {
 	
 	if (mipLevels == 0) mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
 
 	if (dataSize) {
-		mUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-		if (mMipLevels > 1) mUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		mUsage |= vk::ImageUsageFlagBits::eTransferDst;
+		if (mMipLevels > 1) mUsage |= vk::ImageUsageFlagBits::eTransferSrc;
 		Create();
 
-		Buffer uploadBuffer(name + " Copy", mDevice, data, dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		Buffer uploadBuffer(name + " Copy", mDevice, data, dataSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
 		CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-		commandBuffer->TransitionBarrier(this, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		commandBuffer->TransitionBarrier(this, vk::ImageLayout::eTransferDstOptimal);
 
-		VkBufferImageCopy copyRegion = {};
+		vk::BufferImageCopy copyRegion = {};
 		copyRegion.bufferOffset = 0;
 		copyRegion.bufferRowLength = 0;
 		copyRegion.bufferImageHeight = 0;
@@ -214,7 +210,7 @@ Texture::Texture(const string& name, ::Device* device, const void* data, VkDevic
 		copyRegion.imageSubresource.layerCount = mArrayLayers;
 		copyRegion.imageOffset = { 0, 0, 0 };
 		copyRegion.imageExtent = mExtent;
-		vkCmdCopyBufferToImage(*commandBuffer, uploadBuffer, mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+		((vk::CommandBuffer)*commandBuffer).copyBufferToImage(uploadBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, 1, &copyRegion);
 		if (mMipLevels > 1) GenerateMipMaps(commandBuffer);
 		mDevice->Execute(commandBuffer);
 		commandBuffer->Wait();
@@ -223,24 +219,23 @@ Texture::Texture(const string& name, ::Device* device, const void* data, VkDevic
 }
 
 	// 2x extent
-Texture::Texture(const string& name, ::Device* device, const VkExtent2D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
+Texture::Texture(const string& name, ::Device* device, const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
 	: Texture(name, device, (const void*)nullptr, 0, { extent.width, extent.height, 1 }, format, mipLevels, numSamples, usage, properties) {}
 // 3d extent
-Texture::Texture(const string& name, ::Device* device, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
+Texture::Texture(const string& name, ::Device* device, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
 	: Texture(name, device, (const void*)nullptr, 0, extent, format, mipLevels, numSamples, usage, properties) {}
 // pixel data / 2d extent
-Texture::Texture(const string& name, ::Device* device, const void* data, VkDeviceSize dataSize, const VkExtent2D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
+Texture::Texture(const string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
 	: Texture(name, device, data, dataSize, { extent.width, extent.height, 1 }, format, mipLevels, numSamples, usage, properties) {}
 
 Texture::~Texture() {
 	for (auto& kp : mViews)
-		if (kp.second != VK_NULL_HANDLE)
-			vkDestroyImageView(*mDevice, kp.second, nullptr);
-	vkDestroyImage(*mDevice, mImage, nullptr);
+		if (kp.second) mDevice->Destroy(kp.second);
+	mDevice->Destroy(mImage);
 	mDevice->FreeMemory(mMemory);
 }
 
-VkImageView Texture::View(uint32_t mipLevel, uint32_t mipCount, uint32_t arrayLayer, uint32_t layerCount) {
+vk::ImageView Texture::View(uint32_t mipLevel, uint32_t mipCount, uint32_t arrayLayer, uint32_t layerCount) {
 	if (mipCount == 0) mipCount = mMipLevels;
 	if (layerCount == 0) layerCount = mArrayLayers;
 
@@ -251,10 +246,9 @@ VkImageView Texture::View(uint32_t mipLevel, uint32_t mipCount, uint32_t arrayLa
 
 	if (mViews.count(hash)) return mViews.at(hash);
 
-	VkImageViewCreateInfo viewInfo = {};
-	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	viewInfo.viewType = (mCreateFlags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) ? VK_IMAGE_VIEW_TYPE_CUBE : (mExtent.depth > 1 ? VK_IMAGE_VIEW_TYPE_3D : (mExtent.height > 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_1D));
-	if (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1) viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D; // special 1x1 case
+	vk::ImageViewCreateInfo viewInfo = {};
+	viewInfo.viewType = (mCreateFlags & vk::ImageCreateFlagBits::eCubeCompatible) ? vk::ImageViewType::eCube : (mExtent.depth > 1 ? vk::ImageViewType::e3D : (mExtent.height > 1 ? vk::ImageViewType::e2D : vk::ImageViewType::e1D));
+	if (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1) viewInfo.viewType = vk::ImageViewType::e2D; // special 1x1 case
 	viewInfo.image = mImage;
 	viewInfo.format = mFormat;
 	viewInfo.subresourceRange.aspectMask = mAspectFlags;
@@ -262,18 +256,16 @@ VkImageView Texture::View(uint32_t mipLevel, uint32_t mipCount, uint32_t arrayLa
 	viewInfo.subresourceRange.layerCount = layerCount;
 	viewInfo.subresourceRange.baseMipLevel = mipLevel;
 	viewInfo.subresourceRange.levelCount = mipCount;
-	VkImageView view;
-	ThrowIfFailed(vkCreateImageView(*mDevice, &viewInfo, nullptr, &view), "vkCreateImageView failed for " + mName + " View");
-	mDevice->SetObjectName(view, mName + " View", VK_OBJECT_TYPE_IMAGE_VIEW);
+	vk::ImageView view = ((vk::Device)*mDevice).createImageView(viewInfo);
+	mDevice->SetObjectName(view, mName + " View");
 	mViews.emplace(hash, view);
 	return view;
 }
 
 void Texture::Create() {
-	VkImageCreateInfo imageInfo = {};
-	imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	imageInfo.imageType = mExtent.depth > 1 ? VK_IMAGE_TYPE_3D : (mExtent.height > 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_1D);
-	if (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1) imageInfo.imageType = VK_IMAGE_TYPE_2D; // special 1x1 case
+	vk::ImageCreateInfo imageInfo = {};
+	imageInfo.imageType = mExtent.depth > 1 ? vk::ImageType::e3D : (mExtent.height > 1 ? vk::ImageType::e2D : vk::ImageType::e1D);
+	if (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1) imageInfo.imageType = vk::ImageType::e2D; // special 1x1 case
 	imageInfo.extent.width = mExtent.width;
 	imageInfo.extent.height = mExtent.height;
 	imageInfo.extent.depth = mExtent.depth;
@@ -281,47 +273,46 @@ void Texture::Create() {
 	imageInfo.arrayLayers = mArrayLayers;
 	imageInfo.format = mFormat;
 	imageInfo.tiling = mTiling;
-	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 	imageInfo.usage = mUsage;
 	imageInfo.samples = mSampleCount;
-	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	imageInfo.sharingMode = vk::SharingMode::eExclusive;
 	imageInfo.flags = mCreateFlags;
-	ThrowIfFailed(vkCreateImage(*mDevice, &imageInfo, nullptr, &mImage), "vkCreateImage failed for " + mName);
-	mDevice->SetObjectName(mImage, mName, VK_OBJECT_TYPE_IMAGE);
+	mImage = ((vk::Device)*mDevice).createImage(imageInfo);
+	mDevice->SetObjectName(mImage, mName);
 
-	VkMemoryRequirements memRequirements;
-	vkGetImageMemoryRequirements(*mDevice, mImage, &memRequirements);
+	vk::MemoryRequirements memRequirements = ((vk::Device)*mDevice).getImageMemoryRequirements(mImage);
 	mMemory = mDevice->AllocateMemory(memRequirements, mMemoryProperties, mName);
-	vkBindImageMemory(*mDevice, mImage, mMemory.mDeviceMemory, mMemory.mOffset);
+	((vk::Device)*mDevice).bindImageMemory(mImage, mMemory.mDeviceMemory, mMemory.mOffset);
 	
-	mAspectFlags = 0;
+	mAspectFlags = {};
 	switch (mFormat) {
 	default:
-		mAspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+		mAspectFlags = vk::ImageAspectFlagBits::eColor;
 		break;
-	case VK_FORMAT_D16_UNORM:
-	case VK_FORMAT_D32_SFLOAT:
-		mAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
+	case vk::Format::eD16Unorm:
+	case vk::Format::eD32Sfloat:
+		mAspectFlags = vk::ImageAspectFlagBits::eDepth;
 		break;
-	case VK_FORMAT_D16_UNORM_S8_UINT:
-	case VK_FORMAT_D24_UNORM_S8_UINT:
-	case VK_FORMAT_D32_SFLOAT_S8_UINT:
-		mAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	case vk::Format::eD16UnormS8Uint:
+	case vk::Format::eD24UnormS8Uint:
+	case vk::Format::eD32SfloatS8Uint:
+		mAspectFlags = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
 		break;
 	}
 
-	mLastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	mLastKnownStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	mLastKnownAccessFlags = 0;
+	mLastKnownLayout = vk::ImageLayout::eUndefined;
+	mLastKnownStageFlags = vk::PipelineStageFlagBits::eTopOfPipe;
+	mLastKnownAccessFlags = {};
 }
 
 void Texture::GenerateMipMaps(CommandBuffer* commandBuffer) {
-	// Transition mip 0 to VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-	commandBuffer->TransitionBarrier(*this, { mAspectFlags, 0, 1, 0, mArrayLayers }, mLastKnownStageFlags, VK_PIPELINE_STAGE_TRANSFER_BIT, mLastKnownLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	// Transition all other mips to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-	commandBuffer->TransitionBarrier(*this, { mAspectFlags, 1, mMipLevels - 1, 0, mArrayLayers }, mLastKnownStageFlags, VK_PIPELINE_STAGE_TRANSFER_BIT, mLastKnownLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	// Transition mip 0 to vk::ImageLayout::eTransferSrcOptimal
+	commandBuffer->TransitionBarrier(*this, { mAspectFlags, 0, 1, 0, mArrayLayers }, mLastKnownStageFlags, vk::PipelineStageFlagBits::eTransfer, mLastKnownLayout, vk::ImageLayout::eTransferSrcOptimal);
+	// Transition all other mips to vk::ImageLayout::eTransferDstOptimal
+	commandBuffer->TransitionBarrier(*this, { mAspectFlags, 1, mMipLevels - 1, 0, mArrayLayers }, mLastKnownStageFlags, vk::PipelineStageFlagBits::eTransfer, mLastKnownLayout, vk::ImageLayout::eTransferDstOptimal);
 
-	VkImageBlit blit = {};
+	vk::ImageBlit blit = {};
 	blit.srcOffsets[0] = { 0, 0, 0 };
 	blit.srcSubresource.baseArrayLayer = 0;
 	blit.srcSubresource.layerCount = mArrayLayers;
@@ -340,19 +331,18 @@ void Texture::GenerateMipMaps(CommandBuffer* commandBuffer) {
 		blit.dstOffsets[1].x = max(1, blit.srcOffsets[1].x / 2);
 		blit.dstOffsets[1].y = max(1, blit.srcOffsets[1].y / 2);
 		blit.dstOffsets[1].z = max(1, blit.srcOffsets[1].z / 2);
-		vkCmdBlitImage(*commandBuffer,
-			mImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			mImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1, &blit,
-			VK_FILTER_LINEAR);
+		((vk::CommandBuffer)*commandBuffer).blitImage(
+			mImage, vk::ImageLayout::eTransferSrcOptimal,
+			mImage, vk::ImageLayout::eTransferDstOptimal,
+			{ blit }, vk::Filter::eLinear);
 
 		blit.srcOffsets[1] = blit.dstOffsets[1];
 		
-		// Transition this mip level to VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-		commandBuffer->TransitionBarrier(*this, { mAspectFlags, i, 1, 0, mArrayLayers }, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		// Transition this mip level to vk::ImageLayout::eTransferSrcOptimal
+		commandBuffer->TransitionBarrier(*this, { mAspectFlags, i, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
 	}
 
-	mLastKnownLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-	mLastKnownStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
-	mLastKnownAccessFlags = VK_ACCESS_TRANSFER_READ_BIT;
+	mLastKnownLayout = vk::ImageLayout::eTransferSrcOptimal;
+	mLastKnownStageFlags = vk::PipelineStageFlagBits::eTransfer;
+	mLastKnownAccessFlags = vk::AccessFlagBits::eTransferRead;
 }

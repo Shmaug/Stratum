@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Data/Animation.hpp>
-#include <Scene/MeshRenderer.hpp>
+#include <Scene/Renderers/Renderer.hpp>
+#include <Scene/Bone.hpp>
 
 class SkinnedMeshRenderer : public Renderer {
 public:

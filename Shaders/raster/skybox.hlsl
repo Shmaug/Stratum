@@ -8,7 +8,7 @@
 
 #pragma multi_compile ENVIRONMENT_TEXTURE_HDR
 
-#pragma static_sampler Sampler maxAnisotropy=0 addressMode=clampEdge
+#pragma static_sampler Sampler maxAnisotropy=0 addressMode=clampEdge maxLod=0
 
 #include <include/shadercompat.h>
 #include <include/math.hlsli>

@@ -8,7 +8,7 @@
 using namespace std;
 
 Material::Material(const string& name, ::Pipeline* pipeline)
-	: mName(name), mPipeline(pipeline), mDevice(pipeline->Device()), mCullMode(VK_CULL_MODE_FLAG_BITS_MAX_ENUM), mPolygonMode(VK_POLYGON_MODE_MAX_ENUM), mCachedDescriptorSet(nullptr), mDescriptorSetDirty(false) {
+	: mName(name), mPipeline(pipeline), mDevice(pipeline->Device()), mCullMode(nullptr), mPolygonMode(nullptr), mCachedDescriptorSet(nullptr), mDescriptorSetDirty(false) {
 	if (GraphicsPipeline* pipeline = mPipeline->GetGraphics("main/forward", mShaderKeywords)) CopyInputSignature(pipeline);
 }
 Material::~Material() {
@@ -34,45 +34,45 @@ void Material::CopyInputSignature(GraphicsPipeline* pipeline) {
 			mDescriptorParameters[kp.first].resize(kp.second.mBinding.descriptorCount);
 }
 
-void Material::SetUniformBuffer(const string& name, variant_ptr<Buffer> buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t arrayIndex) {
+void Material::SetUniformBuffer(const string& name, variant_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = vec[arrayIndex];
-	p.mType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	p.mType = vk::DescriptorType::eUniformBuffer;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferValue = buffer;
 	p.mBufferOffset = offset;
 	p.mBufferRange = range;
 	p.mTextureValue = nullptr;
-	p.mImageView = VK_NULL_HANDLE;
-	p.mImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	p.mImageView = nullptr;
+	p.mImageLayout = vk::ImageLayout::eUndefined;
 	p.mSamplerValue = nullptr;
 
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetStorageBuffer(const string& name, variant_ptr<Buffer> buffer, VkDeviceSize offset, VkDeviceSize range, uint32_t arrayIndex) {
+void Material::SetStorageBuffer(const string& name, variant_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
-	p.mType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	p.mType = vk::DescriptorType::eStorageBuffer;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferValue = buffer;
 	p.mBufferOffset = offset;
 	p.mBufferRange = range;
 	p.mTextureValue = nullptr;
-	p.mImageView = VK_NULL_HANDLE;
-	p.mImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	p.mImageView = nullptr;
+	p.mImageLayout = vk::ImageLayout::eUndefined;
 	p.mSamplerValue = nullptr;
 
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetSampledTexture(const string& name, variant_ptr<Texture> texture, uint32_t arrayIndex, VkImageLayout layout) {
+void Material::SetSampledTexture(const string& name, variant_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
-	p.mType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	p.mType = vk::DescriptorType::eSampledImage;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferOffset = 0;
 	p.mBufferRange = 0;
@@ -85,11 +85,11 @@ void Material::SetSampledTexture(const string& name, variant_ptr<Texture> textur
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetStorageTexture(const string& name, variant_ptr<Texture> texture, uint32_t arrayIndex, VkImageLayout layout) {
+void Material::SetStorageTexture(const string& name, variant_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
-	p.mType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	p.mType = vk::DescriptorType::eStorageImage;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferOffset = 0;
 	p.mBufferRange = 0;
@@ -105,27 +105,27 @@ void Material::SetSampler(const string& name, variant_ptr<Sampler> sampler, uint
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
-	p.mType = VK_DESCRIPTOR_TYPE_SAMPLER;
+	p.mType = vk::DescriptorType::eSampler;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferOffset = 0;
 	p.mBufferRange = 0;
 	p.mBufferValue = 0;
 	p.mTextureValue = nullptr;
-	p.mImageView = VK_NULL_HANDLE;
-	p.mImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	p.mImageView = nullptr;
+	p.mImageLayout = vk::ImageLayout::eUndefined;
 	p.mSamplerValue = sampler;
 
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
 
-void Material::SetPushParameter(const string& name, VkDeviceSize dataSize, const void* data) {
+void Material::SetPushParameter(const string& name, vk::DeviceSize dataSize, const void* data) {
 	char* dst = new char[dataSize];
 	memcpy(dst, data, dataSize);
 	mPushParameters[name] = make_pair(dataSize, (void*)dst);
 }
 
-bool Material::GetPushParameter(const string& name, VkDeviceSize dataSize, void* data) const {
+bool Material::GetPushParameter(const string& name, vk::DeviceSize dataSize, void* data) const {
 	if (!mPushParameters.count(name)) return false;
 	const auto& p = mPushParameters.at(name);
 	memcpy(data, p.second, min(dataSize, p.first));
@@ -135,7 +135,7 @@ bool Material::GetPushParameter(const string& name, VkDeviceSize dataSize, void*
 void Material::OnLateUpdate(CommandBuffer* commandBuffer) {
 	for (auto& kp : mDescriptorParameters)
 		for (auto& d : kp.second)
-			if (d.mType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || d.mType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || d.mType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+			if (d.mType == vk::DescriptorType::eStorageImage || d.mType == vk::DescriptorType::eSampledImage || d.mType == vk::DescriptorType::eCombinedImageSampler)
 				commandBuffer->TransitionBarrier(d.mTextureValue.get(), d.mImageLayout);
 }
 

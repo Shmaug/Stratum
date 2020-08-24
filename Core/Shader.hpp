@@ -2,17 +2,11 @@
 
 #include <Util/Util.hpp>
 
-struct DescriptorBinding {
-	VkDescriptorSetLayoutBinding mBinding;
-	uint32_t mSet;
-	std::vector<VkSampler> mImmutableSamplers;
-};
-
 struct SpirvModule {
 	std::string mEntryPoint;
-	VkShaderStageFlagBits mStage;
+	vk::ShaderStageFlagBits mStage;
 	std::vector<uint32_t> mSpirvBinary;
-	VkShaderModule mShaderModule;
+	vk::ShaderModule mShaderModule;
 
 	inline void Write(std::ostream& stream) const {
 		WriteString(stream, mEntryPoint);
@@ -25,34 +19,40 @@ struct SpirvModule {
 		ReadVector(stream, mSpirvBinary);
 	}
 };
+
+struct DescriptorBinding {
+	vk::DescriptorSetLayoutBinding mBinding;
+	uint32_t mSet;
+	std::vector<vk::Sampler> mImmutableSamplers;
+};
+
 struct ShaderVariant {
 	std::set<std::string> mKeywords;
 	std::unordered_map<std::string, DescriptorBinding> mDescriptorSetBindings;
-	std::unordered_map<std::string, VkPushConstantRange> mPushConstants;
-	std::unordered_map<std::string, VkSamplerCreateInfo> mImmutableSamplers;
+	std::unordered_map<std::string, vk::PushConstantRange> mPushConstants;
+	std::unordered_map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
 	std::vector<SpirvModule> mModules; // vs/ps or cs
 
 	// Graphics variant data
 
-	std::vector<VkPipelineColorBlendAttachmentState> mBlendStates;
+	std::vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
 	std::string mShaderPass;
-	VkPipelineDepthStencilStateCreateInfo mDepthStencilState;
-	VkCullModeFlags mCullMode;
-	VkPolygonMode mPolygonMode;
-	VkBool32 mSampleShading;
-	uint32_t mRenderQueue;
+	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState;
+	vk::CullModeFlags mCullMode = vk::CullModeFlagBits::eBack;
+	vk::PolygonMode mPolygonMode = vk::PolygonMode::eFill;
+	bool mSampleShading = false;
+	uint32_t mRenderQueue = 1000;
 
 	// Compute variant data
 
 	uint3 mWorkgroupSize;
 
-	inline ShaderVariant() : mCullMode(VK_CULL_MODE_BACK_BIT), mPolygonMode(VK_POLYGON_MODE_FILL), mSampleShading(VK_FALSE), mDepthStencilState({}), mRenderQueue(1000) {
-		mDepthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	inline ShaderVariant() {
 		mDepthStencilState.depthTestEnable = VK_TRUE;
 		mDepthStencilState.depthWriteEnable = VK_TRUE;
-		mDepthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		mDepthStencilState.depthCompareOp = vk::CompareOp::eLessOrEqual;
 		mDepthStencilState.front = mDepthStencilState.back;
-		mDepthStencilState.back.compareOp = VK_COMPARE_OP_ALWAYS;
+		mDepthStencilState.back.compareOp = vk::CompareOp::eAlways;
 	}
 		
 	inline void Write(std::ostream& stream) const {
@@ -116,7 +116,7 @@ struct ShaderVariant {
 		for (uint32_t i = 0; i < pushConstantCount; i++) {
 			std::string name;
 			ReadString(stream, name);
-			VkPushConstantRange value;
+			vk::PushConstantRange value;
 			ReadValue(stream, value);
 			mPushConstants.emplace(name, value);
 		}
@@ -126,7 +126,7 @@ struct ShaderVariant {
 		for (uint32_t i = 0; i < immutableSamplerCount; i++) {
 			std::string name;
 			ReadString(stream, name);
-			VkSamplerCreateInfo value;
+			vk::SamplerCreateInfo value;
 			ReadValue(stream, value);
 			mImmutableSamplers.emplace(name, value);
 		}

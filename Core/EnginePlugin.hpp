@@ -14,7 +14,7 @@ protected:
 	friend class Scene;
 
 	inline virtual std::set<std::string> InstanceExtensionsRequired() { return {}; };
-	inline virtual std::set<std::string> DeviceExtensionsRequired(VkPhysicalDevice device) { return {}; };
+	inline virtual std::set<std::string> DeviceExtensionsRequired(vk::PhysicalDevice device) { return {}; };
 
 	inline virtual bool OnSceneInit(Scene* scene) { return true; }
 	

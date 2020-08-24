@@ -15,11 +15,11 @@ public:
 	// Write the CameraData buffer to a location in memory
 	STRATUM_API virtual void WriteUniformBuffer(void* bufferData);
 	// Calls vkCmdSetViewport and vkCmdSetScissor
-	STRATUM_API virtual void SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye = EYE_NONE);
+	STRATUM_API virtual void SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye = StereoEye::eNone);
 
-	STRATUM_API virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = EYE_NONE);
-	STRATUM_API virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = EYE_NONE);
-	STRATUM_API virtual Ray ScreenToWorldRay(const float2& uv, StereoEye eye = EYE_NONE);
+	STRATUM_API virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = StereoEye::eNone);
+	STRATUM_API virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = StereoEye::eNone);
+	STRATUM_API virtual Ray ScreenToWorldRay(const float2& uv, StereoEye eye = StereoEye::eNone);
 	
 	STRATUM_API virtual bool RendersToSubpass(RenderPass* renderPass, uint32_t subpassIndex);
 
@@ -34,8 +34,8 @@ public:
 	inline virtual void Near(float n) { mNear = n; DirtyTransform(); }
 	inline virtual void Far(float f) { mFar = f;  DirtyTransform(); }
 	inline virtual void FieldOfView(float f) { mFieldOfView = f; DirtyTransform(); }
-	inline virtual void EyeOffset(const float3& translate, const quaternion& rotate, StereoEye eye = EYE_NONE) { mEyeOffsetTranslate[eye] = translate; mEyeOffsetRotate[eye] = rotate;  DirtyTransform(); }
-	inline virtual void Projection(const float4x4& projection, StereoEye eye = EYE_NONE) { mFieldOfView = 0; mOrthographic = false; mProjection[eye] = projection; DirtyTransform(); }
+	inline virtual void EyeOffset(const float3& translate, const quaternion& rotate, StereoEye eye = StereoEye::eNone) { mEyeOffsetTranslate[(uint32_t)eye] = translate; mEyeOffsetRotate[(uint32_t)eye] = rotate;  DirtyTransform(); }
+	inline virtual void Projection(const float4x4& projection, StereoEye eye = StereoEye::eNone) { mFieldOfView = 0; mOrthographic = false; mProjection[(uint32_t)eye] = projection; DirtyTransform(); }
 
 	// Getters
 
@@ -48,15 +48,15 @@ public:
 	inline virtual float Near() const { return mNear; }
 	inline virtual float Far() const { return mFar; }
 	inline virtual float FieldOfView() const { return mFieldOfView; }
-	inline virtual float3 EyeOffsetTranslate(StereoEye eye = EYE_NONE) const { return mEyeOffsetTranslate[eye]; }
-	inline virtual quaternion EyeOffsetRotate(StereoEye eye = EYE_NONE) const { return mEyeOffsetRotate[eye]; }
+	inline virtual float3 EyeOffsetTranslate(StereoEye eye = StereoEye::eNone) const { return mEyeOffsetTranslate[(uint32_t)eye]; }
+	inline virtual quaternion EyeOffsetRotate(StereoEye eye = StereoEye::eNone) const { return mEyeOffsetRotate[(uint32_t)eye]; }
 	// The view matrix is calculated without translation. To transform from world->view, one must apply: view * (worldPos - cameraPos)
-	inline virtual float4x4 View(StereoEye eye = EYE_NONE) { UpdateTransform(); return mView[eye]; }
-	inline virtual float4x4 InverseView(StereoEye eye = EYE_NONE) { UpdateTransform(); return mInvView[eye]; }
-	inline virtual float4x4 Projection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mProjection[eye]; }
-	inline virtual float4x4 InverseProjection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mInvProjection[eye]; }
-	inline virtual float4x4 ViewProjection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mViewProjection[eye]; }
-	inline virtual float4x4 InverseViewProjection(StereoEye eye = EYE_NONE) { UpdateTransform(); return mInvViewProjection[eye]; }
+	inline virtual float4x4 View(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mView[(uint32_t)eye]; }
+	inline virtual float4x4 InverseView(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mInvView[(uint32_t)eye]; }
+	inline virtual float4x4 Projection(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mProjection[(uint32_t)eye]; }
+	inline virtual float4x4 InverseProjection(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mInvProjection[(uint32_t)eye]; }
+	inline virtual float4x4 ViewProjection(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mViewProjection[(uint32_t)eye]; }
+	inline virtual float4x4 InverseViewProjection(StereoEye eye = StereoEye::eNone) { UpdateTransform(); return mInvViewProjection[(uint32_t)eye]; }
 	inline virtual const float4* Frustum() { UpdateTransform(); return mFrustum; }
 
 private:

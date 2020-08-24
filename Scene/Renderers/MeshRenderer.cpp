@@ -1,7 +1,4 @@
-#include <Scene/MeshRenderer.hpp>
-#include <Scene/Scene.hpp>
-#include <Scene/Camera.hpp>
-#include <Util/Profiler.hpp>
+#include <Scene/Renderers/MeshRenderer.hpp>
 
 #define INSTANCE_BATCH_SIZE 1024
 
@@ -31,7 +28,7 @@ bool MeshRenderer::TryCombineInstances(CommandBuffer* commandBuffer, Renderer* r
 
 	// renderer is combinable
 	if (!instanceBuffer) {
-		instanceBuffer = commandBuffer->GetBuffer(mName + " batch", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+		instanceBuffer = commandBuffer->GetBuffer(mName + " batch", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 		instanceCount = 0;
 	}
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
@@ -50,7 +47,7 @@ void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera,
 	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
 		commandBuffer->BindDescriptorSet(perCamera, PER_CAMERA);
 	
-	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT] != VK_NULL_HANDLE) {
+	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
 		DescriptorSet* perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
 		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING);
 		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
@@ -61,18 +58,18 @@ void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera,
 	commandBuffer->BindVertexBuffer(mesh->VertexBuffer().get(), 0, 0);
 	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
 	
-	camera->SetViewportScissor(commandBuffer, EYE_LEFT);
-	vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
+	camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
+	((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 	commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
-	if (camera->StereoMode() != STEREO_NONE) {
-		camera->SetViewportScissor(commandBuffer, EYE_RIGHT);
-		vkCmdDrawIndexed(*commandBuffer, mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
+	if (camera->StereoMode() != StereoMode::eNone) {
+		camera->SetViewportScissor(commandBuffer, StereoEye::eRight);
+		((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
 		commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
 	}
 }
 
 void MeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
 	buf->ObjectToWorld = ObjectToWorld();
 	buf->WorldToObject = WorldToObject();

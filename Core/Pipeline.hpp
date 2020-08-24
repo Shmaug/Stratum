@@ -2,32 +2,32 @@
 
 #include <Core/Instance.hpp>
 #include <Core/RenderPass.hpp>
-#include <ShaderCompiler/ShaderCompiler.hpp>
+#include <Core/Shader.hpp>
 
 class PipelineVariant {
 public:
 	ShaderVariant* mShaderVariant;
 
-	VkPipelineLayout mPipelineLayout;
-	std::vector<VkDescriptorSetLayout> mDescriptorSetLayouts;
+	vk::PipelineLayout mPipelineLayout;
+	std::vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
 
 	inline uint32_t GetDescriptorLocation(const std::string& descriptorName) const { return mShaderVariant->mDescriptorSetBindings.at(descriptorName).mBinding.binding; }
 	inline uint32_t GetDescriptorSet(const std::string& descriptorName) const { return mShaderVariant->mDescriptorSetBindings.at(descriptorName).mSet; }
 };
 class ComputePipeline : public PipelineVariant {
 public:
-	VkPipeline mPipeline;
+	vk::Pipeline mPipeline;
 };
 class GraphicsPipeline : public PipelineVariant {
 public:
 	std::string mName;
 	Device* mDevice;
-	std::unordered_map<PipelineInstance, VkPipeline> mPipelines;
+	std::unordered_map<PipelineInstance, vk::Pipeline> mPipelines;
 
-	STRATUM_API VkPipeline GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput,
-		VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-		VkCullModeFlags cullMode = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
-		VkPolygonMode polyMode = VK_POLYGON_MODE_MAX_ENUM);
+	STRATUM_API vk::Pipeline GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput,
+		vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList,
+		vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr,
+		vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
 };
 
 class Pipeline {

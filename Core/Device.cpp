@@ -16,7 +16,7 @@
 
 using namespace std;
 
-inline size_t HashTextureData(VkExtent3D extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount) {
+inline size_t HashTextureData(vk::Extent3D extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlags sampleCount) {
 	size_t value = 0;
 	hash_combine(value, extent.width);
 	hash_combine(value, extent.height);
@@ -29,15 +29,9 @@ inline size_t HashTextureData(VkExtent3D extent, VkFormat format, uint32_t mipLe
 inline size_t HashTextureData(const Texture* tex) { return HashTextureData(tex->Extent(), tex->Format(), tex->MipLevels(), tex->SampleCount()); }
 
 
-Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
+Device::Device(::Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
 	: mInstance(instance), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily),
 	mCommandBufferCount(0), mDescriptorSetCount(0), mMemoryAllocationCount(0), mMemoryUsage(0), mFrameCount(0) {
-
-	#ifdef ENABLE_DEBUG_LAYERS
-	SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(*instance, "vkSetDebugUtilsObjectNameEXT");
-	CmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetInstanceProcAddr(*instance, "vkCmdBeginDebugUtilsLabelEXT");
-	CmdEndDebugUtilsLabelEXT   = (PFN_vkCmdEndDebugUtilsLabelEXT)  vkGetInstanceProcAddr(*instance, "vkCmdEndDebugUtilsLabelEXT");
-	#endif
 
 	mPhysicalDevice = physicalDevice;
 	mMaxMSAASamples = GetMaxUsableSampleCount();
@@ -49,11 +43,10 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 
 	#pragma region get queue info
 	set<uint32_t> uniqueQueueFamilies{ mGraphicsQueueFamilyIndex, mPresentQueueFamilyIndex };
-	vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 	float queuePriority = 1.0f;
 	for (uint32_t queueFamily : uniqueQueueFamilies) {
-		VkDeviceQueueCreateInfo queueCreateInfo = {};
-		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		vk::DeviceQueueCreateInfo queueCreateInfo = {};
 		queueCreateInfo.queueFamilyIndex = queueFamily;
 		queueCreateInfo.queueCount = 1;
 		queueCreateInfo.pQueuePriorities = &queuePriority;
@@ -62,7 +55,7 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	#pragma endregion
 
 	#pragma region create logical device and queues
-	VkPhysicalDeviceFeatures deviceFeatures = {};
+	vk::PhysicalDeviceFeatures deviceFeatures = {};
 	deviceFeatures.fillModeNonSolid = VK_TRUE;
 	deviceFeatures.sparseBinding = VK_TRUE;
 	deviceFeatures.samplerAnisotropy = VK_TRUE;
@@ -72,14 +65,12 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	deviceFeatures.largePoints = VK_TRUE;
 	deviceFeatures.sampleRateShading = VK_TRUE;
 
-	VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures = {};
-	indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+	vk::PhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures = {};
 	indexingFeatures.pNext = nullptr;
 	indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
 	indexingFeatures.runtimeDescriptorArray = VK_TRUE;
 
-	VkDeviceCreateInfo createInfo = {};
-	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	vk::DeviceCreateInfo createInfo = {};
 	createInfo.queueCreateInfoCount = (uint32_t)queueCreateInfos.size();
 	createInfo.pQueueCreateInfos = queueCreateInfos.data();
 	createInfo.pEnabledFeatures = &deviceFeatures;
@@ -88,29 +79,29 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 	createInfo.enabledLayerCount = (uint32_t)validationLayers.size();
 	createInfo.ppEnabledLayerNames = validationLayers.data();
 	createInfo.pNext = &indexingFeatures;
-	ThrowIfFailed(vkCreateDevice(mPhysicalDevice, &createInfo, nullptr, &mDevice), "vkCreateDevice failed");
+	mDevice = mPhysicalDevice.createDevice(createInfo);
+	
+	mMemoryProperties = mPhysicalDevice.getMemoryProperties();
 
-	VkPhysicalDeviceProperties properties = {};
-	vkGetPhysicalDeviceProperties(mPhysicalDevice, &properties);
-	string name = "Device " + to_string(properties.deviceID) + ": " + properties.deviceName;
-	SetObjectName(mDevice, name, VK_OBJECT_TYPE_DEVICE);
+	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
+	string name = "Device " + to_string(properties.deviceID) + ": " + properties.deviceName.data();
+	SetObjectName(mDevice, name);
 	mLimits = properties.limits;
 
 	mGraphicsQueueIndex = 0;
 	mPresentQueueIndex = 0;
 
-	vkGetDeviceQueue(mDevice, mGraphicsQueueFamilyIndex, mGraphicsQueueIndex, &mGraphicsQueue);
-	vkGetDeviceQueue(mDevice, mPresentQueueFamilyIndex, mPresentQueueIndex, &mPresentQueue);
-	SetObjectName(mGraphicsQueue, name + " Graphics Queue", VK_OBJECT_TYPE_QUEUE);
-	SetObjectName(mPresentQueue, name + " Present Queue", VK_OBJECT_TYPE_QUEUE);
+	mDevice.getQueue(mGraphicsQueueFamilyIndex, mGraphicsQueueIndex, &mGraphicsQueue);
+	mDevice.getQueue(mPresentQueueFamilyIndex, mPresentQueueIndex, &mPresentQueue);
+	SetObjectName(mGraphicsQueue, name + " Graphics Queue");
+	SetObjectName(mPresentQueue, name + " Present Queue");
 	#pragma endregion
 
 	#pragma region PipelineCache and DesriptorPool
 	char* cacheData = nullptr;
 	ifstream cacheFile("./pcache", ios::binary | ios::ate);
 
-	VkPipelineCacheCreateInfo cacheInfo = {};
-	cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+	vk::PipelineCacheCreateInfo cacheInfo = {};
 	if (cacheFile.is_open()) {
 		size_t size = cacheFile.tellg();
 		cacheData = new char[size];
@@ -120,52 +111,48 @@ Device::Device(::Instance* instance, VkPhysicalDevice physicalDevice, uint32_t p
 		cacheInfo.pInitialData = cacheData;
 		cacheInfo.initialDataSize = size;
 	}
-	vkCreatePipelineCache(mDevice, &cacheInfo, nullptr, &mPipelineCache);
+	mDevice.createPipelineCache(&cacheInfo, nullptr, &mPipelineCache);
 	safe_delete_array(cacheData);
 	
-	VkDescriptorPoolSize type_count[5] {
-		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,			min(4096u, mLimits.maxDescriptorSetUniformBuffers) },
-		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,	min(4096u, mLimits.maxDescriptorSetSampledImages) },
-		{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,				min(4096u, mLimits.maxDescriptorSetSampledImages) },
-		{ VK_DESCRIPTOR_TYPE_SAMPLER,					min(4096u, mLimits.maxDescriptorSetSamplers) },
-		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,			min(4096u, mLimits.maxDescriptorSetStorageBuffers) },
+	vk::DescriptorPoolSize type_count[5] = {
+		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					min(4096u, mLimits.maxDescriptorSetUniformBuffers)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(4096u, mLimits.maxDescriptorSetSampledImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					min(4096u, mLimits.maxDescriptorSetSampledImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(4096u, mLimits.maxDescriptorSetSamplers)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(4096u, mLimits.maxDescriptorSetStorageBuffers))
 	};
 
-	VkDescriptorPoolCreateInfo poolInfo = {};
-	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	vk::DescriptorPoolCreateInfo poolInfo = {};
+	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+	poolInfo.maxSets = 8192;
 	poolInfo.poolSizeCount = 5;
 	poolInfo.pPoolSizes = type_count;
-	poolInfo.maxSets = 8192;
 
-	ThrowIfFailed(vkCreateDescriptorPool(mDevice, &poolInfo, nullptr, &mDescriptorPool), "vkCreateDescriptorPool failed");
-	SetObjectName(mDescriptorPool, name, VK_OBJECT_TYPE_DESCRIPTOR_POOL);
+	mDescriptorPool = mDevice.createDescriptorPool(poolInfo);
+	SetObjectName(mDescriptorPool, name);
 	#pragma endregion
-
-	vkGetPhysicalDeviceMemoryProperties(mPhysicalDevice, &mMemoryProperties);
 
 	mAssetManager = new ::AssetManager(this);
 	
-	vector<VkDescriptorSetLayoutBinding> bindings(6);
-	bindings[0] = { CAMERA_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	bindings[1] = { LIGHT_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	bindings[2] = { SHADOW_BUFFER_BINDING, 				VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	bindings[3] = { SHADOW_ATLAS_BINDING, 				VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	bindings[4] = { ENVIRONMENT_TEXTURE_BINDING, 	VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	bindings[5] = { SHADOW_SAMPLER_BINDING, 			VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
-	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	vector<vk::DescriptorSetLayoutBinding> bindings(6);
+	bindings[0] = { CAMERA_BUFFER_BINDING, 				vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr };
+	bindings[1] = { LIGHT_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr };
+	bindings[2] = { SHADOW_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
+	bindings[3] = { SHADOW_ATLAS_BINDING, 				vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
+	bindings[4] = { ENVIRONMENT_TEXTURE_BINDING, 	vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
+	bindings[5] = { SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
+	vk::DescriptorSetLayoutCreateInfo layoutInfo = {};
 	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
 	layoutInfo.pBindings = bindings.data(); 
-	vkCreateDescriptorSetLayout(mDevice, &layoutInfo, nullptr, &mCameraSetLayout);
-	SetObjectName(mCameraSetLayout, "PER_CAMERA DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+	mCameraSetLayout = mDevice.createDescriptorSetLayout(layoutInfo);
+	SetObjectName(mCameraSetLayout, "PER_CAMERA DescriptorSetLayout");
 
 	bindings.resize(1);
-	bindings[0] = { INSTANCE_BUFFER_BINDING, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr };
+	bindings[0] = { INSTANCE_BUFFER_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr };
 	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
 	layoutInfo.pBindings = bindings.data(); 
-	vkCreateDescriptorSetLayout(mDevice, &layoutInfo, nullptr, &mObjectSetLayout);
-	SetObjectName(mObjectSetLayout, "PER_OBJECT DescriptorSetLayout", VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+	mObjectSetLayout = mDevice.createDescriptorSetLayout(layoutInfo);
+	SetObjectName(mObjectSetLayout, "PER_OBJECT DescriptorSetLayout");
 }
 Device::~Device() {
 	Flush();
@@ -199,25 +186,25 @@ Device::~Device() {
 	for (auto kp : mMemoryAllocations)
 		for (uint32_t i = 0; i < kp.second.size(); i++) {
 			for (auto it = kp.second[i].mAllocations.begin(); it != kp.second[i].mAllocations.begin(); it++)
-				fprintf_color(COLOR_RED, stderr, "Device memory leak detected [%s]\n", it->mTag.c_str());
+				fprintf_color(ConsoleColorBits::eRed, stderr, "Device memory leak detected [%s]\n", it->mTag.c_str());
 			vkFreeMemory(mDevice, kp.second[i].mMemory, nullptr);
 		}
 
 	vkDestroyDevice(mDevice, nullptr);
 }
 
-bool Device::Allocation::SubAllocate(const VkMemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const string& tag) {
+bool Device::Allocation::SubAllocate(const vk::MemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const string& tag) {
 	if (mAvailable.empty()) return false;
 
-	VkDeviceSize blockSize = 0;
-	VkDeviceSize memLocation = 0;
-	VkDeviceSize memSize = 0;
+	vk::DeviceSize blockSize = 0;
+	vk::DeviceSize memLocation = 0;
+	vk::DeviceSize memSize = 0;
 
 	// find smallest block that can fit the allocation
 	auto block = mAvailable.end();
 	for (auto it = mAvailable.begin(); it != mAvailable.end(); it++) {
-		VkDeviceSize offset = it->first ? AlignUp(it->first, requirements.alignment) : 0;
-		VkDeviceSize blockEnd = AlignUp(offset + requirements.size, MEM_BLOCK_SIZE);
+		vk::DeviceSize offset = it->first ? AlignUp(it->first, requirements.alignment) : 0;
+		vk::DeviceSize blockEnd = AlignUp(offset + requirements.size, MEM_BLOCK_SIZE);
 
 		if (blockEnd > it->first + it->second) continue;
 
@@ -256,7 +243,7 @@ void Device::Allocation::Deallocate(const DeviceMemoryAllocation& allocation) {
 			break;
 		}
 
-	VkDeviceSize end = allocation.mOffset + allocation.mSize;
+	vk::DeviceSize end = allocation.mOffset + allocation.mSize;
 
 	auto firstAfter = mAvailable.end();
 	auto startBlock = mAvailable.end();
@@ -292,7 +279,7 @@ void Device::Allocation::Deallocate(const DeviceMemoryAllocation& allocation) {
 	}
 }
 
-DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requirements, VkMemoryPropertyFlags properties, const string& tag) {
+DeviceMemoryAllocation Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
 	lock_guard<mutex> lock(mMemoryMutex);
 
 	int32_t memoryType = -1;
@@ -303,7 +290,7 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 		}
 	}
 	if (memoryType == -1) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Failed to find suitable memory type!");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Failed to find suitable memory type!");
 		throw;
 	}
 
@@ -322,59 +309,37 @@ DeviceMemoryAllocation Device::AllocateMemory(const VkMemoryRequirements& requir
 	allocations.push_back({});
 	Allocation& allocation = allocations.back();
 	
-	VkMemoryAllocateInfo info = {};
-	info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	vk::MemoryAllocateInfo info = {};
 	info.memoryTypeIndex = memoryType;
 	info.allocationSize = max((uint64_t)MEM_MIN_ALLOC, AlignUp(requirements.size, MEM_BLOCK_SIZE));
-	if (VkResult err = vkAllocateMemory(mDevice, &info, nullptr, &allocation.mMemory)) {
-		VkDeviceSize deviceMemSize = 0;
-		for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
-			if (mMemoryProperties.memoryHeaps[i].flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
-				deviceMemSize += mMemoryProperties.memoryHeaps[i].size;
-
-		switch (err) {
-		case VK_ERROR_OUT_OF_HOST_MEMORY:
-			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_OUT_OF_HOST_MEMORY\n");
-			throw;
-		case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_OUT_OF_DEVICE_MEMORY (%.3f / %.3f)\n", (mMemoryUsage + info.allocationSize) / (1024.f * 1024.f), deviceMemSize / (1024.f * 1024.f));
-			throw;
-		case VK_ERROR_TOO_MANY_OBJECTS:
-			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_TOO_MANY_OBJECTS\n");
-			throw;
-		case VK_ERROR_INVALID_EXTERNAL_HANDLE:
-			fprintf_color(COLOR_RED, stderr, "vkAllocateMemory failed: VK_ERROR_INVALID_EXTERNAL_HANDLE\n");
-			throw;
-		default:
-			break;
-		}
-	}
+	allocation.mMemory = mDevice.allocateMemory(info);
+	
 	allocation.mSize = info.allocationSize;
-	allocation.mAvailable = { make_pair((VkDeviceSize)0, allocation.mSize) };
+	allocation.mAvailable = { make_pair((vk::DeviceSize)0, allocation.mSize) };
 	mMemoryAllocationCount++;
 
-	if (mMemoryProperties.memoryTypes[memoryType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+	if (mMemoryProperties.memoryTypes[memoryType].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)
 		mMemoryUsage += allocation.mSize;
 
-	if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-		vkMapMemory(mDevice, allocation.mMemory, 0, allocation.mSize, 0, &allocation.mMapped);
+	if (properties & vk::MemoryPropertyFlagBits::eHostVisible)
+		allocation.mMapped = mDevice.mapMemory(allocation.mMemory, 0, allocation.mSize);
 
 	if (!allocation.SubAllocate(requirements, alloc, tag)) {
-		fprintf_color(COLOR_RED, stderr, "%s", "Failed to allocate memory\n");
+		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Failed to allocate memory\n");
 		throw;
 	}
 
 	#ifdef PRINT_VK_ALLOCATIONS
 	if (info.allocationSize < 1024)
-		printf_color(COLOR_YELLOW, "Allocated %llu B of type %u\t-- ", info.allocationSize, info.memoryTypeIndex);
+		printf_color(ConsoleColorBits::eYellow, "Allocated %llu B of type %u\t-- ", info.allocationSize, info.memoryTypeIndex);
 	else if (info.allocationSize < 1024 * 1024)
-		printf_color(COLOR_YELLOW, "Allocated %.3f KiB of type %u\t-- ", info.allocationSize / 1024, info.memoryTypeIndex);
+		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f KiB of type %u\t-- ", info.allocationSize / 1024, info.memoryTypeIndex);
 	else if (info.allocationSize < 1024 * 1024 * 1024)
-		printf_color(COLOR_YELLOW, "Allocated %.3f MiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f), info.memoryTypeIndex);
+		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f MiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f), info.memoryTypeIndex);
 	else
-		printf_color(COLOR_YELLOW, "Allocated %.3f GiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f * 1024.f), info.memoryTypeIndex);
+		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f GiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f * 1024.f), info.memoryTypeIndex);
 	PrintAllocations();
-	printf_color(COLOR_YELLOW, "\n");
+	printf_color(ConsoleColorBits::eYellow, "\n");
 	#endif
 
 	return alloc;
@@ -387,21 +352,21 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 		if (it->mMemory == allocation.mDeviceMemory) {
 			it->Deallocate(allocation);
 			if (it->mAvailable.size() == 1 && it->mAvailable.begin()->second == it->mSize) {
-				vkFreeMemory(mDevice, it->mMemory, nullptr);
+				mDevice.freeMemory(it->mMemory);
 				mMemoryAllocationCount--;
-				if (mMemoryProperties.memoryTypes[allocation.mMemoryType].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+				if (mMemoryProperties.memoryTypes[allocation.mMemoryType].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)
 					mMemoryUsage -= it->mSize;
 				#ifdef PRINT_VK_ALLOCATIONS
 				if (allocation.mSize < 1024)
-					printf_color(COLOR_YELLOW, "Freed %lu B of type %u\t- ", allocation.mSize, allocation.mMemoryType);
+					printf_color(ConsoleColorBits::eYellow, "Freed %lu B of type %u\t- ", allocation.mSize, allocation.mMemoryType);
 				else if (allocation.mSize < 1024 * 1024)
-					printf_color(COLOR_YELLOW, "Freed %.3f KiB of type %u\t-- ", allocation.mSize / 1024.f, allocation.mMemoryType);
+					printf_color(ConsoleColorBits::eYellow, "Freed %.3f KiB of type %u\t-- ", allocation.mSize / 1024.f, allocation.mMemoryType);
 				else if (allocation.mSize < 1024 * 1024 * 1024)
-					printf_color(COLOR_YELLOW, "Freed %.3f MiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f), allocation.mMemoryType);
+					printf_color(ConsoleColorBits::eYellow, "Freed %.3f MiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f), allocation.mMemoryType);
 				else
-					printf_color(COLOR_YELLOW, "Freed %.3f GiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f * 1024), allocation.mMemoryType);
+					printf_color(ConsoleColorBits::eYellow, "Freed %.3f GiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f * 1024), allocation.mMemoryType);
 				PrintAllocations();
-				printf_color(COLOR_YELLOW, "\n");
+				printf_color(ConsoleColorBits::eYellow, "\n");
 				#endif
 				it = allocations.erase(it);
 				continue;
@@ -411,7 +376,7 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 	}
 }
 
-Buffer* Device::GetPooledBuffer(const string& name, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+Buffer* Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	Buffer* b = nullptr;
 	mBufferPoolMutex.lock();
 	auto best = mBufferPool.end();
@@ -428,7 +393,7 @@ Buffer* Device::GetPooledBuffer(const string& name, VkDeviceSize size, VkBufferU
 	mBufferPoolMutex.unlock();
 	return b ? b : new Buffer(name, this, size, usage, memoryProperties);
 }
-DescriptorSet* Device::GetPooledDescriptorSet(const string& name, VkDescriptorSetLayout layout) {
+DescriptorSet* Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
 	DescriptorSet* ds = nullptr;
 	mDescriptorSetPoolMutex.lock();
 	auto& sets = mDescriptorSetPool[layout];
@@ -441,7 +406,7 @@ DescriptorSet* Device::GetPooledDescriptorSet(const string& name, VkDescriptorSe
 	mDescriptorSetPoolMutex.unlock();
 	return ds ? ds : new DescriptorSet(name, this, layout);
 }
-Texture* Device::GetPooledTexture(const string& name, const VkExtent3D& extent, VkFormat format, uint32_t mipLevels, VkSampleCountFlagBits sampleCount, VkImageUsageFlags usage, VkMemoryPropertyFlags memoryProperties) {
+Texture* Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	Texture* tex = nullptr;
 	mTexturePoolMutex.lock();
 	auto& pool = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount)];
@@ -473,11 +438,10 @@ void Device::PoolResource(Texture* texture) {
 }
 
 void Device::PurgePooledResources(uint32_t maxAge) {
-
 	mCommandBufferPoolMutex.lock();
 	for (auto& kp : mCommandBufferPool)
 		for (auto& it = kp.second.begin(); it != kp.second.end();) {
-			if (it->mResource->State() != CMDBUF_STATE_DONE) continue;
+			if (it->mResource->State() != CommandBufferState::eDone) continue;
 			it->mResource->Clear();
 			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 				safe_delete(it->mResource);
@@ -513,24 +477,23 @@ void Device::PurgePooledResources(uint32_t maxAge) {
 	mDescriptorSetPoolMutex.unlock();
 }
 
-CommandBuffer* Device::GetCommandBuffer(const std::string& name, VkCommandBufferLevel level) {
+CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBufferLevel level) {
 	// get a commandpool for the current thread
 	mCommandPoolMutex.lock();
-	VkCommandPool& commandPool = mCommandPools[this_thread::get_id()];
+	vk::CommandPool& commandPool = mCommandPools[this_thread::get_id()];
 	mCommandPoolMutex.unlock();
 	if (!commandPool) {
-		VkCommandPoolCreateInfo poolInfo = {};
-		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		vk::CommandPoolCreateInfo poolInfo = {};
 		poolInfo.queueFamilyIndex = mGraphicsQueueFamilyIndex;
-		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		ThrowIfFailed(vkCreateCommandPool(mDevice, &poolInfo, nullptr, &commandPool), "vkCreateCommandPool failed");
-		SetObjectName(commandPool, name + " Graphics Command Pool", VK_OBJECT_TYPE_COMMAND_POOL);
+		poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+		commandPool = mDevice.createCommandPool(poolInfo);
+		SetObjectName(commandPool, name + " Graphics Command Pool");
 	}
 
-	if (level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) {
+	if (level == vk::CommandBufferLevel::ePrimary) {
 		auto& pool = mCommandBufferPool[commandPool];
 		if (!pool.empty()) {
-			if (pool.front().mResource->State() == CMDBUF_STATE_DONE) {
+			if (pool.front().mResource->State() == CommandBufferState::eDone) {
 				CommandBuffer* commandBuffer = pool.front().mResource;
 				pool.pop_front();
 				commandBuffer->Reset(name);
@@ -542,24 +505,23 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, VkCommandBuffer
 	return new CommandBuffer(name, this, commandPool, level);
 }
 void Device::Execute(CommandBuffer* commandBuffer) {
-	if (commandBuffer->State() != CMDBUF_STATE_RECORDING)
-		fprintf_color(COLOR_YELLOW, stderr, "Warning: Execute() expected CommandBuffer to be in CMDBUF_STATE_RECORDING\n");
-	ThrowIfFailed(vkEndCommandBuffer(commandBuffer->mCommandBuffer), "vkEndCommandBuffer failed");
+	if (commandBuffer->State() != CommandBufferState::eRecording)
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Execute() expected CommandBuffer to be in CommandBufferState::eRecording\n");
+	((vk::CommandBuffer)*commandBuffer).end();
 
-	vector<VkPipelineStageFlags> waitStages;	
-	vector<VkSemaphore> waitSemaphores;	
+	vector<vk::PipelineStageFlags> waitStages;	
+	vector<vk::Semaphore> waitSemaphores;	
 	for (uint32_t i = 0; i < commandBuffer->mWaitSemaphores.size(); i++) {
 		waitStages.push_back(commandBuffer->mWaitSemaphores[i].first);
 		waitSemaphores.push_back(*commandBuffer->mWaitSemaphores[i].second);
 	}
 
-	vector<VkSemaphore> signalSemaphores;
+	vector<vk::Semaphore> signalSemaphores;
 	for (uint32_t i = 0; i < commandBuffer->mSignalSemaphores.size(); i++)
 		signalSemaphores.push_back(*commandBuffer->mSignalSemaphores[i]);
 
 	PROFILER_BEGIN("vkQueueSubmit");
-	VkSubmitInfo submitInfo = {};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	vk::SubmitInfo submitInfo = {};
 	submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
 	submitInfo.pSignalSemaphores = signalSemaphores.data();
 	submitInfo.pWaitDstStageMask = waitStages.data();
@@ -567,10 +529,10 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 	submitInfo.pWaitSemaphores = waitSemaphores.data();
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &commandBuffer->mCommandBuffer;
-	vkQueueSubmit(mGraphicsQueue, 1, &submitInfo, commandBuffer->mSignalFence);
+	mGraphicsQueue.submit(1, &submitInfo, commandBuffer->mSignalFence);
 	PROFILER_END;
 
-	commandBuffer->mState = CMDBUF_STATE_PENDING;
+	commandBuffer->mState = CommandBufferState::ePending;
 
 	mCommandBufferPoolMutex.lock();
 	mCommandBufferPool[commandBuffer->mCommandPool].push_back({ mFrameCount, commandBuffer });
@@ -579,7 +541,7 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 void Device::Flush() {
 	mCommandBufferPoolMutex.lock();
 
-	vkDeviceWaitIdle(mDevice);
+	mDevice.waitIdle();
 
 	for (auto& kp : mCommandBufferPool)
 		while (!kp.second.empty()) {
@@ -591,35 +553,24 @@ void Device::Flush() {
 	mCommandBufferPoolMutex.unlock();
 }
 
-void Device::SetObjectName(void* object, const string& name, VkObjectType type) const {
-	#ifdef ENABLE_DEBUG_LAYERS
-	VkDebugUtilsObjectNameInfoEXT info = {};
-	info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-	info.objectHandle = (uint64_t)object;
-	info.objectType = type;
-	info.pObjectName = name.c_str();
-	SetDebugUtilsObjectNameEXT(mDevice, &info);
-	#endif
-}
+vk::SampleCountFlagBits Device::GetMaxUsableSampleCount() {
+	vk::PhysicalDeviceProperties physicalDeviceProperties;
+	mPhysicalDevice.getProperties(&physicalDeviceProperties);
 
-VkSampleCountFlagBits Device::GetMaxUsableSampleCount() {
-	VkPhysicalDeviceProperties physicalDeviceProperties;
-	vkGetPhysicalDeviceProperties(mPhysicalDevice, &physicalDeviceProperties);
-
-	VkSampleCountFlags counts = std::min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
-	if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
-	if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
-	if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
-	if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
-	if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
-	if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
-	return VK_SAMPLE_COUNT_1_BIT;
+	vk::SampleCountFlags counts = std::min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
+	if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; }
+	if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; }
+	if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; }
+	if (counts & vk::SampleCountFlagBits::e8) { return vk::SampleCountFlagBits::e8; }
+	if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; }
+	if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; }
+	return vk::SampleCountFlagBits::e1;
 }
 
 void Device::PrintAllocations() {
-	VkDeviceSize used = 0;
-	VkDeviceSize available = 0;
-	VkDeviceSize total = 0;
+	vk::DeviceSize used = 0;
+	vk::DeviceSize available = 0;
+	vk::DeviceSize total = 0;
 
 	for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
 		total += mMemoryProperties.memoryHeaps[i].size;
@@ -631,7 +582,7 @@ void Device::PrintAllocations() {
 		}
 
 	if (used == 0) {
-		printf_color(COLOR_YELLOW, "%s", "Using 0 B");
+		printf_color(ConsoleColorBits::eYellow, "%s", "Using 0 B");
 		return;
 	}
 
@@ -639,9 +590,9 @@ void Device::PrintAllocations() {
 	float percentWasted = 100.f * (float)available / (float)used;
 
 	if (used < 1024)
-		printf_color(COLOR_YELLOW, "Using %lu B (%.1f%%) - %.1f%% wasted", used, percentTotal, percentWasted);
+		printf_color(ConsoleColorBits::eYellow, "Using %lu B (%.1f%%) - %.1f%% wasted", used, percentTotal, percentWasted);
 	else if (used < 1024 * 1024)
-		printf_color(COLOR_YELLOW, "Using %.3f KiB (%.1f%%) - %.1f%%wasted", used / 1024.f, percentTotal, percentWasted);
+		printf_color(ConsoleColorBits::eYellow, "Using %.3f KiB (%.1f%%) - %.1f%%wasted", used / 1024.f, percentTotal, percentWasted);
 	else
-		printf_color(COLOR_YELLOW, "Using %.3f MiB (%.1f%%) - %.1f%% wasted", used / (1024.f * 1024.f), percentTotal, percentWasted);
+		printf_color(ConsoleColorBits::eYellow, "Using %.3f MiB (%.1f%%) - %.1f%% wasted", used / (1024.f * 1024.f), percentTotal, percentWasted);
 }

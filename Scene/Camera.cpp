@@ -6,7 +6,7 @@
 using namespace std;
 
 Camera::Camera(const string& name, const set<RenderTargetIdentifier>& renderTargets)
-	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView(PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(STEREO_NONE) {
+	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView(PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(StereoMode::eNone) {
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
@@ -16,13 +16,13 @@ Camera::~Camera() {}
 
 float4 Camera::WorldToClip(const float3& worldPos, StereoEye eye) {
 	UpdateTransform();
-	return mViewProjection[eye] * float4((worldPos - (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz), 1);
+	return mViewProjection[(uint32_t)eye] * float4((worldPos - (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz), 1);
 }
 float3 Camera::ClipToWorld(const float3& clipPos, StereoEye eye) {
 	UpdateTransform();
-	float4 wp = mInvViewProjection[eye] * float4(clipPos, 1);
+	float4 wp = mInvViewProjection[(uint32_t)eye] * float4(clipPos, 1);
 	wp.xyz /= wp.w;
-	return (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + wp.xyz;
+	return (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + wp.xyz;
 }
 Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	UpdateTransform();
@@ -30,12 +30,12 @@ Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
 	Ray ray;
 	if (mOrthographic) {
 		clip.x *= mAspectRatio;
-		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + WorldRotation() * float3(clip * mOrthographicSize, mNear);
+		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + WorldRotation() * float3(clip * mOrthographicSize, mNear);
 		ray.mDirection = WorldRotation() * float3(0, 0, 1);
 	} else {
-		float4 p1 = mInvViewProjection[eye] * float4(clip, .1f, 1);
+		float4 p1 = mInvViewProjection[(uint32_t)eye] * float4(clip, .1f, 1);
 		ray.mDirection = normalize(p1.xyz / p1.w);
-		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[eye], 1)).xyz + mEyeOffsetTranslate[eye];
+		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + mEyeOffsetTranslate[(uint32_t)eye];
 	}
 	return ray;
 }
@@ -55,22 +55,22 @@ void Camera::WriteUniformBuffer(void* bufferData) {
 	buf.Position[1] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1)).xyz, mFar);
 }
 void Camera::SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye) {
-	VkViewport vp = { 0.f, 0.f, (float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height, 0.f, 1.f };
-	if (mStereoMode == STEREO_SBS_HORIZONTAL) {
+	vk::Viewport vp = { 0.f, 0.f, (float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height, 0.f, 1.f };
+	if (mStereoMode == StereoMode::eHorizontal) {
 		vp.width /= 2;
-		vp.x = eye == EYE_LEFT ? 0 : vp.width;
-	} else if (mStereoMode == STEREO_SBS_VERTICAL) {
+		vp.x = eye == StereoEye::eLeft ? 0 : vp.width;
+	} else if (mStereoMode == StereoMode::eVertical) {
 		vp.height /= 2;
-		vp.y = eye == EYE_LEFT ? 0 : vp.height;
+		vp.y = eye == StereoEye::eLeft ? 0 : vp.height;
 	}
 	// make viewport go from y-down (vulkan) to y-up
 	vp.y += vp.height;
 	vp.height = -vp.height;
-	vkCmdSetViewport(*commandBuffer, 0, 1, &vp);
+	((vk::CommandBuffer)*commandBuffer).setViewport(0, 1, &vp);
 	commandBuffer->PushConstantRef("StereoEye", (uint32_t)eye);
 
-	VkRect2D scissor { { 0, 0 }, commandBuffer->CurrentFramebuffer()->Extent() };
-	vkCmdSetScissor(*commandBuffer, 0, 1, &scissor);
+	vk::Rect2D scissor { { 0, 0 }, commandBuffer->CurrentFramebuffer()->Extent() };
+	((vk::CommandBuffer)*commandBuffer).setScissor(0, 1, &scissor);
 }
 
 bool Camera::RendersToSubpass(RenderPass* renderPass, uint32_t subpassIndex) {
@@ -153,7 +153,7 @@ void Camera::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui
 	float3 f6 = ClipToWorld(float3(1, -1, 1));
 	float3 f7 = ClipToWorld(float3(1, 1, 1));
 
-	float4 color = mStereoMode == STEREO_NONE ? 1 : float4(1, .5f, .5f, .5f);
+	float4 color = mStereoMode == StereoMode::eNone ? 1 : float4(1, .5f, .5f, .5f);
 
 	vector<float3> points {
 		f0, f4, f5, f1, f0,
@@ -162,16 +162,16 @@ void Camera::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui
 	};
 	gui->PolyLine(float4x4(1), points.data(), (uint32_t)points.size(), color, 1.f);
 
-	if (mStereoMode != STEREO_NONE) {
-		f0 = ClipToWorld(float3(-1, -1, 0), EYE_RIGHT);
-		f1 = ClipToWorld(float3(-1, 1, 0), EYE_RIGHT);
-		f2 = ClipToWorld(float3(1, -1, 0), EYE_RIGHT);
-		f3 = ClipToWorld(float3(1, 1, 0), EYE_RIGHT);
+	if (mStereoMode != StereoMode::eNone) {
+		f0 = ClipToWorld(float3(-1, -1, 0), StereoEye::eRight);
+		f1 = ClipToWorld(float3(-1, 1, 0), StereoEye::eRight);
+		f2 = ClipToWorld(float3(1, -1, 0), StereoEye::eRight);
+		f3 = ClipToWorld(float3(1, 1, 0), StereoEye::eRight);
 
-		f4 = ClipToWorld(float3(-1, -1, 1), EYE_RIGHT);
-		f5 = ClipToWorld(float3(-1, 1, 1), EYE_RIGHT);
-		f6 = ClipToWorld(float3(1, -1, 1), EYE_RIGHT);
-		f7 = ClipToWorld(float3(1, 1, 1), EYE_RIGHT);
+		f4 = ClipToWorld(float3(-1, -1, 1), StereoEye::eRight);
+		f5 = ClipToWorld(float3(-1, 1, 1), StereoEye::eRight);
+		f6 = ClipToWorld(float3(1, -1, 1), StereoEye::eRight);
+		f7 = ClipToWorld(float3(1, 1, 1), StereoEye::eRight);
 
 		vector<float3> points2 {
 			f0, f4, f5, f1, f0, f2, 

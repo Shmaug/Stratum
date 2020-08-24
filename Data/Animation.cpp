@@ -6,31 +6,29 @@
 
 using namespace std;
 
-AnimationChannel::AnimationChannel(const vector<AnimationKeyframe>& keyframes, AnimationExtrapolate in, AnimationExtrapolate out)
-	: mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
-	
+AnimationChannel::AnimationChannel(const vector<AnimationKeyframe>& keyframes, AnimationExtrapolateMode in, AnimationExtrapolateMode out) : mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
 	if (!mKeyframes.size()) return;
 
 	// compute tangents
 	for (uint32_t i = 0; i < mKeyframes.size(); i++) {
 		switch (mKeyframes[i].mTangentModeIn) {
-		case ANIMATION_TANGENT_SMOOTH:
+		case AnimationTangentMode::eSmooth:
 			if (i > 0 && i < mKeyframes.size()-1) {
 				mKeyframes[i].mTangentIn = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
 				break;
 			}
-		case ANIMATION_TANGENT_LINEAR:
+		case AnimationTangentMode::eLinear:
 			if (i > 0) mKeyframes[i].mTangentIn = (mKeyframes[i].mValue - mKeyframes[i-1].mValue) / (mKeyframes[i].mTime - mKeyframes[i - 1].mTime);
 			break;
 		}
 
 		switch (mKeyframes[i].mTangentModeOut) {
-		case ANIMATION_TANGENT_SMOOTH:
+		case AnimationTangentMode::eSmooth:
 			if (i > 0 && i < mKeyframes.size() - 1) {
 				mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
 				break;
 			}
-		case ANIMATION_TANGENT_LINEAR:
+		case AnimationTangentMode::eLinear:
 			if (i < mKeyframes.size() - 1) mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
 			break;
 		}
@@ -52,7 +50,7 @@ AnimationChannel::AnimationChannel(const vector<AnimationKeyframe>& keyframes, A
 		float v1 = mKeyframes[i + 1].mTangentIn * ts;
 
 		mCoefficients[i].x = p0y;
-		if (mKeyframes[i].mTangentModeOut == ANIMATION_TANGENT_STEP) continue;
+		if (mKeyframes[i].mTangentModeOut == AnimationTangentMode::eStep) continue;
 
 		mCoefficients[i].y = v0;
 		mCoefficients[i].z = 3 * (p1y - p0y) - 2*v0 - v1;
@@ -74,16 +72,16 @@ float AnimationChannel::Sample(float t) const {
 	
 	if (tl > 0) {
 		switch (mExtrapolateOut) {
-		case EXTRAPOLATE_CONSTANT:
+		case AnimationExtrapolateMode::eConstant:
 			return last.mValue;
-		case EXTRAPOLATE_LINEAR:
+		case AnimationExtrapolateMode::eLinear:
 			return last.mValue + last.mTangentOut * tl;
-		case EXTRAPOLATE_CYCLE_OFFSET:
+		case AnimationExtrapolateMode::eCycleOffset:
 			offset += (last.mValue - first.mValue) * (floorf(tl / length) + 1);
-		case EXTRAPOLATE_CYCLE:
+		case AnimationExtrapolateMode::eCycle:
 			t = fmodf(tl, length);
 			break;
-		case EXTRAPOLATE_BOUNCE:
+		case AnimationExtrapolateMode::eBounce:
 			t = fmodf(tl, 2 * length);
 			if (t > length) t = 2 * length - t;
 			break;
@@ -92,16 +90,16 @@ float AnimationChannel::Sample(float t) const {
 	}
 	if (ts > 0) {
 		switch (mExtrapolateIn) {
-		case EXTRAPOLATE_CONSTANT:
+		case AnimationExtrapolateMode::eConstant:
 			return first.mValue;
-		case EXTRAPOLATE_LINEAR:
+		case AnimationExtrapolateMode::eLinear:
 			return first.mValue - first.mTangentIn * ts;
-		case EXTRAPOLATE_CYCLE_OFFSET:
+		case AnimationExtrapolateMode::eCycleOffset:
 			offset += (first.mValue - last.mValue) * (floorf(ts / length) + 1);
-		case EXTRAPOLATE_CYCLE:
+		case AnimationExtrapolateMode::eCycle:
 			t = fmodf(ts, length);
 			break;
-		case EXTRAPOLATE_BOUNCE:
+		case AnimationExtrapolateMode::eBounce:
 			t = fmodf(ts, 2 * length);
 			if (t > length) t = 2 * length - t;
 			break;

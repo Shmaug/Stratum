@@ -1,15 +1,8 @@
-#include <Core/PluginManager.hpp>
-#include <Data/AssetManager.hpp>
-#include <Input/InputManager.hpp>
 #include <Scene/Scene.hpp>
+#include <Scene/Light.hpp>
+#include <Core/PluginManager.hpp>
 #include <Scene/Bone.hpp>
-#include <Scene/Camera.hpp>
-#include <Scene/MeshRenderer.hpp>
-#include <Scene/SkinnedMeshRenderer.hpp>
-#include <Scene/GuiContext.hpp>
-#include <Scene/ObjectBvh2.hpp>
-#include <Scene/TriangleBvh2.hpp>
-#include <Scene/Renderer.hpp>
+#include <Scene/Renderers/MeshRenderer.hpp>
 #include <Util/Profiler.hpp>
 
 #include <assimp/scene.h>
@@ -22,23 +15,9 @@ using namespace std;
 #define INSTANCE_BATCH_SIZE 1024
 #define MAX_GPU_LIGHTS 64
 
-const ::VertexInput Float3VertexInput {
-	{
-		{
-			0, // binding
-			sizeof(float3), // stride
-			VK_VERTEX_INPUT_RATE_VERTEX // inputRate
-		}
-	},
-	{
-		{
-			0, // location
-			0, // binding
-			VK_FORMAT_R32G32B32_SFLOAT, // format
-			0 // offset
-		}
-	}
-};
+const ::VertexInput Float3VertexInput(
+	{ vk::VertexInputBindingDescription(0, sizeof(float3), vk::VertexInputRate::eVertex) },
+	{ vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, 0) } );
 
 struct AIWeight {
 	string bones[4];
@@ -130,49 +109,48 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	mStartTime = mClock.now();
 	mLastFrame = mStartTime;
 
-	VkSamplerCreateInfo samplerInfo = {};
-	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-	samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	vk::SamplerCreateInfo samplerInfo = {};
+	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+	samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToBorder;
+	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToBorder;
+	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToBorder;
 	samplerInfo.compareEnable = VK_TRUE;
-	samplerInfo.compareOp = VK_COMPARE_OP_LESS;
-	samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	samplerInfo.compareOp = vk::CompareOp::eLess;
+	samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
 	mShadowSampler = new Sampler("ShadowSampler", mInstance->Device(), samplerInfo);
 
 
-	VkFormat renderFormat = mInstance->Window()->Format().format;
-	VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_8_BIT;
+	vk::Format renderFormat = mInstance->Window()->Format().format;
+	vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e8;
 	
 	Subpass shadowSubpass = {};
 	shadowSubpass.mShaderPass = "forward/depth";
-	shadowSubpass.mAttachments["stm_shadow_atlas"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
+	shadowSubpass.mAttachments["stm_shadow_atlas"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
 
 
 	Subpass depthPrepass = {};
 	depthPrepass.mShaderPass = "forward/depth";
-	depthPrepass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, sampleCount, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
+	depthPrepass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
 
 	Subpass opaqueSubpass = {};
 	opaqueSubpass.mShaderPass = "forward/opaque";
-	opaqueSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE };
-	opaqueSubpass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, VK_FORMAT_D32_SFLOAT, sampleCount, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE };
-	opaqueSubpass.mAttachmentDependencies["stm_shadow_atlas"] = { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT };
+	opaqueSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
+	opaqueSubpass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
+	opaqueSubpass.mAttachmentDependencies["stm_shadow_atlas"] = { vk::PipelineStageFlagBits::eFragmentShader, vk::AccessFlagBits::eShaderRead };
 	
 	Subpass transparentSubpass = {};
 	transparentSubpass.mShaderPass = "forward/transparent";
-	transparentSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE };
-	transparentSubpass.mAttachments["stm_main_resolve"] = { ATTACHMENT_RESOLVE, renderFormat, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_STORE };
+	transparentSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
+	transparentSubpass.mAttachments["stm_main_resolve"] = { ATTACHMENT_RESOLVE, renderFormat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore };
 	transparentSubpass.mAttachments["stm_main_depth"] = opaqueSubpass.mAttachments["stm_main_depth"];
 
 	AssignRenderNode("Shadows", { shadowSubpass });
 	AssignRenderNode("Main", { depthPrepass, opaqueSubpass, transparentSubpass });
 
-	SetAttachmentInfo("stm_shadow_atlas", { 4096, 4096 }, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-	SetAttachmentInfo("stm_main_render", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-	SetAttachmentInfo("stm_main_depth", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-	SetAttachmentInfo("stm_main_resolve", mInstance->Window()->SwapchainExtent(), VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+	SetAttachmentInfo("stm_shadow_atlas", { 4096, 4096 }, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	SetAttachmentInfo("stm_main_render", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
+	SetAttachmentInfo("stm_main_depth", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc);
+	SetAttachmentInfo("stm_main_resolve", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 
 	// init skybox
 
@@ -197,11 +175,10 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	};
 	
 	mSkybox = CreateObject<MeshRenderer>("Skybox");
-	mSkybox->Mesh(make_shared<Mesh>("SkyCube", mInstance->Device(), verts, indices, 8, (uint32_t)sizeof(float3), 36, &Float3VertexInput, VK_INDEX_TYPE_UINT16));
+	mSkybox->Mesh(make_shared<Mesh>("SkyCube", mInstance->Device(), verts, indices, 8, (uint32_t)sizeof(float3), 36, &Float3VertexInput, vk::IndexType::eUint16));
 	mSkybox->Material(make_shared<Material>("Skybox", mInstance->Device()->AssetManager()->LoadPipeline("Shaders/skybox.stmb")));
 	mSkybox->LocalScale(1e5f);
 
-	for (XRRuntime* xr : mInstance->XRRuntimes()) xr->OnSceneInit(this);
 	for (EnginePlugin* plugin : mInstance->PluginManager()->Plugins()) plugin->OnSceneInit(this);
 }
 Scene::~Scene() {
@@ -223,13 +200,13 @@ Scene::~Scene() {
 	for (auto& kp : mGuiContexts) safe_delete(kp.second);
 }
 
-void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const VkExtent2D& extent, VkImageUsageFlags usage) {
+void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Extent2D& extent, vk::ImageUsageFlags usage) {
 	// TODO: support specification of finalLayout
 	mAttachmentInfo[name] = { extent, usage };
 	mRenderGraphDirty = true;
 }
 
-void Scene::MainRenderExtent(const VkExtent2D& extent) {
+void Scene::MainRenderExtent(const vk::Extent2D& extent) {
 	SetAttachmentInfo("stm_main_render", { extent }, GetAttachmentInfo("stm_main_render").second);
 	SetAttachmentInfo("stm_main_depth", { extent }, GetAttachmentInfo("stm_main_depth").second);
 	SetAttachmentInfo("stm_main_resolve", { extent }, GetAttachmentInfo("stm_main_resolve").second);
@@ -283,8 +260,8 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 		for (uint32_t i = 0; i < node.mRenderPass->AttachmentCount(); i++) {
 			const RenderTargetIdentifier& attachment = node.mRenderPass->AttachmentName(i);
 			
-			VkExtent2D extent = { 1024, 1024 };
-			VkImageUsageFlags usage = HasDepthComponent(node.mRenderPass->Attachment(i).format) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			vk::Extent2D extent = { 1024, 1024 };
+			vk::ImageUsageFlags usage = HasDepthComponent(node.mRenderPass->Attachment(i).format) ? vk::ImageUsageFlagBits::eDepthStencilAttachment : vk::ImageUsageFlagBits::eColorAttachment;
 			if (mAttachmentInfo.count(attachment)) {
 				extent = mAttachmentInfo.at(attachment).first;
 				usage = mAttachmentInfo.at(attachment).second;
@@ -408,7 +385,7 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 	for (auto o : mObjects) if (o->EnabledHierarchy()) o->OnLateUpdate(commandBuffer);
 	for (EnginePlugin* p : mInstance->PluginManager()->Plugins()) p->OnLateUpdate(commandBuffer);
 	mSkybox->Material()->OnLateUpdate(commandBuffer);
-	commandBuffer->TransitionBarrier(mEnvironmentTexture, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	commandBuffer->TransitionBarrier(mEnvironmentTexture, vk::ImageLayout::eShaderReadOnlyOptimal);
 	PROFILER_END;
 	
 	AABB shadowBounds;
@@ -424,9 +401,9 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 	}
 
 	PROFILER_BEGIN("Lighting Update");
-	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
-	mShadowAtlas = commandBuffer->GetTexture("Shadow Atlas", { 4096, 4096, 1 }, VK_FORMAT_D32_SFLOAT, 1, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+	mShadowAtlas = commandBuffer->GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 	
 	uint32_t si = 0;
 	uint32_t shadowCount = 0;
@@ -519,13 +496,6 @@ void Scene::Render(CommandBuffer* commandBuffer) {
 	}
 
 	for (auto& kp : mGuiContexts) kp.second->Reset();
-
-	if (mInstance->XRRuntimes().size()) {
-		PROFILER_BEGIN("PostRender");
-		for (XRRuntime* xr : mInstance->XRRuntimes()) xr->PostRender(commandBuffer);
-		PROFILER_END;
-	}
-
 	END_CMD_REGION(commandBuffer);
 }
 void Scene::RenderCamera(CommandBuffer* commandBuffer, Camera* camera) {
@@ -555,7 +525,7 @@ void Scene::RenderCamera(CommandBuffer* commandBuffer, Camera* camera) {
 
 	camera->AspectRatio((float)commandBuffer->CurrentFramebuffer()->Extent().width / (float)commandBuffer->CurrentFramebuffer()->Extent().height);
 
-	Buffer* cameraBuffer = commandBuffer->GetBuffer("Camera Buffer", sizeof(CameraBuffer), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+	Buffer* cameraBuffer = commandBuffer->GetBuffer("Camera Buffer", sizeof(CameraBuffer), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 	camera->WriteUniformBuffer(cameraBuffer->MappedData());
 	camera->SetViewportScissor(commandBuffer);
 

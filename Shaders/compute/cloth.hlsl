@@ -3,7 +3,7 @@
 #pragma kernel ComputeNormals0
 #pragma kernel ComputeNormals1
 
-#pragma multi_compile INDEX_UINT32
+#pragma multi_compile INDEXUint32
 #pragma multi_compile PIN
 
 #define FORCE_INT_SCALE 16384
@@ -59,7 +59,7 @@ uint hash_edge(uint x, uint y){
 void AddForces(uint3 index : SV_DispatchThreadID) {
     if (index.x >= TriangleCount) return;
 
-#ifdef INDEX_UINT32
+#ifdef INDEXUint32
     uint3 tri = Triangles.Load3(index.x * 12);
 #else
     uint2 tt = Triangles.Load2(index.x * 6);
@@ -184,7 +184,7 @@ void Integrate(uint3 index : SV_DispatchThreadID) {
 void ComputeNormals0(uint3 index : SV_DispatchThreadID) {
     if (index.x >= TriangleCount) return;
 
-    #ifdef INDEX_UINT32
+    #ifdef INDEXUint32
     uint3 tri = Triangles.Load3(index.x * 12);
     #else
     uint2 tt = Triangles.Load2(index.x * 6);

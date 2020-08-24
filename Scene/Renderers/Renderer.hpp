@@ -1,6 +1,7 @@
 #pragma once 
 
-#include <Scene/Object.hpp>
+#include <Scene/Scene.hpp>
+#include <Scene/Camera.hpp>
 
 class Renderer : public virtual Object {
 public:

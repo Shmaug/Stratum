@@ -18,23 +18,23 @@ int main(int argc, char** argv) {
 		scene->MainRenderExtent(instance->Window()->SwapchainExtent());
 
 		CommandBuffer* commandBuffer = instance->Device()->GetCommandBuffer();
-		if (instance->Window()->SwapchainExtent() != VkExtent2D { 0, 0 })
-			commandBuffer->WaitOn(VK_PIPELINE_STAGE_TRANSFER_BIT, instance->Window()->ImageAvailableSemaphore());
-		commandBuffer->Signal(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, commandSemaphore);
+		if (instance->Window()->SwapchainExtent().width > 0 && instance->Window()->SwapchainExtent().height > 0)
+			commandBuffer->WaitOn(vk::PipelineStageFlagBits::eTransfer, instance->Window()->ImageAvailableSemaphore());
+		commandBuffer->Signal(vk::PipelineStageFlagBits::eAllCommands, commandSemaphore);
 		
 		scene->Update(commandBuffer);
 		scene->Render(commandBuffer);
 
 		Texture* srcImage = scene->HasAttachment("stm_main_resolve") ? scene->GetAttachment("stm_main_resolve") : scene->GetAttachment("stm_main_render");
-		commandBuffer->TransitionBarrier(srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-		commandBuffer->TransitionBarrier(instance->Window()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-		VkImageCopy rgn = {};
-		rgn.dstSubresource = rgn.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		commandBuffer->TransitionBarrier(srcImage, vk::ImageLayout::eTransferSrcOptimal);
+		commandBuffer->TransitionBarrier(instance->Window()->BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal);
+		vk::ImageCopy rgn = {};
+		rgn.dstSubresource = rgn.srcSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 };
 		rgn.extent = { instance->Window()->SwapchainExtent().width, instance->Window()->SwapchainExtent().height, 1 };
-		vkCmdCopyImage(*commandBuffer,
-			*srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			instance->Window()->BackBuffer(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
-		commandBuffer->TransitionBarrier(instance->Window()->BackBuffer(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		((vk::CommandBuffer)*commandBuffer).copyImage(
+			*srcImage, vk::ImageLayout::eTransferSrcOptimal,
+			instance->Window()->BackBuffer(), vk::ImageLayout::eTransferDstOptimal, { rgn });
+		commandBuffer->TransitionBarrier(instance->Window()->BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 		
 		instance->Device()->Execute(commandBuffer);
 		instance->EndFrame({ *commandSemaphore });

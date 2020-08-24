@@ -7,7 +7,7 @@ using namespace std;
 Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFilename) : mName(name), mDevice(device) {
 	ifstream fileStream(shaderFilename, ios::binary);
 	if (!fileStream.is_open()) {
-		fprintf_color(COLOR_RED, stderr, "Failed to load shader: %s\n", shaderFilename.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load shader: %s\n", shaderFilename.c_str());
 		throw;
 	}
 
@@ -24,11 +24,10 @@ Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFil
 		}
 
 		for (uint32_t i = 0; i < variant.mModules.size(); i++) {
-			VkShaderModuleCreateInfo moduleCreateInfo = {};
-			moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+			vk::ShaderModuleCreateInfo moduleCreateInfo = {};
 			moduleCreateInfo.codeSize = variant.mModules[i].mSpirvBinary.size() * sizeof(uint32_t);
 			moduleCreateInfo.pCode = variant.mModules[i].mSpirvBinary.data();
-			ThrowIfFailed(vkCreateShaderModule(*mDevice, &moduleCreateInfo, nullptr, &variant.mModules[i].mShaderModule), "vkCreateShaderModule failed");
+			variant.mModules[i].mShaderModule = ((vk::Device)*mDevice).createShaderModule(moduleCreateInfo);
 		}
 
 		PipelineVariant* var;
@@ -49,47 +48,43 @@ Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFil
 		
 		// create DescriptorSetLayout bindings
 
-		vector<vector<VkDescriptorSetLayoutBinding>> bindings;
-		vector<vector<VkDescriptorBindingFlagsEXT>> bindingFlags;
+		vector<vector<vk::DescriptorSetLayoutBinding>> bindings;
+		vector<vector<vk::DescriptorBindingFlagsEXT>> bindingFlags;
 		for (auto& binding : variant.mDescriptorSetBindings) {
 			if (bindings.size() <= binding.second.mSet) bindings.resize((size_t)binding.second.mSet + 1);
 			if (bindingFlags.size() <= binding.second.mSet) bindingFlags.resize((size_t)binding.second.mSet + 1);
 
 			// Create static samplers
 			for (const auto& sampler : variant.mImmutableSamplers)
-				if (binding.first == sampler.first) {
-					binding.second.mImmutableSamplers.push_back({});
-					vkCreateSampler(*mDevice, &sampler.second, nullptr, &binding.second.mImmutableSamplers.back());
-				}
+				if (binding.first == sampler.first)
+					binding.second.mImmutableSamplers.push_back(((vk::Device)*mDevice).createSampler(sampler.second));
 			binding.second.mBinding.pImmutableSamplers = binding.second.mImmutableSamplers.data();
 			
 			bindings[binding.second.mSet].push_back(binding.second.mBinding);
-			bindingFlags[binding.second.mSet].push_back(binding.second.mBinding.descriptorCount > 1 ? VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT : 0);
+			bindingFlags[binding.second.mSet].push_back(binding.second.mBinding.descriptorCount > 1 ? vk::DescriptorBindingFlagBits::ePartiallyBound : vk::DescriptorBindingFlags());
 		}
 
 		// create DescriptorSetLayouts
 		var->mDescriptorSetLayouts.resize(bindings.size());
 		for (uint32_t s = 0; s < bindings.size(); s++) {
-			var->mDescriptorSetLayouts[s] = VK_NULL_HANDLE;
+			var->mDescriptorSetLayouts[s] = nullptr;
 			if (bindings[s].empty()) continue;
 
-			VkDescriptorSetLayoutBindingFlagsCreateInfoEXT extendedInfo = {};
-			extendedInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+			vk::DescriptorSetLayoutBindingFlagsCreateInfoEXT extendedInfo = {};
 			extendedInfo.bindingCount = (uint32_t)bindingFlags[s].size();
 			extendedInfo.pBindingFlags = bindingFlags[s].data();
 
-			VkDescriptorSetLayoutCreateInfo descriptorSetLayout = {};
-			descriptorSetLayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-			descriptorSetLayout.pNext = &extendedInfo;
-			descriptorSetLayout.bindingCount = (uint32_t)bindings[s].size();
-			descriptorSetLayout.pBindings = bindings[s].data();
-			vkCreateDescriptorSetLayout(*mDevice, &descriptorSetLayout, nullptr, &var->mDescriptorSetLayouts[s]);
-			mDevice->SetObjectName(var->mDescriptorSetLayouts[s], mName + " DescriptorSetLayout" + to_string(s), VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+			vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutInfo = {};
+			descriptorSetLayoutInfo.pNext = &extendedInfo;
+			descriptorSetLayoutInfo.bindingCount = (uint32_t)bindings[s].size();
+			descriptorSetLayoutInfo.pBindings = bindings[s].data();
+			var->mDescriptorSetLayouts[s] = ((vk::Device)*mDevice).createDescriptorSetLayout(descriptorSetLayoutInfo);
+			mDevice->SetObjectName(var->mDescriptorSetLayouts[s], mName + " DescriptorSetLayout" + to_string(s));
 		}
 
 		// Create push constant ranges
-		vector<VkPushConstantRange> constants;
-		unordered_map<VkShaderStageFlags, uint2> ranges;
+		vector<vk::PushConstantRange> constants;
+		unordered_map<vk::ShaderStageFlags, uint2> ranges;
 		for (const auto& b : variant.mPushConstants) {
 			if (ranges.count(b.second.stageFlags) == 0)
 				ranges[b.second.stageFlags] = uint2(b.second.offset, b.second.offset + b.second.size);
@@ -108,42 +103,38 @@ Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFil
 		if (variant.mShaderPass != "") {
 			if (var->mDescriptorSetLayouts.size() <= max(PER_OBJECT, PER_CAMERA)) var->mDescriptorSetLayouts.resize(max(PER_OBJECT, PER_CAMERA) + 1);
 			if (!var->mDescriptorSetLayouts[PER_OBJECT]) var->mDescriptorSetLayouts[PER_OBJECT] = mDevice->PerObjectSetLayout();
-			if (var->mDescriptorSetLayouts[PER_CAMERA]) vkDestroyDescriptorSetLayout(*mDevice, var->mDescriptorSetLayouts[PER_CAMERA], nullptr);
+			if (var->mDescriptorSetLayouts[PER_CAMERA]) mDevice->Destroy(var->mDescriptorSetLayouts[PER_CAMERA]);
 			// TODO: make this descriptor sets not mandatory
 			var->mDescriptorSetLayouts[PER_CAMERA] = mDevice->PerCameraSetLayout();
 
 			// Create dummy descriptors in any slots with null descriptors
 			for (uint32_t s = 0; s < var->mDescriptorSetLayouts.size(); s++) {
-				if (var->mDescriptorSetLayouts[s] != VK_NULL_HANDLE) continue;
-				VkDescriptorSetLayoutCreateInfo descriptorSetLayout = {};
-				descriptorSetLayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-				vkCreateDescriptorSetLayout(*mDevice, &descriptorSetLayout, nullptr, &var->mDescriptorSetLayouts[s]);
-				mDevice->SetObjectName(var->mDescriptorSetLayouts[s], mName + " DummyDescriptorSetLayout" + to_string(s), VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+				if (var->mDescriptorSetLayouts[s]) continue;
+				vk::DescriptorSetLayoutCreateInfo descriptorSetLayout = {};
+				var->mDescriptorSetLayouts[s] = ((vk::Device)*mDevice).createDescriptorSetLayout(descriptorSetLayout);
+				mDevice->SetObjectName(var->mDescriptorSetLayouts[s], mName + " DummyDescriptorSetLayout" + to_string(s));
 			}
 		}
 
-		VkPipelineLayoutCreateInfo layout = {};
-		layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		vk::PipelineLayoutCreateInfo layout = {};
 		layout.setLayoutCount = (uint32_t)var->mDescriptorSetLayouts.size();
 		layout.pSetLayouts = var->mDescriptorSetLayouts.data();
 		layout.pushConstantRangeCount = (uint32_t)constants.size();
 		layout.pPushConstantRanges = constants.data();
-		ThrowIfFailed(vkCreatePipelineLayout(*mDevice, &layout, nullptr, &var->mPipelineLayout), "vkCreatePipelineLayout failed");
-		mDevice->SetObjectName(var->mPipelineLayout, mName + " PipelineLayout", VK_OBJECT_TYPE_PIPELINE_LAYOUT);
+		var->mPipelineLayout = ((vk::Device)*mDevice).createPipelineLayout(layout);
+		mDevice->SetObjectName(var->mPipelineLayout, mName + " PipelineLayout");
 	}
 
 	for (auto& kp : mComputeVariants) {
-		VkComputePipelineCreateInfo pipeline = {};
-		pipeline.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		pipeline.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		pipeline.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		vk::ComputePipelineCreateInfo pipeline = {};
+		pipeline.stage.stage = vk::ShaderStageFlagBits::eCompute;
 		pipeline.stage.pName = kp.second->mShaderVariant->mModules[0].mEntryPoint.c_str();
 		pipeline.stage.module = kp.second->mShaderVariant->mModules[0].mShaderModule;
 		pipeline.layout = kp.second->mPipelineLayout;
 		pipeline.basePipelineIndex = -1;
-		pipeline.basePipelineHandle = VK_NULL_HANDLE;
-		vkCreateComputePipelines(*mDevice, mDevice->PipelineCache(), 1, &pipeline, nullptr, &kp.second->mPipeline);
-		mDevice->SetObjectName(kp.second->mPipeline, mName, VK_OBJECT_TYPE_PIPELINE);
+		pipeline.basePipelineHandle = nullptr;
+		kp.second->mPipeline = ((vk::Device)*mDevice).createComputePipelines(mDevice->PipelineCache(), { pipeline }).value[0];
+		mDevice->SetObjectName(kp.second->mPipeline, mName);
 	}
 	printf("Loaded %s (%u variants)\n", shaderFilename.c_str(), (uint32_t)mShader->mVariants.size());
 }
@@ -151,34 +142,34 @@ Pipeline::~Pipeline() {
 	for (auto& v : mGraphicsVariants) {
 		for (auto& s : v.second->mDescriptorSetLayouts)
 			if (s != mDevice->PerObjectSetLayout() && s != mDevice->PerCameraSetLayout())
-				vkDestroyDescriptorSetLayout(*mDevice, s, nullptr);
+				mDevice->Destroy(s);
 		for (auto& b : v.second->mShaderVariant->mDescriptorSetBindings)
-			for (VkSampler s : b.second.mImmutableSamplers)
-				vkDestroySampler(*mDevice, s, nullptr);
-		vkDestroyPipelineLayout(*mDevice, v.second->mPipelineLayout, nullptr);
-		for (auto& s : v.second->mPipelines) vkDestroyPipeline(*mDevice, s.second, nullptr);
+			for (vk::Sampler s : b.second.mImmutableSamplers)
+				mDevice->Destroy(s);
+		mDevice->Destroy(v.second->mPipelineLayout);
+		for (auto& s : v.second->mPipelines) mDevice->Destroy(s.second);
 		safe_delete(v.second);
 	}
 	for (auto& v : mComputeVariants) {
 		for (auto& b : v.second->mShaderVariant->mDescriptorSetBindings)
-			for (VkSampler s : b.second.mImmutableSamplers)
-				vkDestroySampler(*mDevice, s, nullptr);
-		vkDestroyPipelineLayout(*mDevice, v.second->mPipelineLayout, nullptr);
-		vkDestroyPipeline(*mDevice, v.second->mPipeline, nullptr);
-		for (auto& l : v.second->mDescriptorSetLayouts) vkDestroyDescriptorSetLayout(*mDevice, l, nullptr);
+			for (vk::Sampler s : b.second.mImmutableSamplers)
+				mDevice->Destroy(s);
+		mDevice->Destroy(v.second->mPipelineLayout);
+		mDevice->Destroy(v.second->mPipeline);
+		for (auto& l : v.second->mDescriptorSetLayouts) mDevice->Destroy(l);
 		safe_delete(v.second);
 	}
 
 	for (uint32_t i = 0; i < mShader->mVariants.size(); i++)
 		for (uint32_t j = 0; j < mShader->mVariants[i].mModules.size(); j++)
-			vkDestroyShaderModule(*mDevice, mShader->mVariants[i].mModules[j].mShaderModule, nullptr);
+			mDevice->Destroy(mShader->mVariants[i].mModules[j].mShaderModule);
 		
 	delete mShader;
 }
 
-VkPipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput, VkPrimitiveTopology topology, VkCullModeFlags cullMode, VkPolygonMode polyMode) {
-	VkCullModeFlags cull = cullMode == VK_CULL_MODE_FLAG_BITS_MAX_ENUM ? mShaderVariant->mCullMode : cullMode;
-	VkPolygonMode poly = polyMode == VK_POLYGON_MODE_MAX_ENUM ? mShaderVariant->mPolygonMode : polyMode;
+vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput, vk::PrimitiveTopology topology, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
+	vk::CullModeFlags cull = cullModeOverride == nullptr ? mShaderVariant->mCullMode : *cullModeOverride;
+	vk::PolygonMode poly = polyModeOverride == nullptr ? mShaderVariant->mPolygonMode : *polyModeOverride;
 	PipelineInstance instance((uint64_t)hash<RenderPass>()(*commandBuffer->CurrentRenderPass()), commandBuffer->CurrentSubpassIndex(), vertexInput, topology, cull, poly);
 
 	if (mPipelines.count(instance))
@@ -186,42 +177,34 @@ VkPipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const Ver
 	else {
 		const Subpass& subpass = commandBuffer->CurrentRenderPass()->GetSubpass(commandBuffer->CurrentSubpassIndex());
 
-		vector<VkPipelineShaderStageCreateInfo> stageInfos(mShaderVariant->mModules.size());
+		vector<vk::PipelineShaderStageCreateInfo> stageInfos(mShaderVariant->mModules.size());
 		for (uint32_t i = 0; i < mShaderVariant->mModules.size(); i++) {
-			stageInfos[i] = {};
-			stageInfos[i].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 			stageInfos[i].stage = mShaderVariant->mModules[i].mStage;
 			stageInfos[i].pName = mShaderVariant->mModules[i].mEntryPoint.c_str();
 			stageInfos[i].module = mShaderVariant->mModules[i].mShaderModule;
 		}
 		
-		VkPipelineRasterizationStateCreateInfo rasterizationState = {};
-		rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		vk::PipelineRasterizationStateCreateInfo rasterizationState = {};
 		rasterizationState.cullMode = cull;
 		rasterizationState.polygonMode = poly;
-		VkPipelineViewportStateCreateInfo viewportState = {};
-		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		vk::PipelineViewportStateCreateInfo viewportState = {};
 		viewportState.viewportCount = 1;
 		viewportState.scissorCount = 1;
 		
-		vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH };
-		VkPipelineDynamicStateCreateInfo dynamicState = {};
-		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		vector<vk::DynamicState> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth };
+		vk::PipelineDynamicStateCreateInfo dynamicState = {};
 		dynamicState.dynamicStateCount = (uint32_t)dynamicStates.size();
 		dynamicState.pDynamicStates = dynamicStates.data();
 
-		VkPipelineColorBlendStateCreateInfo blendState = {};
-		blendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		vk::PipelineColorBlendStateCreateInfo blendState = {};
 		blendState.attachmentCount = (uint32_t)mShaderVariant->mBlendStates.size();
 		blendState.pAttachments = mShaderVariant->mBlendStates.data();
 
-		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
-		inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		vk::PipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
 		inputAssemblyState.topology = topology;
 		inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
-		VkPipelineVertexInputStateCreateInfo vinput = {};
-		vinput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vk::PipelineVertexInputStateCreateInfo vinput = {};
 		if (vertexInput) {
 			vinput.vertexBindingDescriptionCount = (uint32_t)vertexInput->mBindings.size();
 			vinput.pVertexBindingDescriptions = vertexInput->mBindings.data();
@@ -234,20 +217,18 @@ VkPipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const Ver
 			vinput.pVertexAttributeDescriptions = nullptr;
 		}
 
-		VkPipelineMultisampleStateCreateInfo multisampleState = {};
-		multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		vk::PipelineMultisampleStateCreateInfo multisampleState = {};
 		multisampleState.sampleShadingEnable = mShaderVariant->mSampleShading;
 		multisampleState.alphaToCoverageEnable = VK_FALSE;
-		multisampleState.alphaToOneEnable = VK_FALSE;
-		multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		multisampleState.alphaToOneEnable = FALSE;
+		multisampleState.rasterizationSamples = vk::SampleCountFlagBits::e1;
 		for (auto& kp : subpass.mAttachments)
 			if (kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL)) {
 				multisampleState.rasterizationSamples = kp.second.mSamples;
 				break;
 			}
 
-		VkGraphicsPipelineCreateInfo info = {};
-		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		vk::GraphicsPipelineCreateInfo info = {};
 		info.stageCount = (uint32_t)stageInfos.size();
 		info.pStages = stageInfos.data();
 		info.pInputAssemblyState = &inputAssemblyState;
@@ -262,12 +243,11 @@ VkPipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const Ver
 		info.layout = mPipelineLayout;
 		info.renderPass = *commandBuffer->CurrentRenderPass();
 		info.subpass = commandBuffer->CurrentSubpassIndex();
-		info.basePipelineHandle = VK_NULL_HANDLE;
+		info.basePipelineHandle = nullptr;
 		info.basePipelineIndex = -1;
 
-		VkPipeline p;
-		ThrowIfFailed(vkCreateGraphicsPipelines(*mDevice, mDevice->PipelineCache(), 1, &info, nullptr, &p), "vkCreateGraphicsPipelines failed");
-		mDevice->SetObjectName(p, mName, VK_OBJECT_TYPE_PIPELINE);
+		vk::Pipeline p = ((vk::Device)*mDevice).createGraphicsPipelines(mDevice->PipelineCache(), { info }).value[0];
+		mDevice->SetObjectName(p, mName);
 		mPipelines.emplace(instance, p);
 
 		return p;
