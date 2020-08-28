@@ -21,32 +21,16 @@ class Texture {
 public:
 	const std::string mName;
 
-	// Construct from file
-	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& filename, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
-
-	// Construct cubemap from file
-	STRATUM_API Texture(const std::string& name, ::Device* device, const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
+	// Construct image or image array from file(s)
+	STRATUM_API Texture(const std::string& name, ::Device* device, const std::vector<std::string>& files, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags());
+	inline Texture(const std::string& name, ::Device* device, const std::string& filename, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags())
+		: Texture(name, device, std::vector<std::string> { filename }, loadFlags, createFlags) {}
 
 	// Construct from pixel data and metadata. Will generate mip maps if mipLevels = 0
 	STRATUM_API Texture(const std::string& name, Device* device, const void* data, vk::DeviceSize dataSize, 
 		const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-	// Construct from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
-	STRATUM_API Texture(const std::string& name, Device* device, 
-		const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
-		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	
-	// Construct from pixel data and metadata. Will generate mip maps if mipLevels = 0
-	STRATUM_API Texture(const std::string& name, Device* device, const void* data, vk::DeviceSize dataSize,
-		const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
-		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	
-	// Construct from metadata, leave empty. Will create approprioate number of (empty) subresources if mipLevels = 0
-	STRATUM_API Texture(const std::string& name, Device* device, 
-		const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
-		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-
 	STRATUM_API ~Texture();
 
 	inline ::Device* Device() const { return mDevice; };
@@ -84,7 +68,7 @@ private:
 	vk::SampleCountFlagBits mSampleCount;
 	vk::ImageUsageFlags mUsage;
 	vk::MemoryPropertyFlags mMemoryProperties;
-	vk::ImageTiling mTiling;
+	vk::ImageTiling mTiling = vk::ImageTiling::eOptimal;
 	
 	vk::ImageLayout mLastKnownLayout;
 	vk::PipelineStageFlags mLastKnownStageFlags;

@@ -203,7 +203,7 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 				dst[x] = (uint8_t)(fminf(fmaxf(kp.second.operator()(0, y)[x], -1), 1)*127);
 		}
 
-	mSDF = new Texture(mName, device, data, 4*extent.width*extent.height, extent, vk::Format::eR8G8B8A8Snorm);
+	mSDF = new Texture(mName, device, data, 4*extent.width*extent.height, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, 0);
 	delete[] data;
 
 	msdfgen::destroyFont(font);

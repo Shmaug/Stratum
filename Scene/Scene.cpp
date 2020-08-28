@@ -15,94 +15,7 @@ using namespace std;
 #define INSTANCE_BATCH_SIZE 1024
 #define MAX_GPU_LIGHTS 64
 
-const ::VertexInput Float3VertexInput(
-	{ vk::VertexInputBindingDescription(0, sizeof(float3), vk::VertexInputRate::eVertex) },
-	{ vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, 0) } );
-
-struct AIWeight {
-	string bones[4];
-	float4 weights;
-
-	AIWeight() {
-		bones[0] = bones[1] = bones[2] = bones[3] = "";
-		weights[0] = weights[1] = weights[2] = weights[3] = 0.f;
-	}
-	inline void Set(const std::string& cluster, float weight) {
-		if (weight < .001f) return;
-
-		uint32_t index = 0;
-		float m = weights[0];
-		for (uint32_t i = 0; i < 4; i++) {
-			if (cluster == bones[i]) {
-				index = i;
-				break;
-			} else if (weights[i] < m) {
-				index = i;
-				m = weights[i];
-			}
-		}
-
-		bones[index] = cluster;
-		weights[index] = weight;
-	}
-	inline void Normalize() {
-		weights /= dot(float4(1), weights);
-	}
-};
-
-inline uint32_t GetDepth(aiNode* node) {
-	uint32_t d = 0;
-	while (node->mParent) {
-		node = node->mParent;
-		d++;
-	}
-	return d;
-}
-inline float4x4 ConvertMatrix(const aiMatrix4x4& m) {
-	return float4x4(
-		m.a1, m.b1, m.c1, m.d1,
-		m.a2, m.b2, m.c2, m.d2,
-		m.a3, m.b3, m.c3, m.d3,
-		m.a4, m.b4, m.c4, m.d4
-	);
-}
-inline Bone* AddBone(AnimationRig& rig, aiNode* node, const aiScene* scene, aiNode* root, unordered_map<aiNode*, Bone*>& boneMap, float scale) {
-	if (node == root) return nullptr;
-	if (boneMap.count(node))
-		return boneMap.at(node);
-
-	float4x4 mat = ConvertMatrix(node->mTransformation);
-	Bone* parent = nullptr;
-
-	if (node->mParent) {
-		// merge empty bones
-		aiNode* p = node->mParent;
-		while (p && p->mName == aiString("")) {
-			mat = ConvertMatrix(p->mTransformation) * mat;
-			p = p->mParent;
-		}
-		// parent transform is the first non-empty parent bone
-		if (p) parent = AddBone(rig, p, scene, root, boneMap, scale);
-	}
-
-	quaternion q;
-	float3 p;
-	float3 s;
-	mat.Decompose(&p, &q, &s);
-
-	Bone* bone = new Bone(node->mName.C_Str(), (uint32_t)rig.size());
-	boneMap.emplace(node, bone);
-	rig.push_back(bone);
-	bone->LocalPosition(p * scale);
-	bone->LocalRotation(q);
-	bone->LocalScale(s);
-
-	if (parent) parent->AddChild(bone);
-	return bone;
-}
-
-Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvhDirty(true), mFixedTimeStep(.0025f),
-	mPhysicsTimeLimitPerFrame(.2f) , mFixedAccumulator(0), mDeltaTime(0), mTotalTime(0), mFps(0), mFrameTimeAccum(0), mFpsAccum(0), mLightBuffer(nullptr), mShadowBuffer(nullptr), mShadowAtlas(nullptr) {
+Scene::Scene(::Instance* instance) : mInstance(instance) {
 	mBvh = new ObjectBvh2();
 	mEnvironmentTexture = mInstance->Device()->AssetManager()->WhiteTexture();
 
@@ -125,23 +38,23 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 	
 	Subpass shadowSubpass = {};
 	shadowSubpass.mShaderPass = "forward/depth";
-	shadowSubpass.mAttachments["stm_shadow_atlas"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
+	shadowSubpass.mAttachments["stm_shadow_atlas"] = { AttachmentType::eDepthStencil, vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
 
 
 	Subpass depthPrepass = {};
 	depthPrepass.mShaderPass = "forward/depth";
-	depthPrepass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
+	depthPrepass.mAttachments["stm_main_depth"] = { AttachmentType::eDepthStencil, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
 
 	Subpass opaqueSubpass = {};
 	opaqueSubpass.mShaderPass = "forward/opaque";
-	opaqueSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
-	opaqueSubpass.mAttachments["stm_main_depth"] = { ATTACHMENT_DEPTH_STENCIL, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
+	opaqueSubpass.mAttachments["stm_main_render"] = { AttachmentType::eColor, renderFormat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
+	opaqueSubpass.mAttachments["stm_main_depth"] = { AttachmentType::eDepthStencil, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
 	opaqueSubpass.mAttachmentDependencies["stm_shadow_atlas"] = { vk::PipelineStageFlagBits::eFragmentShader, vk::AccessFlagBits::eShaderRead };
 	
 	Subpass transparentSubpass = {};
 	transparentSubpass.mShaderPass = "forward/transparent";
-	transparentSubpass.mAttachments["stm_main_render"] = { ATTACHMENT_COLOR, renderFormat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
-	transparentSubpass.mAttachments["stm_main_resolve"] = { ATTACHMENT_RESOLVE, renderFormat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore };
+	transparentSubpass.mAttachments["stm_main_render"] = { AttachmentType::eColor, renderFormat, sampleCount, vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore };
+	transparentSubpass.mAttachments["stm_main_resolve"] = { AttachmentType::eResolve, renderFormat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore };
 	transparentSubpass.mAttachments["stm_main_depth"] = opaqueSubpass.mAttachments["stm_main_depth"];
 
 	AssignRenderNode("Shadows", { shadowSubpass });
@@ -173,9 +86,16 @@ Scene::Scene(::Instance* instance) : mInstance(instance), mLastBvhBuild(0), mBvh
 		6,4,2,4,0,2,
 		4,7,5,4,6,7
 	};
+	shared_ptr<Buffer> skyVertexBuffer = make_shared<Buffer>("SkyCube/Vertices", mInstance->Device(), verts, sizeof(float3)*8, vk::BufferUsageFlagBits::eVertexBuffer);
+	shared_ptr<Buffer> skyIndexBuffer  = make_shared<Buffer>("SkyCube/Indices" , mInstance->Device(), indices, sizeof(uint16_t)*36, vk::BufferUsageFlagBits::eIndexBuffer);
 	
+	shared_ptr<Mesh> skyCube = make_shared<Mesh>("SkyCube");
+	skyCube->SetAttribute(VertexAttributeType::ePosition, 0, BufferView(skyVertexBuffer), 0, (uint32_t)sizeof(float3));
+	skyCube->SetIndexBuffer(BufferView(skyIndexBuffer), vk::IndexType::eUint16);
+	skyCube->AddSubmesh(Mesh::Submesh(8, 0, 36, 0));
+
 	mSkybox = CreateObject<MeshRenderer>("Skybox");
-	mSkybox->Mesh(make_shared<Mesh>("SkyCube", mInstance->Device(), verts, indices, 8, (uint32_t)sizeof(float3), 36, &Float3VertexInput, vk::IndexType::eUint16));
+	mSkybox->Mesh(skyCube);
 	mSkybox->Material(make_shared<Material>("Skybox", mInstance->Device()->AssetManager()->LoadPipeline("Shaders/skybox.stmb")));
 	mSkybox->LocalScale(1e5f);
 
@@ -238,20 +158,24 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 		auto& node = kp.second;
 
 		if (!node.mRenderPass) {
+			// resolve non-subpass dependencies
 			node.mNonSubpassDependencies.clear();
 			vector<Subpass> subpasses;
-			for (auto& subpass : node.mSubpasses) {
-				for (auto& dep : subpass.mAttachmentDependencies) {
+			for (uint32_t i = 0; i < node.mSubpasses.size(); i++) {
+				for (auto& dependency : node.mSubpasses[i].mAttachmentDependencies) {
 					bool subpassDependency = false;
-					for (auto& srcSubpass : node.mSubpasses)
-						if (srcSubpass.mAttachments.count(dep.first) && (srcSubpass.mAttachments.at(dep.first).mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL | ATTACHMENT_RESOLVE | ATTACHMENT_PRESERVE))) {
+					for (uint32_t j = 0; j < node.mSubpasses.size(); j++) {
+						if (i == j || node.mSubpasses[j].mAttachments.count(dependency.first) == 0) continue;
+						AttachmentType type = node.mSubpasses[j].mAttachments.at(dependency.first).mType;
+						if (type == AttachmentType::eColor || type == AttachmentType::eDepthStencil || type == AttachmentType::eResolve || type == AttachmentType::ePreserve) {
 								subpassDependency = true;
 								break;
 							}
+						}
 					if (!subpassDependency)
-						node.mNonSubpassDependencies.insert(dep.first);
+						node.mNonSubpassDependencies.insert(dependency.first);
 				}
-				subpasses.push_back(subpass);
+				subpasses.push_back(node.mSubpasses[i]);
 			}
 			node.mRenderPass = new RenderPass(kp.first, mInstance->Device(), subpasses);
 		}
@@ -280,7 +204,7 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 				}
 			}
 			// ...or just create a new one if not
-			newAttachments.emplace(attachment, new Texture(attachment, mInstance->Device(), extent, node.mRenderPass->Attachment(i).format, 1, node.mRenderPass->Attachment(i).samples, usage));
+			newAttachments.emplace(attachment, new Texture(attachment, mInstance->Device(), nullptr, 0, vk::Extent3D(extent, 1), node.mRenderPass->Attachment(i).format, 1, node.mRenderPass->Attachment(i).samples, usage));
 		}
 
 		// release previous framebuffer if invalid
@@ -316,10 +240,11 @@ void Scene::BuildRenderGraph(CommandBuffer* commandBuffer) {
 	sort(mRenderGraph.begin(), mRenderGraph.end(), [&](const RenderGraphNode* a, const RenderGraphNode* b) {
 		// b < a if a depends on b
 		for (const RenderTargetIdentifier& dep : a->mNonSubpassDependencies)
-			for (const Subpass& subpass : b->mSubpasses)
+			for (const Subpass& subpass : b->mSubpasses) {
 				for (const auto& kp : subpass.mAttachments)
-					if (kp.first == dep && (kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL | ATTACHMENT_RESOLVE)))
+					if (kp.first == dep && (kp.second.mType == AttachmentType::eColor || kp.second.mType == AttachmentType::eDepthStencil || kp.second.mType == AttachmentType::eResolve))
 						return false;
+			}
 		return true;
 	});
 
@@ -388,6 +313,12 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 	commandBuffer->TransitionBarrier(mEnvironmentTexture, vk::ImageLayout::eShaderReadOnlyOptimal);
 	PROFILER_END;
 	
+	
+	PROFILER_BEGIN("Lighting Update");
+	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+	mShadowAtlas = commandBuffer->GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	
 	AABB shadowBounds;
 	shadowBounds.mMin = 1e10f;
 	shadowBounds.mMax = -1e10f;
@@ -399,12 +330,6 @@ void Scene::Update(CommandBuffer* commandBuffer) {
 			shadowBounds.Encapsulate(aabb);
 		}
 	}
-
-	PROFILER_BEGIN("Lighting Update");
-	mLightBuffer = commandBuffer->GetBuffer("Light Buffer", MAX_GPU_LIGHTS * sizeof(GPULight), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
-	mShadowBuffer = commandBuffer->GetBuffer("Shadow Buffer", MAX_GPU_LIGHTS * sizeof(ShadowData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
-	mShadowAtlas = commandBuffer->GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
-	
 	uint32_t si = 0;
 	uint32_t shadowCount = 0;
 	

@@ -24,8 +24,9 @@ public:
 	Device* mDevice;
 	std::unordered_map<PipelineInstance, vk::Pipeline> mPipelines;
 
-	STRATUM_API vk::Pipeline GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput,
+	STRATUM_API vk::Pipeline GetPipeline(CommandBuffer* commandBuffer,
 		vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList,
+		const vk::PipelineVertexInputStateCreateInfo& vertexInput = vk::PipelineVertexInputStateCreateInfo(),
 		vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr,
 		vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
 };

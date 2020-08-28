@@ -4,14 +4,11 @@
 
 class AssetManager {
 public:
-	typedef std::variant<Pipeline*, Texture*, Mesh*, Font*> Asset;
-
 	STRATUM_API ~AssetManager();
 
 	STRATUM_API Pipeline*	LoadPipeline(const std::string& filename);
 	STRATUM_API Texture*	LoadTexture(const std::string& filename, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
 	STRATUM_API Texture*  LoadCubemap(const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
-	STRATUM_API Mesh*		  LoadMesh(const std::string& filename, float scale = 1.f);
 	STRATUM_API Font*		  LoadFont(const std::string& filename);
 
 	inline Texture* WhiteTexture() const { return mWhiteTexture; }
@@ -31,6 +28,6 @@ private:
 	Texture* mNoiseTexture;
 
 	Device* mDevice;
-	std::unordered_map<std::string, Asset> mAssets;
+	std::unordered_map<std::string, std::variant<Pipeline*, Texture*, Font*>> mAssets;
 	mutable std::mutex mMutex;
 };

@@ -10,10 +10,10 @@ struct Sphere {
 	inline Sphere(const float3& center, float radius) : mCenter(center), mRadius(radius) {}
 };
 struct AABB {
-	float3 mMin;
-	float3 mMax;
+	float3 mMin = 0;
+	float3 mMax = 0;
 
-	AABB() : mMin(float3()), mMax(float3()) {}
+	AABB() {}
 	AABB(const float3& min, const float3& max) : mMin(min), mMax(max) {}
 	AABB(const AABB& aabb) : mMin(aabb.mMin), mMax(aabb.mMax) {}
 	AABB(const AABB& aabb, const float4x4& transform) : AABB(aabb) {

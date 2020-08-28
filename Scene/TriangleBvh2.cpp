@@ -4,10 +4,7 @@
 
 using namespace std;
 
-void TriangleBvh2::Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType) {
-	mTriangles.clear();
-	mNodes.clear();
-
+TriangleBvh2::TriangleBvh2(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType, uint32_t leafSize) {
 	mVertices.resize(vertexCount);
 
 	vector<AABB> aabbs;

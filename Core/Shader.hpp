@@ -27,11 +27,18 @@ struct DescriptorBinding {
 };
 
 struct ShaderVariant {
+	struct StageInput {
+		uint32_t mLocation;
+		vk::Format mFormat;
+		VertexAttributeType mType;
+		uint32_t mTypeIndex;
+	};
 	std::set<std::string> mKeywords;
+	std::unordered_map<std::string, StageInput> mStageInputs;
 	std::unordered_map<std::string, DescriptorBinding> mDescriptorSetBindings;
 	std::unordered_map<std::string, vk::PushConstantRange> mPushConstants;
 	std::unordered_map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
-	std::vector<SpirvModule> mModules; // vs/ps or cs
+	std::vector<SpirvModule> mModules; // vert/frag stages or just a compute kernel
 
 	// Graphics variant data
 
@@ -59,6 +66,15 @@ struct ShaderVariant {
 		WriteValue(stream, (uint64_t)mKeywords.size());
 		for (const std::string& kw : mKeywords)
 			WriteString(stream, kw);
+
+		WriteValue(stream, (uint64_t)mStageInputs.size());
+		for (const auto& kp : mStageInputs) {
+			WriteString(stream, kp.first);
+			WriteValue(stream, kp.second.mLocation);
+			WriteValue(stream, kp.second.mFormat);
+			WriteValue(stream, kp.second.mType);
+			WriteValue(stream, kp.second.mTypeIndex);
+		}
 
 		WriteValue(stream, (uint64_t)mDescriptorSetBindings.size());
 		for (const auto& kp : mDescriptorSetBindings) {
@@ -100,6 +116,19 @@ struct ShaderVariant {
 			mKeywords.insert(str);
 		}
 		
+		uint64_t inputCount;
+		ReadValue<uint64_t>(stream, inputCount);
+		for (uint32_t i = 0; i < inputCount; i++) {
+			std::string name;
+			ReadString(stream, name);
+			StageInput input;
+			ReadValue(stream, input.mLocation);
+			ReadValue(stream, input.mFormat);
+			ReadValue(stream, input.mType);
+			ReadValue(stream, input.mTypeIndex);
+			mStageInputs.emplace(name, input);
+		}
+
 		uint64_t descriptorCount;
 		ReadValue<uint64_t>(stream, descriptorCount);
 		for (uint32_t i = 0; i < descriptorCount; i++) {

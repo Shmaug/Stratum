@@ -34,9 +34,6 @@ AssetManager::~AssetManager() {
 				delete get<Texture*>(asset.second);
 				break;
 			case 2:
-				delete get<Mesh*>(asset.second);
-				break;
-			case 3:
 				delete get<Font*>(asset.second);
 				break;
 		}
@@ -44,36 +41,29 @@ AssetManager::~AssetManager() {
 
 Pipeline* AssetManager::LoadPipeline(const string& filename) {
 	mMutex.lock();
-	Asset& asset = mAssets[filename];
+	auto& asset = mAssets[filename];
 	if (asset.index() != 0 || get<Pipeline*>(asset) == nullptr) asset = new Pipeline(filename, mDevice, filename);
 	mMutex.unlock();
 	return get<Pipeline*>(asset);
 }
 Texture* AssetManager::LoadTexture(const string& filename, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[filename + to_string((uint32_t)flags)];
+	auto& asset = mAssets[filename + to_string((uint32_t)flags)];
 	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(filename, mDevice, filename, flags);
 	mMutex.unlock();
 	return get<Texture*>(asset);
 }
 Texture* AssetManager::LoadCubemap(const string& posx, const string& negx, const string& posy, const string& negy, const string& posz, const string& negz, TextureLoadFlags flags) {
 	mMutex.lock();
-	Asset& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string((uint32_t)flags)];
-	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, posx, negx, posy, negy, posz, negz, flags);
+	auto& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string((uint32_t)flags)];
+	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, { posx, negx, posy, negy, posz, negz }, flags, vk::ImageCreateFlagBits::eCubeCompatible);
 	mMutex.unlock();
 	return get<Texture*>(asset);
 }
-Mesh* AssetManager::LoadMesh(const string& filename, float scale) {
-	mMutex.lock();
-	Asset& asset = mAssets[filename];
-	if (asset.index() != 2 || get<Mesh*>(asset) == nullptr) asset = new Mesh(filename, mDevice, filename, scale);
-	mMutex.unlock();
-	return get<Mesh*>(asset);
-}
 Font* AssetManager::LoadFont(const string& filename) {
 	mMutex.lock();
-	Asset& asset = mAssets[filename];
-	if (asset.index() != 3 || get<Font*>(asset) == nullptr) asset = new Font(filename, mDevice, filename);
+	auto& asset = mAssets[filename];
+	if (asset.index() != 2 || get<Font*>(asset) == nullptr) asset = new Font(filename, mDevice, filename);
 	mMutex.unlock();
 	return get<Font*>(asset);
 }

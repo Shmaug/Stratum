@@ -11,21 +11,20 @@
 #define END_CMD_REGION(cmd)
 #endif
 
-class Semaphore {
-public:
-	inline Semaphore::Semaphore(Device* device) : mDevice(device) { mSemaphore = ((vk::Device)*mDevice).createSemaphore({}); }
-	inline Semaphore::~Semaphore() { mDevice->Destroy(mSemaphore); }
-	inline operator vk::Semaphore() const { return mSemaphore; }
-private:
-	vk::Semaphore mSemaphore;
-	Device* mDevice;
-};
-
 class CommandBuffer {
 private:
+	enum class CommandBufferState {
+		eRecording,
+		ePending,
+		eDone
+	};
+	
 	vk::CommandBuffer mCommandBuffer;
 
+	void CheckDone();
+
 public:
+
 	STRATUM_API ~CommandBuffer();
 	inline operator vk::CommandBuffer() const { return mCommandBuffer; }
 
@@ -41,7 +40,6 @@ public:
 
 	STRATUM_API void Reset(const std::string& name = "Command Buffer");
 	STRATUM_API void Wait();
-	inline CommandBufferState State();
 
 	STRATUM_API void Signal(vk::PipelineStageFlags, Semaphore* semaphore) { mSignalSemaphores.push_back(semaphore); };
 	STRATUM_API void WaitOn(vk::PipelineStageFlags stage, Semaphore* semaphore) { mWaitSemaphores.push_back(std::make_pair(stage, semaphore)); }
@@ -86,8 +84,8 @@ public:
 	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
 
 	STRATUM_API void BindPipeline(ComputePipeline* pipeline);
-	STRATUM_API void BindPipeline(GraphicsPipeline* shader, const VertexInput* vertexInput = nullptr, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr, vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
-	STRATUM_API bool BindMaterial(Material* material, const VertexInput* vertexInput = nullptr, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList);
+	STRATUM_API void BindPipeline(GraphicsPipeline* pipeline, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, const vk::PipelineVertexInputStateCreateInfo& vertexInput = vk::PipelineVertexInputStateCreateInfo(), vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr, vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
+	STRATUM_API GraphicsPipeline* BindPipeline(Material* material, Mesh* mesh);
 
 	// Find the range for a push constant (in the current pipeline's layout) named 'name' and push it
 	STRATUM_API bool PushConstant(const std::string& name, const void* data, uint32_t dataSize);
@@ -107,8 +105,8 @@ public:
 	inline void DispatchAligned(uint32_t x, uint32_t y) { DispatchAligned(uint3(x, y, 1)); }
 	inline void DispatchAligned(uint32_t x, uint32_t y, uint32_t z) { DispatchAligned(uint3(x, y, z)); }
 
-	STRATUM_API void BindVertexBuffer(Buffer* buffer, uint32_t index, vk::DeviceSize offset);
-	STRATUM_API void BindIndexBuffer(Buffer* buffer, vk::DeviceSize offset, vk::IndexType indexType);
+	STRATUM_API void BindVertexBuffer(const BufferView& view, uint32_t index);
+	STRATUM_API void BindIndexBuffer(const BufferView& view, vk::IndexType indexType);
 	
 private:
 	friend class Device;
@@ -148,8 +146,8 @@ private:
 	vk::PipelineLayout mGraphicsPipelineLayout;
 	std::vector<DescriptorSet*> mBoundGraphicsDescriptorSets;
 
-	std::unordered_map<uint32_t, Buffer*> mBoundVertexBuffers;
-	Buffer* mBoundIndexBuffer;
+	std::unordered_map<uint32_t, BufferView> mBoundVertexBuffers;
+	BufferView mBoundIndexBuffer;
 
 	#ifdef ENABLE_DEBUG_LAYERS
 	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT = 0;

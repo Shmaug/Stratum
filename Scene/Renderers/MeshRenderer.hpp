@@ -11,25 +11,25 @@ public:
 	STRATUM_API MeshRenderer(const std::string& name);
 	STRATUM_API ~MeshRenderer();
 
-	inline virtual void Mesh(::Mesh* m) { mMesh = m; DirtyTransform(); }
-	inline virtual void Mesh(std::shared_ptr<::Mesh> m) { mMesh = m; DirtyTransform(); }
-	inline virtual ::Mesh* Mesh() const { return mMesh.index() == 0 ? std::get<::Mesh*>(mMesh) : std::get<std::shared_ptr<::Mesh>>(mMesh).get(); }
+	STRATUM_API virtual void Mesh(variant_ptr<::Mesh> m);
+	inline virtual ::Mesh* Mesh() const { return mMesh.get(); }
 
+	inline virtual void Material(variant_ptr<::Material> m) { mMaterial = m; }
 	inline virtual ::Material* Material() { return mMaterial.get(); }
-	inline virtual void Material(std::shared_ptr<::Material> m) { mMaterial = m; }
 
 	// Renderer functions
 
+	inline virtual bool BypassCulling() override { return mBypassCulling; }
 	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
 	STRATUM_API virtual bool Intersect(const Ray& ray, float* t, bool any) override;
 
-	inline virtual bool Visible(const std::string& pass) override { return Mesh() && mMaterial && mMaterial->GetPassPipeline(pass) && Renderer::Visible(pass); }
-	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
+	inline virtual bool Visible(const std::string& pass) override { return mMesh.get() && mMaterial.get() && mMaterial->GetPassPipeline(pass) && Renderer::Visible(pass); }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial.get() ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
 
 private:
-	std::variant<::Mesh*, std::shared_ptr<::Mesh>> mMesh;
-	std::shared_ptr<::Material> mMaterial;
-	uint32_t mRayMask;
+	variant_ptr<::Mesh> mMesh;
+	variant_ptr<::Material> mMaterial;
+	bool mBypassCulling;
 	AABB mAABB;
 
 protected:

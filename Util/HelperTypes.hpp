@@ -46,39 +46,50 @@ public:
 	inline T* operator ->() const { return ptr; }
 };
 
+struct BufferView {
+	variant_ptr<Buffer> mBuffer = nullptr;
+	vk::DeviceSize mByteOffset = 0;
+
+	BufferView() = default;
+	inline BufferView(variant_ptr<Buffer> buffer, vk::DeviceSize offset = 0) : mBuffer(buffer), mByteOffset(offset) {};
+
+	inline bool operator==(const BufferView& rhs) const {
+		return mBuffer == rhs.mBuffer && mByteOffset == rhs.mByteOffset;
+	}
+};
+
 struct fRect2D {
 	union {
 		float v[4];
 		float4 xyzw;
 		struct {
-			// location
 			float2 mOffset;
 			// full size of rectangle
-			float2 mExtent;
+			float2 mSize;
 		};
 	};
 
-	inline fRect2D() : mOffset(0), mExtent(0) {};
-	inline fRect2D(const float2& offset, const float2& extent) : mOffset(offset), mExtent(extent) {};
-	inline fRect2D(float ox, float oy, float ex, float ey) : mOffset(float2(ox, oy)), mExtent(ex, ey) {};
+	inline fRect2D() : mOffset(0), mSize(0) {};
+	inline fRect2D(const float2& offset, const float2& extent) : mOffset(offset), mSize(extent) {};
+	inline fRect2D(float ox, float oy, float ex, float ey) : mOffset(float2(ox, oy)), mSize(ex, ey) {};
 
 	inline fRect2D& operator=(const fRect2D & rhs) {
 		mOffset = rhs.mOffset;
-		mExtent = rhs.mExtent;
+		mSize = rhs.mSize;
 		return *this;
 	}
 
 	inline bool Intersects(const fRect2D& p) const {
 		return !(
-			mOffset.x + mExtent.x < p.mOffset.x ||
-			mOffset.y + mExtent.y < p.mOffset.y ||
-			mOffset.x > p.mOffset.x + p.mExtent.x ||
-			mOffset.y > p.mOffset.y + p.mExtent.y);
+			mOffset.x + mSize.x < p.mOffset.x ||
+			mOffset.y + mSize.y < p.mOffset.y ||
+			mOffset.x > p.mOffset.x + p.mSize.x ||
+			mOffset.y > p.mOffset.y + p.mSize.y);
 	}
 	inline bool Contains(const float2& p) const {
 		return 
 			p.x > mOffset.x && p.y > mOffset.y &&
-			p.x < mOffset.x + mExtent.x && p.y < mOffset.y + mExtent.y;
+			p.x < mOffset.x + mSize.x && p.y < mOffset.y + mSize.y;
 	}
 };
 
@@ -92,72 +103,36 @@ struct DeviceMemoryAllocation {
 	std::string mTag;
 };
 
-
-// Defines a vertex input. Hashes itself once at creation, then remains immutable.
-struct VertexInput {
-public:
-	const std::vector<vk::VertexInputBindingDescription> mBindings;
-	// Note: In order to hash and compare correctly, attributes must appear in order of location.
-	const std::vector<vk::VertexInputAttributeDescription> mAttributes;
-
-	VertexInput(const std::vector<vk::VertexInputBindingDescription>& bindings, const std::vector<vk::VertexInputAttributeDescription>& attribs)
-		: mBindings(bindings), mAttributes(attribs) {
-		std::size_t h = 0;
-		for (const auto& b : mBindings) {
-			hash_combine(h, b.binding);
-			hash_combine(h, b.inputRate);
-			hash_combine(h, b.stride);
-		}
-		for (const auto& a : mAttributes) {
-			hash_combine(h, a.binding);
-			hash_combine(h, a.format);
-			hash_combine(h, a.location);
-			hash_combine(h, a.offset);
-		}
-		mHash = h;
-	};
-
-	inline bool operator==(const VertexInput& rhs) const {
-		/*
-		if (mBinding.binding != rhs.mBinding.binding ||
-			mBinding.inputRate != rhs.mBinding.inputRate ||
-			mBinding.stride != rhs.mBinding.stride ||
-			mAttributes.size() != rhs.mAttributes.size()) return false;
-		for (uint32_t i = 0; i < mAttributes.size(); i++)
-			if (mAttributes[i].binding != rhs.mAttributes[i].binding ||
-				mAttributes[i].format != rhs.mAttributes[i].format ||
-				mAttributes[i].location != rhs.mAttributes[i].location ||
-				mAttributes[i].offset != rhs.mAttributes[i].offset) return false;
-		return true;
-		*/
-		return mHash == rhs.mHash;
-	}
-
-private:
-	friend struct std::hash<VertexInput>;
-	size_t mHash;
-};
-
 // Represents a pipeline with various parameters, within a shader
 struct PipelineInstance {
 	public:
 	const uint64_t mRenderPassHash;
 	const uint32_t mSubpassIndex;
-	const VertexInput* mVertexInput;
 	const vk::PrimitiveTopology mTopology;
 	const vk::CullModeFlags mCullMode;
 	const vk::PolygonMode mPolygonMode;
+	const vk::PipelineVertexInputStateCreateInfo mVertexInput;
 
-	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, const VertexInput* vertexInput, vk::PrimitiveTopology topology, vk::CullModeFlags cullMode, vk::PolygonMode polyMode)
-		: mRenderPassHash(renderPassHash), mSubpassIndex(subpassIndex), mVertexInput(vertexInput), mTopology(topology), mCullMode(cullMode), mPolygonMode(polyMode) {
+	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, vk::PrimitiveTopology topology, vk::CullModeFlags cullMode, vk::PolygonMode polyMode, const vk::PipelineVertexInputStateCreateInfo& vertexInput)
+		: mRenderPassHash(renderPassHash), mSubpassIndex(subpassIndex), mTopology(topology), mCullMode(cullMode), mPolygonMode(polyMode), mVertexInput(vertexInput) {
 			// Compute hash once upon creation
 			mHash = 0;
 			hash_combine(mHash, mRenderPassHash);
 			hash_combine(mHash, mSubpassIndex);
-			if (mVertexInput) hash_combine(mHash, *mVertexInput);
 			hash_combine(mHash, mTopology);
 			hash_combine(mHash, mCullMode);
 			hash_combine(mHash, mPolygonMode);
+			for (uint32_t i = 0; i < mVertexInput.vertexBindingDescriptionCount; i++) {
+				hash_combine(mHash, mVertexInput.pVertexBindingDescriptions[i].binding);
+				hash_combine(mHash, mVertexInput.pVertexBindingDescriptions[i].inputRate);
+				hash_combine(mHash, mVertexInput.pVertexBindingDescriptions[i].stride);
+			}
+			for (uint32_t i = 0; i < mVertexInput.vertexAttributeDescriptionCount; i++) {
+				hash_combine(mHash, mVertexInput.pVertexAttributeDescriptions[i].binding);
+				hash_combine(mHash, mVertexInput.pVertexAttributeDescriptions[i].format);
+				hash_combine(mHash, mVertexInput.pVertexAttributeDescriptions[i].location);
+				hash_combine(mHash, mVertexInput.pVertexAttributeDescriptions[i].offset);
+			}
 		};
 
 	inline bool operator==(const PipelineInstance& rhs) const { return rhs.mHash == mHash; }
@@ -165,6 +140,15 @@ struct PipelineInstance {
 private:
 	friend struct std::hash<PipelineInstance>;
 	size_t mHash;
+};
+
+struct VertexAttribute {
+	BufferView mBufferView;
+	VertexAttributeType mType;
+	uint32_t mTypeIndex;
+	uint32_t mElementOffset;
+	uint32_t mElementStride;
+	vk::VertexInputRate mInputRate;
 };
 
 namespace std {
@@ -178,25 +162,41 @@ namespace std {
 	};
 
 	template<>
+	struct hash<BufferView> {
+		inline std::size_t operator()(const BufferView& v) const {
+			size_t h = 0;
+			hash_combine(h, *reinterpret_cast<const size_t*>(&v.mBuffer));
+			hash_combine(h, v.mByteOffset);
+			return h;
+		}
+	};
+
+	template<>
 	struct hash<fRect2D> {
 		inline std::size_t operator()(const fRect2D& v) const {
 			size_t h = 0;
-			hash_combine(h, v.mExtent);
+			hash_combine(h, v.mSize);
 			hash_combine(h, v.mOffset);
 			return h;
 		}
 	};
 	
 	template<>
-	struct hash<VertexInput> {
-		inline std::size_t operator()(const  VertexInput& v) const {
-			return v.mHash;
-		}
-	};
-	
-	template<>
 	struct hash<PipelineInstance> {
 		inline std::size_t operator()(const PipelineInstance& p) const { return p.mHash; }
+	};
+
+	template<>
+	struct hash<VertexAttribute> {
+		inline std::size_t operator()(const VertexAttribute& v) const {
+			size_t h = 0;
+			hash_combine(h, v.mBufferView);
+			hash_combine(h, v.mType);
+			hash_combine(h, v.mTypeIndex);
+			hash_combine(h, v.mElementOffset);
+			hash_combine(h, v.mElementStride);
+			return h;
+		}
 	};
 
 	template<typename T>

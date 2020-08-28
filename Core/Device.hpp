@@ -2,6 +2,19 @@
 
 #include <Core/Instance.hpp>
 
+
+class Semaphore {
+public:
+	inline Semaphore::Semaphore(Device* device) : mDevice(device) { mSemaphore = ((vk::Device)*mDevice).createSemaphore({}); }
+	inline Semaphore::~Semaphore() { mDevice->Destroy(mSemaphore); }
+	inline operator vk::Semaphore() const { return mSemaphore; }
+private:
+	vk::Semaphore mSemaphore;
+	Device* mDevice;
+};
+
+
+
 class Device {
 private:
 	vk::Device mDevice;

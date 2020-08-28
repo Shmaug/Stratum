@@ -409,6 +409,31 @@ int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const 
 int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, SpirvModule& spirv) {
 	spirv_cross::Compiler* compiler = new spirv_cross::Compiler(spirv.mSpirvBinary.data(), spirv.mSpirvBinary.size());
 	spirv_cross::ShaderResources resources = compiler->get_shader_resources();
+
+	unordered_map<string, VertexAttributeType> attributeMap {
+		{ "POSITION", 	VertexAttributeType::ePosition },
+		{ "NORMAL", 		VertexAttributeType::eNormal },
+		{ "TANGENT", 		VertexAttributeType::eTangent },
+		{ "BITANGENT", 	VertexAttributeType::eBitangent },
+		{ "TEXCOORD", 	VertexAttributeType::eTexcoord },
+		{ "COLOR", 			VertexAttributeType::eColor },
+		{ "PSIZE", 			VertexAttributeType::ePointSize },
+		{ "POINTSIZE", 	VertexAttributeType::ePointSize }
+	};
+	
+	unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>> formatMap {
+		{ spirv_cross::SPIRType::SByte, 	{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
+		{ spirv_cross::SPIRType::UByte, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
+		{ spirv_cross::SPIRType::Short, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
+		{ spirv_cross::SPIRType::UShort, 	{ vk::Format::eR16Uint, 	vk::Format::eR16G16Uint, 	 vk::Format::eR16G16B16Uint, 		vk::Format::eR16G16B16A16Uint } },
+		{ spirv_cross::SPIRType::Int, 		{ vk::Format::eR32Sint, 	vk::Format::eR32G32Sint, 	 vk::Format::eR32G32B32Sint, 		vk::Format::eR32G32B32A32Sint } },
+		{ spirv_cross::SPIRType::UInt, 		{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+		{ spirv_cross::SPIRType::Int64, 	{ vk::Format::eR64Sint, 	vk::Format::eR64G64Sint, 	 vk::Format::eR64G64B64Sint, 		vk::Format::eR64G64B64A64Sint } },
+		{ spirv_cross::SPIRType::UInt64, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+		{ spirv_cross::SPIRType::Half, 		{ vk::Format::eR16Sfloat, vk::Format::eR16G16Sfloat, vk::Format::eR16G16B16Sfloat,  vk::Format::eR16G16B16A16Sfloat } },
+		{ spirv_cross::SPIRType::Float, 	{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
+		{ spirv_cross::SPIRType::Double, 	{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
+	};
 	
 	auto RegisterResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
 		auto& binding = destVariant.mDescriptorSetBindings[resource.name];
@@ -424,6 +449,26 @@ int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, Spir
 		}
 	};
 	
+	for (const auto& r : resources.stage_inputs) {
+		auto& input = destVariant.mStageInputs[r.name];
+		auto& type = compiler->get_type(r.base_type_id);
+
+		input.mLocation = compiler->get_decoration(r.id, spv::DecorationLocation);
+		input.mFormat = formatMap.at(type.basetype)[type.vecsize-1];
+		input.mTypeIndex = 0;
+
+		string semantic = compiler->get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
+		if (semantic.empty()) continue;
+
+		size_t semanticIndex = semantic.find_first_of("0123456789");
+		string semanticName = semantic;
+		if (semanticIndex != string::npos) {
+			input.mTypeIndex = atoi(semantic.c_str() + semanticIndex);
+			semanticName = semantic.substr(0, semanticIndex);
+		}
+		if (semanticName.back() == '_') semanticName = semanticName.substr(0, semanticName.length() - 1);
+		input.mType = attributeMap.at(semanticName);
+	}
 	for (const auto& r : resources.separate_images) 	RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
 	for (const auto& r : resources.storage_images) 		RegisterResource(r, compiler->get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
 	for (const auto& r : resources.sampled_images) 		RegisterResource(r, vk::DescriptorType::eCombinedImageSampler);
@@ -548,6 +593,7 @@ int CompileSpirv(const string& filename, const set<string>& macros, const string
 	// Compile with shaderc
 
 	CompileOptions options;
+	options.SetHlslFunctionality1(true);
 	options.SetOptimizationLevel(shaderc_optimization_level_zero);
 	options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
 	options.SetTargetSpirv(shaderc_spirv_version_1_3);

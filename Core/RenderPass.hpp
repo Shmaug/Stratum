@@ -2,13 +2,13 @@
 
 #include <Core/Device.hpp>
 
-enum AttachmentType {
-	ATTACHMENT_UNUSED,
-	ATTACHMENT_COLOR,
-	ATTACHMENT_DEPTH_STENCIL,
-	ATTACHMENT_RESOLVE,
-	ATTACHMENT_INPUT,
-	ATTACHMENT_PRESERVE,
+enum class AttachmentType {
+	eUnused,
+	eColor,
+	eDepthStencil,
+	eResolve,
+	eInput,
+	ePreserve,
 };
 
 struct SubpassAttachment {

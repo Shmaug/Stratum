@@ -15,7 +15,7 @@ class Window;
 
 // Data
 
-class Animation;
+class AnimationCurve;
 class Asset;
 class AssetManager;
 class Font;

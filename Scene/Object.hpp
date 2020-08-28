@@ -32,8 +32,8 @@ public:
 	inline void LocalScale(float x, float y, float z) { mLocalScale.x = x; mLocalScale.y = y; mLocalScale.z = z; DirtyTransform(); }
 	inline void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; DirtyTransform(); }
 	
+	inline virtual AABB Bounds() { return AABB(WorldPosition(), WorldPosition()); }
 	inline virtual bool BypassCulling() { return true; };
-	inline virtual AABB Bounds() { UpdateTransform(); return mBounds; }
 
 	inline Object* Parent() const { return mParent; }
 	STRATUM_API void AddChild(Object* obj);
@@ -58,27 +58,24 @@ public:
 private:
 	friend class ::Scene;
 	
-	::Scene* mScene;
+	::Scene* mScene = nullptr;
 
-	bool mEnabled;
-	bool mEnabledHierarchy;
-
-	bool mTransformDirty;
-	float3 mLocalPosition;
-	quaternion mLocalRotation;
-	float3 mLocalScale;
+	bool mEnabled = true;
+	bool mEnabledHierarchy = true;
+	bool mTransformDirty = true;
+	float3 mLocalPosition = 0;
+	quaternion mLocalRotation = quaternion(0,0,0,1);
+	float3 mLocalScale = 1;
+	float3 mWorldPosition;
+	quaternion mWorldRotation;
 	float3 mWorldScale;
-	AABB mBounds;
 	float4x4 mObjectToParent;
 	float4x4 mObjectToWorld;
 	float4x4 mWorldToObject;
 
-	uint32_t mLayerMask;
+	uint32_t mLayerMask = 1;
 
-	float3 mWorldPosition;
-	quaternion mWorldRotation;
-
-	Object* mParent;
+	Object* mParent = nullptr;
 	std::deque<Object*> mChildren;
 
 protected:

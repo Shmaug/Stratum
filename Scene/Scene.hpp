@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Core/RenderPass.hpp>
-#include <Data/Animation.hpp>
 #include <Data/AssetManager.hpp>
 #include <Data/Font.hpp>
 #include <Data/Material.hpp>
@@ -11,8 +10,6 @@
 #include <Scene/GuiContext.hpp>
 #include <Scene/ObjectBvh2.hpp>
 
-// Holds scene Objects. In general, plugins will add objects during their lifetime, and remove objects during or at the end of their lifetime.
-// This makes the shared_ptr destroy when the plugin removes the object, allowing the plugin's module to free the memory.
 class Scene {
 public:
 	STRATUM_API Scene(::Instance* instance);
@@ -31,13 +28,16 @@ public:
 	STRATUM_API void AssignRenderNode(const std::string& nodeName, const std::deque<Subpass>& subpasses);
 	STRATUM_API void DeleteRenderNode(const std::string& nodeName);
 
+	// Updates physics, objects, and lighting 
 	STRATUM_API void Update(CommandBuffer* commandBuffer);
-	// Renders all the cameras and RenderPasses in the scene
+	// Renders RenderNodes in the scene
 	STRATUM_API void Render(CommandBuffer* commandBuffer);
 	// Draw all renderers in view of a camera
 	STRATUM_API void RenderCamera(CommandBuffer* commandBuffer, Camera* camera);
 	
+	// Call commandBuffer->PushConstant() for any scene information i.e. AmbientLight, LightCount, etc.
 	STRATUM_API void PushSceneConstants(CommandBuffer* commandBuffer);
+
 
 	inline Object* Raycast(const Ray& worldRay, float* t = nullptr, bool any = false, uint32_t mask = 0xFFFFFFFF) { return BVH()->Intersect(worldRay, t, any, mask); }
 
@@ -49,6 +49,7 @@ public:
 	inline void EnvironmentTexture(Texture* t) { mEnvironmentTexture = t; }
 	inline void FixedTimeStep(float step) { mFixedTimeStep = step; }
 	inline void PhysicsTimeLimitPerFrame(float t) { mPhysicsTimeLimitPerFrame = t; }
+	inline void BvhDirty(Object* reason) { mBvhDirty = true; }
 
 	// Getters
 	inline bool HasAttachment(const RenderTargetIdentifier& name) const { return mAttachments.count(name); }
@@ -63,15 +64,9 @@ public:
 	inline float FixedTimeStep() const { return mFixedTimeStep; }
 	inline float PhysicsTimeLimitPerFrame() const { return mPhysicsTimeLimitPerFrame; }
 
-	// All objects, in order of insertion
 	STRATUM_API std::vector<Object*> Objects() const;
-
 	STRATUM_API ObjectBvh2* BVH();
-	// Frame id of the last bvh build
 	inline uint64_t LastBvhBuild() { return mLastBvhBuild; }
-
-	inline void BvhDirty(/* unused */ Object* reason) { mBvhDirty = true; }
-
 	inline ::Instance* Instance() const { return mInstance; }
 
 private:
@@ -85,9 +80,9 @@ private:
 	STRATUM_API void AddObjectInternal(Object* object);
 	STRATUM_API void BuildRenderGraph(CommandBuffer* commandBuffer);
 
-	::Instance* mInstance;
+	::Instance* mInstance = nullptr;
 
-	Sampler* mShadowSampler;
+	Sampler* mShadowSampler = nullptr;
 	
 	std::deque<Object*> mObjects;
 	std::deque<Light*> mLights;
@@ -95,35 +90,36 @@ private:
 	std::deque<Renderer*> mRenderers;
 	
 	std::unordered_map<std::string, RenderGraphNode> mRenderNodes;
-	bool mRenderGraphDirty;
+	bool mRenderGraphDirty = true;
 	std::vector<RenderGraphNode*> mRenderGraph;
 	std::unordered_map<RenderTargetIdentifier, Texture*> mAttachments;
 	std::unordered_map<RenderTargetIdentifier, std::pair<vk::Extent2D, vk::ImageUsageFlags>> mAttachmentInfo;
 	std::unordered_map<Camera*, GuiContext*> mGuiContexts;
 	
-	ObjectBvh2* mBvh;
-	uint64_t mLastBvhBuild;
-	bool mBvhDirty;
+	ObjectBvh2* mBvh = nullptr;
+	uint64_t mLastBvhBuild = 0;
+	bool mBvhDirty = true;
 
-	MeshRenderer* mSkybox;
+	MeshRenderer* mSkybox = nullptr;
 
-	uint32_t mLightCount;
-	Buffer* mLightBuffer;
-	Buffer* mShadowBuffer;
-	Texture* mShadowAtlas;
-	Texture* mEnvironmentTexture;
-	float3 mAmbientLight;
+	uint32_t mLightCount = 0;
+	Buffer* mLightBuffer = nullptr;
+	Buffer* mShadowBuffer = nullptr;
+	Texture* mShadowAtlas = nullptr;
+	Texture* mEnvironmentTexture = nullptr;
+	float3 mAmbientLight = 0;
 
-	// fps calculation
+	float mPhysicsTimeLimitPerFrame = 0.2f;
+	float mFixedAccumulator = 0;
+	float mFixedTimeStep = 0.0025f;
+
+	float mTotalTime = 0;
+	float mDeltaTime = 0;
+
 	std::chrono::high_resolution_clock mClock;
 	std::chrono::high_resolution_clock::time_point mStartTime;
 	std::chrono::high_resolution_clock::time_point mLastFrame;
-	float mTotalTime;
-	float mDeltaTime;
-	float mFrameTimeAccum;
-	uint32_t mFpsAccum;
-	float mFps;
-	float mPhysicsTimeLimitPerFrame;
-	float mFixedAccumulator;
-	float mFixedTimeStep;
+	float mFrameTimeAccum = 0;
+	uint32_t mFpsAccum = 0;
+	float mFps = 0;
 };

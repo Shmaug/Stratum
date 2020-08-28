@@ -59,10 +59,8 @@ void Render(uint3 index : SV_DispatchThreadID) {
 	texelSize *= sign(rayDirection);
 
 	float4 sum = 0;
-	float4 outscatter = 1;
-	float4 inscatter = 0;
 	uint sampleCount = 0;
-	for (float t = isect.x; t <= isect.y && sum.a < 0.99 && outscatter.a > 0.01;) {
+	for (float t = isect.x; t <= isect.y && sum.a < 0.99;) {
 		float3 uvw = saturate(rayOrigin + rayDirection * t);
 		uint3 idx = min(uint3(uvw * float3(VolumeResolution)), VolumeResolution-1);
 		
@@ -74,31 +72,23 @@ void Render(uint3 index : SV_DispatchThreadID) {
 		float4 localSample = SampleColor(idx);
 
 		if (localSample.a > 0.001) {
-			sampleCount++;
+			float3 gradient = SampleGradient(idx);
 			float3 worldPos = qmul(VolumeRotation, uvw-0.5) * VolumeScale + VolumePosition;
-			float3 gradient = qmul(VolumeRotation, SampleGradient(idx)) * VolumeScale;
+			float3 worldGradient = qmul(VolumeRotation, gradient) * VolumeScale;
 
 			#ifdef SHADING_LOCAL
-				float4 ls = SampleColor(idx + sign(SampleGradient(idx)));
-				float4 lin = exp(-Density*max(0, ls*ls.a - localSample*localSample.a));
-
-				inscatter += outscatter*lin;
-				outscatter *= exp(-Density*dt*localSample.a);
-			#else
+				localSample.rgb *= saturate(dot(normalize(worldGradient), normalize(float3(1,1,-1))));
+			#endif
 				// front-to-back alpha blending
 				localSample.a = saturate(localSample.a*Density);
 				localSample.rgb *= localSample.a;
 				sum += (1 - sum.a) * localSample;
-			#endif
 		}
 
 		t = ti.y + eps;
+		sampleCount++;
 	}
 
 	float4 src = RenderTarget[coord];
-	#ifdef SHADING_LOCAL
-	RenderTarget[coord] = float4(src.rgb*outscatter + inscatter, 1);
-	#else
 	RenderTarget[coord] = float4(src.rgb * (1 - sum.a) + sum.rgb * sum.a, 1);
-	#endif
 }

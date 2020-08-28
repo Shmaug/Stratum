@@ -5,9 +5,7 @@
 
 using namespace std;
 
-Object::Object(const string& name) : mName(name), mScene(nullptr), mLayerMask(0x01), mParent(nullptr), 
-	mLocalPosition(float3()), mLocalRotation(quaternion(0, 0, 0, 1)), mLocalScale(float3(1)), mWorldPosition(float3()), 
-	mWorldRotation(quaternion(0, 0, 0, 1)), mObjectToWorld(float4x4(1)), mWorldToObject(float4x4(1)), mTransformDirty(true), mEnabled(true), mEnabledHierarchy(true) {
+Object::Object(const string& name) : mName(name) {
 	DirtyTransform();
 }
 Object::~Object() {
@@ -41,7 +39,6 @@ bool Object::UpdateTransform() {
 	mWorldScale.x = length(mObjectToWorld[0].xyz);
 	mWorldScale.y = length(mObjectToWorld[1].xyz);
 	mWorldScale.z = length(mObjectToWorld[2].xyz);
-	mBounds = AABB(mWorldPosition, mWorldPosition);
 
 	mTransformDirty = false;
 	return true;

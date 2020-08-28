@@ -19,20 +19,20 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 				d.format = kp.second.mFormat;
 				d.samples = kp.second.mSamples;
 				switch (kp.second.mType) {
-					case ATTACHMENT_UNUSED: break;
-					case ATTACHMENT_COLOR:
+					case AttachmentType::eUnused: break;
+					case AttachmentType::eColor:
 						d.initialLayout = vk::ImageLayout::eColorAttachmentOptimal;
 						d.finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
 						break;
-					case ATTACHMENT_DEPTH_STENCIL:
+					case AttachmentType::eDepthStencil:
 						d.initialLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
 						d.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
 						break;
-					case ATTACHMENT_RESOLVE:
+					case AttachmentType::eResolve:
 						d.initialLayout = vk::ImageLayout::eGeneral;
 						d.finalLayout = vk::ImageLayout::eGeneral;
 						break;
-					case ATTACHMENT_INPUT:
+					case AttachmentType::eInput:
 						d.initialLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 						d.finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 						break;
@@ -67,28 +67,28 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 				dep.dependencyFlags = vk::DependencyFlagBits::eByRegion;
 
 				switch (kp.second.mType) {
-					case ATTACHMENT_UNUSED: break;
-					case ATTACHMENT_COLOR:
+					case AttachmentType::eUnused: break;
+					case AttachmentType::eColor:
 						dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 						subpassData[index].colorAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor));
 						break;
-					case ATTACHMENT_DEPTH_STENCIL:
+					case AttachmentType::eDepthStencil:
 						dep.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
 						subpassData[index].depthAttachment = vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageAspectFlagBits::eDepth);
 						break;
-					case ATTACHMENT_RESOLVE:
+					case AttachmentType::eResolve:
 						dep.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 						subpassData[index].resolveAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal , vk::ImageAspectFlagBits::eColor));
 						break;
-					case ATTACHMENT_INPUT:
+					case AttachmentType::eInput:
 						dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
 						subpassData[index].inputAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor));
 						break;
-					case ATTACHMENT_PRESERVE:
+					case AttachmentType::ePreserve:
 						dep.dstAccessMask = {};
 						dep.dstStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
 						subpassData[index].preserveAttachments.push_back(mAttachmentMap.at(kp.first));
@@ -101,24 +101,24 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 				for (const auto& srcSubpass : mSubpasses) {
 					if (srcIndex >= index) break;
 					for (const auto srcKp : srcSubpass.mAttachments) {
-						if (srcKp.first != kp.first || srcKp.second.mType == ATTACHMENT_UNUSED) continue;
+						if (srcKp.first != kp.first || srcKp.second.mType == AttachmentType::eUnused) continue;
 						switch (srcKp.second.mType) {
-						case ATTACHMENT_COLOR:
+						case AttachmentType::eColor:
 							dep.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 							dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 							break;
-						case ATTACHMENT_DEPTH_STENCIL:
+						case AttachmentType::eDepthStencil:
 							dep.srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 							dep.srcStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
 							break;
-						case ATTACHMENT_RESOLVE:
+						case AttachmentType::eResolve:
 							dep.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 							dep.srcStageMask = vk::PipelineStageFlagBits::eTransfer;
 							break;
-						case ATTACHMENT_INPUT:
+						case AttachmentType::eInput:
 							dep.srcAccessMask = vk::AccessFlagBits::eShaderRead;
 							break;
-						case ATTACHMENT_PRESERVE:
+						case AttachmentType::ePreserve:
 							dep.srcAccessMask = {};
 							dep.srcStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
 							break;

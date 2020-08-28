@@ -14,7 +14,7 @@ bool PointerRenderer::UpdateTransform() {
 
 void PointerRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/pointer.stmb")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
-	commandBuffer->BindPipeline(pipeline, nullptr);
+	commandBuffer->BindPipeline(pipeline);
 
 	float3 p0 = WorldPosition();
 	float3 p1 = WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance);

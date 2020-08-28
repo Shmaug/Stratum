@@ -2,21 +2,6 @@
 
 #include <vulkan/vulkan.hpp>
 
-enum class AnimationExtrapolateMode {
-	eConstant,
-	eLinear,
-	eCycle,
-	eCycleOffset,
-	eBounce,
-};
-enum class AnimationTangentMode {
-	eManual,
-	eFlat,
-	eLinear,
-	eSmooth,
-	eStep,
-};
-
 enum class ClearFlagBits {
 	eNone = 0,
 	eDepth = 1,
@@ -25,12 +10,6 @@ enum class ClearFlagBits {
 	eSkybox = 4 | eColorDepth
 };
 using ClearFlags = vk::Flags<ClearFlagBits>;
-
-enum class CommandBufferState {
-	eRecording,
-	ePending,
-	eDone
-};
 
 enum class ConsoleColorBits {
 	eWhite    = 0,
@@ -43,11 +22,6 @@ enum class ConsoleColorBits {
 	eBold = 8
 };
 using ConsoleColor = vk::Flags<ConsoleColorBits>;
-
-enum class LayoutAxis : uint32_t {
-	eHorizontal = 0,
-	eVertical = 1
-};
 
 enum class StereoEye : uint32_t {
 	eNone = 0,
@@ -68,4 +42,15 @@ enum class TextAnchor {
 enum class TextureLoadFlags {
 	eSrgb,
 	eSigned
+};
+
+enum class VertexAttributeType {
+	ePosition,
+	eNormal,
+	eTangent,
+	eBitangent,
+	eTexcoord,
+	eColor,
+	ePointSize,
+	eOther
 };

@@ -4,15 +4,29 @@
 
 using namespace std;
 
-MeshRenderer::MeshRenderer(const string& name) : Object(name), mMesh(nullptr), mRayMask(0) {}
+MeshRenderer::MeshRenderer(const string& name) : Object(name) {}
 MeshRenderer::~MeshRenderer() {}
+
+void MeshRenderer::Mesh(variant_ptr<::Mesh> m) {
+	mMesh = m;
+	DirtyTransform();
+}
 
 bool MeshRenderer::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
-	if (!Mesh())
-		mAABB = AABB(WorldPosition(), WorldPosition());
-	else
-		mAABB = Mesh()->Bounds() * ObjectToWorld();
+	mAABB = AABB(WorldPosition(), WorldPosition());
+	mBypassCulling = true;
+
+	if (mMesh.get()) {
+		for (uint32_t i = 0; i < mMesh->SubmeshCount(); i++)
+			if (mMesh->GetSubmesh(i).mBvh) {
+				if (mBypassCulling) {
+					mAABB = mMesh->GetSubmesh(i).mBvh->Bounds() * ObjectToWorld();
+					mBypassCulling = false;
+				} else 
+					mAABB.Encapsulate(mMesh->GetSubmesh(i).mBvh->Bounds() * ObjectToWorld());
+			}
+	}
 	return true;
 }
 
@@ -39,10 +53,7 @@ bool MeshRenderer::TryCombineInstances(CommandBuffer* commandBuffer, Renderer* r
 }
 
 void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera, Buffer* instanceBuffer, uint32_t instanceCount) {
-	::Mesh* mesh = Mesh();
-
-	commandBuffer->BindMaterial(mMaterial.get(), mesh->VertexInput(), mesh->Topology());
-	GraphicsPipeline* pipeline = mMaterial->GetPassPipeline(commandBuffer->CurrentShaderPass());
+	GraphicsPipeline* pipeline = commandBuffer->BindPipeline(mMaterial.get(), mMesh.get());
 
 	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
 		commandBuffer->BindDescriptorSet(perCamera, PER_CAMERA);
@@ -53,21 +64,8 @@ void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera,
 		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
 	}
 
-	Scene()->PushSceneConstants(commandBuffer);
-	
-	commandBuffer->BindVertexBuffer(mesh->VertexBuffer().get(), 0, 0);
-	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
-	
-	camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
-	((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
-	commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
-	if (camera->StereoMode() != StereoMode::eNone) {
-		camera->SetViewportScissor(commandBuffer, StereoEye::eRight);
-		((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), instanceCount, mesh->BaseIndex(), mesh->BaseVertex(), 0);
-		commandBuffer->mTriangleCount += instanceCount * (mesh->IndexCount() / 3);
-	}
+	mMesh->Draw(commandBuffer, camera, 0, instanceCount);
 }
-
 void MeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
 	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
@@ -77,10 +75,19 @@ void MeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descript
 }
 
 bool MeshRenderer::Intersect(const Ray& ray, float* t, bool any) {
-	::Mesh* m = Mesh();
-	if (!m) return false;
+	if (!mMesh.get()) return false;
 	Ray r;
 	r.mOrigin = (WorldToObject() * float4(ray.mOrigin, 1)).xyz;
 	r.mDirection = (WorldToObject() * float4(ray.mDirection, 0)).xyz;
-	return m->Intersect(r, t, any);
+	bool hit = false;
+	float tmin = 0;
+	for (uint32_t i = 0; i < mMesh->SubmeshCount(); i++) {
+		float ht;
+		if (mMesh->GetSubmesh(i).mBvh && mMesh->GetSubmesh(i).mBvh->Intersect(r, &ht, any)) {
+			if (any) return true;
+			if (!hit || ht < tmin) tmin = ht;
+			hit = true;
+		}
+	}
+	return hit;
 }

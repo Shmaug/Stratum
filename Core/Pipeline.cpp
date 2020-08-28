@@ -7,7 +7,7 @@ using namespace std;
 Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFilename) : mName(name), mDevice(device) {
 	ifstream fileStream(shaderFilename, ios::binary);
 	if (!fileStream.is_open()) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load shader: %s\n", shaderFilename.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Could not open file: %s\n", shaderFilename.c_str());
 		throw;
 	}
 
@@ -167,10 +167,10 @@ Pipeline::~Pipeline() {
 	delete mShader;
 }
 
-vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const VertexInput* vertexInput, vk::PrimitiveTopology topology, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
+vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
 	vk::CullModeFlags cull = cullModeOverride == nullptr ? mShaderVariant->mCullMode : *cullModeOverride;
 	vk::PolygonMode poly = polyModeOverride == nullptr ? mShaderVariant->mPolygonMode : *polyModeOverride;
-	PipelineInstance instance((uint64_t)hash<RenderPass>()(*commandBuffer->CurrentRenderPass()), commandBuffer->CurrentSubpassIndex(), vertexInput, topology, cull, poly);
+	PipelineInstance instance((uint64_t)hash<RenderPass>()(*commandBuffer->CurrentRenderPass()), commandBuffer->CurrentSubpassIndex(), topology, cull, poly, vertexInput);
 
 	if (mPipelines.count(instance))
 		return mPipelines.at(instance);
@@ -184,17 +184,18 @@ vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const V
 			stageInfos[i].module = mShaderVariant->mModules[i].mShaderModule;
 		}
 		
-		vk::PipelineRasterizationStateCreateInfo rasterizationState = {};
-		rasterizationState.cullMode = cull;
-		rasterizationState.polygonMode = poly;
 		vk::PipelineViewportStateCreateInfo viewportState = {};
 		viewportState.viewportCount = 1;
 		viewportState.scissorCount = 1;
-		
+	
 		vector<vk::DynamicState> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth };
 		vk::PipelineDynamicStateCreateInfo dynamicState = {};
 		dynamicState.dynamicStateCount = (uint32_t)dynamicStates.size();
 		dynamicState.pDynamicStates = dynamicStates.data();
+
+		vk::PipelineRasterizationStateCreateInfo rasterizationState = {};
+		rasterizationState.cullMode = cull;
+		rasterizationState.polygonMode = poly;
 
 		vk::PipelineColorBlendStateCreateInfo blendState = {};
 		blendState.attachmentCount = (uint32_t)mShaderVariant->mBlendStates.size();
@@ -202,28 +203,12 @@ vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const V
 
 		vk::PipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
 		inputAssemblyState.topology = topology;
-		inputAssemblyState.primitiveRestartEnable = VK_FALSE;
-
-		vk::PipelineVertexInputStateCreateInfo vinput = {};
-		if (vertexInput) {
-			vinput.vertexBindingDescriptionCount = (uint32_t)vertexInput->mBindings.size();
-			vinput.pVertexBindingDescriptions = vertexInput->mBindings.data();
-			vinput.vertexAttributeDescriptionCount = (uint32_t)vertexInput->mAttributes.size();
-			vinput.pVertexAttributeDescriptions = vertexInput->mAttributes.data();
-		} else {
-			vinput.vertexBindingDescriptionCount = 0;
-			vinput.pVertexBindingDescriptions = nullptr;
-			vinput.vertexAttributeDescriptionCount = 0;
-			vinput.pVertexAttributeDescriptions = nullptr;
-		}
 
 		vk::PipelineMultisampleStateCreateInfo multisampleState = {};
 		multisampleState.sampleShadingEnable = mShaderVariant->mSampleShading;
-		multisampleState.alphaToCoverageEnable = VK_FALSE;
-		multisampleState.alphaToOneEnable = FALSE;
 		multisampleState.rasterizationSamples = vk::SampleCountFlagBits::e1;
 		for (auto& kp : subpass.mAttachments)
-			if (kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL)) {
+			if (kp.second.mType == AttachmentType::eColor || kp.second.mType == AttachmentType::eDepthStencil) {
 				multisampleState.rasterizationSamples = kp.second.mSamples;
 				break;
 			}
@@ -232,7 +217,7 @@ vk::Pipeline GraphicsPipeline::GetPipeline(CommandBuffer* commandBuffer, const V
 		info.stageCount = (uint32_t)stageInfos.size();
 		info.pStages = stageInfos.data();
 		info.pInputAssemblyState = &inputAssemblyState;
-		info.pVertexInputState = &vinput;
+		info.pVertexInputState = &vertexInput;
 		info.pTessellationState = nullptr;
 		info.pViewportState = &viewportState;
 		info.pRasterizationState = &rasterizationState;

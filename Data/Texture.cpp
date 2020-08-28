@@ -41,7 +41,7 @@ Sampler::~Sampler() {
 }
 
 
-uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
+uint8_t* load(const string& filename, TextureLoadFlags loadFlags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
 	uint8_t* pixels = nullptr;
 	pixelSize = 0;
 	x, y, channels;
@@ -71,12 +71,12 @@ uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSiz
 		{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat, vk::Format::eR32G32B32A32Sfloat },
 	};
 
-	if (flags == TextureLoadFlags::eSrgb) {
+	if (loadFlags == TextureLoadFlags::eSrgb) {
 		formatMap[0][0] = vk::Format::eR8Srgb;
 		formatMap[0][1] = vk::Format::eR8G8Srgb;
 		formatMap[0][2] = vk::Format::eR8G8B8Srgb;
 		formatMap[0][3] = vk::Format::eR8G8B8A8Srgb;
-	} else if (flags == TextureLoadFlags::eSigned) {
+	} else if (loadFlags == TextureLoadFlags::eSigned) {
 		formatMap[0][0] = vk::Format::eR8Snorm;
 		formatMap[0][1] = vk::Format::eR8G8Snorm;
 		formatMap[0][2] = vk::Format::eR8G8B8Snorm;
@@ -92,69 +92,36 @@ uint8_t* load(const string& filename, TextureLoadFlags flags, uint32_t& pixelSiz
 	return pixels;
 }
 
-
-Texture::Texture(const string& name, ::Device* device, const string& filename, TextureLoadFlags flags) : mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal) {
+Texture::Texture(const string& name, ::Device* device, const vector<string>& files, TextureLoadFlags loadFlags, vk::ImageCreateFlags createFlags)
+	: mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal), mCreateFlags(createFlags), mArrayLayers((uint32_t)files.size()) {
 	int32_t x, y, channels;
+	vk::Format format;
 	uint32_t size;
-	uint8_t* pixels = load(filename, flags, size, x, y, channels, mFormat);
+	
+	vector<uint8_t*> pixels(files.size());
+	for (uint32_t i = 0; i < files.size(); i++) {
+		pixels[i] = load(files[i], loadFlags, size, x, y, channels, format);
+		// TODO: warn or fail about inconsistent format/channels/resolution
+	}
 
+	mFormat = format;
 	mExtent = { (uint32_t)x, (uint32_t)y, 1 };
-	mArrayLayers = 1;
+	mArrayLayers = (uint32_t)pixels.size();
 	mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
 	mSampleCount = vk::SampleCountFlagBits::e1;
 	mUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
 	mMemoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal;
 
 	Create();
-
-	vk::BufferImageCopy copyRegion = {};
-	copyRegion.bufferOffset = 0;
-	copyRegion.bufferRowLength = 0;
-	copyRegion.bufferImageHeight = 0;
-	copyRegion.imageSubresource.aspectMask = mAspectFlags;
-	copyRegion.imageSubresource.mipLevel = 0;
-	copyRegion.imageSubresource.baseArrayLayer = 0;
-	copyRegion.imageSubresource.layerCount = 1;
-	copyRegion.imageOffset = { 0, 0, 0 };
-	copyRegion.imageExtent = mExtent;
 
 	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
 
 	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	uploadBuffer->Upload(pixels, dataSize);
+	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	for (uint32_t j = 0; j < pixels.size(); j++)
+		memcpy((uint8_t*)uploadBuffer->MappedData() + j * dataSize, pixels[j], dataSize);
 
-	commandBuffer->TransitionBarrier(this, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-	((vk::CommandBuffer)*commandBuffer).copyBufferToImage(*uploadBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, 1, &copyRegion);
-	GenerateMipMaps(commandBuffer);
-	mDevice->Execute(commandBuffer);
-	stbi_image_free(pixels);
-	
-	//printf("Loaded %s: %dx%d %s\n", filename.c_str(), mExtent.width, mExtent.height, FormatToString(mFormat));
-}
-Texture::Texture(const string& name, ::Device* device, const string& px, const string& nx, const string& py, const string& ny, const string& pz, const string& nz, TextureLoadFlags flags)
-	: mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal), mCreateFlags(vk::ImageCreateFlagBits::eCubeCompatible) {
-	int32_t x, y, channels;
-	uint32_t size;
-	
-	uint8_t* pixels[6] {
-		load(px, flags, size, x, y, channels, mFormat),
-		load(nx, flags, size, x, y, channels, mFormat),
-		load(py, flags, size, x, y, channels, mFormat),
-		load(ny, flags, size, x, y, channels, mFormat),
-		load(pz, flags, size, x, y, channels, mFormat),
-		load(nz, flags, size, x, y, channels, mFormat)
-	};
-
-	mExtent = { (uint32_t)x, (uint32_t)y, 1 };
-	mArrayLayers = 6;
-	mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
-	mSampleCount = vk::SampleCountFlagBits::e1;
-	mUsage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
-	mMemoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal;
-
-	Create();
-
+	commandBuffer->TransitionBarrier(this, vk::ImageLayout::eTransferDstOptimal);
 	vk::BufferImageCopy copyRegion = {};
 	copyRegion.bufferOffset = 0;
 	copyRegion.bufferRowLength = 0;
@@ -165,32 +132,19 @@ Texture::Texture(const string& name, ::Device* device, const string& px, const s
 	copyRegion.imageSubresource.layerCount = mArrayLayers;
 	copyRegion.imageOffset = { 0, 0, 0 };
 	copyRegion.imageExtent = { mExtent.width, mExtent.height, 1 };
-
-	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
-
-	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	for (uint32_t j = 0; j < mArrayLayers; j++)
-		memcpy((uint8_t*)uploadBuffer->MappedData() + j * dataSize, pixels[j], dataSize);
-
-	commandBuffer->TransitionBarrier(this, vk::ImageLayout::eTransferDstOptimal);
 	((vk::CommandBuffer)*commandBuffer).copyBufferToImage(*uploadBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, { copyRegion });
 	GenerateMipMaps(commandBuffer);
 	mDevice->Execute(commandBuffer);
 
-	for (uint32_t i = 0; i < 6; i++)
+	for (uint32_t i = 0; i < pixels.size(); i++)
 		stbi_image_free(pixels[i]);
-
-	//printf("Loaded Cubemap %s: %dx%d %s\n", nx.c_str(), mExtent.width, mExtent.height, FormatToString(mFormat));
 }
-
-// 3d extent / pixel data
 Texture::Texture(const string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
 		: mName(name), mDevice(device), mExtent(extent), mArrayLayers(1), mMipLevels(mipLevels), mFormat(format), mSampleCount(numSamples), mUsage(usage), mMemoryProperties(properties), mTiling(vk::ImageTiling::eOptimal) {
 	
 	if (mipLevels == 0) mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
 
-	if (dataSize) {
+	if (data && dataSize) {
 		mUsage |= vk::ImageUsageFlagBits::eTransferDst;
 		if (mMipLevels > 1) mUsage |= vk::ImageUsageFlagBits::eTransferSrc;
 		Create();
@@ -217,16 +171,6 @@ Texture::Texture(const string& name, ::Device* device, const void* data, vk::Dev
 	} else
 		Create();
 }
-
-	// 2x extent
-Texture::Texture(const string& name, ::Device* device, const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
-	: Texture(name, device, (const void*)nullptr, 0, { extent.width, extent.height, 1 }, format, mipLevels, numSamples, usage, properties) {}
-// 3d extent
-Texture::Texture(const string& name, ::Device* device, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
-	: Texture(name, device, (const void*)nullptr, 0, extent, format, mipLevels, numSamples, usage, properties) {}
-// pixel data / 2d extent
-Texture::Texture(const string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, const vk::Extent2D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
-	: Texture(name, device, data, dataSize, { extent.width, extent.height, 1 }, format, mipLevels, numSamples, usage, properties) {}
 
 Texture::~Texture() {
 	for (auto& kp : mViews)

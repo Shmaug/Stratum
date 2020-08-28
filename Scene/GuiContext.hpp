@@ -4,6 +4,32 @@
 #include <Core/CommandBuffer.hpp>
 
 class GuiContext {
+public:
+	enum class LayoutAxis : uint32_t {
+		eHorizontal = 0,
+		eVertical = 1
+	};
+	struct LayoutTheme {
+		float4 mBackgroundColor;
+		float4 mTextColor;
+		float4 mControlBackgroundColor;
+
+		float4 mButtonColor;
+		float4 mSliderColor;
+		float4 mSliderKnobColor;
+
+		Font* mControlFont;
+		Font* mTitleFont;
+		float mControlFontHeight;
+		float mTitleFontHeight;
+
+		float mControlSize; // Height of a control in a vertical layout
+		float mControlPadding; // Padding between controls
+		float mSliderBarSize;
+		float mSliderKnobSize;
+		float mScrollBarThickness;
+	};
+
 private:
 	#pragma pack(push)
 	#pragma pack(1)
@@ -90,27 +116,6 @@ private:
 	STRATUM_API void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera);
 
 public:
-	struct LayoutTheme {
-		float4 mBackgroundColor;
-		float4 mTextColor;
-		float4 mControlBackgroundColor;
-
-		float4 mButtonColor;
-		float4 mSliderColor;
-		float4 mSliderKnobColor;
-
-		Font* mControlFont;
-		Font* mTitleFont;
-		float mControlFontHeight;
-		float mTitleFontHeight;
-
-		float mControlSize; // Height of a control in a vertical layout
-		float mControlPadding; // Padding between controls
-		float mSliderBarSize;
-		float mSliderKnobSize;
-		float mScrollBarThickness;
-	};
-
 	LayoutTheme mLayoutTheme;
 
 	inline ::Device* Device() const { return mDevice; }

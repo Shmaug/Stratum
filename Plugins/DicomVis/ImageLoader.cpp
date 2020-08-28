@@ -1,8 +1,5 @@
 #include "ImageLoader.hpp"
 
-#include <thread>
-
-#define STB_IMAGE_IMPLEMENTATION
 #include <ThirdParty/stb_image.h>
 
 #include <dcmtk/dcmimgle/dcmimage.h>
@@ -11,27 +8,27 @@
 using namespace std;
 
 unordered_multimap<string, ImageStackType> ExtensionMap {
-	{ ".dcm", IMAGE_STACK_DICOM },
-	{ ".raw", IMAGE_STACK_RAW },
-	{ ".png", IMAGE_STACK_STANDARD },
-	{ ".jpg", IMAGE_STACK_STANDARD }
+	{ ".dcm", eDicom },
+	{ ".raw", eRaw },
+	{ ".png", eStandard },
+	{ ".jpg", eStandard }
 };
 
 ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 	try {
-		if (!fs::exists(folder)) return IMAGE_STACK_NONE;
+		if (!fs::exists(folder)) return ImageStackType::eNone;
 
-		ImageStackType type = IMAGE_STACK_NONE;
+		ImageStackType type = ImageStackType::eNone;
 		for (const auto& p : fs::directory_iterator(folder))
 			if (ExtensionMap.count(p.path().extension().string())) {
 				ImageStackType t = ExtensionMap.find(p.path().extension().string())->second;
-				if (type != IMAGE_STACK_NONE && type != t) return IMAGE_STACK_NONE; // inconsistent image type
+				if (type != ImageStackType::eNone && type != t) return ImageStackType::eNone; // inconsistent image type
 				type = t;
 			}
 
-		if (type == IMAGE_STACK_NONE) return type;
+		if (type == ImageStackType::eNone) return type;
 
-		if (type == IMAGE_STACK_STANDARD) {
+		if (type == ImageStackType::eStandard) {
 			vector<fs::path> images;
 			for (const auto& p : fs::directory_iterator(folder))
 				if (ExtensionMap.count(p.path().extension().string()))
@@ -41,7 +38,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			});
 
 			int x, y, c;
-			if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return IMAGE_STACK_NONE;
+			if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return ImageStackType::eNone;
 
 			uint32_t width = x;
 			uint32_t height = y;
@@ -50,14 +47,14 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 
 			for (uint32_t i = 1; i < images.size(); i++) {
 				stbi_info(images[i].string().c_str(), &x, &y, &c);
-				if (x != width) { return IMAGE_STACK_NONE; }
-				if (y != height) { return IMAGE_STACK_NONE; }
-				if (c != channels) { return IMAGE_STACK_NONE; }
+				if (x != width) { return ImageStackType::eNone; }
+				if (y != height) { return ImageStackType::eNone; }
+				if (c != channels) { return ImageStackType::eNone; }
 			}
 		}
 		return type;
 	} catch (exception e) {
-		return IMAGE_STACK_NONE;
+		return ImageStackType::eNone;
 	}
 }
 
@@ -66,7 +63,7 @@ Texture* ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, 
 
 	vector<fs::path> images;
 	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_STANDARD)
+		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eStandard)
 			images.push_back(p.path());
 	if (images.empty()) return nullptr;
 	std::sort(images.begin(), images.end(), [reverse](const fs::path& a, const fs::path& b) {
@@ -172,7 +169,7 @@ Texture* ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, flo
 	double3 maxSpacing = 0;
 	vector<DcmSlice> images = {};
 	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_DICOM) {
+		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eDicom) {
 			images.push_back(ReadDicomSlice(p.path().string()));
 			maxSpacing = max(maxSpacing, images[images.size() - 1].spacing);
 		}
@@ -220,7 +217,7 @@ Texture* ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float
 
 	vector<fs::path> images;
 	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == IMAGE_STACK_RAW)
+		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eRaw)
 			images.push_back(p.path());
 	if (images.empty()) return nullptr;
 	std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {

@@ -33,7 +33,8 @@ CommandBuffer::CommandBuffer( const string& name, ::Device* device, vk::CommandP
 	mState = CommandBufferState::eRecording;
 }
 CommandBuffer::~CommandBuffer() {
-	if (State() == CommandBufferState::ePending)
+	CheckDone();
+	if (mState == CommandBufferState::ePending)
 		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Destructing a CommandBuffer that is in CommandBufferState::ePending\n");
 	Clear();
 	((vk::Device)*mDevice).freeCommandBuffers(mCommandPool, 1, &mCommandBuffer);
@@ -85,7 +86,7 @@ void CommandBuffer::Clear() {
 	mBoundGraphicsDescriptorSets.clear();
 	mBoundComputeDescriptorSets.clear();
 
-	mBoundIndexBuffer = nullptr;
+	mBoundIndexBuffer.mBuffer = nullptr;
 	mBoundVertexBuffers.clear();
 }
 void CommandBuffer::Reset(const string& name) {
@@ -105,12 +106,11 @@ void CommandBuffer::Wait() {
 		Clear();
 	}
 }
-CommandBufferState CommandBuffer::State() {
+void CommandBuffer::CheckDone() {
 	if (mState == CommandBufferState::ePending) {
 		vk::Result status = ((vk::Device)*mDevice).getFenceStatus(mSignalFence);
 		if (status == vk::Result::eSuccess) mState = CommandBufferState::eDone;
 	}
-	return mState;
 }
 
 Buffer* CommandBuffer::GetBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
@@ -235,7 +235,7 @@ void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebu
 	// Assign clear values specified by the render pass
 	vector<vk::ClearValue> clearValues(renderPass->mAttachments.size());
 	for (const auto& kp : renderPass->mSubpasses[0].mAttachments)
-		if (kp.second.mType == ATTACHMENT_DEPTH_STENCIL)
+		if (kp.second.mType == AttachmentType::eDepthStencil)
 			clearValues[renderPass->mAttachmentMap.at(kp.first)].depthStencil = { 1.0f, 0 };
 		else
 			clearValues[renderPass->mAttachmentMap.at(kp.first)].color.setFloat32({ 0.f, 0.f, 0.f, 0.f });
@@ -312,8 +312,8 @@ void CommandBuffer::BindPipeline(ComputePipeline* pipeline) {
 	mBoundGraphicsDescriptorSets.clear();
 
 }
-void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* input, vk::PrimitiveTopology topology, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
-	vk::Pipeline vkpipeline = pipeline->GetPipeline(this, input, topology, cullModeOverride, polyModeOverride);
+void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
+	vk::Pipeline vkpipeline = pipeline->GetPipeline(this, topology, vertexInput, cullModeOverride, polyModeOverride);
 	if (vkpipeline == mGraphicsPipeline) return;
 	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vkpipeline);
 	mComputePipeline = nullptr;
@@ -327,31 +327,28 @@ void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, const VertexInput* 
 	mBoundMaterial = nullptr;
 	mBoundGraphicsDescriptorSets.clear();
 }
-bool CommandBuffer::BindMaterial(Material* material, const VertexInput* vertexInput, vk::PrimitiveTopology topology) {
+GraphicsPipeline* CommandBuffer::BindPipeline(Material* material, Mesh* mesh) {
 	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass());
-	if (!pipeline) return false;
-	BindPipeline(pipeline, vertexInput, topology, material->CullMode(), material->PolygonMode());
+	if (!pipeline) return nullptr;
+
+	BindPipeline(pipeline, mesh->Topology(), mesh->PipelineInput(pipeline), material->CullMode(), material->PolygonMode());
 	if (mBoundMaterial != material) {
 		mBoundMaterial = material;
 		material->BindDescriptorParameters(this);
 	}
 	material->PushConstants(this);
-	return true;
+	return pipeline;
 }
 
-void CommandBuffer::BindVertexBuffer(Buffer* buffer, uint32_t index, vk::DeviceSize offset) {
-	if (mBoundVertexBuffers[index] == buffer) return;
-	vk::Buffer buf = nullptr;
-	if (buffer) buf = *buffer;
-	mCommandBuffer.bindVertexBuffers(index, 1, &buf, &offset);
-	mBoundVertexBuffers[index] = buffer;
+void CommandBuffer::BindVertexBuffer(const BufferView& view, uint32_t index) {
+	if (mBoundVertexBuffers[index] == view) return;
+	mCommandBuffer.bindVertexBuffers(index, { *view.mBuffer.get() }, { view.mByteOffset });
+	mBoundVertexBuffers[index] = view;
 }
-void CommandBuffer::BindIndexBuffer(Buffer* buffer, vk::DeviceSize offset, vk::IndexType indexType) {
-	if (mBoundIndexBuffer == buffer) return;
-	vk::Buffer buf = nullptr;
-	if (buffer) buf = *buffer;
-	mCommandBuffer.bindIndexBuffer(buf, offset, indexType);
-	mBoundIndexBuffer = buffer;
+void CommandBuffer::BindIndexBuffer(const BufferView& view, vk::IndexType indexType) {
+	if (mBoundIndexBuffer == view) return;
+	mCommandBuffer.bindIndexBuffer(*view.mBuffer.get(), view.mByteOffset, indexType);
+	mBoundIndexBuffer = view;
 }
 
 void CommandBuffer::Dispatch(const uint3& dim) {

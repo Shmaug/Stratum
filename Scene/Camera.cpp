@@ -76,7 +76,10 @@ void Camera::SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye) {
 bool Camera::RendersToSubpass(RenderPass* renderPass, uint32_t subpassIndex) {
 	const Subpass& subpass = renderPass->GetSubpass(subpassIndex);
 	for (auto& kp : subpass.mAttachments)
-			if ((kp.second.mType & (ATTACHMENT_COLOR | ATTACHMENT_DEPTH_STENCIL | ATTACHMENT_RESOLVE)) && mRenderTargets.count(kp.first)) return true;
+			if (mRenderTargets.count(kp.first) && 
+				 (kp.second.mType == AttachmentType::eColor || 
+					kp.second.mType == AttachmentType::eDepthStencil ||
+					kp.second.mType == AttachmentType::eResolve)) return true;
 	return false;
 }
 

@@ -2,47 +2,29 @@
 
 using namespace std;
 
-SkinnedMeshRenderer::SkinnedMeshRenderer(const string& name) : Object(name) {}
-SkinnedMeshRenderer::~SkinnedMeshRenderer() {}
-
-bool SkinnedMeshRenderer::UpdateTransform() {
-	if (!Object::UpdateTransform()) return false;
-	if (!Mesh())
-		mAABB = AABB(WorldPosition(), WorldPosition());
-	else
-		mAABB = Mesh()->Bounds() * ObjectToWorld();
-	return true;
-}
+SkinnedMeshRenderer::~SkinnedMeshRenderer() { safe_delete(mSkinnedMesh); }
 
 void SkinnedMeshRenderer::Rig(const AnimationRig& rig) {
 	mBoneMap.clear();
 	mRig = rig;
 	for (auto b : mRig) mBoneMap.emplace(b->mName, b);
 }
-
 Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 	return mBoneMap.count(boneName) ? mBoneMap.at(boneName) : nullptr;
 }
 
+inline void SkinnedMeshRenderer::Mesh(variant_ptr<::Mesh> m) {
+	mMesh = m;
+	mSkinnedMesh = m.get(); // TODO: make a copy of mMesh
+}
+
 void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stmb");
-	::Mesh* m = this->Mesh();
-
-	mVertexBuffer = commandBuffer->GetBuffer(mName + " VertexBuffer", m->VertexBuffer()->Size(), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 	
-	vk::BufferCopy rgn = {};
-	rgn.size = mVertexBuffer->Size();
-	((vk::CommandBuffer)*commandBuffer).copyBuffer(*m->VertexBuffer(), *mVertexBuffer, 1, &rgn);
-
-	vk::BufferMemoryBarrier barrier = {};
-	barrier.buffer = *mVertexBuffer;
-	barrier.size = mVertexBuffer->Size();
-	barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-	barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-	commandBuffer->Barrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, barrier);
+	// TODO: fix this to work with new Mesh system
 
 	// Shape Keys
+	/*
 	if (mShapeKeys.size()) {
 		float4 weights = 0;
 		Buffer* targets[4] {
@@ -115,14 +97,12 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	barrier.srcAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
 	barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
 	commandBuffer->Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eVertexInput, barrier);
+	*/
 	mMaterial->OnLateUpdate(commandBuffer);
 }
 
 void SkinnedMeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	::Mesh* mesh = this->Mesh();
-
-	commandBuffer->BindMaterial(mMaterial.get(), mesh->VertexInput(), mesh->Topology());
-	GraphicsPipeline* pipeline = mMaterial->GetPassPipeline(commandBuffer->CurrentShaderPass());
+	GraphicsPipeline* pipeline = commandBuffer->BindPipeline(mMaterial.get(), mSkinnedMesh);
 
 	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
 		// TODO: Cache object descriptorset?
@@ -134,20 +114,8 @@ void SkinnedMeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, D
 		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
 		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
 	}
-	
-	Scene()->PushSceneConstants(commandBuffer);
-	
-	commandBuffer->BindVertexBuffer(mVertexBuffer, 0, 0);
-	commandBuffer->BindIndexBuffer(mesh->IndexBuffer().get(), 0, mesh->IndexType());
-	
-	camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
-	((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
-	commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
-	if (camera->StereoMode() != StereoMode::eNone) {
-		camera->SetViewportScissor(commandBuffer, StereoEye::eRight);
-		((vk::CommandBuffer)*commandBuffer).drawIndexed(mesh->IndexCount(), 1, mesh->BaseIndex(), mesh->BaseVertex(), 0);
-		commandBuffer->mTriangleCount += mesh->IndexCount() / 3;
-	}
+
+	mSkinnedMesh->Draw(commandBuffer, camera);
 }
 
 void SkinnedMeshRenderer::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {

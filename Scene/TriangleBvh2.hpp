@@ -16,25 +16,18 @@ public:
 		uint32_t mRightOffset; // 1st child is at node[index + 1], 2nd child is at node[index + mRightOffset]
 	};
 
-	inline TriangleBvh2(uint32_t leafSize = 4) : mLeafSize(leafSize) {};
-	inline ~TriangleBvh2() {}
+	STRATUM_API TriangleBvh2(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType, uint32_t leafSize = 4);
 
-	const std::vector<Node>& Nodes() const { return mNodes; }
-
-	float3 GetVertex(uint32_t index) const { return mVertices[index]; }
-	uint3 GetTriangle(uint32_t index) const { return mTriangles[index]; }
-	uint32_t TriangleCount() const { return (uint32_t)mTriangles.size(); }
-
-	inline AABB Bounds() { return mNodes.size() ? mNodes[0].mBounds : AABB(); }
-	
-	STRATUM_API void Build(const void* vertices, uint32_t baseVertex, uint32_t vertexCount, size_t vertexStride, const void* indices, uint32_t indexCount, vk::IndexType indexType);
 	STRATUM_API bool Intersect(const Ray& ray, float* t, bool any);
+
+	inline float3 GetVertex(uint32_t index) const { return mVertices[index]; }
+	inline uint3 GetTriangle(uint32_t index) const { return mTriangles[index]; }
+	inline uint32_t TriangleCount() const { return (uint32_t)mTriangles.size(); }
+	inline AABB Bounds() { return mNodes.size() ? mNodes[0].mBounds : AABB(); }	
 
 private:
 	std::vector<Node> mNodes;
-
 	std::vector<uint3> mTriangles;
 	std::vector<float3> mVertices;
-
-	uint32_t mLeafSize;
+	uint32_t mLeafSize = 4;
 };

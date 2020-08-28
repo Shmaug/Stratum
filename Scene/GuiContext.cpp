@@ -98,7 +98,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 	if (mWorldRects.size()) {
 		GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer->CurrentShaderPass(), {});
 		if (pipeline) {
-			commandBuffer->BindPipeline(pipeline, nullptr);
+			commandBuffer->BindPipeline(pipeline);
 
 			Buffer* screenRects = commandBuffer->GetBuffer("WorldRects", mWorldRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 			memcpy(screenRects->MappedData(), mWorldRects.data(), mWorldRects.size() * sizeof(GuiRect));
@@ -120,7 +120,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 	if (mWorldTextureRects.size()) {
 		GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer->CurrentShaderPass(), { "TEXTURED" });
 		if (pipeline) {
-			commandBuffer->BindPipeline(pipeline, nullptr);
+			commandBuffer->BindPipeline(pipeline);
 
 			Buffer* screenRects = commandBuffer->GetBuffer("WorldRects", mWorldTextureRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 			memcpy(screenRects->MappedData(), mWorldTextureRects.data(), mWorldTextureRects.size() * sizeof(GuiRect));
@@ -144,7 +144,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 	if (mWorldStrings.size() && mStringGlyphs.size() && mStringTransforms.size()) {
 		GraphicsPipeline* pipeline = font->GetGraphics(commandBuffer->CurrentShaderPass(), {});
 		if (pipeline) {
-			commandBuffer->BindPipeline(pipeline, nullptr);
+			commandBuffer->BindPipeline(pipeline);
 
 			DescriptorSet* ds = commandBuffer->GetDescriptorSet("Screen Strings DescriptorSet", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
 			ds->CreateBufferDescriptor("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect), pipeline);
@@ -176,7 +176,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 		if (mScreenRects.size()) {
 			GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE" });
 			if (pipeline) {
-				commandBuffer->BindPipeline(pipeline, nullptr);
+				commandBuffer->BindPipeline(pipeline);
 
 				Buffer* screenRects = commandBuffer->GetBuffer("ScreenRects", mScreenRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 				memcpy(screenRects->MappedData(), mScreenRects.data(), mScreenRects.size() * sizeof(GuiRect));
@@ -194,7 +194,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 		if (mScreenTextureRects.size()) {
 			GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE", "TEXTURED" });
 			if (pipeline) {
-				commandBuffer->BindPipeline(pipeline, nullptr);
+				commandBuffer->BindPipeline(pipeline);
 
 				Buffer* screenRects = commandBuffer->GetBuffer("ScreenRects", mScreenTextureRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 				memcpy(screenRects->MappedData(), mScreenTextureRects.data(), mScreenTextureRects.size() * sizeof(GuiRect));
@@ -214,7 +214,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 		if (mScreenLines.size()) {
 			GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/line.stmb")->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE" });
 			if (pipeline) {
-				commandBuffer->BindPipeline(pipeline, nullptr, vk::PrimitiveTopology::eLineStrip);
+				commandBuffer->BindPipeline(pipeline, vk::PrimitiveTopology::eLineStrip);
 
 				Buffer* pts = commandBuffer->GetBuffer("Line Pts", sizeof(float3) * mLinePoints.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 				Buffer* transforms = commandBuffer->GetBuffer("Line Transforms", sizeof(float4x4) * mLineTransforms.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
@@ -242,7 +242,7 @@ void GuiContext::OnDraw(CommandBuffer* commandBuffer, Camera* camera, Descriptor
 			camera->SetViewportScissor(commandBuffer);
 			GraphicsPipeline* pipeline = font->GetGraphics(commandBuffer->CurrentShaderPass(), { "SCREEN_SPACE" });
 			if (pipeline) {
-				commandBuffer->BindPipeline(pipeline, nullptr);
+				commandBuffer->BindPipeline(pipeline);
 
 				DescriptorSet* ds = commandBuffer->GetDescriptorSet("Screen Strings DescriptorSet", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
 				ds->CreateBufferDescriptor("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect), pipeline);
@@ -415,7 +415,7 @@ void GuiContext::DrawString(const float2& screenPos, float z, Font* font, float 
 void GuiContext::DrawString(const float4x4& transform, const float2& offset, Font* font, float pixelHeight, const string& str, const float4& color, TextAnchor horizontalAnchor, const fRect2D& clipRect) {
 	if (str.empty()) return;
 
-	GuiString s = {};
+	GuiString s;
 	s.mSdfIndex = (uint32_t)mStringSDFs.size();
 	for (uint32_t i = 0; i < mStringSDFs.size(); i++)
 		if (mStringSDFs[i] == font->SDF()) {
@@ -451,8 +451,8 @@ void GuiContext::Rect(const fRect2D& screenRect, float z, const float4& color, T
 		if (screenRect.Contains(c) && clipRect.Contains(c)) const_cast<InputPointer*>(i->GetPointer(0))->mGuiHitT = 0.f;
 	}
 
-	GuiRect r = {};
-	r.mScaleTranslate = float4(screenRect.mExtent, screenRect.mOffset);
+	GuiRect r;
+	r.mScaleTranslate = float4(screenRect.mSize, screenRect.mOffset);
 	r.mColor = color;
 	r.mClipBounds = clipRect;
 	r.mDepth = z;
@@ -491,9 +491,9 @@ void GuiContext::Rect(const float4x4& transform, const fRect2D& rect, const floa
 	}
 
 
-	GuiRect r = {};
+	GuiRect r;
 	r.mTransform = transform;
-	r.mScaleTranslate = float4(rect.mExtent, rect.mOffset);
+	r.mScaleTranslate = float4(rect.mSize, rect.mOffset);
 	r.mColor = color;
 	r.mClipBounds = clipRect;
 	r.mTextureST = textureST;
@@ -516,11 +516,11 @@ void GuiContext::Label(const fRect2D& screenRect, float z, Font* font, float fon
 	if (bgcolor.a > 0) Rect(screenRect, z, bgcolor, nullptr, 0, clipRect);
 	if (textColor.a > 0 && text.length()){
 		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mExtent.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mExtent.x - 2;
+		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mSize.x * .5f;
+		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mSize.x - 2;
 
-		if (verticalAnchor == TextAnchor::eMid) o.y = screenRect.mExtent.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mExtent.y - font->Ascent(fontPixelHeight) - 2;
+		if (verticalAnchor == TextAnchor::eMid) o.y = screenRect.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
+		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mSize.y - font->Ascent(fontPixelHeight) - 2;
 		else o.y = -font->Descent(fontPixelHeight) + 2;
 
 		DrawString(screenRect.mOffset + o, z + DEPTH_DELTA, font, fontPixelHeight, text, textColor, horizontalAnchor, clipRect);
@@ -531,11 +531,11 @@ void GuiContext::Label(const float4x4& transform, const fRect2D& rect, Font* fon
 	if (bgcolor.a > 0) Rect(transform, rect, bgcolor, nullptr, 0, clipRect);
 	if (textColor.a > 0 && text.length()) {
 		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = rect.mExtent.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = rect.mExtent.x - 2;
+		if (horizontalAnchor == TextAnchor::eMid) o.x = rect.mSize.x * .5f;
+		else if (horizontalAnchor == TextAnchor::eMax) o.x = rect.mSize.x - 2;
 
-		if (verticalAnchor == TextAnchor::eMid) o.y = rect.mExtent.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = rect.mExtent.y - font->Ascent(fontPixelHeight) - 2;
+		if (verticalAnchor == TextAnchor::eMid) o.y = rect.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
+		else if (verticalAnchor == TextAnchor::eMax) o.y = rect.mSize.y - font->Ascent(fontPixelHeight) - 2;
 		else o.y = -font->Descent(fontPixelHeight) + 2;
 
 		DrawString(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, font, fontPixelHeight, text, textColor, horizontalAnchor, clipRect);
@@ -573,11 +573,11 @@ bool GuiContext::TextButton(const fRect2D& screenRect, float z, Font* font, floa
 
 	if (textColor.a > 0 && text.length()) {
 		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mExtent.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mExtent.x - 2;
+		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mSize.x * .5f;
+		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mSize.x - 2;
 
-		if (verticalAnchor == TextAnchor::eMid) o.y = screenRect.mExtent.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mExtent.y - font->Ascent(fontPixelHeight) - 2;
+		if (verticalAnchor == TextAnchor::eMid) o.y = screenRect.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
+		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mSize.y - font->Ascent(fontPixelHeight) - 2;
 		else o.y = -font->Descent(fontPixelHeight) + 2;
 
 		DrawString(r.mOffset + o, z + DEPTH_DELTA, font, fontPixelHeight, text, float4(textColor.rgb * m, textColor.a), horizontalAnchor, clipRect);
@@ -632,11 +632,11 @@ bool GuiContext::TextButton(const float4x4& transform, const fRect2D& rect, Font
 	
 	if (textColor.a > 0 && text.length()) {
 		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = r.mExtent.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = r.mExtent.x - 2;
+		if (horizontalAnchor == TextAnchor::eMid) o.x = r.mSize.x * .5f;
+		else if (horizontalAnchor == TextAnchor::eMax) o.x = r.mSize.x - 2;
 
-		if (verticalAnchor == TextAnchor::eMid) o.y = r.mExtent.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = r.mExtent.y - font->Ascent(fontPixelHeight) - 2;
+		if (verticalAnchor == TextAnchor::eMid) o.y = r.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
+		else if (verticalAnchor == TextAnchor::eMax) o.y = r.mSize.y - font->Ascent(fontPixelHeight) - 2;
 		else o.y = -font->Descent(fontPixelHeight) + 2;
 		DrawString(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), r.mOffset + o, font, fontPixelHeight, text, float4(textColor.rgb * m, textColor.a), horizontalAnchor, clipRect);
 	}
@@ -733,9 +733,9 @@ bool GuiContext::Slider(const fRect2D& screenRect, float z, float& value, float 
 
 	fRect2D barRect = screenRect;
 	fRect2D interactRect = screenRect;
-	if (knobSize > interactRect.mExtent[otherAxis]) {
-		interactRect.mOffset[otherAxis] += interactRect.mExtent[otherAxis] * .5f - knobSize * .5f;
-		interactRect.mExtent[otherAxis] = knobSize;
+	if (knobSize > interactRect.mSize[otherAxis]) {
+		interactRect.mOffset[otherAxis] += interactRect.mSize[otherAxis] * .5f - knobSize * .5f;
+		interactRect.mSize[otherAxis] = knobSize;
 	}
 
 	// Modify position from input
@@ -746,7 +746,7 @@ bool GuiContext::Slider(const fRect2D& screenRect, float z, float& value, float 
 	lastCursor.y = i->WindowHeight() - lastCursor.y;
 	const InputPointer* p = i->GetPointer(0);
 	if ((i->KeyDown(MOUSE_LEFT) && mLastHotControl[p->mName] == controlId) || (i->KeyDownFirst(MOUSE_LEFT) && interactRect.Contains(cursor)) ) {
-		value = minimum + (cursor[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+		value = minimum + (cursor[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
 		ret = true;
 		hover = true;
 		click = true;
@@ -756,8 +756,8 @@ bool GuiContext::Slider(const fRect2D& screenRect, float z, float& value, float 
 	value = clamp(value, minimum, maximum);
 	
 	fRect2D knobRect(barRect.mOffset, knobSize);
-	knobRect.mOffset[scrollAxis] += (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
-	knobRect.mOffset[otherAxis] += barRect.mExtent[otherAxis] *.5f;
+	knobRect.mOffset[scrollAxis] += (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
+	knobRect.mOffset[otherAxis] += barRect.mSize[otherAxis] *.5f;
 	knobRect.mOffset -= knobSize*.5f;
 
 	bool hvr = (interactRect.Contains(cursor)) && clipRect.Contains(cursor);
@@ -786,7 +786,7 @@ bool GuiContext::Slider(const float4x4& transform, const fRect2D& rect, float& v
 	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
 
 	// Determine knob position
-	float knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	float knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
 
 	// Modify kob position from input
 	float4x4 invTransform = inverse(transform);
@@ -803,7 +803,7 @@ bool GuiContext::Slider(const float4x4& transform, const fRect2D& rect, float& v
 
 			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
 			if (rect.Contains(c) && clipRect.Contains(c))
-				knobPos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+				knobPos += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
 
 			if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
 				Ray ray = p->mWorldRay;
@@ -820,9 +820,9 @@ bool GuiContext::Slider(const float4x4& transform, const fRect2D& rect, float& v
 		}
 
 	// Derive modified value from modified position
-	value = minimum + (knobPos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	value = minimum + (knobPos - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
 	value = clamp(value, minimum, maximum);
-	knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
 
 	fRect2D knobRect(barRect.mOffset, knobSize);
 	knobRect.mOffset[scrollAxis] += knobPos;
@@ -891,7 +891,7 @@ bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values,
 
 	for (uint32_t j = 0; j < 2; j++)
 		if (i->KeyDown(MOUSE_LEFT) && mLastHotControl[p->mName] == controlId[j]) {
-				values[j] = minimum + (cursor[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+				values[j] = minimum + (cursor[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
 				mHotControl[p->mName] = controlId[j];
 				const_cast<InputPointer*>(p)->mGuiHitT = 0.f;
 				ret = true;
@@ -904,10 +904,10 @@ bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values,
 	fRect2D knobRects[2];
 	knobRects[0] = fRect2D(barRect.mOffset, knobSize);
 	knobRects[1] = fRect2D(barRect.mOffset, knobSize);
-	knobRects[0].mOffset[scrollAxis] += (values[0] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
-	knobRects[1].mOffset[scrollAxis] += (values[1] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
-	knobRects[0].mOffset[otherAxis] += barRect.mExtent[otherAxis] * .5f;
-	knobRects[1].mOffset[otherAxis] += barRect.mExtent[otherAxis] * .5f;
+	knobRects[0].mOffset[scrollAxis] += (values[0] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
+	knobRects[1].mOffset[scrollAxis] += (values[1] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
+	knobRects[0].mOffset[otherAxis] += barRect.mSize[otherAxis] * .5f;
+	knobRects[1].mOffset[otherAxis] += barRect.mSize[otherAxis] * .5f;
 	knobRects[0].mOffset -= knobSize*.5f;
 	knobRects[1].mOffset -= knobSize*.5f;
 	
@@ -925,7 +925,7 @@ bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values,
 
 	fRect2D middleRect = barRect;
 	middleRect.mOffset[scrollAxis] = min(knobRects[0].mOffset[scrollAxis], knobRects[1].mOffset[scrollAxis]) + knobSize * .5f;
-	middleRect.mExtent[scrollAxis] = fabsf(knobRects[1].mOffset[scrollAxis] - knobRects[0].mOffset[scrollAxis]);
+	middleRect.mSize[scrollAxis] = fabsf(knobRects[1].mOffset[scrollAxis] - knobRects[0].mOffset[scrollAxis]);
 
 	float m = 1.25f;
 	if (hover) m *= 1.2f;
@@ -934,7 +934,7 @@ bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values,
 	Rect(barRect, z, barColor, nullptr, 0, clipRect);
 	Rect(knobRects[0], z, float4(knobColor.rgb * m, knobColor.a), mIconsTexture, ICON_TRI_RIGHT_ST, clipRect);
 	Rect(knobRects[1], z, float4(knobColor.rgb * m, knobColor.a), mIconsTexture, ICON_TRI_LEFT_ST, clipRect);
-	if (middleRect.mExtent[scrollAxis] > 0)
+	if (middleRect.mSize[scrollAxis] > 0)
 		Rect(middleRect, z, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 	return ret;
 }
@@ -950,7 +950,7 @@ bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, flo
 	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
 
 	// Determine knob positions
-	float2 pos = barRect.mOffset[scrollAxis] + (values - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	float2 pos = barRect.mOffset[scrollAxis] + (values - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
 
 	// Modify kob positions from input
 	float4x4 invTransform = inverse(transform);
@@ -968,11 +968,11 @@ bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, flo
 			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
 			if (rect.Contains(c) && clipRect.Contains(c)) {
 				if (c.x < pos[0] + knobSize * .5f)
-					pos[0] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+					pos[0] += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
 				else if (c.x > pos[1] - knobSize * .5f)
-					pos[1] += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+					pos[1] += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
 				else
-					pos += p->mScrollDelta[scrollAxis] * barRect.mExtent[scrollAxis] * .25f;
+					pos += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
 			}
 
 			for (uint32_t j = 0; j < 3; j++)
@@ -992,19 +992,19 @@ bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, flo
 		}
 
 	// Derive modified value from modified positions
-	values = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mExtent[scrollAxis] * (maximum - minimum);
+	values = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
 	values = clamp(values, minimum, maximum);
 	if (values.x > values.y) swap(values.x, values.y);
 
 	// Derive final knob position from the modified, clamped value
-	pos[0] = barRect.mOffset[scrollAxis] + (values[0] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
-	pos[1] = barRect.mOffset[scrollAxis] + (values[1] - minimum) / (maximum - minimum) * barRect.mExtent[scrollAxis];
+	pos[0] = barRect.mOffset[scrollAxis] + (values[0] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
+	pos[1] = barRect.mOffset[scrollAxis] + (values[1] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
 
 	fRect2D middleRect = rect;
-	middleRect.mOffset[otherAxis] += rect.mExtent[otherAxis] * .125f;
-	middleRect.mExtent[otherAxis] *= 0.75f;
+	middleRect.mOffset[otherAxis] += rect.mSize[otherAxis] * .125f;
+	middleRect.mSize[otherAxis] *= 0.75f;
 	middleRect.mOffset[scrollAxis] = pos[0] + knobSize;
-	middleRect.mExtent[scrollAxis] = pos[1] - (pos[0] + knobSize);
+	middleRect.mSize[scrollAxis] = pos[1] - (pos[0] + knobSize);
 
 	fRect2D knobRects[2];
 	knobRects[0] = fRect2D(barRect.mOffset, knobSize);
@@ -1044,7 +1044,7 @@ bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, flo
 				}
 			}
 
-			if (middleRect.mExtent[scrollAxis] > 0) {
+			if (middleRect.mSize[scrollAxis] > 0) {
 				bool hvr = middleRect.Contains(c) && clipRect.Contains(c);
 				bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[2]));
 
@@ -1066,7 +1066,7 @@ bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, flo
 	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
 	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 	Rect(transform* float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[1], float4(knobColor.rgb* m, knobColor.a), nullptr, 0, clipRect);
-	if (middleRect.mExtent[scrollAxis] > 0)
+	if (middleRect.mSize[scrollAxis] > 0)
 		Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
 	return ret;
 }
@@ -1076,11 +1076,11 @@ fRect2D GuiContext::GuiLayout::Get(float size) {
 	fRect2D layoutRect = mRect;
 	switch (mAxis) {
 	case LayoutAxis::eVertical:
-		layoutRect.mExtent.y = size;
-		layoutRect.mOffset.y += (mRect.mExtent.y - size) - mLayoutPosition;
+		layoutRect.mSize.y = size;
+		layoutRect.mOffset.y += (mRect.mSize.y - size) - mLayoutPosition;
 		break;
 	case LayoutAxis::eHorizontal:
-		layoutRect.mExtent.x = size;
+		layoutRect.mSize.x = size;
 		layoutRect.mOffset.x += mLayoutPosition;
 		break;
 	}
@@ -1089,13 +1089,13 @@ fRect2D GuiContext::GuiLayout::Get(float size) {
 }
 
 fRect2D GuiContext::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect) {
-	fRect2D layoutRect(screenRect.mOffset + mLayoutTheme.mControlPadding, screenRect.mExtent - mLayoutTheme.mControlPadding * 2);
+	fRect2D layoutRect(screenRect.mOffset + mLayoutTheme.mControlPadding, screenRect.mSize - mLayoutTheme.mControlPadding * 2);
 	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
 	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(screenRect, START_DEPTH, mLayoutTheme.mBackgroundColor, nullptr, 0);
 	return layoutRect;
 }
 fRect2D GuiContext::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect) {
-	fRect2D layoutRect(rect.mOffset + mLayoutTheme.mControlPadding, rect.mExtent - mLayoutTheme.mControlPadding * 2);
+	fRect2D layoutRect(rect.mOffset + mLayoutTheme.mControlPadding, rect.mSize - mLayoutTheme.mControlPadding * 2);
 	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
 	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(tranform * float4x4::Translate(float3(0, 0, START_DEPTH)), rect, mLayoutTheme.mBackgroundColor);
 	return layoutRect;
@@ -1115,7 +1115,7 @@ fRect2D GuiContext::BeginSubLayout(LayoutAxis axis, float size) {
 	}
 
 	layoutRect.mOffset += mLayoutTheme.mControlPadding;
-	layoutRect.mExtent -= mLayoutTheme.mControlPadding * 2;
+	layoutRect.mSize -= mLayoutTheme.mControlPadding * 2;
 
 	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, layoutRect, 0, l.mLayoutDepth + 2*DEPTH_DELTA });
 
@@ -1164,7 +1164,7 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 			}
 	}
 
-	float scrollMax = max(0.f, contentSize - layoutRect.mExtent.y);
+	float scrollMax = max(0.f, contentSize - layoutRect.mSize.y);
 	scrollAmount = clamp(scrollAmount, 0.f, scrollMax);
 
 	mControlData[controlId] = scrollAmount;
@@ -1180,15 +1180,15 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 
 	fRect2D contentRect = layoutRect;
 	contentRect.mOffset += mLayoutTheme.mControlPadding;
-	contentRect.mExtent -= mLayoutTheme.mControlPadding * 2;
+	contentRect.mSize -= mLayoutTheme.mControlPadding * 2;
 	switch (l.mAxis) {
 	case LayoutAxis::eHorizontal:
-		contentRect.mOffset.x -= scrollAmount + (layoutRect.mExtent.x - contentSize);
-		contentRect.mExtent.x = contentSize - mLayoutTheme.mControlPadding * 2;
+		contentRect.mOffset.x -= scrollAmount + (layoutRect.mSize.x - contentSize);
+		contentRect.mSize.x = contentSize - mLayoutTheme.mControlPadding * 2;
 		break;
 	case LayoutAxis::eVertical:
-		contentRect.mOffset.y += (layoutRect.mExtent.y - contentSize) + scrollAmount;
-		contentRect.mExtent.y = contentSize - mLayoutTheme.mControlPadding * 2;
+		contentRect.mOffset.y += (layoutRect.mSize.y - contentSize) + scrollAmount;
+		contentRect.mSize.y = contentSize - mLayoutTheme.mControlPadding * 2;
 		break;
 	}
 	
@@ -1199,24 +1199,24 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 
 		switch (l.mAxis) {
 		case LayoutAxis::eHorizontal:
-			slider.mExtent = float2(layoutRect.mExtent.x * (layoutRect.mExtent.x / contentSize), mLayoutTheme.mScrollBarThickness);
-			slider.mOffset = layoutRect.mOffset + float2((layoutRect.mExtent.x - slider.mExtent.x) * (scrollAmount / scrollMax), 0);
+			slider.mSize = float2(layoutRect.mSize.x * (layoutRect.mSize.x / contentSize), mLayoutTheme.mScrollBarThickness);
+			slider.mOffset = layoutRect.mOffset + float2((layoutRect.mSize.x - slider.mSize.x) * (scrollAmount / scrollMax), 0);
 			sliderbg.mOffset = layoutRect.mOffset;
-			sliderbg.mExtent = float2(layoutRect.mExtent.x, slider.mExtent.y);
+			sliderbg.mSize = float2(layoutRect.mSize.x, slider.mSize.y);
 
-			contentRect.mOffset.y += slider.mExtent.y;
-			layoutRect.mOffset.y += slider.mExtent.y;
-			layoutRect.mExtent.y -= slider.mExtent.y;
+			contentRect.mOffset.y += slider.mSize.y;
+			layoutRect.mOffset.y += slider.mSize.y;
+			layoutRect.mSize.y -= slider.mSize.y;
 			break;
 
 		case LayoutAxis::eVertical:
-			slider.mExtent = float2(mLayoutTheme.mScrollBarThickness, layoutRect.mExtent.y * (layoutRect.mExtent.y / contentSize));
-			slider.mOffset = layoutRect.mOffset + float2(layoutRect.mExtent.x - slider.mExtent.x, (layoutRect.mExtent.y - slider.mExtent.y) * (1 - scrollAmount / scrollMax));
-			sliderbg.mOffset = layoutRect.mOffset + float2(layoutRect.mExtent.x - slider.mExtent.x, 0);
-			sliderbg.mExtent = float2(slider.mExtent.x, layoutRect.mExtent.y);
+			slider.mSize = float2(mLayoutTheme.mScrollBarThickness, layoutRect.mSize.y * (layoutRect.mSize.y / contentSize));
+			slider.mOffset = layoutRect.mOffset + float2(layoutRect.mSize.x - slider.mSize.x, (layoutRect.mSize.y - slider.mSize.y) * (1 - scrollAmount / scrollMax));
+			sliderbg.mOffset = layoutRect.mOffset + float2(layoutRect.mSize.x - slider.mSize.x, 0);
+			sliderbg.mSize = float2(slider.mSize.x, layoutRect.mSize.y);
 
-			layoutRect.mExtent.x -= slider.mExtent.x;
-			contentRect.mExtent.x -= slider.mExtent.x;
+			layoutRect.mSize.x -= slider.mSize.x;
+			contentRect.mSize.x -= slider.mSize.x;
 			break;
 		}
 
@@ -1224,23 +1224,23 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 		uint32_t otherAxis = l.mAxis == LayoutAxis::eHorizontal ? 1 : 0;
 
 		float2 offset = slider.mOffset;
-		float extent = slider.mExtent[otherAxis];
+		float extent = slider.mSize[otherAxis];
 		slider.mOffset[scrollAxis] += extent / 2;
-		slider.mExtent[scrollAxis] = fmaxf(0, slider.mExtent[scrollAxis] - extent);
+		slider.mSize[scrollAxis] = fmaxf(0, slider.mSize[scrollAxis] - extent);
 		
 		if (l.mScreenSpace) {
 			Rect(slider, l.mLayoutDepth + DEPTH_DELTA, mLayoutTheme.mSliderColor, nullptr, 0);
 			Rect(slider, l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, nullptr, 0);
 			
 			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
-			offset[scrollAxis] += floorf(slider.mExtent[scrollAxis] - 0.5f);
+			offset[scrollAxis] += floorf(slider.mSize[scrollAxis] - 0.5f);
 			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 		} else {
 			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), sliderbg, mLayoutTheme.mSliderColor);
 			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), slider, mLayoutTheme.mSliderKnobColor);
 			
 			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
-			offset[scrollAxis] += slider.mExtent[scrollAxis];
+			offset[scrollAxis] += slider.mSize[scrollAxis];
 			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 		}
 	}
@@ -1306,7 +1306,7 @@ bool GuiContext::LayoutImageButton(const float2& size, Texture* texture, const f
 	fRect2D layoutRect = l.Get(size[(uint32_t)l.mAxis]);
 	LayoutSpace(mLayoutTheme.mControlPadding);
 
-	layoutRect.mExtent = size;
+	layoutRect.mSize = size;
 
 	if (l.mScreenSpace)
 		return ImageButton(layoutRect, l.mLayoutDepth, texture, mLayoutTheme.mTextColor, textureST, l.mClipRect);
@@ -1321,8 +1321,8 @@ bool GuiContext::LayoutToggle(const string& label, bool& value) {
 
 	if (l.mScreenSpace) {
 		Label(layoutRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += layoutRect.mExtent.x - mLayoutTheme.mControlSize;
-		layoutRect.mExtent = mLayoutTheme.mControlSize;
+		layoutRect.mOffset.x += layoutRect.mSize.x - mLayoutTheme.mControlSize;
+		layoutRect.mSize = mLayoutTheme.mControlSize;
 		if (ImageButton(layoutRect, l.mLayoutDepth, mIconsTexture, mLayoutTheme.mTextColor, value ? ICON_CHECK_ST : ICON_CHECKBOX_ST, l.mClipRect)) {
 			value = !value;
 			return true;
@@ -1330,8 +1330,8 @@ bool GuiContext::LayoutToggle(const string& label, bool& value) {
 		return false;
 	} else {
 		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += layoutRect.mExtent.x - mLayoutTheme.mControlSize;
-		layoutRect.mExtent = mLayoutTheme.mControlSize;
+		layoutRect.mOffset.x += layoutRect.mSize.x - mLayoutTheme.mControlSize;
+		layoutRect.mSize = mLayoutTheme.mControlSize;
 		if (ImageButton(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mIconsTexture, mLayoutTheme.mTextColor, value ? ICON_CHECK_ST : ICON_CHECKBOX_ST, l.mClipRect)) {
 			value = !value;
 			return true;
@@ -1346,23 +1346,23 @@ bool GuiContext::LayoutSlider(const string& label, float& value, float minimum, 
 	LayoutSpace(mLayoutTheme.mControlPadding);
 
 	// make the bar the right size
-	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mExtent[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
-	layoutRect.mExtent[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
+	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mSize[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
+	layoutRect.mSize[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
 
 	LayoutAxis axis = l.mAxis == LayoutAxis::eHorizontal ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
 	if (l.mScreenSpace) {
 		fRect2D labelRect = layoutRect;
-		labelRect.mExtent.x *= .25f;
+		labelRect.mSize.x *= .25f;
 		Label(labelRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mExtent.x -= labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize;
+		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
+		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
 		return Slider(layoutRect, l.mLayoutDepth, value, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
 	} else {
 		fRect2D labelRect = layoutRect;
-		labelRect.mExtent.x *= .25f;
+		labelRect.mSize.x *= .25f;
 		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), labelRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mExtent.x -= labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize;
+		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
+		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
 		return Slider(l.mTransform, layoutRect, value, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
 	}
 }
@@ -1373,23 +1373,23 @@ bool GuiContext::LayoutRangeSlider(const string& label, float2& values, float mi
 	LayoutSpace(mLayoutTheme.mControlPadding);
 
 	// make the bar the right size
-	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mExtent[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
-	layoutRect.mExtent[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
+	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mSize[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
+	layoutRect.mSize[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
 
 	LayoutAxis axis = l.mAxis == LayoutAxis::eHorizontal ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
 	if (l.mScreenSpace) {
 		fRect2D labelRect = layoutRect;
-		labelRect.mExtent.x *= .25f;
+		labelRect.mSize.x *= .25f;
 		Label(labelRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mExtent.x -= labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize;
+		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
+		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
 		return RangeSlider(layoutRect, l.mLayoutDepth, values, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
 	} else {
 		fRect2D labelRect = layoutRect;
-		labelRect.mExtent.x *= .25f;
+		labelRect.mSize.x *= .25f;
 		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), labelRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mExtent.x -= labelRect.mExtent.x + mLayoutTheme.mSliderKnobSize;
+		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
+		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
 		return RangeSlider(l.mTransform, layoutRect, values, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
 	}
 }

@@ -419,7 +419,7 @@ Texture* Device::GetPooledTexture(const string& name, const vk::Extent3D& extent
 				break;
 			}
 	mTexturePoolMutex.unlock();
-	return tex ? tex : new Texture(name, this, extent, format, mipLevels, sampleCount, usage, memoryProperties);
+	return tex ? tex : new Texture(name, this, nullptr, 0, extent, format, mipLevels, sampleCount, usage, memoryProperties);
 }
 void Device::PoolResource(Buffer* buffer) {
 	mBufferPoolMutex.lock();
@@ -441,7 +441,8 @@ void Device::PurgePooledResources(uint32_t maxAge) {
 	mCommandBufferPoolMutex.lock();
 	for (auto& kp : mCommandBufferPool)
 		for (auto& it = kp.second.begin(); it != kp.second.end();) {
-			if (it->mResource->State() != CommandBufferState::eDone) continue;
+			it->mResource->CheckDone();
+			if (it->mResource->mState != CommandBuffer::CommandBufferState::eDone) continue;
 			it->mResource->Clear();
 			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
 				safe_delete(it->mResource);
@@ -493,7 +494,8 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBuff
 	if (level == vk::CommandBufferLevel::ePrimary) {
 		auto& pool = mCommandBufferPool[commandPool];
 		if (!pool.empty()) {
-			if (pool.front().mResource->State() == CommandBufferState::eDone) {
+			pool.front().mResource->CheckDone();
+			if (pool.front().mResource->mState == CommandBuffer::CommandBufferState::eDone) {
 				CommandBuffer* commandBuffer = pool.front().mResource;
 				pool.pop_front();
 				commandBuffer->Reset(name);
@@ -505,8 +507,10 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBuff
 	return new CommandBuffer(name, this, commandPool, level);
 }
 void Device::Execute(CommandBuffer* commandBuffer) {
-	if (commandBuffer->State() != CommandBufferState::eRecording)
+	commandBuffer->CheckDone();
+	if (commandBuffer->mState != CommandBuffer::CommandBufferState::eRecording)
 		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Execute() expected CommandBuffer to be in CommandBufferState::eRecording\n");
+	
 	((vk::CommandBuffer)*commandBuffer).end();
 
 	vector<vk::PipelineStageFlags> waitStages;	
@@ -532,7 +536,7 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 	mGraphicsQueue.submit(1, &submitInfo, commandBuffer->mSignalFence);
 	PROFILER_END;
 
-	commandBuffer->mState = CommandBufferState::ePending;
+	commandBuffer->mState = CommandBuffer::CommandBufferState::ePending;
 
 	mCommandBufferPoolMutex.lock();
 	mCommandBufferPool[commandBuffer->mCommandPool].push_back({ mFrameCount, commandBuffer });

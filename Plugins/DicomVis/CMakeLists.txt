@@ -1,6 +1,6 @@
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required (VERSION 3.15)
 
-add_library(DicomVis MODULE "DicomVis.cpp" "ImageLoader.cpp")
+add_library(DicomVis MODULE "DicomVis.cpp" "ImageLoader.cpp" "RenderVolume.cpp")
 link_plugin(DicomVis)
 
 if(WIN32)

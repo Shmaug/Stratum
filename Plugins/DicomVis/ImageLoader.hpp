@@ -3,10 +3,10 @@
 #include <Data/Texture.hpp>
 
 enum ImageStackType {
-	IMAGE_STACK_NONE,
-	IMAGE_STACK_DICOM,
-	IMAGE_STACK_RAW,
-	IMAGE_STACK_STANDARD,
+	eNone,
+	eDicom,
+	eRaw,
+	eStandard,
 };
 
 class ImageLoader {
