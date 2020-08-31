@@ -141,7 +141,7 @@ struct Ray {
 	}
 
 	inline bool Intersect(float3 v0, float3 v1, float3 v2, float3* tuv) const {
-		// http://jcgt.org/published/0002/01/05/paper.pdf
+		// Algorithm from http://jcgt.org/published/0002/01/05/paper.pdf
 
 		v0 -= mOrigin;
 		v1 -= mOrigin;

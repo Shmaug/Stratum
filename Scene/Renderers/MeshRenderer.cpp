@@ -40,9 +40,9 @@ bool MeshRenderer::TryCombineInstances(CommandBuffer* commandBuffer, Renderer* r
 	MeshRenderer* mr = dynamic_cast<MeshRenderer*>(renderer);
 	if (!mr || (mr->Material() != Material()) || mr->Mesh() != Mesh()) return false;
 
-	// renderer is combinable
+	// renderer is currently batchable
 	if (!instanceBuffer) {
-		instanceBuffer = commandBuffer->GetBuffer(mName + " batch", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+		instanceBuffer = commandBuffer->GetBuffer(mName + "/Instances", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 		instanceCount = 0;
 	}
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
@@ -64,10 +64,10 @@ void MeshRenderer::OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera,
 		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
 	}
 
-	mMesh->Draw(commandBuffer, camera, 0, instanceCount);
+	mMesh->Draw(commandBuffer, camera, instanceCount);
 }
 void MeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
+	Buffer* instanceBuffer = commandBuffer->GetBuffer(mName + "/Instances", sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
 	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
 	buf->ObjectToWorld = ObjectToWorld();
 	buf->WorldToObject = WorldToObject();

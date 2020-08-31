@@ -613,7 +613,7 @@ bool Instance::BeginFrame() {
 	mWindow->AcquireNextImage();
 	PROFILER_END;
 	
-	// TODO: replace mScene->mCameras[0]
+	// FIXME: replace mScene->mCameras[0]
 	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));	
 	return true;
 }

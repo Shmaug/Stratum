@@ -15,13 +15,13 @@ Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 
 inline void SkinnedMeshRenderer::Mesh(variant_ptr<::Mesh> m) {
 	mMesh = m;
-	mSkinnedMesh = m.get(); // TODO: make a copy of mMesh
+	mSkinnedMesh = m.get(); // FIXME: make a copy of mMesh
 }
 
 void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stmb");
 	
-	// TODO: fix this to work with new Mesh system
+	// FIXME: fix this to work with new Mesh system
 
 	// Shape Keys
 	/*

@@ -106,7 +106,6 @@ Scene::~Scene() {
 	mInstance->PluginManager()->UnloadPlugins();
 
 	safe_delete(mShadowSampler);
-	
 	safe_delete(mBvh);
 
 	set<RenderPass*> uniqueRenderPasses;

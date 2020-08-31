@@ -104,7 +104,7 @@ Pipeline::Pipeline(const string& name, ::Device* device, const string& shaderFil
 			if (var->mDescriptorSetLayouts.size() <= max(PER_OBJECT, PER_CAMERA)) var->mDescriptorSetLayouts.resize(max(PER_OBJECT, PER_CAMERA) + 1);
 			if (!var->mDescriptorSetLayouts[PER_OBJECT]) var->mDescriptorSetLayouts[PER_OBJECT] = mDevice->PerObjectSetLayout();
 			if (var->mDescriptorSetLayouts[PER_CAMERA]) mDevice->Destroy(var->mDescriptorSetLayouts[PER_CAMERA]);
-			// TODO: make this descriptor sets not mandatory
+			// TODO: make these descriptor sets not mandatory
 			var->mDescriptorSetLayouts[PER_CAMERA] = mDevice->PerCameraSetLayout();
 
 			// Create dummy descriptors in any slots with null descriptors

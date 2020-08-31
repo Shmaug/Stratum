@@ -587,7 +587,7 @@ void XR::PostRender(CommandBuffer* commandBuffer) {
 	mHmdCamera->EyeOffset(iq * (positions[1] - center), iq * rotations[1], eyes[1]);
 
 
-	// TODO: Copy render result into right and left respectively
+	// FIXME: Copy render result into right and left respectively
 	//mHmdCamera->WriteUniformBuffer();
 	vk::Image right = mSwapchainImages[0][mProjectionViews[0].subImage.imageArrayIndex].image;
 	vk::Image left = mSwapchainImages[1][mProjectionViews[1].subImage.imageArrayIndex].image;

@@ -547,10 +547,9 @@ int CompileSpirv(const string& filename, const set<string>& macros, const string
 	fs::path p = fs::path(filename);
 
 	bool hlsl = p.extension().string() == ".hlsl";
+	// TODO: Try to compile with DXC
 	/*
 	if (hlsl) {
-		// TODO: Try to compile with DXC
-
 		string spvFile = fs::temp_directory_path().string() + "/" + p.filename().stem().string() + ".spv";
 		if (fs::exists(spvFile)) fs::remove(spvFile);
 		string cmd = "dxc -spirv ";

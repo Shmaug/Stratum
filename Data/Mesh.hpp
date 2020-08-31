@@ -18,7 +18,7 @@ public:
 			: mVertexCount(vertexCount), mBaseVertex(baseVertex), mIndexCount(indexCount), mBaseIndex(baseIndex), mBvh(bvh) {}
 		inline ~Submesh() { safe_delete(mBvh); };
 
-		STRATUM_API void Draw(CommandBuffer* commandBuffer, uint32_t instanceCount, uint32_t firstInstance);
+		STRATUM_API void Draw(CommandBuffer* commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
 	};
 
 	const std::string mName;

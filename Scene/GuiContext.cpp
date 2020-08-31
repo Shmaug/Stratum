@@ -297,10 +297,10 @@ void GuiContext::PolyLine(const float4x4& transform, const float3* points, uint3
 }
 
 void GuiContext::WireCube(const float3& center, const float3& extents, const quaternion& rotation, const float4& color) {
-	// TODO: implement WireCube
+	// FIXME: implement WireCube
 }
 void GuiContext::WireCircle(const float3& center, float radius, const quaternion& rotation, const float4& color) {
-	// TODO: implement WireCircle
+	// FIXME: implement WireCircle
 }
 void GuiContext::WireSphere(const float3& center, float radius, const float4& color) {
 	WireCircle(center, radius, quaternion(0,0,0,1), color);

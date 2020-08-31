@@ -173,7 +173,7 @@ private:
 					const auto& bufferView = model.bufferViews[accessor.bufferView];
 					mesh->SetAttribute(type, typeIdx, BufferView(buffers[bufferView.buffer], bufferView.byteOffset), (uint32_t)accessor.byteOffset, (uint32_t)bufferView.byteStride);
 
-					vertexCount = accessor.count;
+					vertexCount = (uint32_t)accessor.count;
 				}
 
 				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)indices.count, 0, nullptr));
