@@ -28,7 +28,18 @@ void PluginManager::LoadPlugins(const string& pluginFolder) {
 		// load plugin DLLs
 		if (p.path().extension().string() == PLUGIN_EXTENSION) {
 			PluginHandle handle = LoadPluginLibrary(p.path().string().c_str());
-			if (handle == NULL_PLUGIN) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to load plugin module\n", p.path().string().c_str()); continue; }
+			if (handle == NULL_PLUGIN) {
+				#ifdef WINDOWS
+				LPVOID lpMsgBuf;
+				FormatMessageA(
+					FORMAT_MESSAGE_ALLOCATE_BUFFER |  FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+					NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR) &lpMsgBuf, 0, NULL );
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to load plugin module: %s", p.path().string().c_str(), lpMsgBuf);
+				#else
+				fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to load plugin module\n", p.path().string().c_str());
+				#endif
+				continue;
+			}
 			EnginePlugin*(*createPlugin)(void) = (EnginePlugin*(*)(void))GetPluginFunction(handle, "CreatePlugin");
 			if (!createPlugin) {
 				fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Failed to find CreatePlugin() function\n", p.path().string().c_str());

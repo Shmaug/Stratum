@@ -230,11 +230,18 @@ Instance::Instance(int argc, char** argv) {
 	#endif
 
 	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
-	if (deviceIndex >= devices.size()) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "Device index out of bounds: %u\n", deviceIndex);
+	if (devices.empty()) {
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Error: No Vulkan devices found\n");
 		throw;
 	}
+	if (deviceIndex >= devices.size()) {
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to device 0\n", deviceIndex);
+		deviceIndex = 0;
+	}
 	vk::PhysicalDevice physicalDevice = devices[deviceIndex];
+	auto deviceProperties = physicalDevice.getProperties();
+
+	printf("Using physical device index %u %s\nVulkan %u.%u.%u\n", deviceIndex, deviceProperties.deviceName.data(), VK_VERSION_MAJOR(deviceProperties.apiVersion), VK_VERSION_MINOR(deviceProperties.apiVersion), VK_VERSION_PATCH(deviceProperties.apiVersion));
 
 	set<string> deviceExtensions = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,

@@ -40,10 +40,10 @@ public:
 	inline uint32_t SubpassCount() const { return (uint32_t)mSubpasses.size(); }
 
 	inline uint32_t AttachmentCount() const { return (uint32_t)mAttachments.size(); }
-	inline vk::AttachmentDescription2 Attachment(uint32_t index) const { return mAttachments[index]; }
+	inline vk::AttachmentDescription Attachment(uint32_t index) const { return mAttachments[index]; }
 	inline RenderTargetIdentifier AttachmentName(uint32_t index) const { return mAttachmentNames[index]; }
 	inline uint32_t AttachmentIndex(const RenderTargetIdentifier& name) const { return mAttachmentMap.at(name); }
-	inline vk::AttachmentDescription2 Attachment(const RenderTargetIdentifier& name) const { return mAttachments.at(mAttachmentMap.at(name)); }
+	inline vk::AttachmentDescription Attachment(const RenderTargetIdentifier& name) const { return mAttachments.at(mAttachmentMap.at(name)); }
 
 	inline ::Device* Device() const { return mDevice; }
 	inline operator vk::RenderPass() const { return mRenderPass; }
@@ -53,7 +53,7 @@ private:
  	friend class CommandBuffer;
 	::Device* mDevice;
 
-	std::vector<vk::AttachmentDescription2> mAttachments;
+	std::vector<vk::AttachmentDescription> mAttachments;
 	std::vector<RenderTargetIdentifier> mAttachmentNames;
 	std::unordered_map<RenderTargetIdentifier, uint32_t> mAttachmentMap;
 	std::vector<Subpass> mSubpasses;

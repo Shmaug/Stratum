@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.0)
 
 option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 set(STRATUM_HOME ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Directory of Stratum")
@@ -15,8 +15,7 @@ include("${STRATUM_HOME}/build/stratum.cmake")
 file(GLOB STRATUM_CPP Core/*.cpp Data/*.cpp Input/*.cpp Util/*.cpp Scene/*.cpp Scene/Renderers/*.cpp)
 add_executable(Stratum ${STRATUM_CPP} "build/stratum.rc" "main.cpp" "Util/Profiler.cpp" "Util/Tokenizer.cpp")
 
-set_target_properties(Stratum PROPERTIES 
-	MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+set_target_properties(Stratum PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/"
 	LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/"
 	ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/lib/"
@@ -30,6 +29,10 @@ set_target_properties(Stratum PROPERTIES
 target_compile_definitions(Stratum PUBLIC STRATUM_CORE)
 
 if(WIN32)
+	configure_file(
+		"${STRATUM_HOME}/ThirdParty/OpenXR-SDK/bin/openxr_loader.dll"
+		"${CMAKE_BINARY_DIR}/bin/openxr_loader.dll" COPYONLY)
+
 	target_link_libraries(Stratum
 		"${STRATUM_HOME}/ThirdParty/msdfgen/lib/msdfgen.lib"
 		"${STRATUM_HOME}/ThirdParty/msdfgen/lib/msdfgen-ext.lib"

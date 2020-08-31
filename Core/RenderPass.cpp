@@ -15,7 +15,7 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 		for (const auto& subpass : mSubpasses) {
 			for (auto kp : subpass.mAttachments) {
 				if (mAttachmentMap.count(kp.first)) continue;
-				vk::AttachmentDescription2 d = {};
+				vk::AttachmentDescription d = {};
 				d.format = kp.second.mFormat;
 				d.samples = kp.second.mSamples;
 				switch (kp.second.mType) {
@@ -48,21 +48,21 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 		}
 		
 		struct SubpassData {
-			vector<vk::AttachmentReference2> inputAttachments;
-			vector<vk::AttachmentReference2> colorAttachments;
-			vector<vk::AttachmentReference2> resolveAttachments;
+			vector<vk::AttachmentReference> inputAttachments;
+			vector<vk::AttachmentReference> colorAttachments;
+			vector<vk::AttachmentReference> resolveAttachments;
 			vector<uint32_t> preserveAttachments;
-			vk::AttachmentReference2 depthAttachment;
+			vk::AttachmentReference depthAttachment;
 		};
 		vector<SubpassData> subpassData(mSubpasses.size());
-		vector<vk::SubpassDescription2> subpasses(mSubpasses.size());
-		vector<vk::SubpassDependency2> dependencies;
+		vector<vk::SubpassDescription> subpasses(mSubpasses.size());
+		vector<vk::SubpassDependency> dependencies;
 
 		uint32_t index = 0;
 		for (const auto& subpass : mSubpasses) {
 			
 			for (auto kp : subpass.mAttachments) {
-				vk::SubpassDependency2 dep = {};
+				vk::SubpassDependency dep = {};
 				dep.dstSubpass = index;
 				dep.dependencyFlags = vk::DependencyFlagBits::eByRegion;
 
@@ -71,22 +71,22 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 					case AttachmentType::eColor:
 						dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-						subpassData[index].colorAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor));
+						subpassData[index].colorAttachments.push_back(vk::AttachmentReference(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal));
 						break;
 					case AttachmentType::eDepthStencil:
 						dep.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
-						subpassData[index].depthAttachment = vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageAspectFlagBits::eDepth);
+						subpassData[index].depthAttachment = vk::AttachmentReference(mAttachmentMap.at(kp.first), vk::ImageLayout::eDepthStencilAttachmentOptimal);
 						break;
 					case AttachmentType::eResolve:
 						dep.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-						subpassData[index].resolveAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal , vk::ImageAspectFlagBits::eColor));
+						subpassData[index].resolveAttachments.push_back(vk::AttachmentReference(mAttachmentMap.at(kp.first), vk::ImageLayout::eColorAttachmentOptimal ));
 						break;
 					case AttachmentType::eInput:
 						dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 						dep.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
-						subpassData[index].inputAttachments.push_back(vk::AttachmentReference2(mAttachmentMap.at(kp.first), vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor));
+						subpassData[index].inputAttachments.push_back(vk::AttachmentReference(mAttachmentMap.at(kp.first), vk::ImageLayout::eShaderReadOnlyOptimal));
 						break;
 					case AttachmentType::ePreserve:
 						dep.dstAccessMask = {};
@@ -143,14 +143,14 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 			index++;
 		}
 
-		vk::RenderPassCreateInfo2 renderPassInfo = {};
+		vk::RenderPassCreateInfo renderPassInfo = {};
 		renderPassInfo.attachmentCount = (uint32_t)mAttachments.size();
 		renderPassInfo.pAttachments = mAttachments.data();
 		renderPassInfo.subpassCount = (uint32_t)subpasses.size();
 		renderPassInfo.pSubpasses = subpasses.data();
 		renderPassInfo.dependencyCount = (uint32_t)dependencies.size();
 		renderPassInfo.pDependencies = dependencies.data();
-		mRenderPass = ((vk::Device)*mDevice).createRenderPass2(renderPassInfo);
+		mRenderPass = ((vk::Device)*mDevice).createRenderPass(renderPassInfo);
 		mDevice->SetObjectName(mRenderPass, mName + " RenderPass");
 }
 RenderPass::~RenderPass() {
