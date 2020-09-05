@@ -13,3 +13,24 @@
 [submodule "ThirdParty/repos/SPIRV-Cross"]
 	path = ThirdParty/repos/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross
+
+ #git submodule add https://github.com/assimp/assimp ThirdParty/src/assimp
+ #git submodule add https://github.com/Chlumsky/msdfgen ThirdParty/src/msdfgen
+ #git submodule add https://github.com/KhronosGroup/OpenXR-SDK ThirdParty/src/OpenXR-SDK
+ #git submodule add https://github.com/google/shaderc ThirdParty/src/shaderc
+ #git submodule add https://github.com/KhronosGroup/SPIRV-Cross ThirdParty/src/SPIRV-Cross
+[submodule "ThirdParty/src/assimp"]
+	path = ThirdParty/src/assimp
+	url = https://github.com/assimp/assimp
+[submodule "ThirdParty/src/msdfgen"]
+	path = ThirdParty/src/msdfgen
+	url = https://github.com/Chlumsky/msdfgen
+[submodule "ThirdParty/src/OpenXR-SDK"]
+	path = ThirdParty/src/OpenXR-SDK
+	url = https://github.com/KhronosGroup/OpenXR-SDK
+[submodule "ThirdParty/src/shaderc"]
+	path = ThirdParty/src/shaderc
+	url = https://github.com/google/shaderc
+[submodule "ThirdParty/src/SPIRV-Cross"]
+	path = ThirdParty/src/SPIRV-Cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross
