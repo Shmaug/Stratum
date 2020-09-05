@@ -1,0 +1,16 @@
+[submodule "ThirdParty/repos/assimp"]
+  path = ThirdParty/repos/assimp
+  url = https://github.com/assimp/assimp
+[submodule "ThirdParty/repos/msdfgen"]
+  path = ThirdParty/repos/msdfgen
+  url = https://github.com/Chlumsky/msdfgen
+[submodule "ThirdParty/repos/OpenXR-SDK"]
+  path = ThirdParty/repos/OpenXR-SDK
+  url = https://github.com/KhronosGroup/OpenXR-SDK
+[submodule "ThirdParty/repos/shaderc"]
+  path = ThirdParty/repos/shaderc
+  url = https://github.com/google/shaderc
+[submodule "ThirdParty/repos/SPIRV-Cross"]
+  path = ThirdParty/repos/SPIRV-Cross
+  url = https://github.com/KhronosGroup/SPIRV-Cross
+  
