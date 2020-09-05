@@ -6,7 +6,7 @@
 using namespace std;
 
 Camera::Camera(const string& name, const set<RenderTargetIdentifier>& renderTargets)
-	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView(PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(StereoMode::eNone) {
+	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView((float)M_PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(StereoMode::eNone) {
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
@@ -54,7 +54,7 @@ void Camera::WriteUniformBuffer(void* bufferData) {
 	buf.Position[0] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1)).xyz, mNear);
 	buf.Position[1] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1)).xyz, mFar);
 }
-void Camera::SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye) {
+void Camera::SetViewportScissor(stm_ptr<CommandBuffer> commandBuffer, StereoEye eye) {
 	vk::Viewport vp = { 0.f, 0.f, (float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height, 0.f, 1.f };
 	if (mStereoMode == StereoMode::eHorizontal) {
 		vp.width /= 2;
@@ -141,7 +141,7 @@ bool Camera::UpdateTransform() {
 	return true;
 }
 
-void Camera::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {
+void Camera::OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {
 	if (camera == this) return;
 	
 	gui->WireSphere(WorldPosition(), mNear, 1.f);

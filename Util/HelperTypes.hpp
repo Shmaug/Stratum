@@ -1,62 +1,73 @@
 #pragma once
 
 #include <Util/Geometry.hpp>
-
 #include <Shaders/include/shadercompat.h>
 
 // TODO: consider using numbers here instead?
 typedef std::string RenderTargetIdentifier;
 typedef std::string ShaderPassIdentifier;
 
-template<typename T>
-class variant_ptr {
+template<typename T>   
+class stm_ptr {
 private:
-	T* ptr;
-	std::shared_ptr<T> sptr;
+	T* mPtr = nullptr;
+	uint16_t* mCounter = nullptr;
 
 public:
-	inline variant_ptr() : ptr(nullptr) {};
-	inline variant_ptr(T* ptr) : ptr(ptr) {};
-	inline variant_ptr(const std::shared_ptr<T>& ptr) : ptr(ptr.get()), sptr(ptr) {};
+	inline stm_ptr() {};
+	inline stm_ptr(T* ptr) : mPtr(ptr) { if (mPtr) mCounter = new uint16_t(1); }
+	inline stm_ptr(const stm_ptr& p) : mPtr(p.mPtr), mCounter(p.mCounter) { if (mCounter) (*mCounter)++; }
+	inline stm_ptr(stm_ptr&& p) : mPtr(p.mPtr), mCounter(p.mCounter) { p.mPtr = nullptr; p.mCounter = nullptr; }
+	inline ~stm_ptr() { reset(); }
 
-	inline T* get_shared() const { return sptr; }
-	inline T* get() const { return ptr; }
-	inline void reset() { ptr = nullptr; sptr.reset(); }
-
-	inline T* operator =(T* rhs) {
-    ptr = rhs;
-    sptr = nullptr;
-		return ptr;
+	template<typename Tx>
+	inline friend stm_ptr<Tx> stm_ptr_cast(const stm_ptr& src) {
+		if (dynamic_cast<Tx*>(src.mPtr)) {
+			stm_ptr cpy(src);
+			return *(stm_ptr<Tx>*)(&cpy);
+		}
+		return nullptr;
 	}
-  inline T* operator =(const std::shared_ptr<T>& rhs) {
-    ptr = rhs.get();
-    sptr = rhs;
-		return ptr;
-	}
-	inline T* operator =(const variant_ptr<T>& rhs) {
-    ptr = rhs.ptr;
-    sptr = rhs.sptr;
-		return ptr;
-	}
-
-	inline bool operator ==(const T* rhs) const { return ptr == rhs; }
-	inline bool operator ==(const std::shared_ptr<T>& rhs) const { return ptr == rhs.get(); }
-	inline bool operator ==(const variant_ptr<T>& rhs) const { return ptr == rhs.ptr; }
 	
-	inline T* operator ->() const { return ptr; }
-};
+	inline T* get() const { return mPtr; }
+	
+	inline void reset() {
+		if (mCounter == nullptr) return;
+		(*mCounter)--;
+		if (*mCounter == 0) {
+			delete mCounter;
+			delete mPtr;
+		}
+		mCounter = nullptr;
+		mPtr = nullptr;
+	}
 
-struct BufferView {
-	variant_ptr<Buffer> mBuffer = nullptr;
-	vk::DeviceSize mByteOffset = 0;
+	inline T& operator*() const { return *mPtr; }
+	inline T* operator->() const { return mPtr; }
 
-	BufferView() = default;
-	inline BufferView(variant_ptr<Buffer> buffer, vk::DeviceSize offset = 0) : mBuffer(buffer), mByteOffset(offset) {};
+	inline operator T*() const { return mPtr; }
+	inline operator bool() const { return mPtr; }
 
-	inline bool operator==(const BufferView& rhs) const {
-		return mBuffer == rhs.mBuffer && mByteOffset == rhs.mByteOffset;
+	inline bool operator ==(const stm_ptr& rhs) const { return mPtr == rhs.mPtr; }
+	inline bool operator ==(const T* rhs) const { return mPtr == rhs; }
+
+	inline stm_ptr& operator =(T* rhs) {
+		if (rhs == mPtr) return *this;
+		reset();
+		mPtr = rhs;
+		if (mPtr) mCounter = new uint16_t(1);
+		return *this;
+	}
+	inline stm_ptr& operator =(const stm_ptr& rhs) {
+		if (rhs.get() == mPtr) return *this;
+		reset();
+		mPtr = rhs.mPtr;
+		mCounter = rhs.mCounter;
+		if (mCounter) (*mCounter)++;
+		return *this;
 	}
 };
+
 
 struct fRect2D {
 	union {
@@ -93,16 +104,6 @@ struct fRect2D {
 	}
 };
 
-// Represents a usable region of device memory
-struct DeviceMemoryAllocation {
-	vk::DeviceMemory mDeviceMemory;
-	vk::DeviceSize mOffset;
-	vk::DeviceSize mSize;
-	uint32_t mMemoryType;
-	void* mMapped;
-	std::string mTag;
-};
-
 // Represents a pipeline with various parameters, within a shader
 struct PipelineInstance {
 	public:
@@ -113,6 +114,7 @@ struct PipelineInstance {
 	const vk::PolygonMode mPolygonMode;
 	const vk::PipelineVertexInputStateCreateInfo mVertexInput;
 
+	PipelineInstance() = delete;
 	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, vk::PrimitiveTopology topology, vk::CullModeFlags cullMode, vk::PolygonMode polyMode, const vk::PipelineVertexInputStateCreateInfo& vertexInput)
 		: mRenderPassHash(renderPassHash), mSubpassIndex(subpassIndex), mTopology(topology), mCullMode(cullMode), mPolygonMode(polyMode), mVertexInput(vertexInput) {
 			// Compute hash once upon creation
@@ -142,15 +144,6 @@ private:
 	size_t mHash;
 };
 
-struct VertexAttribute {
-	BufferView mBufferView;
-	VertexAttributeType mType;
-	uint32_t mTypeIndex;
-	uint32_t mElementOffset;
-	uint32_t mElementStride;
-	vk::VertexInputRate mInputRate;
-};
-
 namespace std {
 	template<typename BitType>
 	struct hash<vk::Flags<BitType>> {
@@ -161,13 +154,10 @@ namespace std {
 		}
 	};
 
-	template<>
-	struct hash<BufferView> {
-		inline std::size_t operator()(const BufferView& v) const {
-			size_t h = 0;
-			hash_combine(h, *reinterpret_cast<const size_t*>(&v.mBuffer));
-			hash_combine(h, v.mByteOffset);
-			return h;
+	template<typename T>
+	struct hash<stm_ptr<T>> {
+		inline std::size_t operator()(const stm_ptr<T>& v) const { 
+			return (std::size_t)v.get();
 		}
 	};
 
@@ -184,25 +174,5 @@ namespace std {
 	template<>
 	struct hash<PipelineInstance> {
 		inline std::size_t operator()(const PipelineInstance& p) const { return p.mHash; }
-	};
-
-	template<>
-	struct hash<VertexAttribute> {
-		inline std::size_t operator()(const VertexAttribute& v) const {
-			size_t h = 0;
-			hash_combine(h, v.mBufferView);
-			hash_combine(h, v.mType);
-			hash_combine(h, v.mTypeIndex);
-			hash_combine(h, v.mElementOffset);
-			hash_combine(h, v.mElementStride);
-			return h;
-		}
-	};
-
-	template<typename T>
-	struct hash<variant_ptr<T>> {
-		inline std::size_t operator()(const variant_ptr<T>& v) const {
-			return hash<T*>(v.get());
-		}
 	};
 }

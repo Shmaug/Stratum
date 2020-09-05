@@ -11,32 +11,35 @@ public:
 	STRATUM_API MeshRenderer(const std::string& name);
 	STRATUM_API ~MeshRenderer();
 
-	STRATUM_API virtual void Mesh(variant_ptr<::Mesh> m);
-	inline virtual ::Mesh* Mesh() const { return mMesh.get(); }
+	STRATUM_API virtual void Mesh(stm_ptr<::Mesh> m);
+	inline virtual ::Mesh* Mesh() const { return mMesh; }
 
-	inline virtual void Material(variant_ptr<::Material> m) { mMaterial = m; }
-	inline virtual ::Material* Material() { return mMaterial.get(); }
+	inline virtual void Material(stm_ptr<::Material> m) { mMaterial = m; }
+	inline virtual ::Material* Material() { return mMaterial; }
 
 	// Renderer functions
 
-	inline virtual bool BypassCulling() override { return mBypassCulling; }
-	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
+	inline virtual std::optional<AABB> Bounds() override { UpdateTransform(); return mAABB; }
 	STRATUM_API virtual bool Intersect(const Ray& ray, float* t, bool any) override;
 
-	inline virtual bool Visible(const std::string& pass) override { return mMesh.get() && mMaterial.get() && mMaterial->GetPassPipeline(pass) && Renderer::Visible(pass); }
-	inline virtual uint32_t RenderQueue(const std::string& pass) override { return mMaterial.get() ? mMaterial->GetPassPipeline(pass)->mShaderVariant->mRenderQueue : Renderer::RenderQueue(pass); }
+	inline virtual bool Visible(const std::string& pass) override { return mMesh && mMaterial && mMaterial->GetPassPipeline(pass) && Renderer::Visible(pass); }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override {
+		if (mMaterial)
+			if (GraphicsPipeline* p = mMaterial->GetPassPipeline(pass))
+				return p->mShaderVariant->mRenderQueue;
+		return Renderer::RenderQueue(pass);
+	}
 
 private:
-	variant_ptr<::Mesh> mMesh;
-	variant_ptr<::Material> mMaterial;
-	bool mBypassCulling;
-	AABB mAABB;
+	stm_ptr<::Mesh> mMesh;
+	stm_ptr<::Material> mMaterial;
+	std::optional<AABB> mAABB;
 
 protected:
-	STRATUM_API virtual void OnLateUpdate(CommandBuffer* commandBuffer) override;
-	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
-	STRATUM_API virtual void OnDrawInstanced(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera, Buffer* instanceBuffer, uint32_t instanceCount) override;
-	STRATUM_API virtual bool TryCombineInstances(CommandBuffer* commandBuffer, Renderer* renderer, Buffer*& instanceBuffer, uint32_t& instanceCount) override;
+	STRATUM_API virtual void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) override;
+	STRATUM_API virtual void OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) override;
+	STRATUM_API virtual void OnDrawInstanced(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera, stm_ptr<Buffer> instanceBuffer, uint32_t instanceCount) override;
+	STRATUM_API virtual bool TryCombineInstances(stm_ptr<CommandBuffer> commandBuffer, Renderer* renderer, stm_ptr<Buffer>& instanceBuffer, uint32_t& instanceCount) override;
 
 	STRATUM_API bool UpdateTransform() override;
 };

@@ -47,7 +47,7 @@ public:
 	inline void CascadeCount(uint32_t c) { mCascadeCount = c; }
 	inline uint32_t CascadeCount() { return mCascadeCount; }
 	
-	inline AABB Bounds() override {
+	inline std::optional<AABB> Bounds() override {
 		float3 c, e;
 		switch (mType) {
 		case LIGHT_TYPE_POINT:

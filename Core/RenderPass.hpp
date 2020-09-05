@@ -86,7 +86,7 @@ namespace std {
 		inline size_t operator()(const Subpass& p) {
 			size_t h = 0;
 			hash_combine(h, p.mShaderPass);
-			for (const auto& kp : p.mAttachments) { hash_combine(h, kp.first); hash_combine(h, kp.second); }
+			for (const auto&[name,attachment] : p.mAttachments) { hash_combine(h, name); hash_combine(h, attachment); }
 			return h;
 		}
 	};

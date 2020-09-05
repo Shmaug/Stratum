@@ -16,7 +16,7 @@ public:
     STRATUM_API std::set<std::string> DeviceExtensionsRequired(vk::PhysicalDevice device);
 
     STRATUM_API void OnFrameStart();
-    STRATUM_API void PostRender(CommandBuffer* commandBuffer);
+    STRATUM_API void PostRender(stm_ptr<CommandBuffer> commandBuffer);
     STRATUM_API void OnFrameEnd();
 
 private:

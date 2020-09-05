@@ -85,7 +85,7 @@ void Profiler::EndFrame() {
 
 void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 	Device* device = gui->Device();
-	Font* font = device->AssetManager()->LoadFont("Assets/Fonts/OpenSans/OpenSans-Regular.ttf");
+	Font* font = device->AssetManager()->Load<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", "OpenSans-Regular");
 	MouseKeyboardInput* input = gui->InputManager()->GetFirst<MouseKeyboardInput>();
 	GuiContext::LayoutTheme theme = gui->mLayoutTheme;
 
@@ -173,7 +173,7 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 			points[i].x = (float)i / ((float)pointCount - 1.f);
 			points[i].y = (points[i].y - graphWindowMin) / (graphWindowMax - graphWindowMin);
 		}
-		gui->PolyLine(points, pointCount, graphLineColor, 1.25f, graphRect.mOffset, graphRect.mSize, clipRect);
+		gui->PolyLine(points, pointCount, graphLineColor, 1.25f, float3(graphRect.mOffset, 0), float3(graphRect.mSize, 1), clipRect);
 		delete[] points;
 	}
 

@@ -1,5 +1,8 @@
 #pragma once
 
+#define _USE_MATH_DEFINES
+#include <cmath>
+
 #ifdef WINDOWS
 
 #ifdef _DEBUG
@@ -28,6 +31,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <variant>
+#include <optional>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -69,8 +73,8 @@ namespace fs = std::filesystem;
 #define PLUGIN_EXPORT
 #endif
 
-#define safe_delete(x) if (x != nullptr) { delete x; x = nullptr; }
-#define safe_delete_array(x) if (x != nullptr) { delete[] x; x = nullptr; }
+#define safe_delete(x) {if (x != nullptr) { delete x; x = nullptr; } }
+#define safe_delete_array(x) { if (x != nullptr) { delete[] x; x = nullptr; } }
 
 template <typename T>
 inline T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
@@ -133,7 +137,7 @@ template<typename... Args>
 inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { fprintf_color(color, stdout, format, std::forward<Args>(a)...); }
 
 
-inline bool ReadFile(const std::string& filename, std::string& dest) {
+inline bool ReadFile(const fs::path& filename, std::string& dest) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
 	if (!file.is_open()) return false;
 	size_t fileSize = (size_t)file.tellg();
@@ -143,7 +147,7 @@ inline bool ReadFile(const std::string& filename, std::string& dest) {
 	file.close();
 	return true;
 }
-inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
+inline bool ReadFile(const fs::path& filename, std::vector<uint8_t>& dest) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
 	if (!file.is_open()) return false;
 	size_t fileSize = (size_t)file.tellg();
@@ -154,7 +158,7 @@ inline bool ReadFile(const std::string& filename, std::vector<uint8_t>& dest) {
 	file.close();
 	return true;
 }
-inline char* ReadFile(const std::string& filename, size_t& fileSize) {
+inline char* ReadFile(const fs::path& filename, size_t& fileSize) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
 	if (!file.is_open()) return nullptr;
 	fileSize = (size_t)file.tellg();

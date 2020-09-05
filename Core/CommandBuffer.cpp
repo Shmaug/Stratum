@@ -1,8 +1,8 @@
 #include <Core/CommandBuffer.hpp>
 #include <Core/Buffer.hpp>
 #include <Core/Framebuffer.hpp>
-#include <Core/Pipeline.hpp>
 #include <Core/RenderPass.hpp>
+#include <Data/Pipeline.hpp>
 #include <Scene/Scene.hpp>
 #include <Util/Profiler.hpp>
 
@@ -58,8 +58,8 @@ void CommandBuffer::Clear() {
 	for (uint32_t i = 0; i < mBuffers.size(); i++) mDevice->PoolResource(mBuffers[i]);
 	for (uint32_t i = 0; i < mDescriptorSets.size(); i++) mDevice->PoolResource(mDescriptorSets[i]);
 	for (uint32_t i = 0; i < mTextures.size(); i++) mDevice->PoolResource(mTextures[i]);
-	for (uint32_t i = 0; i < mFramebuffers.size(); i++) safe_delete(mFramebuffers[i]);
-	for (uint32_t i = 0; i < mRenderPasses.size(); i++) safe_delete(mRenderPasses[i]);
+	//for (uint32_t i = 0; i < mFramebuffers.size(); i++) mDevice->PoolResource(mFramebuffers[i]);
+	//for (uint32_t i = 0; i < mRenderPasses.size(); i++) mDevice->PoolResource(mRenderPasses[i]);
 	mBuffers.clear();
 	mDescriptorSets.clear();
 	mTextures.clear();
@@ -70,23 +70,17 @@ void CommandBuffer::Clear() {
 	mWaitSemaphores.clear();
 	mTriangleCount = 0;
 
-	mBoundComputePipeline = nullptr;
-	mComputePipeline = nullptr;
-	mComputePipelineLayout = nullptr;
-
 	mCurrentFramebuffer = nullptr;
 	mCurrentRenderPass = nullptr;
 	mCurrentSubpassIndex = -1;
 	mCurrentShaderPass = "";
 	mBoundMaterial = nullptr;
-	mBoundGraphicsPipeline = nullptr;
-	mGraphicsPipeline = nullptr;
-	mGraphicsPipelineLayout = nullptr;
+	mBoundVariant = nullptr;
+	mBoundPipeline = nullptr;
+	mBoundPipelineLayout = nullptr;
+	mBoundDescriptorSets.clear();
 
-	mBoundGraphicsDescriptorSets.clear();
-	mBoundComputeDescriptorSets.clear();
-
-	mBoundIndexBuffer.mBuffer = nullptr;
+	mBoundIndexBuffer = {};
 	mBoundVertexBuffers.clear();
 }
 void CommandBuffer::Reset(const string& name) {
@@ -113,25 +107,25 @@ void CommandBuffer::CheckDone() {
 	}
 }
 
-Buffer* CommandBuffer::GetBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	Buffer* b = mDevice->GetPooledBuffer(name, size, usage, memoryProperties);
+stm_ptr<Buffer> CommandBuffer::GetBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
+	stm_ptr<Buffer> b = mDevice->GetPooledBuffer(name, size, usage, memoryProperties);
 	mBuffers.push_back(b);
 	return b;
 }
-DescriptorSet* CommandBuffer::GetDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout) {
-	DescriptorSet* ds = mDevice->GetPooledDescriptorSet(name, layout);
+stm_ptr<DescriptorSet> CommandBuffer::GetDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout) {
+	stm_ptr<DescriptorSet> ds = mDevice->GetPooledDescriptorSet(name, layout);
 	mDescriptorSets.push_back(ds);
 	return ds;
 }
-Texture* CommandBuffer::GetTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	Texture* tex = mDevice->GetPooledTexture(name, extent, format, mipLevels, sampleCount, usage, memoryProperties);
+stm_ptr<Texture> CommandBuffer::GetTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
+	stm_ptr<Texture> tex = mDevice->GetPooledTexture(name, extent, format, mipLevels, sampleCount, usage, memoryProperties);
 	mTextures.push_back(tex);
 	return tex;
 }
 
-void CommandBuffer::TrackResource(Buffer* resource) { mBuffers.push_back(resource); }
-void CommandBuffer::TrackResource(Texture* resource) { mTextures.push_back(resource); }
-void CommandBuffer::TrackResource(DescriptorSet* resource) { mDescriptorSets.push_back(resource); }
+void CommandBuffer::TrackResource(stm_ptr<Buffer> resource) { mBuffers.push_back(resource); }
+void CommandBuffer::TrackResource(stm_ptr<Texture> resource) { mTextures.push_back(resource); }
+void CommandBuffer::TrackResource(stm_ptr<DescriptorSet> resource) { mDescriptorSets.push_back(resource); }
 void CommandBuffer::TrackResource(Framebuffer* resource) { mFramebuffers.push_back(resource); }
 void CommandBuffer::TrackResource(RenderPass* resource) { mRenderPasses.push_back(resource); }
 
@@ -212,18 +206,17 @@ void CommandBuffer::TransitionBarrier(vk::Image image, const vk::ImageSubresourc
 	Barrier(srcStage, dstStage, barrier);
 }
 
-void CommandBuffer::BindDescriptorSet(DescriptorSet* descriptorSet, uint32_t set) {
+void CommandBuffer::BindDescriptorSet(stm_ptr<DescriptorSet> descriptorSet, uint32_t set) {
+	if (!mBoundPipeline) {
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "Error: Cannot bind a descriptor set, without first binding a pipeline\n");
+		throw;
+	}
+	if (mBoundDescriptorSets.size() <= set) mBoundDescriptorSets.resize(set + 1);
+	else if (mBoundDescriptorSets[set] == descriptorSet) return;
 	descriptorSet->FlushWrites();
 	if (!mCurrentRenderPass) descriptorSet->TransitionTextures(this);
-	if (mGraphicsPipeline) {
-		if (mBoundGraphicsDescriptorSets.size() <= set) mBoundGraphicsDescriptorSets.resize(set + 1);
-		mBoundGraphicsDescriptorSets[set] = descriptorSet;
-		mCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mGraphicsPipelineLayout, set, { *descriptorSet }, {});
-	} else if (mComputePipeline) {
-		if (mBoundComputeDescriptorSets.size() <= set) mBoundComputeDescriptorSets.resize(set + 1);
-		mBoundComputeDescriptorSets[set] = descriptorSet;
-		mCommandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, mComputePipelineLayout, set, { *descriptorSet }, {});
-	}
+	mBoundDescriptorSets[set] = descriptorSet;
+	mCommandBuffer.bindDescriptorSets(mCurrentBindPoint, mBoundPipelineLayout, set, { *descriptorSet }, {});
 }
 
 void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebuffer, vk::SubpassContents contents) {
@@ -234,11 +227,11 @@ void CommandBuffer::BeginRenderPass(RenderPass* renderPass, Framebuffer* framebu
 
 	// Assign clear values specified by the render pass
 	vector<vk::ClearValue> clearValues(renderPass->mAttachments.size());
-	for (const auto& kp : renderPass->mSubpasses[0].mAttachments)
-		if (kp.second.mType == AttachmentType::eDepthStencil)
-			clearValues[renderPass->mAttachmentMap.at(kp.first)].depthStencil = { 1.0f, 0 };
+	for (const auto& [name, attachment] : renderPass->mSubpasses[0].mAttachments)
+		if (attachment.mType == AttachmentType::eDepthStencil)
+			clearValues[renderPass->mAttachmentMap.at(name)].depthStencil = { 1.0f, 0 };
 		else
-			clearValues[renderPass->mAttachmentMap.at(kp.first)].color.setFloat32({ 0.f, 0.f, 0.f, 0.f });
+			clearValues[renderPass->mAttachmentMap.at(name)].color.setFloat32({ 0.f, 0.f, 0.f, 0.f });
 
 	vk::RenderPassBeginInfo info = {};
 	info.renderPass = *renderPass;
@@ -263,7 +256,7 @@ void CommandBuffer::EndRenderPass() {
 
 	// Update tracked image layouts
 	for (uint32_t i = 0; i < mCurrentRenderPass->AttachmentCount(); i++){
-		Texture* attachment = mCurrentFramebuffer->Attachment(mCurrentRenderPass->AttachmentName(i));
+		stm_ptr<Texture> attachment = mCurrentFramebuffer->Attachment(mCurrentRenderPass->AttachmentName(i));
 		attachment->mLastKnownLayout = mCurrentRenderPass->Attachment(i).finalLayout;
 		attachment->mLastKnownStageFlags = GuessStage(mCurrentRenderPass->Attachment(i).finalLayout);
 		attachment->mLastKnownAccessFlags = GuessAccessMask(mCurrentRenderPass->Attachment(i).finalLayout);
@@ -283,49 +276,36 @@ void CommandBuffer::ClearAttachments(const vector<vk::ClearAttachment>& values) 
 }
 
 bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint32_t dataSize) {
-	if (mBoundGraphicsPipeline) {
-		if (mBoundGraphicsPipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
-		vk::PushConstantRange range = mBoundGraphicsPipeline->mShaderVariant->mPushConstants.at(name);
-		mCommandBuffer.pushConstants(mGraphicsPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
-		return true;
-	} else if (mBoundComputePipeline) {
-		if (mBoundComputePipeline->mShaderVariant->mPushConstants.count(name) == 0) return false;
-		vk::PushConstantRange range = mBoundComputePipeline->mShaderVariant->mPushConstants.at(name);
-		mCommandBuffer.pushConstants(mComputePipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
-		return true;
-	}
-	return false;
+	if (!mBoundVariant || mBoundVariant->mShaderVariant->mPushConstants.count(name) == 0) return false;
+	vk::PushConstantRange range = mBoundVariant->mShaderVariant->mPushConstants.at(name);
+	mCommandBuffer.pushConstants(mBoundPipelineLayout, range.stageFlags, range.offset, min(dataSize, range.size), data);
+	return true;
 }
 
 void CommandBuffer::BindPipeline(ComputePipeline* pipeline) {
-	if (pipeline->mPipeline == mComputePipeline) return;
+	if (pipeline->mPipeline == mBoundPipeline) return;
 	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->mPipeline);
-	mComputePipeline = pipeline->mPipeline;
-	mComputePipelineLayout = pipeline->mPipelineLayout;
-	mBoundComputePipeline = pipeline;
-	mBoundComputeDescriptorSets.clear();
-
-	mGraphicsPipeline = nullptr;
-	mGraphicsPipelineLayout = nullptr;
-	mBoundGraphicsPipeline = nullptr;
+	mBoundVariant = pipeline;
+	mBoundPipeline = pipeline->mPipeline;
+	mBoundPipelineLayout = pipeline->mPipelineLayout;
+	mBoundDescriptorSets.clear();
 	mBoundMaterial = nullptr;
-	mBoundGraphicsDescriptorSets.clear();
-
+	mCurrentBindPoint = vk::PipelineBindPoint::eCompute;
+	mBoundVertexBuffers.clear();
+	mBoundIndexBuffer = {};
 }
 void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
 	vk::Pipeline vkpipeline = pipeline->GetPipeline(this, topology, vertexInput, cullModeOverride, polyModeOverride);
-	if (vkpipeline == mGraphicsPipeline) return;
+	if (vkpipeline == mBoundPipeline) return;
 	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vkpipeline);
-	mComputePipeline = nullptr;
-	mComputePipelineLayout = nullptr;
-	mBoundComputePipeline = nullptr;
-	mBoundComputeDescriptorSets.clear();
-
-	mGraphicsPipeline = vkpipeline;
-	mGraphicsPipelineLayout = pipeline->mPipelineLayout;
-	mBoundGraphicsPipeline = pipeline;
+	mBoundVariant = pipeline;
+	mBoundPipeline = vkpipeline;
+	mBoundPipelineLayout = pipeline->mPipelineLayout;
+	mBoundDescriptorSets.clear();
 	mBoundMaterial = nullptr;
-	mBoundGraphicsDescriptorSets.clear();
+	mCurrentBindPoint = vk::PipelineBindPoint::eGraphics;
+	mBoundVertexBuffers.clear();
+	mBoundIndexBuffer = {};
 }
 GraphicsPipeline* CommandBuffer::BindPipeline(Material* material, Mesh* mesh) {
 	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass());
@@ -342,12 +322,12 @@ GraphicsPipeline* CommandBuffer::BindPipeline(Material* material, Mesh* mesh) {
 
 void CommandBuffer::BindVertexBuffer(const BufferView& view, uint32_t index) {
 	if (mBoundVertexBuffers[index] == view) return;
-	mCommandBuffer.bindVertexBuffers(index, { *view.mBuffer.get() }, { view.mByteOffset });
+	mCommandBuffer.bindVertexBuffers(index, { (vk::Buffer)*view.mBuffer }, { view.mByteOffset });
 	mBoundVertexBuffers[index] = view;
 }
 void CommandBuffer::BindIndexBuffer(const BufferView& view, vk::IndexType indexType) {
 	if (mBoundIndexBuffer == view) return;
-	mCommandBuffer.bindIndexBuffer(*view.mBuffer.get(), view.mByteOffset, indexType);
+	mCommandBuffer.bindIndexBuffer( (vk::Buffer)*view.mBuffer, view.mByteOffset, indexType);
 	mBoundIndexBuffer = view;
 }
 
@@ -355,9 +335,6 @@ void CommandBuffer::Dispatch(const uint3& dim) {
 	mCommandBuffer.dispatch(dim.x, dim.y, dim.z);
 }
 void CommandBuffer::DispatchAligned(const uint3& dim) {
-	if (!mBoundComputePipeline) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "Error: Calling DispatchAligned without any compute pipeline bound\n");
-		throw;
-	}
-	Dispatch((dim + mBoundComputePipeline->mShaderVariant->mWorkgroupSize - 1) / mBoundComputePipeline->mShaderVariant->mWorkgroupSize);
+	ComputePipeline* p = (ComputePipeline*)mBoundVariant;
+	Dispatch((dim + p->mShaderVariant->mWorkgroupSize - 1) / p->mShaderVariant->mWorkgroupSize);
 }

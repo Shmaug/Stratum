@@ -27,9 +27,10 @@ public:
 	// Poll events, advance swapchain. Returns false if the program should exit
 	STRATUM_API bool BeginFrame();
 	// Present swapchain
-	STRATUM_API void EndFrame(const std::vector<vk::Semaphore>& waitSemaphores);
+	STRATUM_API void EndFrame(const std::set<vk::Semaphore>& waitSemaphores);
 
-	inline const std::vector<std::string>& CommandLineArguments() const { return mCmdArguments; }
+	inline const std::vector<std::string>::const_iterator ArgsBegin() const { return mCmdArguments.begin(); }
+	inline const std::vector<std::string>::const_iterator ArgsEnd() const { return mCmdArguments.end(); }
 	
 	inline ::Device* Device() const { return mDevice; }
 	inline ::Window* Window() const { return mWindow; }

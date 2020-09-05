@@ -44,60 +44,58 @@ private:
 	float mZoom = 0;
 	bool mShowPerformance = false;
 
-	fs::path mDataPath = "";
 	std::set<fs::path> mStackFolders;
 
 	void ScanFolders() {
-		for (uint32_t i = 0; i < mScene->Instance()->CommandLineArguments().size(); i++)
-			if (mScene->Instance()->CommandLineArguments()[i] == "--datapath") {
-				i++;
-				if (i < mScene->Instance()->CommandLineArguments().size())
-					mDataPath = mScene->Instance()->CommandLineArguments()[i];
-			}
-		if (!fs::exists(mDataPath)) mDataPath = "/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "/data";
-		if (!fs::exists(mDataPath)) mDataPath = "~/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "~/data";
-		if (!fs::exists(mDataPath)) mDataPath = "C:/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "D:/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "E:/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "F:/Data";
-		if (!fs::exists(mDataPath)) mDataPath = "G:/Data";
-		if (!fs::exists(mDataPath)) {
-			fprintf_color(ConsoleColorBits::eRed, stderr, "DicomVis: Could not locate datapath. Please specify with --datapath <path>\n");
+		fs::path dataPath;
+		vector<fs::path> defaultLocations { "/Data", "/data", "~/Data", "~/data", "C:/Data", "D:/Data", "E:/Data", "F:/Data" "G:/Data", };
+		for (auto it = mScene->Instance()->ArgsBegin(); it != mScene->Instance()->ArgsEnd(); it++)
+			if (*it == "--datapath" && ++it != mScene->Instance()->ArgsEnd())
+					dataPath = *it;
+		auto it = defaultLocations.begin();
+		while (!fs::exists(dataPath) && it != defaultLocations.end()) dataPath = *it++;
+		if (!fs::exists(dataPath)) {
+			fprintf_color(ConsoleColorBits::eRed, stderr, "DicomVis: Could not locate image data path. Please specify with --datapath <path>\n");
 			return;
 		}
 
-		for (const auto& p : fs::recursive_directory_iterator(mDataPath)) {
+		for (const auto& p : fs::recursive_directory_iterator(dataPath)) {
 			if (!p.is_directory() || p.path().stem() == "_mask" || ImageLoader::FolderStackType(p.path()) == ImageStackType::eNone) continue;
 			mStackFolders.insert(p.path());
 		}
 	}
 	void LoadScene() {
+		fs::path filename;
+		for (auto it = mScene->Instance()->ArgsBegin(); it != mScene->Instance()->ArgsEnd(); it++)
+			if (*it == "--environment" && ++it != mScene->Instance()->ArgsEnd())
+				filename = *it;
+
 		tinygltf::Model model;
 		tinygltf::TinyGLTF loader;
 		std::string err;
 		std::string warn;
-		if (!loader.LoadASCIIFromFile(&model, &err, &warn, mDataPath.string() + "/Room/Room.gltf")) {
-			fprintf_color(ConsoleColorBits::eRed, stderr, "%s/Room/Room.gltf: %s\n", mDataPath.string().c_str(), err.c_str());
+		if (
+			(filename.extension() == ".glb" && !loader.LoadBinaryFromFile(&model, &err, &warn, filename.string())) ||
+			(filename.extension() == ".gltf" && !loader.LoadASCIIFromFile(&model, &err, &warn, filename.string())) ) {
+			fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", filename.string().c_str(), err.c_str());
 			return;
 		}
-		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s/Room/Room.gltf: %s\n", mDataPath.string().c_str(), warn.c_str());
+		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 		
 		Device* device = mScene->Instance()->Device();
-		vector<shared_ptr<Buffer>> buffers;
-		vector<shared_ptr<Texture>> images;
-		vector<vector<shared_ptr<Mesh>>> meshes;
-		vector<shared_ptr<Material>> materials;
+		vector<stm_ptr<Buffer>> buffers;
+		vector<stm_ptr<Texture>> images;
+		vector<vector<stm_ptr<Mesh>>> meshes;
+		vector<stm_ptr<Material>> materials;
 
 		for (const auto& b : model.buffers)
-			buffers.push_back(make_shared<Buffer>(b.name, mScene->Instance()->Device(), b.data.data(), b.data.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer));
+			buffers.push_back(new Buffer(b.name, mScene->Instance()->Device(), b.data.data(), b.data.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer));
 
 		for (const auto& i : model.images)
-			images.push_back(make_shared<Texture>(i.name, device, (void*)i.image.data(), i.image.size(), vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), 1));
+			images.push_back(new Texture(i.name, device, (void*)i.image.data(), i.image.size(), vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), 1));
 
 		for (const auto& m : model.materials) {
-			shared_ptr<Material> mat = make_shared<Material>(m.name, mScene->Instance()->Device()->AssetManager()->LoadPipeline("Shaders/pbr.stmb"));
+			stm_ptr<Material> mat = new Material(m.name, mScene->Instance()->Device()->AssetManager()->Load<Pipeline>("Shaders/pbr.stmb", "pbr"));
 			materials.push_back(mat);
 		}
 
@@ -127,7 +125,7 @@ private:
 					case TINYGLTF_MODE_TRIANGLE_FAN: topo = vk::PrimitiveTopology::eTriangleFan; break;
 				}
 				
-				shared_ptr<Mesh> mesh = make_shared<Mesh>(m.name, topo);
+				stm_ptr<Mesh> mesh(new Mesh(m.name, topo));
 				const auto& indices = model.accessors[prim.indices];
 				const auto& indexBufferView = model.bufferViews[indices.bufferView];
 				mesh->SetIndexBuffer(BufferView(buffers[indexBufferView.buffer], indexBufferView.byteOffset), indices.ByteStride(indexBufferView) == sizeof(uint16_t) ? vk::IndexType::eUint16 : vk::IndexType::eUint32);
@@ -137,7 +135,8 @@ private:
 					string typeName = attrib.first;
 					const auto& accessor = model.accessors[attrib.second];
 
-					std::transform(typeName.begin(), typeName.end(), typeName.begin(), [](unsigned char c) { return std::tolower(c); });
+					// parse typename
+					transform(typeName.begin(), typeName.end(), typeName.begin(), [](char c) { return std::tolower(c); });
 					uint32_t typeIdx = 0;
 					size_t stridx = typeName.find_first_of("0123456789");
 					if (stridx != string::npos) {
@@ -150,24 +149,10 @@ private:
 
 					uint32_t channelc = 0;
 					switch (accessor.type) {
-						case TINYGLTF_TYPE_SCALAR:
-							channelc = 1;
-							break;
-						case TINYGLTF_TYPE_VEC2:
-							channelc = 2;
-							break;
-						case TINYGLTF_TYPE_VEC3:
-							channelc = 3;
-							break;
-						case TINYGLTF_TYPE_VEC4:
-							channelc = 4;
-							break;
-						case TINYGLTF_TYPE_VECTOR:
-						case TINYGLTF_TYPE_MATRIX:
-						case TINYGLTF_TYPE_MAT2:
-						case TINYGLTF_TYPE_MAT3:
-						case TINYGLTF_TYPE_MAT4:
-							break;
+						case TINYGLTF_TYPE_SCALAR: channelc = 1; break;
+						case TINYGLTF_TYPE_VEC2: channelc = 2; break;
+						case TINYGLTF_TYPE_VEC3: channelc = 3; break;
+						case TINYGLTF_TYPE_VEC4: channelc = 4; break;
 					}
 					
 					const auto& bufferView = model.bufferViews[accessor.bufferView];
@@ -183,7 +168,9 @@ private:
 
 		for (const auto& s : model.scenes)
 			for (auto& n : s.nodes) {
+				if (n < 0 || n >= model.nodes.size()) continue;
 				const auto& node = model.nodes[n];
+				if (node.mesh < 0 || node.mesh >= model.meshes.size()) continue;
 				const auto& nodeMesh = model.meshes[node.mesh];
 				uint32_t primIndex = 0;
 				for (const auto& prim : nodeMesh.primitives) {
@@ -199,6 +186,8 @@ private:
 					primIndex++;
 				}
 			}
+	
+		buffers.clear();
 	}
 
 protected:
@@ -216,15 +205,15 @@ protected:
 
 		mScene->AmbientLight(.5f);
 
-		auto info = mScene->GetAttachmentInfo("stm_main_resolve");
-		mScene->SetAttachmentInfo("stm_main_resolve", info.first, info.second | vk::ImageUsageFlagBits::eStorage);
+		auto[extent, usageFlags] = mScene->GetAttachmentInfo("stm_main_resolve");
+		mScene->SetAttachmentInfo("stm_main_resolve", extent, usageFlags | vk::ImageUsageFlagBits::eStorage);
 
 		ScanFolders();
 		//LoadScene();
 
 		return true;
 	}
-	PLUGIN_EXPORT void OnUpdate(CommandBuffer* commandBuffer) override {
+	PLUGIN_EXPORT void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) override {
 		if (mKeyboardInput->KeyDownFirst(KEY_TILDE)) mShowPerformance = !mShowPerformance;
 
 		if (mKeyboardInput->GetPointerLast(0)->mGuiHitT < 0) {
@@ -240,9 +229,9 @@ protected:
 			}
 		}
 	}
-	PLUGIN_EXPORT void OnLateUpdate(CommandBuffer* commandBuffer) override { if (mVolume) mVolume->UpdateBake(commandBuffer); }
+	PLUGIN_EXPORT void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) override { if (mVolume) mVolume->UpdateBake(commandBuffer); }
 	
-	PLUGIN_EXPORT void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) override {		
+	PLUGIN_EXPORT void OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) override {		
 		bool worldSpace = camera->StereoMode() != StereoMode::eNone;
 
 		// Draw performance overlay
@@ -282,7 +271,7 @@ protected:
 		gui->EndLayout();
 	}
 
-	PLUGIN_EXPORT void OnPostProcess(CommandBuffer* commandBuffer, Framebuffer* framebuffer, const set<Camera*>& cameras) override {
+	PLUGIN_EXPORT void OnPostProcess(stm_ptr<CommandBuffer> commandBuffer, Framebuffer* framebuffer, const set<Camera*>& cameras) override {
 		if (!mVolume) return;
 		for (Camera* camera : cameras)
 			mVolume->Draw(commandBuffer, framebuffer, camera);

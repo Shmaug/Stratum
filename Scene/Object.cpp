@@ -1,7 +1,6 @@
 #include <Scene/Object.hpp>
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
-#include <Core/EnginePlugin.hpp>
 
 using namespace std;
 
@@ -61,7 +60,7 @@ void Object::RemoveChild(Object* c) {
 }
 
 void Object::DirtyTransform() {
-	if (mScene && LayerMask()) mScene->BvhDirty(this);
+	if (mScene && Bounds()) mScene->BvhDirty(this);
 	mTransformDirty = true;
 	queue<Object*> objs;
 	for (Object* c : mChildren) objs.push(c);
@@ -69,12 +68,13 @@ void Object::DirtyTransform() {
 		Object* c = objs.front();
 		objs.pop();
 		c->mTransformDirty = true;
-		if (mScene && c->LayerMask() && !c->BypassCulling()) mScene->BvhDirty(this);
+		if (mScene && c->Bounds()) mScene->BvhDirty(this);
 		for (Object* o : c->mChildren) objs.push(o);
 	}
 }
 
 void Object::EnabledSelf(bool e) {
+	if (e == mEnabled) return;
 	mEnabled = e;
 	mEnabledHierarchy = mEnabled && (!mParent || mParent->mEnabledHierarchy);
 	queue<Object*> objs;
@@ -83,7 +83,6 @@ void Object::EnabledSelf(bool e) {
 		Object* c = objs.front();
 		objs.pop();
 		c->mEnabledHierarchy = c->mEnabled && c->mParent->mEnabledHierarchy;
-		if (mScene && c->LayerMask() && !c->BypassCulling()) mScene->BvhDirty(this);
 		for (Object* o : c->mChildren) objs.push(o);
 	}
 }

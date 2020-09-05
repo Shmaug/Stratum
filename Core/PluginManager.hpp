@@ -26,7 +26,7 @@ private:
 	friend class Instance;
 	friend class Scene;
 
-	STRATUM_API void LoadPlugins(const std::string& folder = "Plugins/");
+	STRATUM_API void LoadPlugins(const fs::path& folder = "Plugins/");
 	STRATUM_API void UnloadPlugins();
 
 	std::vector<PluginHandle> mPluginModules;

@@ -36,6 +36,7 @@ public:
 	inline bool VSync() const { return mVSync; }
 	inline void VSync(bool v) { mVSync = v; }
 	
+	inline vk::SwapchainKHR Swapchain() const { return mSwapchain; }
 	inline vk::Extent2D SwapchainExtent() const { return mSwapchainExtent; }
 	inline vk::Image BackBuffer() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].first; }
 	inline vk::Image BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].first; }
@@ -58,9 +59,9 @@ private:
 		, HINSTANCE hInst);
 	#endif
 
-	STRATUM_API vk::Image AcquireNextImage();
+	STRATUM_API void AcquireNextImage();
 	/// Waits on all semaphores in waitSemaphores
-	STRATUM_API void Present(const std::vector<vk::Semaphore>& waitSemaphores);
+	STRATUM_API void Present(const std::set<vk::Semaphore>& waitSemaphores);
 	STRATUM_API void CreateSwapchain(::Device* device);
 	STRATUM_API void DestroySwapchain();
 

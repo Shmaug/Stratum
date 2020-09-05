@@ -1,33 +1,37 @@
 #pragma once
 
-#include <Core/Device.hpp>
+#include <Data/Texture.hpp>
 
 class AssetManager {
 public:
-	STRATUM_API ~AssetManager();
+	template<typename T, typename... Targs>
+	inline stm_ptr<T> Load(const fs::path& filename, Targs&&... args) {
+		uint64_t key = hash<string>()(filename.string());
+		mMutex.lock();
+		if (mLoadedAssets.count(key) == 0)
+			mLoadedAssets.emplace(key, new T(filename, mDevice, args...));
+		stm_ptr<T> asset = stm_ptr_cast<T>(mLoadedAssets.at(key));
+		mMutex.unlock();
+		return asset;
+	}
 
-	STRATUM_API Pipeline*	LoadPipeline(const std::string& filename);
-	STRATUM_API Texture*	LoadTexture(const std::string& filename, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
-	STRATUM_API Texture*  LoadCubemap(const std::string& posx, const std::string& negx, const std::string& posy, const std::string& negy, const std::string& posz, const std::string& negz, TextureLoadFlags flags = TextureLoadFlags::eSrgb);
-	STRATUM_API Font*		  LoadFont(const std::string& filename);
-
-	inline Texture* WhiteTexture() const { return mWhiteTexture; }
-	inline Texture* TransparentBlackTexture() const { return mTransparentBlackTexture; }
-	inline Texture* BlackTexture() const { return mBlackTexture; }
-	inline Texture* BumpTexture() const { return mBumpTexture; }
-	inline Texture* NoiseTexture() const { return mNoiseTexture; }
+	inline stm_ptr<Texture> WhiteTexture() const { return mWhiteTexture; }
+	inline stm_ptr<Texture> TransparentBlackTexture() const { return mTransparentBlackTexture; }
+	inline stm_ptr<Texture> BlackTexture() const { return mBlackTexture; }
+	inline stm_ptr<Texture> BumpTexture() const { return mBumpTexture; }
+	inline stm_ptr<Texture> NoiseTexture() const { return mNoiseTexture; }
 
 private:
 	friend class Device;
 	STRATUM_API AssetManager(Device* device);
 
-	Texture* mWhiteTexture;
-	Texture* mBlackTexture;
-	Texture* mTransparentBlackTexture;
-	Texture* mBumpTexture;
-	Texture* mNoiseTexture;
+	stm_ptr<Texture> mWhiteTexture;
+	stm_ptr<Texture> mBlackTexture;
+	stm_ptr<Texture> mTransparentBlackTexture;
+	stm_ptr<Texture> mBumpTexture;
+	stm_ptr<Texture> mNoiseTexture;
 
 	Device* mDevice;
-	std::unordered_map<std::string, std::variant<Pipeline*, Texture*, Font*>> mAssets;
+	std::unordered_map<uint64_t, stm_ptr<Asset>> mLoadedAssets;
 	mutable std::mutex mMutex;
 };

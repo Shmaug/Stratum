@@ -4,9 +4,9 @@
 #include <Core/Buffer.hpp>
 #include <Core/CommandBuffer.hpp>
 #include <Core/DescriptorSet.hpp>
-#include <Core/Pipeline.hpp>
 #include <Data/AssetManager.hpp>
 #include <Data/Font.hpp>
+#include <Data/Pipeline.hpp>
 #include <Data/Texture.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -20,7 +20,7 @@ const string gSampleText = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#
 const uint32_t gBitmapPadding = 16;
 const double gBitmapScale = 8;
 
-void WriteGlyphCache(const string& filename, const unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
+void WriteGlyphCache(const fs::path& filename, const unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
 	ofstream file(filename, ios::binary);
 	WriteValue<uint32_t>(file, gBitmapPadding);
 	WriteValue<double>(file, gBitmapScale);
@@ -32,7 +32,7 @@ void WriteGlyphCache(const string& filename, const unordered_map<uint32_t, msdfg
 		file.write((const char*)(const float*)kp.second, sizeof(float) * 4*kp.second.width() * kp.second.height());
 	}
 }
-void ReadGlyphCache(const string& filename, unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
+void ReadGlyphCache(const fs::path& filename, unordered_map<uint32_t, msdfgen::Bitmap<float, 4>>& bitmaps) {
 	ifstream file(filename, ios::binary);
 	if (!file.is_open()) return;
 	uint32_t pad, count;
@@ -54,11 +54,7 @@ void ReadGlyphCache(const string& filename, unordered_map<uint32_t, msdfgen::Bit
 			return;
 		}
 	}
-	printf("Loaded %s\n", filename.c_str());
-}
-
-msdfgen::Point2 msdfpt(const double2& p) {
-	return msdfgen::Point2(p.x, p.y);
+	printf("Loaded %s\n", filename.string().c_str());
 }
 
 inline float2 barycentrics(const float2& p, const float2& a, const float2& b, const float2& c) {
@@ -73,7 +69,7 @@ inline float2 barycentrics(const float2& p, const float2& a, const float2& b, co
 	return float2(dot11 * dot02 - dot01 * dot12, dot00 * dot12 - dot01 * dot02) / (dot00 * dot11 - dot01 * dot01);
 }
 inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1) {
-	uint2 mx = uint2(ceil(max(p0, p1)));
+	uint2 mx = (uint2)ceil(max(p0, p1));
 	float2 uv;
 	for (uint32_t y = 0; y < mx.y; y++) 
 		for (uint32_t x = 0; x < mx.x; x++) {
@@ -83,7 +79,7 @@ inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2
 		}
 }
 inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1, const float2& c) {
-	uint2 mx = uint2(ceil(max(max(p0, p1), c)));
+	uint2 mx = (uint2)ceil(max(max(p0, p1), c));
 	float2 uv;
 	for (uint32_t y = 0; y < mx.y; y++) 
 		for (uint32_t x = 0; x < mx.x; x++) {
@@ -94,9 +90,9 @@ inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2
 		}
 }
 
-Font::Font(const string& name, Device* device, const string& filename) : mName(name) {
+Font::Font(const fs::path& filename, ::Device* device, const string& name) : Asset(filename, device, name) {
 	msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
-	msdfgen::FontHandle* font = msdfgen::loadFont(ft, filename.c_str());
+	msdfgen::FontHandle* font = msdfgen::loadFont(ft, filename.string().c_str());
 	if (!font) throw;
 
 	double spaceAdvance, tabAdvance;
@@ -110,13 +106,7 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 	mDescent = (float)metrics.descenderY;
 	mLineGap = (float)metrics.lineHeight;
 
-	string cacheFolder = "cache/";
-	bool rmcache = false;
-
-	for (auto arg : device->Instance()->CommandLineArguments())
-		if (arg == "--rmcache") rmcache = true;
-
-	string cacheFile = cacheFolder + fs::path(filename).filename().replace_extension("stmb").string();
+	fs::path cacheFile = fs::path(filename).replace_extension("stmb");
 	
 	uint64_t area = 0;
 	unordered_map<uint32_t, msdfgen::Bitmap<float, 4>> bitmaps;
@@ -157,9 +147,7 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 		writeCache = true;
 	}
 	
-	if (fs::exists(cacheFolder) && rmcache) fs::remove(cacheFolder);
-	else if (!rmcache) fs::create_directory(cacheFolder);
-	if (!rmcache) WriteGlyphCache(cacheFile, bitmaps);
+	WriteGlyphCache(cacheFile, bitmaps);
 
 	// Place bitmaps
 	
@@ -203,14 +191,11 @@ Font::Font(const string& name, Device* device, const string& filename) : mName(n
 				dst[x] = (uint8_t)(fminf(fmaxf(kp.second.operator()(0, y)[x], -1), 1)*127);
 		}
 
-	mSDF = new Texture(mName, device, data, 4*extent.width*extent.height, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, 0);
+	mSDF = new Texture(mName+"/SDF", device, data, 4*extent.width*extent.height, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, 0);
 	delete[] data;
 
 	msdfgen::destroyFont(font);
 	msdfgen::deinitializeFreetype(ft);
-}
-Font::~Font() {
-	safe_delete(mSDF);
 }
 
 void Font::GenerateGlyphs(vector<GlyphRect>& result, AABB& bounds, const string& str, float pixelHeight, const float2& offset, TextAnchor horizontalAnchor) const {	
@@ -262,7 +247,7 @@ void Font::GenerateGlyphs(vector<GlyphRect>& result, AABB& bounds, const string&
 		GlyphRect g = {};
 		g.Offset = float2(currentPoint, baseline) + glyph.mOffset*scale;
 		g.Extent = glyph.mExtent*scale;
-		g.TextureST = float4(float2(glyph.mTextureExtent), float2(glyph.mTextureOffset)) / float4((float)mSDF->Extent().width, (float)mSDF->Extent().height, (float)mSDF->Extent().width, (float)mSDF->Extent().height);
+		g.TextureST = float4((float2)glyph.mTextureExtent, (float2)glyph.mTextureOffset) / float4((float)mSDF->Extent().width, (float)mSDF->Extent().height, (float)mSDF->Extent().width, (float)mSDF->Extent().height);
 		result.push_back(g);
 
 		bounds.mMin = float3(min(bounds.mMin.xy, g.Offset), 0);

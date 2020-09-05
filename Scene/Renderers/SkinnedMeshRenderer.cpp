@@ -2,8 +2,6 @@
 
 using namespace std;
 
-SkinnedMeshRenderer::~SkinnedMeshRenderer() { safe_delete(mSkinnedMesh); }
-
 void SkinnedMeshRenderer::Rig(const AnimationRig& rig) {
 	mBoneMap.clear();
 	mRig = rig;
@@ -13,13 +11,13 @@ Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 	return mBoneMap.count(boneName) ? mBoneMap.at(boneName) : nullptr;
 }
 
-inline void SkinnedMeshRenderer::Mesh(variant_ptr<::Mesh> m) {
+inline void SkinnedMeshRenderer::Mesh(stm_ptr<::Mesh> m) {
 	mMesh = m;
-	mSkinnedMesh = m.get(); // FIXME: make a copy of mMesh
+	mSkinnedMesh = m; // FIXME: make a copy of mMesh
 }
 
-void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
-	Pipeline* skinner = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/skinner.stmb");
+void SkinnedMeshRenderer::OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) {
+	Pipeline* skinner = commandBuffer->Device()->AssetManager()->Load<Pipeline>("Shaders/skinner.stmb", "Skinner");
 	
 	// FIXME: fix this to work with new Mesh system
 
@@ -27,7 +25,7 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	/*
 	if (mShapeKeys.size()) {
 		float4 weights = 0;
-		Buffer* targets[4] {
+		stm_ptr<Buffer> targets[4] {
 			mVertexBuffer, mVertexBuffer, mVertexBuffer, mVertexBuffer
 		};
 
@@ -46,7 +44,7 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 
 		ComputePipeline* s = skinner->GetCompute("blend", {});
 	
-		DescriptorSet* ds = commandBuffer->GetDescriptorSet("Blend", s->mDescriptorSetLayouts[0]);
+		stm_ptr<DescriptorSet> ds = commandBuffer->GetDescriptorSet("Blend", s->mDescriptorSetLayouts[0]);
 		ds->CreateStorageBufferDescriptor(mVertexBuffer, 0);
 		ds->CreateStorageBufferDescriptor(targets[0], 1);
 		ds->CreateStorageBufferDescriptor(targets[1], 2);
@@ -72,7 +70,7 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	// Skeleton
 	if (mRig.size()) {
 		// bind space -> object space
-		Buffer* poseBuffer = commandBuffer->GetBuffer(mName + " Pose", mRig.size() * sizeof(float4x4), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
+		stm_ptr<Buffer> poseBuffer = commandBuffer->GetBuffer(mName + " Pose", mRig.size() * sizeof(float4x4), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached);
 		float4x4* skin = (float4x4*)poseBuffer->MappedData();
 		for (uint32_t i = 0; i < mRig.size(); i++)
 			skin[i] = (WorldToObject() * mRig[i]->ObjectToWorld()) * mRig[i]->mInverseBind; // * vertex;
@@ -80,7 +78,7 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 		ComputePipeline* s = skinner->GetCompute("skin", {});
 		commandBuffer->BindPipeline(s);
 
-		DescriptorSet* ds = commandBuffer->GetDescriptorSet("Skinning", s->mDescriptorSetLayouts[0]);
+		stm_ptr<DescriptorSet> ds = commandBuffer->GetDescriptorSet("Skinning", s->mDescriptorSetLayouts[0]);
 		ds->CreateStorageBufferDescriptor(mVertexBuffer, 0);
 		ds->CreateStorageBufferDescriptor(m->WeightBuffer().get(), 5);
 		ds->CreateStorageBufferDescriptor(poseBuffer, 6);
@@ -101,16 +99,16 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer* commandBuffer) {
 	mMaterial->OnLateUpdate(commandBuffer);
 }
 
-void SkinnedMeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	GraphicsPipeline* pipeline = commandBuffer->BindPipeline(mMaterial.get(), mSkinnedMesh);
+void SkinnedMeshRenderer::OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) {
+	GraphicsPipeline* pipeline = commandBuffer->BindPipeline(mMaterial, mSkinnedMesh);
 
 	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
 		// TODO: Cache object descriptorset?
-		Buffer* instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
+		stm_ptr<Buffer> instanceBuffer = commandBuffer->GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
 		InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
 		buf->ObjectToWorld = ObjectToWorld();
 		buf->WorldToObject = WorldToObject();
-		DescriptorSet* perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
+		stm_ptr<DescriptorSet> perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
 		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING, 0);
 		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
 	}
@@ -118,7 +116,7 @@ void SkinnedMeshRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, D
 	mSkinnedMesh->Draw(commandBuffer, camera);
 }
 
-void SkinnedMeshRenderer::OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {
+void SkinnedMeshRenderer::OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {
 	if (mRig.size()){
 		for (auto b : mRig) {
 			gui->WireSphere(b->WorldPosition(), .01f, float4(0.25f, 1.f, 0.25f, 1.f));

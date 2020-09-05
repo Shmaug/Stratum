@@ -33,15 +33,8 @@ RenderVolume::RenderVolume(const string& name, Device* device, const fs::path& i
 
   mUniformBuffer = new Buffer("Volume Uniforms", device, sizeof(VolumeUniformBuffer), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
 }
-RenderVolume::~RenderVolume() {
-  safe_delete(mRawVolume);
-  safe_delete(mRawMask);
-  safe_delete(mBakedVolume);
-  safe_delete(mGradient);
-  safe_delete(mUniformBuffer);
-}
 
-void RenderVolume::DrawGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {
+void RenderVolume::DrawGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {
   bool localShading = mShadingMode == ShadingMode::eLocal;
   gui->LayoutTitle("Render Settings");
   gui->LayoutSlider("Sample Rate", mSampleRate, .01f, 1);
@@ -54,7 +47,7 @@ void RenderVolume::DrawGui(CommandBuffer* commandBuffer, Camera* camera, GuiCont
   mShadingMode = localShading ? ShadingMode::eLocal : ShadingMode::eNone;
 }
 
-void RenderVolume::UpdateBake(CommandBuffer* commandBuffer) {
+void RenderVolume::UpdateBake(stm_ptr<CommandBuffer> commandBuffer) {
   if (!mRawVolume || (!mBakeDirty && !mGradientDirty)) return;
 
   VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->MappedData();
@@ -76,13 +69,15 @@ void RenderVolume::UpdateBake(CommandBuffer* commandBuffer) {
     keywords.emplace("SINGLE_CHANNEL");
     if (mColorize) keywords.emplace("COLORIZE");
   }
+
+  Pipeline* volumeComputePipeline = commandBuffer->Device()->AssetManager()->Load<Pipeline>("Shaders/precompute.stmb", "precompute");
   
   // Bake the volume if necessary
   if (mBakeDirty && mBakedVolume) {
-    ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stmb")->GetCompute("BakeVolume", keywords);
+    ComputePipeline* pipeline = volumeComputePipeline->GetCompute("BakeVolume", keywords);
     commandBuffer->BindPipeline(pipeline);
 
-    DescriptorSet* ds = commandBuffer->GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
+    stm_ptr<DescriptorSet> ds = commandBuffer->GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
     ds->CreateTextureDescriptor("Volume", mRawVolume, pipeline);
     if (mRawMask) ds->CreateTextureDescriptor("RawMask", mRawMask, pipeline);
     ds->CreateTextureDescriptor("Output", mBakedVolume, pipeline);
@@ -97,10 +92,10 @@ void RenderVolume::UpdateBake(CommandBuffer* commandBuffer) {
 
   // Bake the gradient if necessary
   if (mGradientDirty && mGradient) {
-    ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/precompute.stmb")->GetCompute("BakeGradient", keywords);
+    ComputePipeline* pipeline = volumeComputePipeline->GetCompute("BakeGradient", keywords);
     commandBuffer->BindPipeline(pipeline);
 
-    DescriptorSet* ds = commandBuffer->GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
+    stm_ptr<DescriptorSet> ds = commandBuffer->GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
     if (mBakedVolume)
       ds->CreateTextureDescriptor("Volume", mBakedVolume, pipeline);
     else {
@@ -118,7 +113,7 @@ void RenderVolume::UpdateBake(CommandBuffer* commandBuffer) {
   }
 }
 
-void RenderVolume::Draw(CommandBuffer* commandBuffer, Framebuffer* framebuffer, Camera* camera) {
+void RenderVolume::Draw(stm_ptr<CommandBuffer> commandBuffer, Framebuffer* framebuffer, Camera* camera) {
   if (!mRawVolume && !mBakedVolume) return;
 
   VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->MappedData();
@@ -155,10 +150,10 @@ void RenderVolume::Draw(CommandBuffer* commandBuffer, Framebuffer* framebuffer, 
   };
 
 
-  ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/volume.stmb")->GetCompute("Render", keywords);
+  ComputePipeline* pipeline = commandBuffer->Device()->AssetManager()->Load<Pipeline>("Shaders/volume.stmb", "volume")->GetCompute("Render", keywords);
   commandBuffer->BindPipeline(pipeline);
 
-  DescriptorSet* ds = commandBuffer->GetDescriptorSet("Draw Volume", pipeline->mDescriptorSetLayouts[0]);
+  stm_ptr<DescriptorSet> ds = commandBuffer->GetDescriptorSet("Draw Volume", pipeline->mDescriptorSetLayouts[0]);
   ds->CreateTextureDescriptor("RenderTarget", framebuffer->Attachment("stm_main_resolve"), pipeline);
   ds->CreateTextureDescriptor("DepthBuffer", framebuffer->Attachment("stm_main_depth"), pipeline, 0, vk::ImageLayout::eShaderReadOnlyOptimal);
   ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);

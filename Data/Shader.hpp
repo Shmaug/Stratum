@@ -3,20 +3,50 @@
 #include <Util/Util.hpp>
 
 struct SpirvModule {
-	std::string mEntryPoint;
-	vk::ShaderStageFlagBits mStage;
-	std::vector<uint32_t> mSpirvBinary;
+	struct StageInput {
+		uint32_t mLocation;
+		vk::Format mFormat;
+		VertexAttributeType mType;
+		uint32_t mTypeIndex;
+	};
+	
 	vk::ShaderModule mShaderModule;
+	std::vector<uint32_t> mSpirvBinary;
+	vk::ShaderStageFlagBits mStage;
+	std::string mEntryPoint;
+	std::unordered_map<std::string, StageInput> mInputs;
 
 	inline void Write(std::ostream& stream) const {
 		WriteString(stream, mEntryPoint);
 		WriteValue(stream, mStage);
 		WriteVector(stream, mSpirvBinary);
+		
+		WriteValue(stream, (uint64_t)mInputs.size());
+		for (const auto&[name,input] : mInputs) {
+			WriteString(stream, name);
+			WriteValue(stream, input.mLocation);
+			WriteValue(stream, input.mFormat);
+			WriteValue(stream, input.mType);
+			WriteValue(stream, input.mTypeIndex);
+		}
 	}
 	inline void Read(std::istream& stream) {
 		ReadString(stream, mEntryPoint);
 		ReadValue(stream, mStage);
 		ReadVector(stream, mSpirvBinary);
+		
+		uint64_t inputCount;
+		ReadValue<uint64_t>(stream, inputCount);
+		for (uint32_t i = 0; i < inputCount; i++) {
+			std::string name;
+			ReadString(stream, name);
+			StageInput input;
+			ReadValue(stream, input.mLocation);
+			ReadValue(stream, input.mFormat);
+			ReadValue(stream, input.mType);
+			ReadValue(stream, input.mTypeIndex);
+			mInputs.emplace(name, input);
+		}
 	}
 };
 
@@ -27,14 +57,7 @@ struct DescriptorBinding {
 };
 
 struct ShaderVariant {
-	struct StageInput {
-		uint32_t mLocation;
-		vk::Format mFormat;
-		VertexAttributeType mType;
-		uint32_t mTypeIndex;
-	};
 	std::set<std::string> mKeywords;
-	std::unordered_map<std::string, StageInput> mStageInputs;
 	std::unordered_map<std::string, DescriptorBinding> mDescriptorSetBindings;
 	std::unordered_map<std::string, vk::PushConstantRange> mPushConstants;
 	std::unordered_map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
@@ -42,8 +65,8 @@ struct ShaderVariant {
 
 	// Graphics variant data
 
+	std::string mShaderPass; // will be empty if a it this a compute variant
 	std::vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
-	std::string mShaderPass;
 	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState;
 	vk::CullModeFlags mCullMode = vk::CullModeFlagBits::eBack;
 	vk::PolygonMode mPolygonMode = vk::PolygonMode::eFill;
@@ -67,32 +90,23 @@ struct ShaderVariant {
 		for (const std::string& kw : mKeywords)
 			WriteString(stream, kw);
 
-		WriteValue(stream, (uint64_t)mStageInputs.size());
-		for (const auto& kp : mStageInputs) {
-			WriteString(stream, kp.first);
-			WriteValue(stream, kp.second.mLocation);
-			WriteValue(stream, kp.second.mFormat);
-			WriteValue(stream, kp.second.mType);
-			WriteValue(stream, kp.second.mTypeIndex);
-		}
-
 		WriteValue(stream, (uint64_t)mDescriptorSetBindings.size());
-		for (const auto& kp : mDescriptorSetBindings) {
-			WriteString(stream, kp.first);
-			WriteValue(stream, kp.second.mSet);
-			WriteValue(stream, kp.second.mBinding);
+		for (const auto&[name, binding] : mDescriptorSetBindings) {
+			WriteString(stream, name);
+			WriteValue(stream, binding.mSet);
+			WriteValue(stream, binding.mBinding);
 		}
 
 		WriteValue(stream, (uint64_t)mPushConstants.size());
-		for (const auto& kp : mPushConstants) {
-			WriteString(stream, kp.first);
-			WriteValue(stream, kp.second);
+		for (const auto&[name, range] : mPushConstants) {
+			WriteString(stream, name);
+			WriteValue(stream, range);
 		}
 		
 		WriteValue(stream, (uint64_t)mImmutableSamplers.size());
-		for (const auto& kp : mImmutableSamplers) {
-			WriteString(stream, kp.first);
-			WriteValue(stream, kp.second);
+		for (const auto&[name, sampler] : mImmutableSamplers) {
+			WriteString(stream, name);
+			WriteValue(stream, sampler);
 		}
 
 		WriteValue(stream, (uint64_t)mModules.size());
@@ -116,19 +130,6 @@ struct ShaderVariant {
 			mKeywords.insert(str);
 		}
 		
-		uint64_t inputCount;
-		ReadValue<uint64_t>(stream, inputCount);
-		for (uint32_t i = 0; i < inputCount; i++) {
-			std::string name;
-			ReadString(stream, name);
-			StageInput input;
-			ReadValue(stream, input.mLocation);
-			ReadValue(stream, input.mFormat);
-			ReadValue(stream, input.mType);
-			ReadValue(stream, input.mTypeIndex);
-			mStageInputs.emplace(name, input);
-		}
-
 		uint64_t descriptorCount;
 		ReadValue<uint64_t>(stream, descriptorCount);
 		for (uint32_t i = 0; i < descriptorCount; i++) {

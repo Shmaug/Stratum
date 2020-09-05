@@ -617,14 +617,13 @@ bool Instance::BeginFrame() {
 	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));	
 	return true;
 }
-void Instance::EndFrame(const std::vector<vk::Semaphore>& waitSemaphores) {
+void Instance::EndFrame(const std::set<vk::Semaphore>& presentWaitSemaphores) {
 	PROFILER_BEGIN("PrePresent");
 	for (EnginePlugin* p : mPluginManager->Plugins()) p->PrePresent();
 	PROFILER_END;
+	mWindow->Present(presentWaitSemaphores);
 
-	mWindow->Present(waitSemaphores);
-
-	mDevice->PurgePooledResources(8);
+	mDevice->PurgeResourcePools(8);
 
 	#ifdef PROFILER_ENABLE
 	Profiler::EndFrame();

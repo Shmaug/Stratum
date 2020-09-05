@@ -539,7 +539,7 @@ void XR::OnFrameStart() {
 	}
 }
 
-void XR::PostRender(CommandBuffer* commandBuffer) {
+void XR::PostRender(stm_ptr<CommandBuffer> commandBuffer) {
 	#pragma region Locate views (eyes) within mReferenceSpace
 	uint32_t tmp;
 	vector<XrView> views(mViewCount);

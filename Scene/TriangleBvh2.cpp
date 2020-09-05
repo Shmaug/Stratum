@@ -131,7 +131,7 @@ TriangleBvh2::TriangleBvh2(const void* vertices, uint32_t baseVertex, uint32_t v
 bool TriangleBvh2::Intersect(const Ray& ray, float* t, bool any) {
 	if (mNodes.size() == 0) return false;
 
-	float ht = 1.e20f;
+	float ht = numeric_limits<float>::infinity();
 	float2 bary = 0;
 	int hitIndex = -1;
 

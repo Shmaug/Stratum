@@ -1,17 +1,16 @@
 #pragma once
 
-#include <Core/Pipeline.hpp>
 #include <Core/Buffer.hpp>
 #include <Core/DescriptorSet.hpp>
+#include <Data/Pipeline.hpp>
 
 class Material {
 public:
 	const std::string mName;
 
-	STRATUM_API Material(const std::string& name, ::Pipeline* pipeline);
-	STRATUM_API ~Material();
+	STRATUM_API Material(const std::string& name, stm_ptr<Pipeline> pipeline);
 
-	inline ::Pipeline* Pipeline() const { return mPipeline; };
+	inline stm_ptr<Pipeline> Pipeline() const { return mPipeline; };
 	inline GraphicsPipeline* GetPassPipeline(const std::string& pass) const { return mPipeline->GetGraphics(pass, mShaderKeywords); }
 
 	// Enable a keyword to be used to select a shader variant
@@ -25,13 +24,13 @@ public:
 	inline void PolygonMode(vk::Optional<const vk::PolygonMode> m) { mPolygonMode = m; }
 	inline vk::Optional<const vk::PolygonMode> PolygonMode() const { return mPolygonMode; }
 
-	STRATUM_API void SetUniformBuffer(const std::string& name, variant_ptr<Buffer> param, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex = 0);
-	STRATUM_API void SetStorageBuffer(const std::string& name, variant_ptr<Buffer> param, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex = 0);
-	STRATUM_API void SetUniformBuffer(const std::string& name, variant_ptr<Buffer> param, uint32_t arrayIndex = 0) { SetUniformBuffer(name, param, 0, param->Size(), arrayIndex); }
-	STRATUM_API void SetStorageBuffer(const std::string& name, variant_ptr<Buffer> param, uint32_t arrayIndex = 0) { SetStorageBuffer(name, param, 0, param->Size(), arrayIndex); }
-	STRATUM_API void SetStorageTexture(const std::string& name, variant_ptr<Texture> param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eGeneral);
-	STRATUM_API void SetSampledTexture(const std::string& name, variant_ptr<Texture> param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eShaderReadOnlyOptimal);
-	STRATUM_API void SetSampler(const std::string& name, variant_ptr<Sampler> param, uint32_t arrayIndex = 0);
+	STRATUM_API void SetUniformBuffer(const std::string& name, stm_ptr<Buffer> param, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex = 0);
+	STRATUM_API void SetStorageBuffer(const std::string& name, stm_ptr<Buffer> param, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex = 0);
+	STRATUM_API void SetUniformBuffer(const std::string& name, stm_ptr<Buffer> param, uint32_t arrayIndex = 0) { SetUniformBuffer(name, param, 0, param->Size(), arrayIndex); }
+	STRATUM_API void SetStorageBuffer(const std::string& name, stm_ptr<Buffer> param, uint32_t arrayIndex = 0) { SetStorageBuffer(name, param, 0, param->Size(), arrayIndex); }
+	STRATUM_API void SetStorageTexture(const std::string& name, stm_ptr<Texture> param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eGeneral);
+	STRATUM_API void SetSampledTexture(const std::string& name, stm_ptr<Texture> param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eShaderReadOnlyOptimal);
+	STRATUM_API void SetSampler(const std::string& name, stm_ptr<Sampler> param, uint32_t arrayIndex = 0);
 	STRATUM_API void SetPushParameter(const std::string& name, vk::DeviceSize dataSize, const void* data);
 	template<typename T>
 	inline void SetPushParameter(const std::string& name, const T& param) { SetPushParameter(name, sizeof(T), &param); }
@@ -46,16 +45,16 @@ public:
 	template<typename T>
 	inline bool GetPushParameter(const std::string& name, T& ref) const { return GetPushParameter(name, sizeof(T), &ref); }
 
-	STRATUM_API void OnLateUpdate(CommandBuffer* commandBuffer);
+	STRATUM_API void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer);
 
 private:
 	friend class Scene;
 	friend class CommandBuffer;
 	STRATUM_API void CopyInputSignature(GraphicsPipeline* shader);
-	STRATUM_API void BindDescriptorParameters(CommandBuffer* commandBuffer);
-	STRATUM_API void PushConstants(CommandBuffer* commandBuffer);
+	STRATUM_API void BindDescriptorParameters(stm_ptr<CommandBuffer> commandBuffer);
+	STRATUM_API void PushConstants(stm_ptr<CommandBuffer> commandBuffer);
 
-	::Pipeline* mPipeline;
+	stm_ptr<::Pipeline> mPipeline;
 	Device* mDevice;
 
 	std::set<std::string> mShaderKeywords;
@@ -63,7 +62,7 @@ private:
 
 	vk::Optional<const vk::PolygonMode> mPolygonMode;
 	vk::Optional<const vk::CullModeFlags> mCullMode;
-	DescriptorSet* mCachedDescriptorSet;
+	stm_ptr<DescriptorSet> mCachedDescriptorSet;
 
 	bool mDescriptorSetDirty;
 

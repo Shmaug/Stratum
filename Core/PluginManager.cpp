@@ -21,7 +21,7 @@ PluginManager::~PluginManager() {
 	UnloadPlugins();
 }
 
-void PluginManager::LoadPlugins(const string& pluginFolder) {
+void PluginManager::LoadPlugins(const fs::path& pluginFolder) {
 	UnloadPlugins();
 
 	for (const auto& p : fs::directory_iterator(pluginFolder)) {

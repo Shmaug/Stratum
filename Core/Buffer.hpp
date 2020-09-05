@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Util/Util.hpp>
+#include <Core/Device.hpp>
 
 class Buffer {
 private:
@@ -51,3 +51,25 @@ private:
 
 	STRATUM_API void Allocate();
 };
+
+struct BufferView {
+	stm_ptr<Buffer> mBuffer;
+	vk::DeviceSize mByteOffset = 0;
+	BufferView() = default;
+	inline BufferView(stm_ptr<Buffer> buffer, vk::DeviceSize offset = 0) : mBuffer(buffer), mByteOffset(offset) {};
+	inline bool operator==(const BufferView& rhs) const {
+		return mBuffer == rhs.mBuffer && mByteOffset == rhs.mByteOffset;
+	}
+};
+
+namespace std {
+	template<>
+	struct hash<BufferView> {
+		inline std::size_t operator()(const BufferView& v) const {
+			size_t h = 0;
+			hash_combine(h, *reinterpret_cast<const size_t*>(&v.mBuffer));
+			hash_combine(h, v.mByteOffset);
+			return h;
+		}
+	};
+}

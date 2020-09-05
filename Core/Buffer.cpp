@@ -67,7 +67,7 @@ void Buffer::CopyFrom(const Buffer& other) {
 		Allocate();
 	}
 
-	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
+	stm_ptr<CommandBuffer> commandBuffer = mDevice->GetCommandBuffer();
 
 	vk::BufferMemoryBarrier barrier = {};
 	barrier.srcAccessMask = vk::AccessFlagBits::eHostWrite;

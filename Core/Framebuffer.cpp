@@ -7,7 +7,7 @@
 
 using namespace std;
 
-Framebuffer::Framebuffer(const string& name, ::RenderPass* renderPass, const vector<Texture*>& attachments) : mName(name), mRenderPass(renderPass), mDeleteAttachments(false) {
+Framebuffer::Framebuffer(const string& name, ::RenderPass* renderPass, const vector<stm_ptr<Texture>>& attachments) : mName(name), mRenderPass(renderPass), mDeleteAttachments(false) {
 	mExtent = { 0, 0 };
 	vector<vk::ImageView> views(attachments.size());
 	for (uint32_t i = 0; i < attachments.size(); i++) {
@@ -28,6 +28,5 @@ Framebuffer::Framebuffer(const string& name, ::RenderPass* renderPass, const vec
 }
 
 Framebuffer::~Framebuffer() {
-	if (mDeleteAttachments) for (auto& kp : mAttachments) safe_delete(kp.second);
 	mRenderPass->Device()->Destroy(mFramebuffer);
 }

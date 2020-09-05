@@ -15,7 +15,7 @@ public:
 	// Write the CameraData buffer to a location in memory
 	STRATUM_API virtual void WriteUniformBuffer(void* bufferData);
 	// Calls vkCmdSetViewport and vkCmdSetScissor
-	STRATUM_API virtual void SetViewportScissor(CommandBuffer* commandBuffer, StereoEye eye = StereoEye::eNone);
+	STRATUM_API virtual void SetViewportScissor(stm_ptr<CommandBuffer> commandBuffer, StereoEye eye = StereoEye::eNone);
 
 	STRATUM_API virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = StereoEye::eNone);
 	STRATUM_API virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = StereoEye::eNone);
@@ -90,6 +90,6 @@ private:
 	quaternion mEyeOffsetRotate[2];
 
 protected:
-	STRATUM_API virtual void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) override;
+	STRATUM_API virtual void OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) override;
 	STRATUM_API virtual bool UpdateTransform() override;
 };

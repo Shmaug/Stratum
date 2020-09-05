@@ -32,8 +32,7 @@ public:
 	inline void LocalScale(float x, float y, float z) { mLocalScale.x = x; mLocalScale.y = y; mLocalScale.z = z; DirtyTransform(); }
 	inline void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; DirtyTransform(); }
 	
-	inline virtual AABB Bounds() { return AABB(WorldPosition(), WorldPosition()); }
-	inline virtual bool BypassCulling() { return true; };
+	inline virtual std::optional<AABB> Bounds() { return {}; }
 
 	inline Object* Parent() const { return mParent; }
 	STRATUM_API void AddChild(Object* obj);
@@ -79,10 +78,10 @@ private:
 	std::deque<Object*> mChildren;
 
 protected:
-	inline virtual void OnFixedUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void OnUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void OnLateUpdate(CommandBuffer* commandBuffer) {}
-	inline virtual void OnGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui) {}
+	inline virtual void OnFixedUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
+	inline virtual void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
+	inline virtual void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
+	inline virtual void OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {}
 
 	STRATUM_API virtual void DirtyTransform();
 	STRATUM_API virtual bool UpdateTransform();

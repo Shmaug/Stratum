@@ -1,8 +1,8 @@
 #pragma once
 
-#include <Core/Instance.hpp>
+#include <Data/Asset.hpp>
 #include <Core/RenderPass.hpp>
-#include <Core/Shader.hpp>
+#include <Data/Shader.hpp>
 
 class PipelineVariant {
 public:
@@ -24,17 +24,15 @@ public:
 	Device* mDevice;
 	std::unordered_map<PipelineInstance, vk::Pipeline> mPipelines;
 
-	STRATUM_API vk::Pipeline GetPipeline(CommandBuffer* commandBuffer,
+	STRATUM_API vk::Pipeline GetPipeline(stm_ptr<CommandBuffer> commandBuffer,
 		vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList,
 		const vk::PipelineVertexInputStateCreateInfo& vertexInput = vk::PipelineVertexInputStateCreateInfo(),
 		vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr,
 		vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
 };
 
-class Pipeline {
+class Pipeline : public Asset {
 public:
-	const std::string mName;
-
 	STRATUM_API ~Pipeline();
 
 	// Returns a pipeline for a specific shader pass and set of keywords, or nullptr if none exists
@@ -44,14 +42,11 @@ public:
 
 	inline bool HasKeyword(const std::string& kw) const { return mKeywords.count(kw); }
 
-	inline ::Device* Device() const { return mDevice; }
-
 private:
 	friend class GraphicsPipeline;
 	friend class AssetManager;
-	STRATUM_API Pipeline(const std::string& name, ::Device* device, const std::string& shaderFilename);
+	STRATUM_API Pipeline(const fs::path& shaderfile, ::Device* device, const std::string& name);
 
-	::Device* mDevice;
 	std::set<std::string> mKeywords;
 	Shader* mShader;
 

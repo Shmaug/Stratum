@@ -3,7 +3,7 @@
 #include <sstream>
 #include <unordered_map>
 
-#include <Core/Shader.hpp>
+#include <Data/Shader.hpp>
 
 #include <shaderc/shaderc.hpp>
 #include <spirv_cross/spirv_cross.hpp>
@@ -72,12 +72,12 @@ public:
 };
 
 struct AssemblyOutputInfo {
-	string mFilename;
+	fs::path mFilename;
 	string mEntryPoint;
 	set<string> mKeywords;
 };
 struct CompilerContext {
-	string mFilename;
+	fs::path mFilename;
 	uint32_t mLineNumber;
 	vector<string>::iterator mCurrentWord;
 	vector<string>::iterator mLineEnd;
@@ -176,7 +176,7 @@ bool DirectiveKernel(CompilerContext& ctx, const string& directiveName, const ve
 	ctx.mResult->mVariants.push_back({});
 	auto& v = ctx.mResult->mVariants.back();
 	v.mShaderPass = "";
-	v.mModules.push_back({ *ctx.mCurrentWord, vk::ShaderStageFlagBits::eCompute, {} });
+	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eCompute, *ctx.mCurrentWord, {} });
 	return true;
 }
 bool DirectiveMultiCompile(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
@@ -217,8 +217,8 @@ bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vect
 	ctx.mResult->mVariants.push_back({});
 	auto& v = ctx.mResult->mVariants.back();
 	v.mShaderPass = shaderPass;
-	v.mModules.push_back({ vs, vk::ShaderStageFlagBits::eVertex, {} });
-	v.mModules.push_back({ fs, vk::ShaderStageFlagBits::eFragment, {} });
+	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eVertex, vs, {} });
+	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eFragment, fs, {} });
 	return true;
 }
 bool DirectiveRenderQueue(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
@@ -321,7 +321,7 @@ unordered_map<string, bool(*)(CompilerContext&, const string&, const vector<Shad
 	{ "zwrite", DirectiveZWrite }
 };
 
-int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const string& source, const set<string>& includePaths, uint32_t includeDepth = 0, stack<pair<string, set<string>>>& selectorStack = stack<pair<string, set<string>>>()) {
+int ParseCompilerDirectives(CompilerContext& ctx, const fs::path& filename, const string& source, const set<string>& includePaths, uint32_t includeDepth = 0, stack<pair<string, set<string>>>& selectorStack = stack<pair<string, set<string>>>()) {
 	uint32_t lineNumber = 0;
 
 	string line;
@@ -369,7 +369,7 @@ int ParseCompilerDirectives(CompilerContext& ctx, const string& filename, const 
 			if ((*cur)[0] == '<') includeType = shaderc_include_type_standard;
 			
 			Includer includer(includePaths);
-			shaderc_include_result* includeResult = includer.GetInclude(includePath.c_str(), includeType, filename.c_str(), includeDepth);
+			shaderc_include_result* includeResult = includer.GetInclude(includePath.c_str(), includeType, filename.string().c_str(), includeDepth);
 			if (includeResult->content_length)
 				ParseCompilerDirectives(ctx, includeResult->source_name, includeResult->content, includePaths, includeDepth + 1, selectorStack);
 			includer.ReleaseInclude(includeResult);
@@ -450,7 +450,7 @@ int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, Spir
 	};
 	
 	for (const auto& r : resources.stage_inputs) {
-		auto& input = destVariant.mStageInputs[r.name];
+		auto& input = spirv.mInputs[r.name];
 		auto& type = compiler->get_type(r.base_type_id);
 
 		input.mLocation = compiler->get_decoration(r.id, spv::DecorationLocation);
@@ -540,13 +540,11 @@ int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, Spir
 	return 0;
 }
 
-int CompileSpirv(const string& filename, const set<string>& macros, const string& optimizationLevel, const set<string>& includePaths, SpirvModule& dest) {
+int CompileSpirv(const fs::path& filename, const set<string>& macros, const string& optimizationLevel, const set<string>& includePaths, SpirvModule& dest) {
 	string source;
 	ReadFile(filename, source);
 
-	fs::path p = fs::path(filename);
-
-	bool hlsl = p.extension().string() == ".hlsl";
+	bool hlsl = filename.extension() == ".hlsl";
 	// TODO: Try to compile with DXC
 	/*
 	if (hlsl) {
@@ -605,7 +603,7 @@ int CompileSpirv(const string& filename, const set<string>& macros, const string
 	if (optimizationLevel == "performance") options.SetOptimizationLevel(shaderc_optimization_level_performance);
 	else if (optimizationLevel == "size") options.SetOptimizationLevel(shaderc_optimization_level_size);
 	Compiler compiler;
-	SpvCompilationResult result = compiler.CompileGlslToSpv(source, vk_to_shaderc(dest.mStage), filename.c_str(), dest.mEntryPoint.c_str(), options);
+	SpvCompilationResult result = compiler.CompileGlslToSpv(source, vk_to_shaderc(dest.mStage), filename.string().c_str(), dest.mEntryPoint.c_str(), options);
 	string msg = result.GetErrorMessage();
 	if (msg.size()) {
 		stringstream ss(msg);
@@ -662,7 +660,7 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 					if (tools.Disassemble(variant.mModules[i].mSpirvBinary, &assembly)) {
 						ofstream out(assemblyOutput.mFilename);
 						out << assembly;
-						printf("Wrote assembly file: %s\n", assemblyOutput.mFilename.c_str());
+						printf("Wrote assembly file: %s\n", assemblyOutput.mFilename.string().c_str());
 					}
 				}
 

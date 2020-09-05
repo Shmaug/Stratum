@@ -3,6 +3,29 @@
 #include <Core/Buffer.hpp>
 #include <Scene/TriangleBvh2.hpp>
 
+struct VertexAttribute {
+	BufferView mBufferView;
+	VertexAttributeType mType;
+	uint32_t mTypeIndex;
+	uint32_t mElementOffset;
+	uint32_t mElementStride;
+	vk::VertexInputRate mInputRate;
+};
+
+namespace std {
+	template<>
+	struct hash<VertexAttribute> {
+		inline std::size_t operator()(const VertexAttribute& v) const {
+			size_t h = 0;
+			hash_combine(h, v.mBufferView);
+			hash_combine(h, v.mType);
+			hash_combine(h, v.mTypeIndex);
+			hash_combine(h, v.mElementOffset);
+			hash_combine(h, v.mElementStride);
+			return h;
+		}
+	};
+}
 
 class Mesh {
 public:
@@ -13,12 +36,12 @@ public:
 		uint32_t mBaseIndex = 0;
 		TriangleBvh2* mBvh = nullptr;
 
-		inline Submesh() {};
+		Submesh() = default;
 		inline Submesh(uint32_t vertexCount, uint32_t baseVertex, uint32_t indexCount, uint32_t baseIndex, TriangleBvh2* bvh = nullptr)
 			: mVertexCount(vertexCount), mBaseVertex(baseVertex), mIndexCount(indexCount), mBaseIndex(baseIndex), mBvh(bvh) {}
 		inline ~Submesh() { safe_delete(mBvh); };
 
-		STRATUM_API void Draw(CommandBuffer* commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
+		STRATUM_API void Draw(stm_ptr<CommandBuffer> commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
 	};
 
 	const std::string mName;
@@ -45,8 +68,8 @@ public:
 		mIndexType = indexType;
 	}
 
-	STRATUM_API void Draw(CommandBuffer* commandBuffer, Camera* camera, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
-	STRATUM_API void Draw(CommandBuffer* commandBuffer, uint32_t submesh, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
+	STRATUM_API void Draw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
+	STRATUM_API void Draw(stm_ptr<CommandBuffer> commandBuffer, uint32_t submesh, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
 
 private:
 	struct PipelineInputInfo {
@@ -57,7 +80,6 @@ private:
 
 	BufferView mIndexBuffer;
 	std::vector<VertexAttribute> mVertexAttributes;
-	std::vector<variant_ptr<Buffer>> mBuffers;
 	std::unordered_map<GraphicsPipeline*, PipelineInputInfo> mPipelineInputs;
 	std::vector<Submesh> mSubmeshes;
 

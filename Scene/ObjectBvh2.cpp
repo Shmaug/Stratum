@@ -3,13 +3,17 @@
 
 using namespace std;
 
-void ObjectBvh2::Build(Object** objects, uint32_t objectCount) {
+ObjectBvh2::ObjectBvh2(const vector<Object*>& objects) {
 	mPrimitives.clear();
 	mNodes.clear();
 
-	mPrimitives.resize(objectCount);
-	for (uint32_t i = 0; i < objectCount; i++)
-		mPrimitives[i] = { objects[i]->Bounds(), objects[i] };
+	mPrimitives.reserve(objects.size());
+	for (uint32_t i = 0; i < objects.size(); i++) {
+		auto bounds = objects[i]->Bounds();
+		if (bounds) mPrimitives.push_back({ *bounds, objects[i] });
+	}
+
+	if (mPrimitives.empty()) return;
 
 	struct BuildTask {
 		uint32_t mParentOffset;
@@ -112,8 +116,9 @@ void ObjectBvh2::Build(Object** objects, uint32_t objectCount) {
 	}
 }
 
-void ObjectBvh2::FrustumCheck(const float4 frustum[6], vector<Object*>& objects, uint32_t mask) {
-	if (mNodes.size() == 0) return;
+vector<Object*> ObjectBvh2::FrustumCheck(const float4 frustum[6], uint32_t mask) const {
+	vector<Object*> objects;
+	if (mNodes.empty()) return objects;
 
 	uint32_t todo[1024];
 	int32_t stackptr = 0;
@@ -123,11 +128,11 @@ void ObjectBvh2::FrustumCheck(const float4 frustum[6], vector<Object*>& objects,
 	while (stackptr >= 0) {
 		int ni = todo[stackptr];
 		stackptr--;
-		const Node& node(mNodes[ni]);
+		const Node& node = mNodes[ni];
 
 		if (node.mRightOffset == 0) { // leaf node
 			const Primitive& p = mPrimitives[node.mStartIndex];
-			if (p.mObject->EnabledHierarchy() && (p.mObject->LayerMask() & mask) && p.mBounds.Intersects(frustum))
+			if (p.mObject->EnabledHierarchy() && (mask == 0 || (p.mObject->LayerMask() & mask)) && p.mBounds.Intersects(frustum))
 				objects.push_back(p.mObject);
 		} else {
 			uint32_t n0 = ni + 1;
@@ -136,11 +141,12 @@ void ObjectBvh2::FrustumCheck(const float4 frustum[6], vector<Object*>& objects,
 			if (mNodes[n1].mBounds.Intersects(frustum)) todo[++stackptr] = n1;
 		}
 	}
+	return objects;
 }
-Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask) {
-	if (mNodes.size() == 0) return nullptr;
+Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask) const {
+	if (mNodes.empty()) return nullptr;
 
-	float ht = 1e20f;
+	float ht = numeric_limits<float>::infinity();
 	Object* hitObject = nullptr;
 
 	uint32_t todo[128];
@@ -155,7 +161,7 @@ Object* ObjectBvh2::Intersect(const Ray& ray, float* t, bool any, uint32_t mask)
 
 		if (node.mRightOffset == 0) {
 			const Primitive& p = mPrimitives[node.mStartIndex];
-			if (!p.mObject->EnabledHierarchy() || (p.mObject->LayerMask() & mask) == 0) continue;
+			if (!p.mObject->EnabledHierarchy() || (mask && (p.mObject->LayerMask() & mask) == 0)) continue;
 
 			float ct;
 			if (!p.mObject->Intersect(ray, &ct, any)) continue;

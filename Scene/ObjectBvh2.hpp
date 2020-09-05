@@ -18,15 +18,13 @@ public:
 		uint32_t mCount;
 	};
 
-	inline ObjectBvh2() {};
-	inline ~ObjectBvh2() {}
+	STRATUM_API ObjectBvh2(const std::vector<Object*>& objects);
 
 	const std::vector<Node>& Nodes() const { return mNodes; }
 	Object* GetObject(uint32_t index) const { return mPrimitives[index].mObject; }
 
-	STRATUM_API void Build(Object** objects, uint32_t objectCount);
-	STRATUM_API void FrustumCheck(const float4 frustum[6], std::vector<Object*>& objects, uint32_t mask);
-	STRATUM_API Object* Intersect(const Ray& ray, float* t, bool any, uint32_t mask);
+	STRATUM_API std::vector<Object*> FrustumCheck(const float4 frustum[6], uint32_t mask) const;
+	STRATUM_API Object* Intersect(const Ray& ray, float* t, bool any, uint32_t mask) const;
 
 private:
 	struct Primitive {

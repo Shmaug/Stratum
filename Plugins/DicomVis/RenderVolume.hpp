@@ -20,18 +20,18 @@ using OrganMask = vk::Flags<OrganMaskBits>;
 class RenderVolume : public Object {
 	private:
 	// The volume loaded directly from the folder
-	Texture* mRawVolume = nullptr;
+	stm_ptr<Texture> mRawVolume = nullptr;
 	// The mask loaded directly from the folder
-	Texture* mRawMask = nullptr;
+	stm_ptr<Texture> mRawMask = nullptr;
 	// The baked volume. This CAN be nullptr, in which case the pipeline will use the raw volume to compute colors on the fly.
-	Texture* mBakedVolume = nullptr;
+	stm_ptr<Texture> mBakedVolume = nullptr;
 	bool mBakeDirty = false;
 	// The gradient of the volume. This CAN be nullptr, in which case the pipeline will compute the gradient on the fly.
-	Texture* mGradient = nullptr;
+	stm_ptr<Texture> mGradient = nullptr;
 	bool mGradientDirty = false;
 	
+	stm_ptr<Buffer> mUniformBuffer;
 	Device* mDevice;
-	Buffer* mUniformBuffer = nullptr;
 
 public:
 	enum class ShadingMode {
@@ -47,9 +47,8 @@ public:
 	ShadingMode mShadingMode = {};
 	OrganMask mOrganMask = {};
 
-	RenderVolume(const std::string& name, Device* device, const fs::path& imageStackFolder);
-  ~RenderVolume();
-	void DrawGui(CommandBuffer* commandBuffer, Camera* camera, GuiContext* gui);
-	void UpdateBake(CommandBuffer* commandBuffer);
-	void Draw(CommandBuffer* commandBuffer, Framebuffer* framebuffer, Camera* camera);
+	PLUGIN_EXPORT RenderVolume(const std::string& name, Device* device, const fs::path& imageStackFolder);
+	PLUGIN_EXPORT void DrawGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui);
+	PLUGIN_EXPORT void UpdateBake(stm_ptr<CommandBuffer> commandBuffer);
+	PLUGIN_EXPORT void Draw(stm_ptr<CommandBuffer> commandBuffer, Framebuffer* framebuffer, Camera* camera);
 };

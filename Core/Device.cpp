@@ -133,43 +133,52 @@ Device::Device(::Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t
 	#pragma endregion
 
 	mAssetManager = new ::AssetManager(this);
-	
-	vector<vk::DescriptorSetLayoutBinding> bindings(6);
-	bindings[0] = { CAMERA_BUFFER_BINDING, 				vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr };
-	bindings[1] = { LIGHT_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr };
-	bindings[2] = { SHADOW_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
-	bindings[3] = { SHADOW_ATLAS_BINDING, 				vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
-	bindings[4] = { ENVIRONMENT_TEXTURE_BINDING, 	vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
-	bindings[5] = { SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, nullptr };
+
+	mDefaultDescriptorSetLayouts.resize(max(PER_CAMERA, PER_OBJECT) + 1);
+	vk::SamplerCreateInfo shadowSamplerInfo;
+	shadowSamplerInfo.addressModeU = shadowSamplerInfo.addressModeV = shadowSamplerInfo.addressModeW = vk::SamplerAddressMode::eClampToBorder;
+	shadowSamplerInfo.anisotropyEnable = false;
+	shadowSamplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
+	shadowSamplerInfo.compareEnable = true;
+	shadowSamplerInfo.compareOp = vk::CompareOp::eLess;
+	shadowSamplerInfo.magFilter = shadowSamplerInfo.minFilter = vk::Filter::eLinear;
+	mDefaultImmutableSamplers.push_back(new Sampler("ShadowSampler", this, shadowSamplerInfo));
+	vector<vk::DescriptorSetLayoutBinding> bindings {
+		{ CAMERA_BUFFER_BINDING, 				vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ LIGHT_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ SHADOW_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ SHADOW_ATLAS_BINDING, 				vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ ENVIRONMENT_TEXTURE_BINDING, 	vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, &mDefaultImmutableSamplers[0]->operator const vk::Sampler&() }
+	};
 	vk::DescriptorSetLayoutCreateInfo layoutInfo = {};
 	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
 	layoutInfo.pBindings = bindings.data(); 
-	mCameraSetLayout = mDevice.createDescriptorSetLayout(layoutInfo);
-	SetObjectName(mCameraSetLayout, "PER_CAMERA DescriptorSetLayout");
+	mDefaultDescriptorSetLayouts[PER_CAMERA] = mDevice.createDescriptorSetLayout(layoutInfo);
+	SetObjectName(mDefaultDescriptorSetLayouts[PER_CAMERA], "PER_CAMERA DescriptorSetLayout");
 
-	bindings.resize(1);
-	bindings[0] = { INSTANCE_BUFFER_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr };
+	bindings = {
+		{ INSTANCE_BUFFER_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr }
+	};
 	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
 	layoutInfo.pBindings = bindings.data(); 
-	mObjectSetLayout = mDevice.createDescriptorSetLayout(layoutInfo);
-	SetObjectName(mObjectSetLayout, "PER_OBJECT DescriptorSetLayout");
+	mDefaultDescriptorSetLayouts[PER_OBJECT] = mDevice.createDescriptorSetLayout(layoutInfo);
+	SetObjectName(mDefaultDescriptorSetLayouts[PER_OBJECT], "PER_OBJECT DescriptorSetLayout");
 }
 Device::~Device() {
 	Flush();
 
-	for (auto& b : mBufferPool) safe_delete(b.mResource);
-	for (auto& kp : mTexturePool)
-		for (auto& t : kp.second)
-			safe_delete(t.mResource);
-	for (auto& kp : mDescriptorSetPool)
-		for (auto& ds : kp.second)
-			safe_delete(ds.mResource);
-			
+	mBufferPool.clear();
+	mTexturePool.clear();
+	mDescriptorSetPool.clear();
+
 	delete mAssetManager;
 
-	vkDestroyDescriptorSetLayout(mDevice, mCameraSetLayout, nullptr);
-	vkDestroyDescriptorSetLayout(mDevice, mObjectSetLayout, nullptr);
-	
+	for (auto& ds : mDefaultDescriptorSetLayouts)
+		if (ds)
+			vkDestroyDescriptorSetLayout(mDevice, ds, nullptr);
+	for (auto& s : mDefaultImmutableSamplers) delete s;
+
 	size_t size = 0;
 	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, nullptr);
 	char* cacheData = new char[size];
@@ -376,8 +385,8 @@ void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 	}
 }
 
-Buffer* Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	Buffer* b = nullptr;
+stm_ptr<Buffer> Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
+	stm_ptr<Buffer> b;
 	mBufferPoolMutex.lock();
 	auto best = mBufferPool.end();
 	for (auto it = mBufferPool.begin(); it != mBufferPool.end(); it++)
@@ -393,8 +402,8 @@ Buffer* Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::Buf
 	mBufferPoolMutex.unlock();
 	return b ? b : new Buffer(name, this, size, usage, memoryProperties);
 }
-DescriptorSet* Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
-	DescriptorSet* ds = nullptr;
+stm_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
+	stm_ptr<DescriptorSet> ds;
 	mDescriptorSetPoolMutex.lock();
 	auto& sets = mDescriptorSetPool[layout];
 	if (sets.size()) {
@@ -406,8 +415,8 @@ DescriptorSet* Device::GetPooledDescriptorSet(const string& name, vk::Descriptor
 	mDescriptorSetPoolMutex.unlock();
 	return ds ? ds : new DescriptorSet(name, this, layout);
 }
-Texture* Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	Texture* tex = nullptr;
+stm_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
+	stm_ptr<Texture> tex;
 	mTexturePoolMutex.lock();
 	auto& pool = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount)];
 	auto best = pool.end();
@@ -421,32 +430,31 @@ Texture* Device::GetPooledTexture(const string& name, const vk::Extent3D& extent
 	mTexturePoolMutex.unlock();
 	return tex ? tex : new Texture(name, this, nullptr, 0, extent, format, mipLevels, sampleCount, usage, memoryProperties);
 }
-void Device::PoolResource(Buffer* buffer) {
+void Device::PoolResource(stm_ptr<Buffer> buffer) {
 	mBufferPoolMutex.lock();
 	mBufferPool.push_back({ mFrameCount, buffer });
 	mBufferPoolMutex.unlock();
 }
-void Device::PoolResource(DescriptorSet* descriptorSet) {
+void Device::PoolResource(stm_ptr<DescriptorSet> descriptorSet) {
 	mDescriptorSetPoolMutex.lock();
 	mDescriptorSetPool[descriptorSet->Layout()].push_back({ mFrameCount, descriptorSet });
 	mDescriptorSetPoolMutex.unlock();
 }
-void Device::PoolResource(Texture* texture) {
+void Device::PoolResource(stm_ptr<Texture> texture) {
 	mTexturePoolMutex.lock();
 	mTexturePool[HashTextureData(texture)].push_back({ mFrameCount, texture });
 	mTexturePoolMutex.unlock();
 }
 
-void Device::PurgePooledResources(uint32_t maxAge) {
+void Device::PurgeResourcePools(uint32_t maxAge) {
 	mCommandBufferPoolMutex.lock();
-	for (auto& kp : mCommandBufferPool)
-		for (auto& it = kp.second.begin(); it != kp.second.end();) {
+	for (auto&[pool, commandBuffers] : mCommandBufferPool)
+		for (auto& it = commandBuffers.begin(); it != commandBuffers.end();) {
 			it->mResource->CheckDone();
 			if (it->mResource->mState != CommandBuffer::CommandBufferState::eDone) continue;
 			it->mResource->Clear();
 			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				safe_delete(it->mResource);
-				it = kp.second.erase(it);
+				it = commandBuffers.erase(it);
 			} else it++;
 		}
 	mCommandBufferPoolMutex.unlock();
@@ -454,31 +462,28 @@ void Device::PurgePooledResources(uint32_t maxAge) {
 	mBufferPoolMutex.lock();
 	for (auto& it = mBufferPool.begin(); it != mBufferPool.end();)
 		if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-			safe_delete(it->mResource);
 			it = mBufferPool.erase(it);
 		} else it++;
 	mBufferPoolMutex.unlock();
 			
 	mTexturePoolMutex.lock();
-	for (auto& kp : mTexturePool)
-		for (auto& it = kp.second.begin(); it != kp.second.end();)
+	for (auto&[h, textures] : mTexturePool)
+		for (auto& it = textures.begin(); it != textures.end();)
 			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				safe_delete(it->mResource);
-				it = kp.second.erase(it);
+				it = textures.erase(it);
 			} else it++;
 	mTexturePoolMutex.unlock();
 	
 	mDescriptorSetPoolMutex.lock();
-	for (auto& kp : mDescriptorSetPool)
-		for (auto& it = kp.second.begin(); it != kp.second.end();)
+	for (auto&[layout, sets] : mDescriptorSetPool)
+		for (auto& it = sets.begin(); it != sets.end();)
 			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				safe_delete(it->mResource);
-				it = kp.second.erase(it);
+				it = sets.erase(it);
 			} else it++;
 	mDescriptorSetPoolMutex.unlock();
 }
 
-CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBufferLevel level) {
+stm_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name, vk::CommandBufferLevel level) {
 	// get a commandpool for the current thread
 	mCommandPoolMutex.lock();
 	vk::CommandPool& commandPool = mCommandPools[this_thread::get_id()];
@@ -496,7 +501,7 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBuff
 		if (!pool.empty()) {
 			pool.front().mResource->CheckDone();
 			if (pool.front().mResource->mState == CommandBuffer::CommandBufferState::eDone) {
-				CommandBuffer* commandBuffer = pool.front().mResource;
+				stm_ptr<CommandBuffer> commandBuffer = pool.front().mResource;
 				pool.pop_front();
 				commandBuffer->Reset(name);
 				return commandBuffer;
@@ -506,7 +511,7 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::CommandBuff
 
 	return new CommandBuffer(name, this, commandPool, level);
 }
-void Device::Execute(CommandBuffer* commandBuffer) {
+void Device::Execute(stm_ptr<CommandBuffer> commandBuffer) {
 	commandBuffer->CheckDone();
 	if (commandBuffer->mState != CommandBuffer::CommandBufferState::eRecording)
 		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Execute() expected CommandBuffer to be in CommandBufferState::eRecording\n");
@@ -544,16 +549,9 @@ void Device::Execute(CommandBuffer* commandBuffer) {
 }
 void Device::Flush() {
 	mCommandBufferPoolMutex.lock();
-
 	mDevice.waitIdle();
-
 	for (auto& kp : mCommandBufferPool)
-		while (!kp.second.empty()) {
-			CommandBuffer* commandBuffer = kp.second.front().mResource;
-			kp.second.pop_front();
-			safe_delete(commandBuffer);
-		}
-	
+		kp.second.clear();
 	mCommandBufferPoolMutex.unlock();
 }
 

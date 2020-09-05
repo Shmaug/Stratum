@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Device.hpp>
+#include <Data/Asset.hpp>
 
 class Sampler {
 public:
@@ -10,30 +10,27 @@ public:
 	STRATUM_API Sampler(const std::string& name, Device* device, float maxLod, vk::Filter filter = vk::Filter::eLinear, vk::SamplerAddressMode addressMode = vk::SamplerAddressMode::eRepeat, float maxAnisotropy = 16);
 	STRATUM_API ~Sampler();
 
-	inline operator vk::Sampler() const { return mSampler; }
+	inline operator const vk::Sampler&() const { return mSampler; }
 
 private:
 	Device* mDevice;
 	vk::Sampler mSampler;
 };
 
-class Texture {
+class Texture : public Asset {
 public:
-	const std::string mName;
-
 	// Construct image or image array from file(s)
-	STRATUM_API Texture(const std::string& name, ::Device* device, const std::vector<std::string>& files, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags());
-	inline Texture(const std::string& name, ::Device* device, const std::string& filename, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags())
-		: Texture(name, device, std::vector<std::string> { filename }, loadFlags, createFlags) {}
+	STRATUM_API Texture(const std::vector<fs::path>& files, ::Device* device, const std::string& name, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags());
+	inline Texture(const fs::path& filename, ::Device* device, const std::string& name, TextureLoadFlags loadFlags = TextureLoadFlags::eSrgb, vk::ImageCreateFlags createFlags = vk::ImageCreateFlags())
+		: Texture(std::vector<fs::path> { filename }, device, name, loadFlags, createFlags) {}
 
 	// Construct from pixel data and metadata. Will generate mip maps if mipLevels = 0
-	STRATUM_API Texture(const std::string& name, Device* device, const void* data, vk::DeviceSize dataSize, 
+	STRATUM_API Texture(const std::string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, 
 		const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	
 	STRATUM_API ~Texture();
 
-	inline ::Device* Device() const { return mDevice; };
 	inline operator vk::Image() const { return mImage; }
 
 	inline vk::Extent3D Extent() const { return mExtent; }
@@ -50,13 +47,12 @@ public:
 	
 	// Texture must have been created with the appropriate mipmap levels
 	// Texture must support vk::ImageAspect::eColor
-	STRATUM_API void GenerateMipMaps(CommandBuffer* commandBuffer);
+	STRATUM_API void GenerateMipMaps(stm_ptr<CommandBuffer> commandBuffer);
 
 private:
 	friend class CommandBuffer;
 	friend class AssetManager;
 	friend class RenderPass;
-	::Device* mDevice = nullptr;
 	DeviceMemoryAllocation mMemory;
 	
 	vk::Extent3D mExtent = 0;

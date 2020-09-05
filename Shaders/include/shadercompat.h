@@ -70,12 +70,16 @@ struct GlyphRect {
 #undef uint
 #else
 
+#pragma static_sampler ShadowSampler 
+
 #define STM_PUSH_CONSTANTS \
 float3 AmbientLight; \
 uint stmPad0; \
 float2 ShadowTexelSize; \
 uint StereoEye; \
 uint LightCount;
+
+#pragma static_sampler ShadowSampler maxAnisotropy=0 maxLod=0 addressMode=clampBorder borderColor=floatOpaqueWhite compareOp=less
 
 #define STRATUM_MATRIX_V Camera.View[StereoEye]
 #define STRATUM_MATRIX_P Camera.Projection[StereoEye]

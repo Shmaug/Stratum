@@ -4,21 +4,18 @@
 
 struct Sphere {
 	float3 mCenter;
-	float mRadius;
-	
-	inline Sphere() : mCenter(float3()), mRadius(0) {}
+	float mRadius = 0;
+	inline Sphere() = default;
 	inline Sphere(const float3& center, float radius) : mCenter(center), mRadius(radius) {}
 };
 struct AABB {
-	float3 mMin = 0;
-	float3 mMax = 0;
+	float3 mMin;
+	float3 mMax;
 
-	AABB() {}
-	AABB(const float3& min, const float3& max) : mMin(min), mMax(max) {}
-	AABB(const AABB& aabb) : mMin(aabb.mMin), mMax(aabb.mMax) {}
-	AABB(const AABB& aabb, const float4x4& transform) : AABB(aabb) {
-		*this *= transform;
-	}
+	AABB() = default;
+	inline AABB(const float3& min, const float3& max) : mMin(min), mMax(max) {}
+	inline AABB(const AABB& aabb) : mMin(aabb.mMin), mMax(aabb.mMax) {}
+	inline AABB(const AABB& aabb, const float4x4& transform) : AABB(aabb) { *this *= transform; }
 
 	inline float3 Center() const { return (mMax + mMin) * .5f; }
 	inline float3 HalfSize() const { return (mMax - mMin) * .5f; }
@@ -100,7 +97,7 @@ struct Ray {
 	float3 mOrigin;
 	float3 mDirection;
 
-	inline Ray() : mOrigin(float3()), mDirection(float3(0,0,1)) {};
+	inline Ray() = default;
 	inline Ray(const float3& ro, const float3& rd) : mOrigin(ro), mDirection(rd) {};
 
 	inline float Intersect(const float4& plane) const {

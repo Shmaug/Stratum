@@ -8,7 +8,7 @@ public:
 	STRATUM_API ~PointerRenderer();
 	
 	inline virtual uint32_t RenderQueue(const std::string& pass) override { return 5000; }
-	inline virtual AABB Bounds() override { UpdateTransform(); return mAABB; }
+	inline virtual std::optional<AABB> Bounds() override { UpdateTransform(); return mAABB; }
 
 	inline void RayDistance(float d) { mRayDistance = d; }
 	inline void Color(const float4& c) { mColor = c; }
@@ -25,6 +25,6 @@ protected:
 
 	AABB mAABB;
 	
-	STRATUM_API virtual void OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) override;
+	STRATUM_API virtual void OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) override;
 	STRATUM_API virtual bool UpdateTransform() override;
 };

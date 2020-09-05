@@ -1,8 +1,4 @@
 #include <Data/AssetManager.hpp>
-#include <Data/Font.hpp>
-#include <Data/Mesh.hpp>
-#include <Core/Pipeline.hpp>
-#include <Data/Texture.hpp>
 
 using namespace std;
 
@@ -18,52 +14,4 @@ AssetManager::AssetManager(Device* device) : mDevice(device) {
 	mTransparentBlackTexture = new Texture("TransparentBlack", device, transparentBlackPixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
 	mBumpTexture = new Texture("Bump", device, bumpPixels, 4, { 1, 1, 1 }, vk::Format::eR8G8B8A8Unorm, 1);
 	mNoiseTexture = new Texture("RGBA Noise", device, noisePixels, 4*256*256, { 256, 256, 1 }, vk::Format::eR8G8B8A8Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage);
-}
-AssetManager::~AssetManager() {
-	delete mWhiteTexture;
-	delete mBlackTexture;
-	delete mTransparentBlackTexture;
-	delete mBumpTexture;
-	delete mNoiseTexture;
-	for (auto& asset : mAssets)
-		switch (asset.second.index()) {
-			case 0:
-				delete get<Pipeline*>(asset.second);
-				break;
-			case 1:
-				delete get<Texture*>(asset.second);
-				break;
-			case 2:
-				delete get<Font*>(asset.second);
-				break;
-		}
-}
-
-Pipeline* AssetManager::LoadPipeline(const string& filename) {
-	mMutex.lock();
-	auto& asset = mAssets[filename];
-	if (asset.index() != 0 || get<Pipeline*>(asset) == nullptr) asset = new Pipeline(filename, mDevice, filename);
-	mMutex.unlock();
-	return get<Pipeline*>(asset);
-}
-Texture* AssetManager::LoadTexture(const string& filename, TextureLoadFlags flags) {
-	mMutex.lock();
-	auto& asset = mAssets[filename + to_string((uint32_t)flags)];
-	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(filename, mDevice, filename, flags);
-	mMutex.unlock();
-	return get<Texture*>(asset);
-}
-Texture* AssetManager::LoadCubemap(const string& posx, const string& negx, const string& posy, const string& negy, const string& posz, const string& negz, TextureLoadFlags flags) {
-	mMutex.lock();
-	auto& asset = mAssets[negx + posx + negy + posy + negz + posz + to_string((uint32_t)flags)];
-	if (asset.index() != 1 || get<Texture*>(asset) == nullptr) asset = new Texture(negx + " Cube", mDevice, { posx, negx, posy, negy, posz, negz }, flags, vk::ImageCreateFlagBits::eCubeCompatible);
-	mMutex.unlock();
-	return get<Texture*>(asset);
-}
-Font* AssetManager::LoadFont(const string& filename) {
-	mMutex.lock();
-	auto& asset = mAssets[filename];
-	if (asset.index() != 2 || get<Font*>(asset) == nullptr) asset = new Font(filename, mDevice, filename);
-	mMutex.unlock();
-	return get<Font*>(asset);
 }

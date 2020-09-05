@@ -23,11 +23,11 @@ public:
 		T mValue;
 		T mTangentIn;
 		T mTangentOut;
-		TangentMode mTangentModeIn;
-		TangentMode mTangentModeOut;
+		TangentMode mTangentModeIn = TangentMode::eSmooth;
+		TangentMode mTangentModeOut = TangentMode::eSmooth;
 	};
 
-	inline AnimationCurve() {};
+	AnimationCurve() = default;
 	inline AnimationCurve(const std::vector<Keyframe>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
 		: mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
 

@@ -7,13 +7,13 @@ PointerRenderer::~PointerRenderer() {}
 
 bool PointerRenderer::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
-	mAABB.mMin = min(WorldPosition(), WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance));
-	mAABB.mMax = max(WorldPosition(), WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance));
+	mAABB.mMin = min(WorldPosition(), WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance)) - mWidth;
+	mAABB.mMax = max(WorldPosition(), WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance)) + mWidth;
 	return true;
 }
 
-void PointerRenderer::OnDraw(CommandBuffer* commandBuffer, Camera* camera, DescriptorSet* perCamera) {
-	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->LoadPipeline("Shaders/pointer.stmb")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
+void PointerRenderer::OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) {
+	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->Load<Pipeline>("Shaders/pointer.stmb", "Pointer")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
 	commandBuffer->BindPipeline(pipeline);
 
 	float3 p0 = WorldPosition();

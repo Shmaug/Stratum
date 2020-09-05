@@ -2,6 +2,16 @@
 
 #include <Core/Instance.hpp>
 
+// Represents a usable region of device memory
+struct DeviceMemoryAllocation {
+	vk::DeviceMemory mDeviceMemory;
+	vk::DeviceSize mOffset;
+	vk::DeviceSize mSize;
+	uint32_t mMemoryType;
+	void* mMapped;
+	std::string mTag;
+};
+
 class Device {
 private:
 	vk::Device mDevice;
@@ -16,20 +26,20 @@ public:
 	template<typename T>
 	inline void Destroy(const T& obj) { mDevice.destroy(obj); }
 	
-	STRATUM_API Buffer* GetPooledBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API DescriptorSet* GetPooledDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout);
-	STRATUM_API Texture* GetPooledTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API stm_ptr<Buffer> GetPooledBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API stm_ptr<DescriptorSet> GetPooledDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout);
+	STRATUM_API stm_ptr<Texture> GetPooledTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(Buffer* resource);
+	STRATUM_API void PoolResource(stm_ptr<Buffer> resource);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(DescriptorSet* resource);
+	STRATUM_API void PoolResource(stm_ptr<DescriptorSet> resource);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(Texture* resource);
+	STRATUM_API void PoolResource(stm_ptr<Texture> resource);
 
-	STRATUM_API void PurgePooledResources(uint32_t maxAge);
+	STRATUM_API void PurgeResourcePools(uint32_t maxAge);
 
-	STRATUM_API CommandBuffer* GetCommandBuffer(const std::string& name = "Command Buffer", vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void Execute(CommandBuffer* commandBuffer);
+	STRATUM_API stm_ptr<CommandBuffer> GetCommandBuffer(const std::string& name = "Command Buffer", vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API void Execute(stm_ptr<CommandBuffer> commandBuffer);
 	// Finish all work being done on this device
 	STRATUM_API void Flush();
 
@@ -66,14 +76,14 @@ public:
 	inline const vk::PhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
 	inline uint64_t FrameCount() const { return mFrameCount; }
 
+	inline vk::DescriptorSetLayout DefaultDescriptorSetLayout(uint32_t index) const { return index < mDefaultDescriptorSetLayouts.size() ? mDefaultDescriptorSetLayouts[index] : nullptr; }
+	inline uint32_t DefaultDescriptorSetCount() const { return (uint32_t)mDefaultDescriptorSetLayouts.size(); }
+
 	inline const vk::PhysicalDeviceLimits& Limits() const { return mLimits; }
 	inline vk::PipelineCache PipelineCache() const { return mPipelineCache; }
 
 	inline ::AssetManager* AssetManager() const { return mAssetManager; }
 	inline ::Instance* Instance() const { return mInstance; }
-
-	inline vk::DescriptorSetLayout PerCameraSetLayout() const { return mCameraSetLayout; }
-	inline vk::DescriptorSetLayout PerObjectSetLayout() const { return mObjectSetLayout; }
 
 	inline operator vk::Device() const { return mDevice; }
 
@@ -92,7 +102,7 @@ private:
 	template<typename T>
 	struct PooledResource {
 		uint64_t mLastFrameUsed;
-		T* mResource;
+		stm_ptr<T> mResource;
 	};
 
 	friend class DescriptorSet;
@@ -136,16 +146,18 @@ private:
 
 	mutable std::mutex mBufferPoolMutex;
 	std::list<PooledResource<Buffer>> mBufferPool;
+
 	mutable std::mutex mDescriptorSetPoolMutex;
 	std::unordered_map<vk::DescriptorSetLayout, std::list<PooledResource<DescriptorSet>>> mDescriptorSetPool;
+	
 	mutable std::mutex mTexturePoolMutex;
 	std::unordered_map<size_t, std::list<PooledResource<Texture>>> mTexturePool;
 
 	mutable std::mutex mMemoryMutex;
 	std::unordered_map<uint32_t, std::vector<Allocation>> mMemoryAllocations;
 
-	vk::DescriptorSetLayout mCameraSetLayout;
-	vk::DescriptorSetLayout mObjectSetLayout;
+	std::vector<Sampler*> mDefaultImmutableSamplers;
+	std::vector<vk::DescriptorSetLayout> mDefaultDescriptorSetLayouts;
 };
 
 class Semaphore {

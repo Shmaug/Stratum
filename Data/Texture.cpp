@@ -1,8 +1,8 @@
 #include <cmath>
 
 #include <Data/AssetManager.hpp>
-#include <Core/Pipeline.hpp>
 #include <Data/Texture.hpp>
+#include <Data/Pipeline.hpp>
 
 #include <Core/Buffer.hpp>
 #include <Core/CommandBuffer.hpp>
@@ -41,25 +41,25 @@ Sampler::~Sampler() {
 }
 
 
-uint8_t* load(const string& filename, TextureLoadFlags loadFlags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
+uint8_t* load(const fs::path& filename, TextureLoadFlags loadFlags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
 	uint8_t* pixels = nullptr;
 	pixelSize = 0;
 	x, y, channels;
-	stbi_info(filename.c_str(), &x, &y, &channels);
+	stbi_info(filename.string().c_str(), &x, &y, &channels);
 
 	int desiredChannels = 4;
-	if (stbi_is_16_bit(filename.c_str())) {
-		pixels = (uint8_t*)stbi_load_16(filename.c_str(), &x, &y, &channels, desiredChannels);
+	if (stbi_is_16_bit(filename.string().c_str())) {
+		pixels = (uint8_t*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(uint16_t);
-	} else if (stbi_is_hdr(filename.c_str())) {
-		pixels = (uint8_t*)stbi_loadf(filename.c_str(), &x, &y, &channels, desiredChannels);
+	} else if (stbi_is_hdr(filename.string().c_str())) {
+		pixels = (uint8_t*)stbi_loadf(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(float);
 	} else {
-		pixels = (uint8_t*)stbi_load(filename.c_str(), &x, &y, &channels, desiredChannels);
+		pixels = (uint8_t*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(uint8_t);
 	}
 	if (!pixels) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load image: %s\n", filename.c_str());
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load image: %s\n", filename.string().c_str());
 		throw;
 	}
 	if (desiredChannels > 0) channels = desiredChannels;
@@ -92,8 +92,8 @@ uint8_t* load(const string& filename, TextureLoadFlags loadFlags, uint32_t& pixe
 	return pixels;
 }
 
-Texture::Texture(const string& name, ::Device* device, const vector<string>& files, TextureLoadFlags loadFlags, vk::ImageCreateFlags createFlags)
-	: mName(name), mDevice(device), mTiling(vk::ImageTiling::eOptimal), mCreateFlags(createFlags), mArrayLayers((uint32_t)files.size()) {
+Texture::Texture(const vector<fs::path>& files, ::Device* device, const string& name, TextureLoadFlags loadFlags, vk::ImageCreateFlags createFlags)
+	: Asset(files[0], device, name), mTiling(vk::ImageTiling::eOptimal), mCreateFlags(createFlags), mArrayLayers((uint32_t)files.size()) {
 	int32_t x, y, channels;
 	vk::Format format;
 	uint32_t size;
@@ -116,8 +116,8 @@ Texture::Texture(const string& name, ::Device* device, const vector<string>& fil
 
 	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
 
-	CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
-	Buffer* uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	stm_ptr<CommandBuffer> commandBuffer = mDevice->GetCommandBuffer();
+	stm_ptr<Buffer> uploadBuffer = commandBuffer->GetBuffer(name + " Copy", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	for (uint32_t j = 0; j < pixels.size(); j++)
 		memcpy((uint8_t*)uploadBuffer->MappedData() + j * dataSize, pixels[j], dataSize);
 
@@ -140,7 +140,7 @@ Texture::Texture(const string& name, ::Device* device, const vector<string>& fil
 		stbi_image_free(pixels[i]);
 }
 Texture::Texture(const string& name, ::Device* device, const void* data, vk::DeviceSize dataSize, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties)
-		: mName(name), mDevice(device), mExtent(extent), mArrayLayers(1), mMipLevels(mipLevels), mFormat(format), mSampleCount(numSamples), mUsage(usage), mMemoryProperties(properties), mTiling(vk::ImageTiling::eOptimal) {
+		: Asset("", device, name), mExtent(extent), mArrayLayers(1), mMipLevels(mipLevels), mFormat(format), mSampleCount(numSamples), mUsage(usage), mMemoryProperties(properties), mTiling(vk::ImageTiling::eOptimal) {
 	
 	if (mipLevels == 0) mMipLevels = (uint32_t)std::floor(std::log2(std::max(mExtent.width, mExtent.height))) + 1;
 
@@ -151,7 +151,7 @@ Texture::Texture(const string& name, ::Device* device, const void* data, vk::Dev
 
 		Buffer uploadBuffer(name + " Copy", mDevice, data, dataSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
-		CommandBuffer* commandBuffer = mDevice->GetCommandBuffer();
+		stm_ptr<CommandBuffer> commandBuffer = mDevice->GetCommandBuffer();
 		commandBuffer->TransitionBarrier(this, vk::ImageLayout::eTransferDstOptimal);
 
 		vk::BufferImageCopy copyRegion = {};
@@ -229,11 +229,8 @@ void Texture::Create() {
 	mMemory = mDevice->AllocateMemory(memRequirements, mMemoryProperties, mName);
 	((vk::Device)*mDevice).bindImageMemory(mImage, mMemory.mDeviceMemory, mMemory.mOffset);
 	
-	mAspectFlags = {};
+	mAspectFlags = vk::ImageAspectFlagBits::eColor;
 	switch (mFormat) {
-	default:
-		mAspectFlags = vk::ImageAspectFlagBits::eColor;
-		break;
 	case vk::Format::eD16Unorm:
 	case vk::Format::eD32Sfloat:
 		mAspectFlags = vk::ImageAspectFlagBits::eDepth;
@@ -250,7 +247,7 @@ void Texture::Create() {
 	mLastKnownAccessFlags = {};
 }
 
-void Texture::GenerateMipMaps(CommandBuffer* commandBuffer) {
+void Texture::GenerateMipMaps(stm_ptr<CommandBuffer> commandBuffer) {
 	// Transition mip 0 to vk::ImageLayout::eTransferSrcOptimal
 	commandBuffer->TransitionBarrier(*this, { mAspectFlags, 0, 1, 0, mArrayLayers }, mLastKnownStageFlags, vk::PipelineStageFlagBits::eTransfer, mLastKnownLayout, vk::ImageLayout::eTransferSrcOptimal);
 	// Transition all other mips to vk::ImageLayout::eTransferDstOptimal

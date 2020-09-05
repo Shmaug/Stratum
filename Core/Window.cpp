@@ -118,26 +118,28 @@ Window::~Window() {
 	#endif
 }
 
-vk::Image Window::AcquireNextImage() {
-	if (!mSwapchain) return nullptr;
+void Window::AcquireNextImage() {
+	if (!mSwapchain && mDevice) CreateSwapchain(mDevice);
+	if (!mSwapchain) return;
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
 	auto result = ((vk::Device)*mDevice).acquireNextImageKHR(mSwapchain, std::numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
 	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
 		CreateSwapchain(mDevice);
-		if (!mSwapchain) return nullptr; // swapchain failed to create (happens when window is minimized, etc)
+		if (!mSwapchain) return; // swapchain failed to create (happens when window is minimized, etc)
 		result = ((vk::Device)*mDevice).acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
 	}
 	mBackBufferIndex = result.value;
-	return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].first;
 }
 
-void Window::Present(const vector<vk::Semaphore>& waitSemaphores) {
+void Window::Present(const set<vk::Semaphore>& waitSemaphores) {
 	if (!mSwapchain) return;
 
+	vector<vk::Semaphore> vec(waitSemaphores.begin(), waitSemaphores.end());
+
 	vk::PresentInfoKHR presentInfo = {};
-	presentInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
-	presentInfo.pWaitSemaphores = waitSemaphores.data();
+	presentInfo.waitSemaphoreCount = (uint32_t)vec.size();
+	presentInfo.pWaitSemaphores = vec.data();
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &mSwapchain;
 	presentInfo.pImageIndices = &mBackBufferIndex;
@@ -314,7 +316,7 @@ void Window::CreateSwapchain(::Device* device) {
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
 
-	CommandBuffer* commandBuffer = device->GetCommandBuffer();
+	stm_ptr<CommandBuffer> commandBuffer = device->GetCommandBuffer();
 	
 	// create per-frame image views and semaphores
 	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) {
@@ -342,7 +344,6 @@ void Window::CreateSwapchain(::Device* device) {
 	device->Execute(commandBuffer);
 	commandBuffer->Wait();
 }
-
 void Window::DestroySwapchain() {
 	mDevice->Flush();
 
