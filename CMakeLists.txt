@@ -1,9 +1,25 @@
 cmake_minimum_required(VERSION 3.0)
+include(CMakeFindDependencyMacro)
 
 project(Stratum)
 
+find_package(Git REQUIRED)
+
 option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
+option(GIT_SUBMODULE "Check submodules during build" ON)
+
 set(STRATUM_HOME ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Directory of Stratum")
+
+execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+								WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+								RESULT_VARIABLE GIT_SUBMOD_RESULT)
+if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+		message(FATAL_ERROR "git submodule update --init failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+endif()
+
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/extern/repo/CMakeLists.txt")
+    message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+endif()
 
 list(APPEND CMAKE_PREFIX_PATH "${STRATUM_HOME}/ThirdParty")
 
@@ -11,10 +27,10 @@ include("${STRATUM_HOME}/build/stratum.cmake")
 
 add_subdirectory("ShaderCompiler/")
 
-find_package(Vulkan REQUIRED)
-find_package(assimp REQUIRED)
-find_package(msdfgen REQUIRED)
-find_package(OpenXR REQUIRED)
+find_dependency(Vulkan REQUIRED)
+find_dependency(assimp REQUIRED)
+find_dependency(msdfgen REQUIRED)
+find_dependency(OpenXR REQUIRED)
 
 file(GLOB STRATUM_CPP Core/*.cpp Data/*.cpp Input/*.cpp Util/*.cpp Scene/*.cpp Scene/Renderers/*.cpp)
 add_executable(Stratum ${STRATUM_CPP} "build/stratum.rc" "main.cpp" "Util/Profiler.cpp" "Util/Tokenizer.cpp")

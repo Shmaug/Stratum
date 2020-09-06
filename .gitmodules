@@ -1,18 +1,18 @@
-[submodule "ThirdParty/src/assimp"]
-  path = ThirdParty/src/assimp
+[submodule "extern/src/assimp"]
+	path = extern/src/assimp
   url = https://github.com/assimp/assimp
-[submodule "ThirdParty/src/msdfgen"]
-	path = ThirdParty/src/msdfgen
+[submodule "extern/src/msdfgen"]
+	path = extern/src/msdfgen
 	url = https://github.com/Chlumsky/msdfgen
-[submodule "ThirdParty/src/OpenXR-SDK"]
-  path = ThirdParty/src/OpenXR-SDK
+[submodule "extern/src/OpenXR-SDK"]
+	path = extern/src/OpenXR-SDK
   url = https://github.com/KhronosGroup/OpenXR-SDK
-[submodule "ThirdParty/src/shaderc"]
-	path = ThirdParty/src/shaderc
+[submodule "extern/src/shaderc"]
+	path = extern/src/shaderc
 	url = https://github.com/google/shaderc
-[submodule "ThirdParty/src/SPIRV-Cross"]
-	path = ThirdParty/src/SPIRV-Cross
+[submodule "extern/src/SPIRV-Cross"]
+	path = extern/src/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross
-[submodule "ThirdParty/src/freetype2"]
-	path = ThirdParty/src/freetype2
+[submodule "extern/src/freetype2"]
+	path = extern/src/freetype2
 	url = git://git.sv.nongnu.org/freetype/freetype2.git
