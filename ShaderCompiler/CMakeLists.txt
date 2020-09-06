@@ -3,10 +3,12 @@ cmake_minimum_required(VERSION 3.0)
 project(ShaderCompiler)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(shaderc REQUIRED)
+find_package(Vulkan REQUIRED)
+find_package(spirv_cross_core REQUIRED)
+find_package(SPIRV-Tools REQUIRED)
 
 add_executable(ShaderCompiler "ShaderCompiler.cpp")
-target_link_libraries(ShaderCompiler shaderc SPIRV-Tools spirv-cross-core)
+target_link_libraries(ShaderCompiler shaderc_combined SPIRV-Tools-static spirv-cross-core)
 
 set_target_properties(ShaderCompiler PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/"

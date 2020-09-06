@@ -1,21 +1,29 @@
 cmake_minimum_required(VERSION 3.0)
 
+project(Stratum)
+
 option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 set(STRATUM_HOME ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Directory of Stratum")
 
-include("${STRATUM_HOME}/build/stratum.cmake")
+list(APPEND CMAKE_PREFIX_PATH "${STRATUM_HOME}/ThirdParty")
 
-add_compile_definitions(STRATUM_VERSION_MAJOR=1)
-add_compile_definitions(STRATUM_VERSION_MINOR=1)
+include("${STRATUM_HOME}/build/stratum.cmake")
 
 add_subdirectory("ShaderCompiler/")
 
-project(Stratum)
+find_package(Vulkan REQUIRED)
+find_package(assimp REQUIRED)
+find_package(msdfgen REQUIRED)
+find_package(OpenXR REQUIRED)
 
 file(GLOB STRATUM_CPP Core/*.cpp Data/*.cpp Input/*.cpp Util/*.cpp Scene/*.cpp Scene/Renderers/*.cpp)
 add_executable(Stratum ${STRATUM_CPP} "build/stratum.rc" "main.cpp" "Util/Profiler.cpp" "Util/Tokenizer.cpp")
 
-target_link_libraries(Stratum msdfgen)
+stm_compile_definitions(Stratum)
+
+target_link_libraries(Stratum Vulkan assimp::assimp msdfgen::msdfgen OpenXR::openxr_loader)
+
+target_compile_definitions(Stratum PUBLIC STRATUM_CORE)
 
 set_target_properties(Stratum PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/"
@@ -27,8 +35,6 @@ set_target_properties(Stratum PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/"
 	LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/"
 	ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lib/")
-
-target_compile_definitions(Stratum PUBLIC STRATUM_CORE)
 
 if(WIN32)
 	configure_file(
@@ -47,16 +53,11 @@ else()
 	target_link_libraries(Stratum
 		"stdc++fs"
 		"pthread"
-		"libvulkan.so.1"
 		"libX11.so"
 		"libXrandr.so"
 		"libX11-xcb.so"
 		"libxcb-keysyms.so"
-		"libxcb-randr.so"
-		"libopenxr_loader.a"
-		"libzlibstatic.a"
-		"libassimp.a"
-		"libIrrXML.a")
+		"libxcb-randr.so")
 endif()
 
 # Create symbolic link to Assets folder so the executable can find assets

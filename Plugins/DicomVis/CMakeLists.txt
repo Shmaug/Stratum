@@ -1,7 +1,21 @@
 cmake_minimum_required (VERSION 3.0)
 
 add_library(DicomVis MODULE "DicomVis.cpp" "ImageLoader.cpp" "RenderVolume.cpp")
-link_plugin(DicomVis)
+stm_compile_definitions(DicomVis)
+
+add_dependencies(DicomVis Stratum)
+target_link_libraries(DicomVis "${PROJECT_BINARY_DIR}/lib/Stratum.lib")
+
+set_target_properties(DicomVis PROPERTIES
+	RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/Plugins"
+	LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/Plugins"
+	ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/lib/Plugins"
+	RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin/Plugins"
+	LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin/Plugins"
+	ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/lib/Plugins"
+	RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Plugins"
+	LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Plugins"
+	ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lib/Plugins")
 
 if(WIN32)
 	if(DEFINED ENV{DCMTK_HOME})
