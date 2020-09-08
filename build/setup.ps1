@@ -12,12 +12,6 @@ function BuildTarget ($FolderName, $ConfigureArguments) {
 Remove-Item -LiteralPath $STRATUM_DIR/extern/ -Force -Recurse
 mkdir -Force extern/include
 
-Invoke-Webrequest -Outfile extern/include/json.hpp          -Uri "https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp"
-Invoke-Webrequest -Outfile extern/include/stb_image.h       -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"
-Invoke-Webrequest -Outfile extern/include/stb_image_write.h -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h"
-Invoke-Webrequest -Outfile extern/include/tiny_gltf.h       -Uri "https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h"
-
-git submodule update --init
 python ./extern/src/shaderc/utils/git-sync-deps
 
 BuildTarget assimp      '-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DBUILD_SHARED_LIBS=OFF -DASSIMP_BUILD_TESTS=OFF -DASSIMP_BUILD_ZLIB=ON'

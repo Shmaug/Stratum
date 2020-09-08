@@ -3,9 +3,7 @@ cmake_minimum_required(VERSION 3.0)
 project(ShaderCompiler)
 set(CMAKE_CXX_STANDARD 17)
 
-find_dependency(Vulkan REQUIRED)
-find_dependency(spirv_cross_core REQUIRED)
-find_dependency(SPIRV-Tools REQUIRED)
+find_package(Vulkan REQUIRED)
 
 add_executable(ShaderCompiler "ShaderCompiler.cpp")
 target_link_libraries(ShaderCompiler shaderc_combined SPIRV-Tools-static spirv-cross-core)
