@@ -17,4 +17,5 @@ CTestTestfile.cmake
 shadertoolsconfig.json
 ThirdParty
 extern/
+!extern/src
 Plugins/Raytracing
