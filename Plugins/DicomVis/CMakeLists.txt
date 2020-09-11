@@ -19,7 +19,7 @@ set_target_properties(DicomVis PROPERTIES
 
 if(WIN32)
 	if(DEFINED ENV{DCMTK_DIR})
-		message(STATUS "Found DCMTK_DIR: $ENV{DCMTK_HOME}")
+		message(STATUS "Found DCMTK_DIR: $ENV{DCMTK_DIR}")
 	else()
 		message(FATAL_ERROR "Error: DCMTK_DIR not set!")
 	endif()

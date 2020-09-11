@@ -1,22 +1,20 @@
 cmake_minimum_required(VERSION 3.7)
 
-list(APPEND CMAKE_PREFIX_PATH "$ENV{VULKAN_SDK}")
-find_package(Vulkan)
+list(APPEND CMAKE_MODULE_PATH "$ENV{VULKAN_SDK}")
+list(APPEND CMAKE_MODULE_PATH "extern/")
 
-file(DOWNLOAD "https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp" $STRATUM_HOME/extern/include/json.hpp)
-file(DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h" $STRATUM_HOME/extern/include/stb_image.h)
-file(DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h" $STRATUM_HOME/extern/include/stb_image_write.h)
-file(DOWNLOAD "https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h" $STRATUM_HOME/extern/include/tiny_gltf.h)
+find_package(Vulkan REQUIRED)
+find_package(assimp REQUIRED)
+find_package(msdfgen REQUIRED)
+find_package(OpenXR REQUIRED)
 
-execute_process(COMMAND git submodule update --init WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-
+project(Stratum)
 
 option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 set(STRATUM_HOME ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Directory of Stratum")
 
-project(Stratum)
 
-include("${STRATUM_HOME}/build/stratum.cmake")
+include("${STRATUM_HOME}/cmake/stmutil.cmake")
 
 
 file(GLOB STRATUM_CPP Core/*.cpp Data/*.cpp Input/*.cpp Util/*.cpp Scene/*.cpp Scene/Renderers/*.cpp)
