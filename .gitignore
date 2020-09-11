@@ -15,6 +15,5 @@ compile_commands.json
 CTestTestfile.cmake
 *.aps
 shadertoolsconfig.json
-ThirdParty
 extern/*
 Plugins/Raytracing
