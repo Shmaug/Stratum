@@ -19,6 +19,7 @@
 #endif
 
 using namespace std;
+using namespace stm;
 
 Socket::Socket(int socket) : mSocket(socket), mType(SocketType::Connect), mBlockingState(true), mFamily(1), mSocketType(0), mPort(0) {}
 

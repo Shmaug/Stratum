@@ -6,6 +6,8 @@
 #undef GetObject
 #endif
 
+namespace stm {
+
 // Stores a binary bvh of Objects, based off each object's Object::Bounds() 
 class ObjectBvh2 {
 public:
@@ -34,3 +36,5 @@ private:
 	std::vector<Node> mNodes;
 	std::vector<Primitive> mPrimitives;
 };
+
+}

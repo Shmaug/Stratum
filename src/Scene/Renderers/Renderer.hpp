@@ -3,6 +3,8 @@
 #include <Scene/Scene.hpp>
 #include <Scene/Camera.hpp>
 
+namespace stm {
+
 class Renderer : public virtual Object {
 public:
 	// Renderers are drawn by the scene in order of increasing RenderQueue
@@ -11,7 +13,9 @@ public:
 
 protected:
 	friend class Scene;
-	virtual void OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) = 0;
-	inline virtual void OnDrawInstanced(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera, stm_ptr<Buffer> instanceBuffer, uint32_t instanceCount) {};
-	inline virtual bool TryCombineInstances(stm_ptr<CommandBuffer> commandBuffer, Renderer* renderer, stm_ptr<Buffer>& instanceBuffer, uint32_t& totalInstanceCount) { return false; }
+	virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera, const std::shared_ptr<DescriptorSet>& perCamera) = 0;
+	inline virtual void OnDrawInstanced(CommandBuffer& commandBuffer, Camera& camera, const std::shared_ptr<DescriptorSet>& perCamera, const std::shared_ptr<Buffer>& instanceBuffer, uint32_t instanceCount) {};
+	inline virtual bool TryCombineInstances(CommandBuffer& commandBuffer, Renderer* renderer, std::shared_ptr<Buffer>& instanceBuffer, uint32_t& totalInstanceCount) { return false; }
 };
+
+}

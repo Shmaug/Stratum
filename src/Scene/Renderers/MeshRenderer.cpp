@@ -1,20 +1,13 @@
 #include <Scene/Renderers/MeshRenderer.hpp>
 
-#define INSTANCE_BATCH_SIZE 1024
+constexpr uint32_t INSTANCE_BATCH_SIZE = 1024;
 
 using namespace std;
-
-MeshRenderer::MeshRenderer(const string& name) : Object(name) {}
-MeshRenderer::~MeshRenderer() {}
-
-void MeshRenderer::Mesh(stm_ptr<::Mesh> m) {
-	mMesh = m;
-	DirtyTransform();
-}
+using namespace stm;
 
 bool MeshRenderer::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
-	mAABB = {};
+	mAABB.reset();
 
 	if (mMesh) {
 		for (uint32_t i = 0; i < mMesh->SubmeshCount(); i++)
@@ -28,11 +21,11 @@ bool MeshRenderer::UpdateTransform() {
 	return true;
 }
 
-void MeshRenderer::OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) {
+void MeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
 	mMaterial->OnLateUpdate(commandBuffer);
 }
 
-bool MeshRenderer::TryCombineInstances(stm_ptr<CommandBuffer> commandBuffer, Renderer* renderer, stm_ptr<Buffer>& instanceBuffer, uint32_t& instanceCount) {
+bool MeshRenderer::TryCombineInstances(CommandBuffer& commandBuffer, Renderer* renderer, shared_ptr<Buffer>& instanceBuffer, uint32_t& instanceCount) {
 	if (instanceCount + 1 >= INSTANCE_BATCH_SIZE) return false;
 
 	MeshRenderer* mr = dynamic_cast<MeshRenderer*>(renderer);
@@ -40,33 +33,33 @@ bool MeshRenderer::TryCombineInstances(stm_ptr<CommandBuffer> commandBuffer, Ren
 
 	// renderer can be instanced with this one
 	if (!instanceBuffer) {
-		instanceBuffer = commandBuffer->GetBuffer(mName + "/Instances", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostCached);
+		instanceBuffer = commandBuffer.GetBuffer(mName + "/Instances", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		instanceCount = 0;
 	}
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
+	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->Mapped();
 	buf[instanceCount].ObjectToWorld = ObjectToWorld();
 	buf[instanceCount].WorldToObject = WorldToObject();
 	instanceCount++;
 	return true;
 }
 
-void MeshRenderer::OnDrawInstanced(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera, stm_ptr<Buffer> instanceBuffer, uint32_t instanceCount) {
-	GraphicsPipeline* pipeline = commandBuffer->BindPipeline(mMaterial, mMesh);
-
+void MeshRenderer::OnDrawInstanced(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera, const shared_ptr<Buffer>& instanceBuffer, uint32_t instanceCount) {
+	GraphicsPipeline* pipeline = commandBuffer.BindPipeline(mMaterial, mMesh.get());
+	
 	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
-		commandBuffer->BindDescriptorSet(perCamera, PER_CAMERA);
+		commandBuffer.BindDescriptorSet(perCamera, PER_CAMERA);
 	
 	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
-		stm_ptr<DescriptorSet> perObject = commandBuffer->GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCE_BUFFER_BINDING);
-		commandBuffer->BindDescriptorSet(perObject, PER_OBJECT);
+		auto perObject = commandBuffer.GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
+		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCES_BINDING);
+		commandBuffer.BindDescriptorSet(perObject, PER_OBJECT);
 	}
-
-	mMesh->Draw(commandBuffer, camera, instanceCount);
+	
+	mMesh->Draw(commandBuffer, &camera, instanceCount);
 }
-void MeshRenderer::OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) {
-	stm_ptr<Buffer> instanceBuffer = commandBuffer->GetBuffer(mName + "/Instances", sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->MappedData();
+void MeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera) {
+	auto instanceBuffer = commandBuffer.GetBuffer(mName + "/Instances", sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
+	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->Mapped();
 	buf->ObjectToWorld = ObjectToWorld();
 	buf->WorldToObject = WorldToObject();
 	OnDrawInstanced(commandBuffer, camera, perCamera, instanceBuffer, 1);

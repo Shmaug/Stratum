@@ -2,6 +2,8 @@
 
 #include <Util/Util.hpp>
 
+namespace stm {
+
 struct SpirvModule {
 	struct StageInput {
 		uint32_t mLocation;
@@ -14,7 +16,7 @@ struct SpirvModule {
 	std::vector<uint32_t> mSpirvBinary;
 	vk::ShaderStageFlagBits mStage;
 	std::string mEntryPoint;
-	std::unordered_map<std::string, StageInput> mInputs;
+	std::map<std::string, StageInput> mInputs;
 
 	inline void Write(std::ostream& stream) const {
 		WriteString(stream, mEntryPoint);
@@ -58,9 +60,9 @@ struct DescriptorBinding {
 
 struct ShaderVariant {
 	std::set<std::string> mKeywords;
-	std::unordered_map<std::string, DescriptorBinding> mDescriptorSetBindings;
-	std::unordered_map<std::string, vk::PushConstantRange> mPushConstants;
-	std::unordered_map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
+	std::map<std::string, DescriptorBinding> mDescriptorSetBindings;
+	std::map<std::string, vk::PushConstantRange> mPushConstants;
+	std::map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
 	std::vector<SpirvModule> mModules; // vert/frag stages or just a compute kernel
 
 	// Graphics variant data
@@ -192,3 +194,5 @@ struct Shader {
 			mVariants[i].Read(stream);
 	}
 };
+
+}

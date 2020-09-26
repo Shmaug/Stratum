@@ -4,6 +4,44 @@
 #include <Core/RenderPass.hpp>
 #include <Data/Shader.hpp>
 
+namespace stm {
+// Represents a pipeline with various parameters
+struct PipelineInstance {
+	public:
+	const uint64_t mRenderPassHash;
+	const uint32_t mSubpassIndex;
+	const vk::PrimitiveTopology mTopology;
+	const vk::CullModeFlags mCullMode;
+	const vk::PolygonMode mPolygonMode;
+	const vk::PipelineVertexInputStateCreateInfo mVertexInput;
+
+	PipelineInstance() = delete;
+	inline PipelineInstance(uint64_t renderPassHash, uint32_t subpassIndex, vk::PrimitiveTopology topology, vk::CullModeFlags cullMode, vk::PolygonMode polyMode, const vk::PipelineVertexInputStateCreateInfo& vertexInput)
+		: mRenderPassHash(renderPassHash), mSubpassIndex(subpassIndex), mTopology(topology), mCullMode(cullMode), mPolygonMode(polyMode), mVertexInput(vertexInput) {
+			// Compute hash once upon creation
+			mHash = hash_combine(mRenderPassHash, mSubpassIndex, mTopology, mCullMode, mPolygonMode);
+			for (uint32_t i = 0; i < mVertexInput.vertexBindingDescriptionCount; i++)
+				mHash = hash_combine(mHash, mVertexInput.pVertexBindingDescriptions[i].binding, mVertexInput.pVertexBindingDescriptions[i].inputRate, mVertexInput.pVertexBindingDescriptions[i].stride);
+			for (uint32_t i = 0; i < mVertexInput.vertexAttributeDescriptionCount; i++)
+				mHash = hash_combine(mHash, mVertexInput.pVertexAttributeDescriptions[i].binding, mVertexInput.pVertexAttributeDescriptions[i].format, mVertexInput.pVertexAttributeDescriptions[i].location, mVertexInput.pVertexAttributeDescriptions[i].offset);
+		};
+
+	inline bool operator==(const PipelineInstance& rhs) const { return rhs.mHash == mHash; }
+	
+private:
+	friend struct std::hash<PipelineInstance>;
+	size_t mHash;
+};
+}
+
+namespace std {
+template<>
+struct hash<stm::PipelineInstance> {
+	inline size_t operator()(const stm::PipelineInstance& p) const { return p.mHash; }
+};
+}
+
+namespace stm {
 class PipelineVariant {
 public:
 	ShaderVariant* mShaderVariant;
@@ -24,7 +62,7 @@ public:
 	Device* mDevice;
 	std::unordered_map<PipelineInstance, vk::Pipeline> mPipelines;
 
-	STRATUM_API vk::Pipeline GetPipeline(stm_ptr<CommandBuffer> commandBuffer,
+	STRATUM_API vk::Pipeline GetPipeline(CommandBuffer& commandBuffer,
 		vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList,
 		const vk::PipelineVertexInputStateCreateInfo& vertexInput = vk::PipelineVertexInputStateCreateInfo(),
 		vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr,
@@ -44,12 +82,14 @@ public:
 
 private:
 	friend class GraphicsPipeline;
-	friend class AssetManager;
-	STRATUM_API Pipeline(const fs::path& shaderfile, ::Device* device, const std::string& name);
+	friend class Device;
+	STRATUM_API Pipeline(const fs::path& shaderfile, stm::Device* device, const std::string& name);
 
 	std::set<std::string> mKeywords;
 	Shader* mShader;
 
-	std::unordered_map<std::string, ComputePipeline*> mComputeVariants;
-	std::unordered_map<std::string, GraphicsPipeline*> mGraphicsVariants;
+	std::map<std::string, ComputePipeline*> mComputeVariants;
+	std::map<std::string, GraphicsPipeline*> mGraphicsVariants;
 };
+
+}

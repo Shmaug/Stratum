@@ -1,60 +1,43 @@
-#include <Core/Device.hpp>
-#include <Data/AssetManager.hpp>
+#include "Device.hpp"
+
+#include <bitset>
+
 #include <Data/Texture.hpp>
-#include <Core/Buffer.hpp>
-#include <Core/CommandBuffer.hpp>
-#include <Core/DescriptorSet.hpp>
-#include <Core/Window.hpp>
-#include <Util/Profiler.hpp>
-
-//#define PRINT_VK_ALLOCATIONS
-
-// 4kb blocks
-#define MEM_BLOCK_SIZE (4*1024)
-// 4mb min allocation
-#define MEM_MIN_ALLOC (4*1024*1024)
+#include "Buffer.hpp"
+#include "CommandBuffer.hpp"
+#include "DescriptorSet.hpp"
+#include "Window.hpp"
 
 using namespace std;
+using namespace stm;
 
-inline size_t HashTextureData(vk::Extent3D extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlags sampleCount) {
-	size_t value = 0;
-	hash_combine(value, extent.width);
-	hash_combine(value, extent.height);
-	hash_combine(value, extent.depth);
-	hash_combine(value, format);
-	hash_combine(value, mipLevels);
-	hash_combine(value, sampleCount);
-	return value;
-}
-inline size_t HashTextureData(const Texture* tex) { return HashTextureData(tex->Extent(), tex->Format(), tex->MipLevels(), tex->SampleCount()); }
+Device::Device(Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, const set<string>& deviceExtensions, vector<const char*> validationLayers)
+	: mInstance(instance), mPhysicalDevice(physicalDevice), mPhysicalDeviceIndex(physicalDeviceIndex) {
 
+	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)(*mInstance)->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
-Device::Device(::Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, uint32_t graphicsQueueFamily, uint32_t presentQueueFamily, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mInstance(instance), mGraphicsQueueFamilyIndex(graphicsQueueFamily), mPresentQueueFamilyIndex(presentQueueFamily),
-	mCommandBufferCount(0), mDescriptorSetCount(0), mMemoryAllocationCount(0), mMemoryUsage(0), mFrameCount(0) {
-
-	mPhysicalDevice = physicalDevice;
 	mMaxMSAASamples = GetMaxUsableSampleCount();
-	mPhysicalDeviceIndex = physicalDeviceIndex;
 
 	vector<const char*> deviceExts;
 	for (const string& s : deviceExtensions)
 		deviceExts.push_back(s.c_str());
 
-	#pragma region get queue info
-	set<uint32_t> uniqueQueueFamilies{ mGraphicsQueueFamilyIndex, mPresentQueueFamilyIndex };
+	#pragma region get queue infos
+	vector<vk::QueueFamilyProperties> queueFamilyProperties = mPhysicalDevice.getQueueFamilyProperties();
 	vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
 	float queuePriority = 1.0f;
-	for (uint32_t queueFamily : uniqueQueueFamilies) {
-		vk::DeviceQueueCreateInfo queueCreateInfo = {};
-		queueCreateInfo.queueFamilyIndex = queueFamily;
-		queueCreateInfo.queueCount = 1;
-		queueCreateInfo.pQueuePriorities = &queuePriority;
-		queueCreateInfos.push_back(queueCreateInfo);
+	for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+		if (queueFamilyProperties[i].queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eTransfer)) {
+			vk::DeviceQueueCreateInfo queueCreateInfo = {};
+			queueCreateInfo.queueFamilyIndex = i;
+			queueCreateInfo.queueCount = 1;
+			queueCreateInfo.pQueuePriorities = &queuePriority;
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
 	}
 	#pragma endregion
 
-	#pragma region create logical device and queues
+	#pragma region Create logical device
 	vk::PhysicalDeviceFeatures deviceFeatures = {};
 	deviceFeatures.fillModeNonSolid = VK_TRUE;
 	deviceFeatures.sparseBinding = VK_TRUE;
@@ -64,77 +47,64 @@ Device::Device(::Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t
 	deviceFeatures.wideLines = VK_TRUE;
 	deviceFeatures.largePoints = VK_TRUE;
 	deviceFeatures.sampleRateShading = VK_TRUE;
-
-	vk::PhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures = {};
-	indexingFeatures.pNext = nullptr;
+	vk::PhysicalDeviceDescriptorIndexingFeatures indexingFeatures;
 	indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
 	indexingFeatures.runtimeDescriptorArray = VK_TRUE;
-
-	vk::DeviceCreateInfo createInfo = {};
-	createInfo.queueCreateInfoCount = (uint32_t)queueCreateInfos.size();
-	createInfo.pQueueCreateInfos = queueCreateInfos.data();
-	createInfo.pEnabledFeatures = &deviceFeatures;
-	createInfo.enabledExtensionCount = (uint32_t)deviceExts.size();
-	createInfo.ppEnabledExtensionNames = deviceExts.data();
-	createInfo.enabledLayerCount = (uint32_t)validationLayers.size();
-	createInfo.ppEnabledLayerNames = validationLayers.data();
+	vk::DeviceCreateInfo createInfo({}, queueCreateInfos, validationLayers, deviceExts, &deviceFeatures);
 	createInfo.pNext = &indexingFeatures;
 	mDevice = mPhysicalDevice.createDevice(createInfo);
-	
-	mMemoryProperties = mPhysicalDevice.getMemoryProperties();
-
 	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
-	string name = "Device " + to_string(properties.deviceID) + ": " + properties.deviceName.data();
+	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
 	SetObjectName(mDevice, name);
 	mLimits = properties.limits;
-
-	mGraphicsQueueIndex = 0;
-	mPresentQueueIndex = 0;
-
-	mDevice.getQueue(mGraphicsQueueFamilyIndex, mGraphicsQueueIndex, &mGraphicsQueue);
-	mDevice.getQueue(mPresentQueueFamilyIndex, mPresentQueueIndex, &mPresentQueue);
-	SetObjectName(mGraphicsQueue, name + " Graphics Queue");
-	SetObjectName(mPresentQueue, name + " Present Queue");
+	mMemoryProperties = mPhysicalDevice.getMemoryProperties();
 	#pragma endregion
-
-	#pragma region PipelineCache and DesriptorPool
-	char* cacheData = nullptr;
-	ifstream cacheFile("./pcache", ios::binary | ios::ate);
-
-	vk::PipelineCacheCreateInfo cacheInfo = {};
-	if (cacheFile.is_open()) {
-		size_t size = cacheFile.tellg();
-		cacheData = new char[size];
-		cacheFile.seekg(0, ios::beg);
-		cacheFile.read(cacheData, size);
-		
-		cacheInfo.pInitialData = cacheData;
-		cacheInfo.initialDataSize = size;
-	}
-	mDevice.createPipelineCache(&cacheInfo, nullptr, &mPipelineCache);
-	safe_delete_array(cacheData);
 	
-	vk::DescriptorPoolSize type_count[5] = {
-		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					min(4096u, mLimits.maxDescriptorSetUniformBuffers)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(4096u, mLimits.maxDescriptorSetSampledImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					min(4096u, mLimits.maxDescriptorSetSampledImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(4096u, mLimits.maxDescriptorSetSamplers)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(4096u, mLimits.maxDescriptorSetStorageBuffers))
+	#pragma region Create PipelineCache and DesriptorPool
+	vk::PipelineCacheCreateInfo cacheInfo = {};
+	if (!mInstance->GetOptionExists("noPipelineCache")) {
+		try {
+			ifstream cacheFile(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary | ios::ate);
+			if (cacheFile.is_open()) {
+				cacheInfo.initialDataSize = cacheFile.tellg();
+				cacheInfo.pInitialData = new char[cacheInfo.initialDataSize];
+				cacheFile.seekg(0, ios::beg);
+				cacheFile.read((char*)cacheInfo.pInitialData, cacheInfo.initialDataSize);
+				printf("Read pipeline cache (%.2f kb)\n", cacheInfo.initialDataSize/(float)1_mB);
+			}
+		} catch (exception& e) {
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Failed to read pipeline cache: %s\n", e.what());
+		}
+	}
+	mPipelineCache = mDevice.createPipelineCache(cacheInfo);
+	if (cacheInfo.pInitialData) delete cacheInfo.pInitialData;
+	
+	vector<vk::DescriptorPoolSize> poolSizes {
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								std::min(1024u, mLimits.maxDescriptorSetSamplers)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	std::min(1024u, mLimits.maxDescriptorSetSampledImages)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eInputAttachment, 				std::min(1024u, mLimits.maxDescriptorSetInputAttachments)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					std::min(1024u, mLimits.maxDescriptorSetSampledImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 					std::min(1024u, mLimits.maxDescriptorSetStorageImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					std::min(1024u, mLimits.maxDescriptorSetUniformBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eUniformBufferDynamic, 	std::min(1024u, mLimits.maxDescriptorSetUniformBuffersDynamic)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					std::min(1024u, mLimits.maxDescriptorSetStorageBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	std::min(1024u, mLimits.maxDescriptorSetStorageBuffersDynamic))
 	};
-
-	vk::DescriptorPoolCreateInfo poolInfo = {};
-	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-	poolInfo.maxSets = 8192;
-	poolInfo.poolSizeCount = 5;
-	poolInfo.pPoolSizes = type_count;
-
-	mDescriptorPool = mDevice.createDescriptorPool(poolInfo);
+	mDescriptorPool = mDevice.createDescriptorPool(vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 8192, poolSizes));
 	SetObjectName(mDescriptorPool, name);
 	#pragma endregion
 
-	mAssetManager = new ::AssetManager(this);
+	for (const vk::DeviceQueueCreateInfo& info : queueCreateInfos) {
+		QueueFamily q = {};
+		q.mQueue = mDevice.getQueue(info.queueFamilyIndex, 0);
+		q.mName = name + "/QueueFamily" + to_string(info.queueFamilyIndex);
+		q.mFamilyIndex = info.queueFamilyIndex;
+		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
+		SetObjectName(q.mQueue, q.mName);
+		mQueueFamilies.emplace(info.queueFamilyIndex, q);
+	}
 
-	mDefaultDescriptorSetLayouts.resize(max(PER_CAMERA, PER_OBJECT) + 1);
+	mDefaultDescriptorSetLayouts.resize(std::max(PER_CAMERA, PER_OBJECT) + 1);
 	vk::SamplerCreateInfo shadowSamplerInfo;
 	shadowSamplerInfo.addressModeU = shadowSamplerInfo.addressModeV = shadowSamplerInfo.addressModeW = vk::SamplerAddressMode::eClampToBorder;
 	shadowSamplerInfo.anisotropyEnable = false;
@@ -143,416 +113,242 @@ Device::Device(::Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t
 	shadowSamplerInfo.compareOp = vk::CompareOp::eLess;
 	shadowSamplerInfo.magFilter = shadowSamplerInfo.minFilter = vk::Filter::eLinear;
 	mDefaultImmutableSamplers.push_back(new Sampler("ShadowSampler", this, shadowSamplerInfo));
+	
 	vector<vk::DescriptorSetLayoutBinding> bindings {
-		{ CAMERA_BUFFER_BINDING, 				vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ LIGHT_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ SHADOW_BUFFER_BINDING, 				vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ CAMERA_DATA_BINDING, 					vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ LIGHTING_DATA_BINDING, 				vk::DescriptorType::eInlineUniformBlockEXT, sizeof(LightingBuffer), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ LIGHTS_BINDING, 							vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
+		{ SHADOWS_BINDING, 							vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
 		{ SHADOW_ATLAS_BINDING, 				vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
 		{ ENVIRONMENT_TEXTURE_BINDING, 	vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, &mDefaultImmutableSamplers[0]->operator const vk::Sampler&() }
+		{ SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, mDefaultImmutableSamplers[0]->operator->() }
 	};
-	vk::DescriptorSetLayoutCreateInfo layoutInfo = {};
-	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
-	layoutInfo.pBindings = bindings.data(); 
-	mDefaultDescriptorSetLayouts[PER_CAMERA] = mDevice.createDescriptorSetLayout(layoutInfo);
+	mDefaultDescriptorSetLayouts[PER_CAMERA] = mDevice.createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo({}, bindings));
 	SetObjectName(mDefaultDescriptorSetLayouts[PER_CAMERA], "PER_CAMERA DescriptorSetLayout");
 
-	bindings = {
-		{ INSTANCE_BUFFER_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr }
-	};
-	layoutInfo.bindingCount = (uint32_t)bindings.size(); 
-	layoutInfo.pBindings = bindings.data(); 
-	mDefaultDescriptorSetLayouts[PER_OBJECT] = mDevice.createDescriptorSetLayout(layoutInfo);
+	bindings = { { INSTANCES_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr } };
+	mDefaultDescriptorSetLayouts[PER_OBJECT] = mDevice.createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo({}, bindings));
 	SetObjectName(mDefaultDescriptorSetLayouts[PER_OBJECT], "PER_OBJECT DescriptorSetLayout");
+
+	uint8_t whitePixels[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+	uint8_t blackPixels[4] = { 0, 0, 0, 0xFF };
+	uint8_t transparentBlackPixels[4] = { 0, 0, 0, 0 };
+	uint8_t bumpPixels[4] = { 0x80, 0x80, 0xFF, 0xFF };
+	uint8_t noisePixels[4 * 256*256];
+	for (uint32_t i = 0; i < 4*256*256; i++) noisePixels[i] = rand() % 0xFF;
+	
+	hash<string> strh;
+	mLoadedAssets.emplace(strh("stm_1x1_white_opaque"), 			new Texture("stm_1x1_white_opaque", 			this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, whitePixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
+	mLoadedAssets.emplace(strh("stm_1x1_black_opaque"), 			new Texture("stm_1x1_black_opaque", 			this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, blackPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
+	mLoadedAssets.emplace(strh("stm_1x1_black_transparent"), 	new Texture("stm_1x1_black_transparent", 	this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, transparentBlackPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
+	mLoadedAssets.emplace(strh("stm_1x1_bump"), 							new Texture("stm_1x1_bump", 							this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, bumpPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
+	mLoadedAssets.emplace(strh("stm_noise_rgba_256"), 				new Texture("stm_noise_rgba_256", 				this, { 256, 256, 1 }, vk::Format::eR8G8B8A8Unorm, noisePixels, 4*256*256, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst));
 }
 Device::~Device() {
 	Flush();
+	PurgeResourcePools(0);
 
-	mBufferPool.clear();
-	mTexturePool.clear();
-	mDescriptorSetPool.clear();
+	mLoadedAssets.clear();
 
-	delete mAssetManager;
-
-	for (auto& ds : mDefaultDescriptorSetLayouts)
-		if (ds)
-			vkDestroyDescriptorSetLayout(mDevice, ds, nullptr);
+	for (auto& [idx,queueFamily] : mQueueFamilies)
+		for (auto& [tid, p] : queueFamily.mCommandBuffers) {
+			for (CommandBuffer* c : p.second) delete c;
+			mDevice.destroyCommandPool(p.first);
+		}
 	for (auto& s : mDefaultImmutableSamplers) delete s;
-
-	size_t size = 0;
-	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, nullptr);
-	char* cacheData = new char[size];
-	vkGetPipelineCacheData(mDevice, mPipelineCache, &size, cacheData);
-	ofstream output("./pcache", ios::binary);
-	output.write(cacheData, size);
-	delete[] cacheData;
-
-	vkDestroyPipelineCache(mDevice, mPipelineCache, nullptr);
-	vkDestroyDescriptorPool(mDevice, mDescriptorPool, nullptr);
-	for (auto& p : mCommandPools)
-		vkDestroyCommandPool(mDevice, p.second, nullptr);
+	for (auto& l : mDefaultDescriptorSetLayouts) if (l) mDevice.destroyDescriptorSetLayout(l);
+	mDevice.destroyDescriptorPool(mDescriptorPool);
 	
-	for (auto kp : mMemoryAllocations)
-		for (uint32_t i = 0; i < kp.second.size(); i++) {
-			for (auto it = kp.second[i].mAllocations.begin(); it != kp.second[i].mAllocations.begin(); it++)
-				fprintf_color(ConsoleColorBits::eRed, stderr, "Device memory leak detected [%s]\n", it->mTag.c_str());
-			vkFreeMemory(mDevice, kp.second[i].mMemory, nullptr);
-		}
+	mMemoryPool.clear();
 
-	vkDestroyDevice(mDevice, nullptr);
-}
-
-bool Device::Allocation::SubAllocate(const vk::MemoryRequirements& requirements, DeviceMemoryAllocation& allocation, const string& tag) {
-	if (mAvailable.empty()) return false;
-
-	vk::DeviceSize blockSize = 0;
-	vk::DeviceSize memLocation = 0;
-	vk::DeviceSize memSize = 0;
-
-	// find smallest block that can fit the allocation
-	auto block = mAvailable.end();
-	for (auto it = mAvailable.begin(); it != mAvailable.end(); it++) {
-		vk::DeviceSize offset = it->first ? AlignUp(it->first, requirements.alignment) : 0;
-		vk::DeviceSize blockEnd = AlignUp(offset + requirements.size, MEM_BLOCK_SIZE);
-
-		if (blockEnd > it->first + it->second) continue;
-
-		if (block == mAvailable.end() || it->second < block->second) {
-			memLocation = offset;
-			memSize = blockEnd - offset;
-			blockSize = blockEnd - it->first;
-			block = it;
+	if (!mInstance->GetOptionExists("noPipelineCache")) {
+		try {
+			vector<uint8_t> cacheData = mDevice.getPipelineCacheData(mPipelineCache);
+			ofstream output(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary);
+			output.write((const char*)cacheData.data(), cacheData.size());
+		} catch (exception& e) {
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Failed to write pipeline cache: %s\n", e.what());
 		}
 	}
-	if (block == mAvailable.end()) return false;
-
-	allocation.mDeviceMemory = mMemory;
-	allocation.mOffset = memLocation;
-	allocation.mSize = memSize;
-	allocation.mMapped = ((uint8_t*)mMapped) + memLocation;
-	allocation.mTag = tag;
-
-	if (block->second > blockSize) {
-		// still room left after this allocation, shift this block over
-		block->first += blockSize;
-		block->second -= blockSize;
-	} else
-		mAvailable.erase(block);
-
-	mAllocations.push_front(allocation);
-
-	return true;
-}
-void Device::Allocation::Deallocate(const DeviceMemoryAllocation& allocation) {
-	if (allocation.mDeviceMemory != mMemory) return;
-
-	for (auto it = mAllocations.begin(); it != mAllocations.end(); it++)
-		if (it->mOffset == allocation.mOffset) {
-			mAllocations.erase(it);
-			break;
-		}
-
-	vk::DeviceSize end = allocation.mOffset + allocation.mSize;
-
-	auto firstAfter = mAvailable.end();
-	auto startBlock = mAvailable.end();
-	auto endBlock = mAvailable.end();
-
-	for (auto it = mAvailable.begin(); it != mAvailable.end(); it++) {
-		if (it->first > allocation.mOffset && (firstAfter == mAvailable.end() || it->first < firstAfter->first)) firstAfter = it;
-
-		if (it->first == end)
-			endBlock = it;
-		if (it->first + it->second == allocation.mOffset)
-			startBlock = it;
-	}
-
-	if (startBlock == endBlock && startBlock != mAvailable.end()) throw; // this should NOT happen
-
-	// merge blocks
-
-	if (startBlock == mAvailable.end() && endBlock == mAvailable.end())
-		// block isn't adjacent to any other blocks
-		mAvailable.insert(firstAfter, make_pair(allocation.mOffset, allocation.mSize));
-	else if (startBlock == mAvailable.end()) {
-		//  --------     |---- allocation ----|---- endBlock ----|
-		endBlock->first = allocation.mOffset;
-		endBlock->second += allocation.mSize;
-	} else if (endBlock == mAvailable.end()) {
-		//  |---- startBlock ----|---- allocation ----|     --------
-		startBlock->second += allocation.mSize;
-	} else {
-		//  |---- startBlock ----|---- allocation ----|---- endBlock ----|
-		startBlock->second += allocation.mSize + endBlock->second;
-		mAvailable.erase(endBlock);
-	}
+	mDevice.destroyPipelineCache(mPipelineCache);
+	mDevice.destroy();
 }
 
-DeviceMemoryAllocation Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
-	lock_guard<mutex> lock(mMemoryMutex);
+Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& requirements) {
+	// find first bit of free space that can fit the required size
+	vk::DeviceSize allocBegin = 0;
+	for (auto[blockStart, blockEnd] : mBlocks) {
+		if (allocBegin + requirements.size <= blockStart) break;
+		allocBegin = AlignUp(blockEnd, requirements.alignment);
+	}
+	if (allocBegin + requirements.size > mSize) return Block(nullptr, 0);
+	mBlocks.emplace(allocBegin, allocBegin + requirements.size);
+	return Block(this, allocBegin);
+}
+void Device::Memory::ReturnBlock(const Device::Memory::Block& block) { mBlocks.erase(block.mOffset); }
 
-	int32_t memoryType = -1;
+Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
+	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
+	uint32_t best = numeric_limits<uint32_t>::max();
 	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++) {
-		if ((requirements.memoryTypeBits & (1 << i)) && ((mMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
-			memoryType = i;
-			break;
+		// skip invalid heaps
+		if ((requirements.memoryTypeBits & (1 << i)) == 0 || (mMemoryProperties.memoryTypes[i].propertyFlags & properties) != properties) continue;
+
+		bitset<32> mask = (uint32_t)(mMemoryProperties.memoryTypes[i].propertyFlags ^ properties);
+		if (mask.count() < best) {
+			best = (uint32_t)mask.count();
+			memoryTypeIndex = i;
+			if (best == 0) break;
 		}
 	}
-	if (memoryType == -1) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Failed to find suitable memory type!");
-		throw;
-	}
-
-	DeviceMemoryAllocation alloc = {};
-	alloc.mMemoryType = memoryType;
-
-	vector<Allocation>& allocations = mMemoryAllocations[memoryType];
-
-	for (uint32_t i = 0; i < allocations.size(); i++)
-		if (allocations[i].SubAllocate(requirements, alloc, tag))
-			return alloc;
-
-
-	// Failed to sub-allocate, make a new allocation
-
-	allocations.push_back({});
-	Allocation& allocation = allocations.back();
+	if (memoryTypeIndex == mMemoryProperties.memoryTypeCount)
+		throw invalid_argument("could not find compatible memory type");
 	
-	vk::MemoryAllocateInfo info = {};
-	info.memoryTypeIndex = memoryType;
-	info.allocationSize = max((uint64_t)MEM_MIN_ALLOC, AlignUp(requirements.size, MEM_BLOCK_SIZE));
-	allocation.mMemory = mDevice.allocateMemory(info);
-	
-	allocation.mSize = info.allocationSize;
-	allocation.mAvailable = { make_pair((vk::DeviceSize)0, allocation.mSize) };
-	mMemoryAllocationCount++;
-
-	if (mMemoryProperties.memoryTypes[memoryType].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)
-		mMemoryUsage += allocation.mSize;
-
-	if (properties & vk::MemoryPropertyFlagBits::eHostVisible)
-		allocation.mMapped = mDevice.mapMemory(allocation.mMemory, 0, allocation.mSize);
-
-	if (!allocation.SubAllocate(requirements, alloc, tag)) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Failed to allocate memory\n");
-		throw;
-	}
-
-	#ifdef PRINT_VK_ALLOCATIONS
-	if (info.allocationSize < 1024)
-		printf_color(ConsoleColorBits::eYellow, "Allocated %llu B of type %u\t-- ", info.allocationSize, info.memoryTypeIndex);
-	else if (info.allocationSize < 1024 * 1024)
-		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f KiB of type %u\t-- ", info.allocationSize / 1024, info.memoryTypeIndex);
-	else if (info.allocationSize < 1024 * 1024 * 1024)
-		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f MiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f), info.memoryTypeIndex);
-	else
-		printf_color(ConsoleColorBits::eYellow, "Allocated %.3f GiB of type %u\t-- ", info.allocationSize / (1024.f * 1024.f * 1024.f), info.memoryTypeIndex);
-	PrintAllocations();
-	printf_color(ConsoleColorBits::eYellow, "\n");
-	#endif
-
-	return alloc;
-}
-void Device::FreeMemory(const DeviceMemoryAllocation& allocation) {
 	lock_guard<mutex> lock(mMemoryMutex);
-
-	vector<Allocation>& allocations = mMemoryAllocations[allocation.mMemoryType];
-	for (auto it = allocations.begin(); it != allocations.end();){
-		if (it->mMemory == allocation.mDeviceMemory) {
-			it->Deallocate(allocation);
-			if (it->mAvailable.size() == 1 && it->mAvailable.begin()->second == it->mSize) {
-				mDevice.freeMemory(it->mMemory);
-				mMemoryAllocationCount--;
-				if (mMemoryProperties.memoryTypes[allocation.mMemoryType].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)
-					mMemoryUsage -= it->mSize;
-				#ifdef PRINT_VK_ALLOCATIONS
-				if (allocation.mSize < 1024)
-					printf_color(ConsoleColorBits::eYellow, "Freed %lu B of type %u\t- ", allocation.mSize, allocation.mMemoryType);
-				else if (allocation.mSize < 1024 * 1024)
-					printf_color(ConsoleColorBits::eYellow, "Freed %.3f KiB of type %u\t-- ", allocation.mSize / 1024.f, allocation.mMemoryType);
-				else if (allocation.mSize < 1024 * 1024 * 1024)
-					printf_color(ConsoleColorBits::eYellow, "Freed %.3f MiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f), allocation.mMemoryType);
-				else
-					printf_color(ConsoleColorBits::eYellow, "Freed %.3f GiB of type %u\t-- ", allocation.mSize / (1024.f * 1024.f * 1024), allocation.mMemoryType);
-				PrintAllocations();
-				printf_color(ConsoleColorBits::eYellow, "\n");
-				#endif
-				it = allocations.erase(it);
-				continue;
-			}
-		}
-		it++;
+	for (Memory* memory : mMemoryPool[memoryTypeIndex])
+		if (Memory::Block block = memory->GetBlock(requirements))
+			return block;
+	// Failed to sub-allocate a block, allocate new memory
+	return mMemoryPool[memoryTypeIndex].emplace_back(new Memory(this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
+}
+void Device::FreeMemory(const Memory::Block& block) {
+	lock_guard<mutex> lock(mMemoryMutex);
+	block.mMemory->ReturnBlock(block);
+	auto& allocs = mMemoryPool[block.mMemory->mMemoryTypeIndex];
+	for (auto it = allocs.begin(); it != allocs.end();) {
+		if ((*it)->empty()) {
+			delete *it;
+			it = allocs.erase(it);
+		} else
+			it++;
 	}
 }
 
-stm_ptr<Buffer> Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	stm_ptr<Buffer> b;
-	mBufferPoolMutex.lock();
-	auto best = mBufferPool.end();
-	for (auto it = mBufferPool.begin(); it != mBufferPool.end(); it++)
-		if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties) && it->mResource->Size() >= size) {
-			if (best == mBufferPool.end() || it->mResource->Size() < it->mResource->Size())
+
+shared_ptr<Buffer> Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags) {
+	{
+		lock_guard lock(mBufferPool.mMutex);
+		auto& pool = mBufferPool.mResources[hash_combine(usage, memoryFlags)];
+		auto best = pool.end();
+		for (auto it = pool.begin(); it != pool.end(); it++)
+			if (it->mResource->Size() >= size && (best == pool.end() || it->mResource->Size() < best->mResource->Size())) {
 				best = it;
-			if (it->mResource->Size() == size) break;
-		}
-	if (best != mBufferPool.end()) {
-		b = best->mResource;
-		mBufferPool.erase(best);
-	}
-	mBufferPoolMutex.unlock();
-	return b ? b : new Buffer(name, this, size, usage, memoryProperties);
-}
-stm_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
-	stm_ptr<DescriptorSet> ds;
-	mDescriptorSetPoolMutex.lock();
-	auto& sets = mDescriptorSetPool[layout];
-	if (sets.size()) {
-		auto front = sets.front();
-		ds = front.mResource;
-		sets.pop_front();
-		ds->mPendingWrites.clear();
-	}
-	mDescriptorSetPoolMutex.unlock();
-	return ds ? ds : new DescriptorSet(name, this, layout);
-}
-stm_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
-	stm_ptr<Texture> tex;
-	mTexturePoolMutex.lock();
-	auto& pool = mTexturePool[HashTextureData(extent, format, mipLevels, sampleCount)];
-	auto best = pool.end();
-	for (auto it = pool.begin(); it != pool.end(); it++)
-		if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties))
-			if (best == pool.end()) {
-				tex = it->mResource;
-				pool.erase(it);
-				break;
+				if (it->mResource->Size() == size) break;
 			}
-	mTexturePoolMutex.unlock();
-	return tex ? tex : new Texture(name, this, nullptr, 0, extent, format, mipLevels, sampleCount, usage, memoryProperties);
-}
-void Device::PoolResource(stm_ptr<Buffer> buffer) {
-	mBufferPoolMutex.lock();
-	mBufferPool.push_back({ mFrameCount, buffer });
-	mBufferPoolMutex.unlock();
-}
-void Device::PoolResource(stm_ptr<DescriptorSet> descriptorSet) {
-	mDescriptorSetPoolMutex.lock();
-	mDescriptorSetPool[descriptorSet->Layout()].push_back({ mFrameCount, descriptorSet });
-	mDescriptorSetPoolMutex.unlock();
-}
-void Device::PoolResource(stm_ptr<Texture> texture) {
-	mTexturePoolMutex.lock();
-	mTexturePool[HashTextureData(texture)].push_back({ mFrameCount, texture });
-	mTexturePoolMutex.unlock();
-}
-
-void Device::PurgeResourcePools(uint32_t maxAge) {
-	mCommandBufferPoolMutex.lock();
-	for (auto&[pool, commandBuffers] : mCommandBufferPool)
-		for (auto& it = commandBuffers.begin(); it != commandBuffers.end();) {
-			it->mResource->CheckDone();
-			if (it->mResource->mState != CommandBuffer::CommandBufferState::eDone) continue;
-			it->mResource->Clear();
-			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				it = commandBuffers.erase(it);
-			} else it++;
+		if (best != pool.end()) {
+			auto b = best->mResource;
+			pool.erase(best);
+			return b;
 		}
-	mCommandBufferPoolMutex.unlock();
-
-	mBufferPoolMutex.lock();
-	for (auto& it = mBufferPool.begin(); it != mBufferPool.end();)
-		if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-			it = mBufferPool.erase(it);
-		} else it++;
-	mBufferPoolMutex.unlock();
-			
-	mTexturePoolMutex.lock();
-	for (auto&[h, textures] : mTexturePool)
-		for (auto& it = textures.begin(); it != textures.end();)
-			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				it = textures.erase(it);
-			} else it++;
-	mTexturePoolMutex.unlock();
-	
-	mDescriptorSetPoolMutex.lock();
-	for (auto&[layout, sets] : mDescriptorSetPool)
-		for (auto& it = sets.begin(); it != sets.end();)
-			if (mFrameCount - it->mLastFrameUsed >= maxAge) {
-				it = sets.erase(it);
-			} else it++;
-	mDescriptorSetPoolMutex.unlock();
+	}
+	return make_shared<Buffer>(name, this, size, usage, memoryFlags);
+}
+shared_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
+	{
+		lock_guard lock(mDescriptorSetPool.mMutex);
+		auto& sets = mDescriptorSetPool.mResources[layout];
+		if (sets.size()) {
+			auto ds = sets.front().mResource;
+			sets.pop_front();
+			ds->mPendingWrites.clear();
+			return ds;
+		}
+	}
+	return make_shared<DescriptorSet>(name, this, layout);
+}
+shared_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
+	{
+		lock_guard lock(mTexturePool.mMutex);
+		auto& pool = mTexturePool.mResources[hash_combine(extent, format, mipLevels, sampleCount)];
+		for (auto it = pool.begin(); it != pool.end(); it++)
+			if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties)) {
+				auto tex = it->mResource;
+				pool.erase(it);
+				return tex;
+			}
+	}
+	return make_shared<Texture>(name, this, extent, format, nullptr, 0, usage, mipLevels, sampleCount, memoryProperties);
+}
+void Device::PoolResource(shared_ptr<Buffer> buffer) {
+	lock_guard lock(mBufferPool.mMutex);
+	mBufferPool.mResources[hash_combine(buffer->Usage(), buffer->MemoryProperties())].push_back({ buffer, mFrameCount });
+}
+void Device::PoolResource(shared_ptr<DescriptorSet> descriptorSet) {
+	lock_guard lock(mDescriptorSetPool.mMutex);
+	mDescriptorSetPool.mResources[descriptorSet->Layout()].push_back({ descriptorSet, mFrameCount });
+}
+void Device::PoolResource(shared_ptr<Texture> texture) {
+	lock_guard lock(mTexturePool.mMutex);
+	mTexturePool.mResources[hash_combine(texture->Extent(), texture->Format(), texture->MipLevels(), texture->SampleCount())].push_back({ texture, mFrameCount });
+}
+void Device::PurgeResourcePools(uint32_t maxAge) {
+	mDescriptorSetPool.EraseOld(mFrameCount, maxAge);
+	mBufferPool.EraseOld(mFrameCount, maxAge);
+	mTexturePool.EraseOld(mFrameCount, maxAge);
+	lock_guard lock(mQueueMutex);
+	for (auto& [idx,queueFamily] : mQueueFamilies)
+		for (auto& [tid,p] : queueFamily.mCommandBuffers)
+			for (auto& commandBuffer : p.second)
+				commandBuffer->CheckDone();
 }
 
-stm_ptr<CommandBuffer> Device::GetCommandBuffer(const std::string& name, vk::CommandBufferLevel level) {
-	// get a commandpool for the current thread
-	mCommandPoolMutex.lock();
-	vk::CommandPool& commandPool = mCommandPools[this_thread::get_id()];
-	mCommandPoolMutex.unlock();
+CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+	// find most specific queue family
+	QueueFamily* queueFamily = nullptr;
+	for (auto& [i,q] : mQueueFamilies)
+		if (q.mProperties.queueFlags & queueFlags)
+			queueFamily = &q;
+
+	if (queueFamily == nullptr) throw invalid_argument("invalid queueFlags " + to_string(queueFlags));
+
+	lock_guard lock(mQueueMutex);
+	auto& [commandPool,commandBuffers] = queueFamily->mCommandBuffers[this_thread::get_id()];
 	if (!commandPool) {
-		vk::CommandPoolCreateInfo poolInfo = {};
-		poolInfo.queueFamilyIndex = mGraphicsQueueFamilyIndex;
-		poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
-		commandPool = mDevice.createCommandPool(poolInfo);
-		SetObjectName(commandPool, name + " Graphics Command Pool");
+		commandPool = mDevice.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamily->mFamilyIndex));
+		SetObjectName(commandPool, name + "/CommandPool");
 	}
 
-	if (level == vk::CommandBufferLevel::ePrimary) {
-		auto& pool = mCommandBufferPool[commandPool];
-		if (!pool.empty()) {
-			pool.front().mResource->CheckDone();
-			if (pool.front().mResource->mState == CommandBuffer::CommandBufferState::eDone) {
-				stm_ptr<CommandBuffer> commandBuffer = pool.front().mResource;
-				pool.pop_front();
+	if (level == vk::CommandBufferLevel::ePrimary)
+		for (auto it = commandBuffers.begin(); it != commandBuffers.end(); it++)
+			if ((*it)->CheckDone()) {
+				CommandBuffer* commandBuffer = *it;
+				commandBuffers.erase(it);
 				commandBuffer->Reset(name);
 				return commandBuffer;
 			}
-		}
-	}
-
-	return new CommandBuffer(name, this, commandPool, level);
+	return new CommandBuffer(name, this, queueFamily, level);
 }
-void Device::Execute(stm_ptr<CommandBuffer> commandBuffer) {
-	commandBuffer->CheckDone();
-	if (commandBuffer->mState != CommandBuffer::CommandBufferState::eRecording)
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Execute() expected CommandBuffer to be in CommandBufferState::eRecording\n");
-	
-	((vk::CommandBuffer)*commandBuffer).end();
+void Device::Execute(CommandBuffer* commandBuffer, bool wait) {
+	ProfileRegion ps("CommandBuffer::Execute");
 
 	vector<vk::PipelineStageFlags> waitStages;	
 	vector<vk::Semaphore> waitSemaphores;	
-	for (uint32_t i = 0; i < commandBuffer->mWaitSemaphores.size(); i++) {
-		waitStages.push_back(commandBuffer->mWaitSemaphores[i].first);
-		waitSemaphores.push_back(*commandBuffer->mWaitSemaphores[i].second);
-	}
-
 	vector<vk::Semaphore> signalSemaphores;
-	for (uint32_t i = 0; i < commandBuffer->mSignalSemaphores.size(); i++)
-		signalSemaphores.push_back(*commandBuffer->mSignalSemaphores[i]);
+	vector<vk::CommandBuffer> commandBuffers { commandBuffer->mCommandBuffer };
+	for (auto& [stage, semaphore] : commandBuffer->mWaitSemaphores) {
+		waitStages.push_back(stage);
+		waitSemaphores.push_back(**semaphore);
+	}
+	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.push_back(**semaphore);
+	(*commandBuffer)->end();
+	commandBuffer->mQueueFamily->mQueue.submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mSignalFence);
+	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 
-	PROFILER_BEGIN("vkQueueSubmit");
-	vk::SubmitInfo submitInfo = {};
-	submitInfo.signalSemaphoreCount = (uint32_t)signalSemaphores.size();
-	submitInfo.pSignalSemaphores = signalSemaphores.data();
-	submitInfo.pWaitDstStageMask = waitStages.data();
-	submitInfo.waitSemaphoreCount = (uint32_t)waitSemaphores.size();
-	submitInfo.pWaitSemaphores = waitSemaphores.data();
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer->mCommandBuffer;
-	mGraphicsQueue.submit(1, &submitInfo, commandBuffer->mSignalFence);
-	PROFILER_END;
-
-	commandBuffer->mState = CommandBuffer::CommandBufferState::ePending;
-
-	mCommandBufferPoolMutex.lock();
-	mCommandBufferPool[commandBuffer->mCommandPool].push_back({ mFrameCount, commandBuffer });
-	mCommandBufferPoolMutex.unlock();
+	lock_guard lock(mQueueMutex);
+	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.push_back(commandBuffer);
+	if (wait) {
+		mDevice.waitForFences({ **commandBuffer->mSignalFence }, true, numeric_limits<uint64_t>::max());
+		commandBuffer->mState = CommandBuffer::CommandBufferState::eDone;
+		commandBuffer->Clear();
+	}
 }
 void Device::Flush() {
-	mCommandBufferPoolMutex.lock();
 	mDevice.waitIdle();
-	for (auto& kp : mCommandBufferPool)
-		kp.second.clear();
-	mCommandBufferPoolMutex.unlock();
+	lock_guard lock(mQueueMutex);
+	for (auto& [idx,queueFamily] : mQueueFamilies)
+		for (auto& [tid,p] : queueFamily.mCommandBuffers)
+			for (auto& commandBuffer : p.second)
+				commandBuffer->CheckDone();
 }
 
 vk::SampleCountFlagBits Device::GetMaxUsableSampleCount() {
@@ -567,34 +363,4 @@ vk::SampleCountFlagBits Device::GetMaxUsableSampleCount() {
 	if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; }
 	if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; }
 	return vk::SampleCountFlagBits::e1;
-}
-
-void Device::PrintAllocations() {
-	vk::DeviceSize used = 0;
-	vk::DeviceSize available = 0;
-	vk::DeviceSize total = 0;
-
-	for (uint32_t i = 0; i < mMemoryProperties.memoryHeapCount; i++)
-		total += mMemoryProperties.memoryHeaps[i].size;
-
-	for (auto kp : mMemoryAllocations)
-		for (auto a : kp.second) {
-			used += a.mSize;
-			for (auto av : a.mAvailable) available += av.second;
-		}
-
-	if (used == 0) {
-		printf_color(ConsoleColorBits::eYellow, "%s", "Using 0 B");
-		return;
-	}
-
-	float percentTotal = 100.f * (float)used / (float)total;
-	float percentWasted = 100.f * (float)available / (float)used;
-
-	if (used < 1024)
-		printf_color(ConsoleColorBits::eYellow, "Using %lu B (%.1f%%) - %.1f%% wasted", used, percentTotal, percentWasted);
-	else if (used < 1024 * 1024)
-		printf_color(ConsoleColorBits::eYellow, "Using %.3f KiB (%.1f%%) - %.1f%%wasted", used / 1024.f, percentTotal, percentWasted);
-	else
-		printf_color(ConsoleColorBits::eYellow, "Using %.3f MiB (%.1f%%) - %.1f%% wasted", used / (1024.f * 1024.f), percentTotal, percentWasted);
 }

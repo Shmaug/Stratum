@@ -4,6 +4,7 @@
 #include <sstream>
 
 using namespace std;
+using namespace stm;
 
 const std::chrono::high_resolution_clock Profiler::mTimer;
 list<ProfilerSample*> Profiler::mFrames;
@@ -13,10 +14,6 @@ uint32_t Profiler::mHistoryCount = 256;
 bool Profiler::mEnabled = true;
 float Profiler::mGraphHeight = 128;
 float Profiler::mSampleHeight = 20;
-
-ProfilerSample::~ProfilerSample() {
-	for (ProfilerSample* c : mChildren) delete c;
-}
 
 void Profiler::ClearAll() {
 	safe_delete(mCurrentSample);
@@ -40,10 +37,7 @@ void Profiler::BeginSample(const string& label) {
 void Profiler::EndSample() {
 	if (!mCurrentSample) return;
 
-	if (!mCurrentSample->mParent) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", "Error: Attempt to end nonexistant Profiler sample!");
-		throw;
-	}
+	if (!mCurrentSample->mParent) throw logic_error("attempt to end nonexistant profiler sample!");
 	mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
 	mCurrentSample = mCurrentSample->mParent;
 }
@@ -62,7 +56,7 @@ void Profiler::EndFrame() {
 	if (!mCurrentSample) return;
 
 	while (mCurrentSample->mParent) {
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s\n", "Warning: Profiler sample %s was never ended!", mCurrentSample->mLabel.c_str());
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s\n", "Warning: Profiler ProfilerSample %s was never ended!", mCurrentSample->mLabel.c_str());
 		mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
 		mCurrentSample = mCurrentSample->mParent;
 	}
@@ -83,21 +77,19 @@ void Profiler::EndFrame() {
 	}
 }
 
-void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
-	Device* device = gui->Device();
-	Font* font = device->AssetManager()->Load<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", "OpenSans-Regular");
-	MouseKeyboardInput* input = gui->InputManager()->GetFirst<MouseKeyboardInput>();
-	GuiContext::LayoutTheme theme = gui->mLayoutTheme;
-
-	char buf[256];
+void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
+	Device* device = gui.mDevice;
+	auto font = device->LoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", "OpenSans-Regular");
+	MouseKeyboardInput* input = gui.mInputManager->GetFirst<MouseKeyboardInput>();
+	GuiContext::LayoutTheme theme = gui.mLayoutTheme;
 
 	float toolbarHeight = 24;
 
-	float4 graphBackgroundColor = gui->mLayoutTheme.mControlBackgroundColor;
+	float4 graphBackgroundColor = gui.mLayoutTheme.mControlBackgroundColor;
 	float4 graphTextColor = float4(0.8f, 0.8f, 0.8f, 1);
-	float4 graphAxisColor = gui->mLayoutTheme.mSliderColor;
+	float4 graphAxisColor = gui.mLayoutTheme.mSliderColor;
 	float4 graphLineColor = float4(0.1f, 1.f, 0.2f, 1);
-	float4 frameSelectLineColor = gui->mLayoutTheme.mSliderKnobColor;
+	float4 frameSelectLineColor = gui.mLayoutTheme.mSliderKnobColor;
 
 	float2 s((float)input->WindowWidth(), (float)input->WindowHeight());
 	float2 c = input->CursorPos();
@@ -105,39 +97,28 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 
 	fRect2D windowRect(0, 0, s.x, toolbarHeight + mGraphHeight);
 
-	gui->BeginScreenLayout(GuiContext::LayoutAxis::eVertical, windowRect);
+	gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, windowRect);
 
 	#pragma region toolbar
-	// Print memory allocations and descriptor set usage
-	vk::DeviceSize memSize = 0;
-	for (uint32_t i = 0; i < device->MemoryProperties().memoryHeapCount; i++)
-		if (device->MemoryProperties().memoryHeaps[i].flags & vk::MemoryHeapFlagBits::eDeviceLocal)
-			memSize += device->MemoryProperties().memoryHeaps[i].size;
-	snprintf(buf, 256, "%u descriptor sets\t%u command buffers\t%u/%u allocations\t%.3f / %.3f mb (%.1f%%)\t %u FPS",
-		device->DescriptorSetCount(),
-		device->CommandBufferCount(),
-		device->MemoryAllocationCount(), device->Limits().maxMemoryAllocationCount,
-		device->MemoryUsage() / (1024.f * 1024.f), memSize / (1024.f * 1024.f), 100.f * (float)device->MemoryUsage() / (float)memSize,
-		framerate );
-	gui->LayoutLabel(buf, TextAnchor::eMax);
-	
-	gui->BeginSubLayout(GuiContext::LayoutAxis::eHorizontal, gui->mLayoutTheme.mControlSize + gui->mLayoutTheme.mControlPadding*2);
-	gui->mLayoutTheme.mControlSize = 140;
-	if (gui->LayoutTextButton(mEnabled ? "PAUSE PROFILER" : "RESUME PROFILER")) mEnabled = !mEnabled;
-	gui->mLayoutTheme = theme;
-	gui->EndLayout();
-
+	gui.BeginSubLayout(GuiContext::LayoutAxis::eHorizontal, gui.mLayoutTheme.mControlSize + gui.mLayoutTheme.mControlPadding*2);
+	gui.mLayoutTheme.mControlSize = 140;
+	if (gui.LayoutTextButton(mEnabled ? "PAUSE PROFILER" : "RESUME PROFILER")) mEnabled = !mEnabled;
+	gui.LayoutLabel(to_string(framerate) + " FPS", TextAnchor::eMax);
+	gui.mLayoutTheme = theme;
+	gui.EndLayout();
 	#pragma endregion
 
-	gui->BeginScrollSubLayout(windowRect.mSize.y - toolbarHeight, 256);
+	char buf[256];
 
-	fRect2D clipRect = gui->LayoutClipRect();
-	float depth = gui->LayoutDepth() - 0.001f;
+	gui.BeginScrollSubLayout(windowRect.mSize.y - toolbarHeight, 256);
 
-	gui->mLayoutTheme.mBackgroundColor.rgb *= 0.8f;
-	fRect2D graphRect = gui->BeginSubLayout(GuiContext::LayoutAxis::eVertical, 128);
-	gui->EndLayout();
-	gui->mLayoutTheme = theme;
+	fRect2D clipRect = gui.LayoutClipRect();
+	float depth = gui.LayoutDepth() - 0.001f;
+
+	gui.mLayoutTheme.mBackgroundColor.xyz *= 0.8f;
+	fRect2D graphRect = gui.BeginSubLayout(GuiContext::LayoutAxis::eVertical, 128);
+	gui.EndLayout();
+	gui.mLayoutTheme = theme;
 
 	// Generate graph points and vertical selection lines
 	if (mFrames.size()) {
@@ -158,14 +139,14 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 		graphWindowMax = floorf(graphWindowMax + 0.5f);
 		// min/max graph labels
 		snprintf(buf, 256, "%ums", (uint32_t)graphWindowMax);
-		gui->DrawString(graphRect.mOffset + float2(2, graphRect.mSize.y - 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
+		gui.DrawString(graphRect.mOffset + float2(2, graphRect.mSize.y - 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
 		snprintf(buf, 256, "%ums", (uint32_t)graphWindowMin);
-		gui->DrawString(graphRect.mOffset + float2(2, 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
+		gui.DrawString(graphRect.mOffset + float2(2, 10), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
 		// Horizontal graph lines
 		for (uint32_t i = 1; i < 3; i++) {
 			snprintf(buf, 256, "%.1fms", graphWindowMax * i / 3.f);
-			gui->DrawString(graphRect.mOffset + float2(2, graphRect.mSize.y * (i / 3.f)), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
-			gui->Rect(fRect2D(graphRect.mOffset.x + 32, graphRect.mOffset.y + graphRect.mSize.y * (i / 3.f) - 1, graphRect.mSize.x - 32, 1), depth, graphAxisColor, nullptr, 0, clipRect);
+			gui.DrawString(graphRect.mOffset + float2(2, graphRect.mSize.y * (i / 3.f)), depth, font, 14, buf, graphTextColor, TextAnchor::eMin, clipRect);
+			gui.Rect(fRect2D(graphRect.mOffset.x + 32, graphRect.mOffset.y + graphRect.mSize.y * (i / 3.f) - 1, graphRect.mSize.x - 32, 1), depth, graphAxisColor, nullptr, 0, clipRect);
 		}
 		
 		// Graph plot line
@@ -173,13 +154,11 @@ void Profiler::DrawGui(GuiContext* gui, uint32_t framerate) {
 			points[i].x = (float)i / ((float)pointCount - 1.f);
 			points[i].y = (points[i].y - graphWindowMin) / (graphWindowMax - graphWindowMin);
 		}
-		gui->PolyLine(points, pointCount, graphLineColor, 1.25f, float3(graphRect.mOffset, 0), float3(graphRect.mSize, 1), clipRect);
+		gui.PolyLine(points, pointCount, graphLineColor, 1.25f, float3(graphRect.mOffset, 0), float3(graphRect.mSize, 1), clipRect);
 		delete[] points;
 	}
 
-	gui->EndLayout(); // scroll
+	gui.EndLayout(); // scroll
 	
-	gui->EndLayout(); // window
-	
-	return;
+	gui.EndLayout(); // window
 }

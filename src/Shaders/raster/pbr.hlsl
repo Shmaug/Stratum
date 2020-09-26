@@ -9,7 +9,7 @@
 
 #pragma static_sampler Sampler
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
 #if defined(TEXTURED_COLORONLY)
 #define NEED_TEXCOORD
@@ -37,9 +37,9 @@
 	float BumpStrength;
 };
 
-#include <include/util.hlsli>
-#include <include/shadow.hlsli>
-#include <include/brdf.hlsli>
+#include <util.hlsli>
+#include <shadow.hlsli>
+#include <brdf.hlsli>
 
 struct v2f {
 	float4 position : SV_Position;
@@ -123,9 +123,7 @@ float4 fsmain(v2f i) : SV_Target0 {
 	material.roughness = max(.002, material.perceptualRoughness * material.perceptualRoughness);
 	material.occlusion = occlusion;
 	material.emission = Emission;
-
-	float3 eval = ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w);
-	return float4(eval, 1);
+	return float4(ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w), 1);
 }
 
 float fsdepth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {

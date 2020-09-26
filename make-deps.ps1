@@ -1,4 +1,4 @@
-param([String] $Generator = "Visual Studio 16 2019")
+param ($Generator = "'Visual Studio 16 2019' -A x64", [Switch]$BuildDebug)
 
 $STRATUM_DIR = (Resolve-Path $PSScriptRoot).Path
 
@@ -11,20 +11,28 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/syoyo/tinygltf/master/
 git submodule update --init
 python $STRATUM_DIR/extern/src/shaderc/utils/git-sync-deps
 
-function BuildTarget($FolderName, $ConfigureArguments) {
-  $prev = Get-Location
-  mkdir -Force "$STRATUM_DIR/extern/src/$FolderName/build"
-  Set-Location "$STRATUM_DIR/extern/src/$FolderName/build"
-  $command = "cmake -S ../ -B . -G '$Generator' -DCMAKE_INSTALL_PREFIX=$STRATUM_DIR/extern -Wno-dev $ConfigureArguments"
+function BuildTarget($FolderName, $Configuration, $ConfigureArguments) {
+  $command = "cmake -S $STRATUM_DIR/extern/src/$FolderName -B $STRATUM_DIR/extern/build/$FolderName -G $Generator -DCMAKE_INSTALL_PREFIX=$STRATUM_DIR/extern -Wno-dev $ConfigureArguments"
+  if ($Generator -eq "Ninja") {
+    $command = $command + " -DCMAKE_BUILD_TYPE=$Configuration"
+  }
   Invoke-Expression $command
-  cmake --build . --config Debug --target install -- -maxCpuCount
-  cmake --build . --config Release --target install -- -maxCpuCount
+
+  Write-Output $command
+  
+  $prev = Get-Location
+  Set-Location "$STRATUM_DIR/extern/build/$FolderName"
+  cmake --build . --config $Configuration --target install -- -maxCpuCount
   Set-Location $prev
 }
 
-BuildTarget assimp      "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DBUILD_SHARED_LIBS=OFF -DASSIMP_BUILD_TESTS=OFF -DASSIMP_BUILD_ZLIB=ON"
-BuildTarget freetype2   "-DMSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
-BuildTarget msdfgen     "-DMSDFGEN_BUILD_MSDFGEN_STANDALONE=OFF -DMSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL -DFREETYPE_INCLUDE_DIRS='${STRATUM_DIR}/extern/include' -DFREETYPE_LIBRARY='${STRATUM_DIR}/extern/lib/freetype.lib'"
-BuildTarget OpenXR-SDK  "-DDYNAMIC_LOADER=ON"
-BuildTarget shaderc     "-DSHADERC_ENABLE_SHARED_CRT=ON -DBUILD_SHARED_LIBS=OFF -DSHADERC_SKIP_TESTS=ON -DBUILD_TESTING=OFF -DSPIRV_SKIP_EXECUTABLES=ON"
-BuildTarget SPIRV-Cross "-DSPIRV_CROSS_ENABLE_TESTS=OFF"
+$cfg = $BuildDebug ? "Debug" : "Release"
+
+BuildTarget assimp      "Debug" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_BUILD_ZLIB=ON"
+BuildTarget assimp      "Release" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_BUILD_ZLIB=ON"
+BuildTarget freetype2   "Debug" ""
+BuildTarget freetype2   "Release" ""
+BuildTarget msdfgen     $cfg "-DFREETYPE_INCLUDE_DIRS='${STRATUM_DIR}/extern/include' -DFREETYPE_LIBRARY='${STRATUM_DIR}/extern/lib/freetype.lib'"
+BuildTarget OpenXR-SDK  $cfg ""
+BuildTarget shaderc     $cfg "-DEFFCEE_BUILD_SAMPLES=OFF -DEFFCEE_BUILD_TESTING=OFF -DSHADERC_SKIP_TESTS=ON"
+BuildTarget SPIRV-Cross $cfg ""

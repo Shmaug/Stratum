@@ -7,9 +7,9 @@
 
 #pragma multi_compile SCREEN_SPACE
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
-[[vk::binding(INSTANCE_BUFFER_BINDING, PER_OBJECT)]] ByteAddressBuffer Vertices : register(t0);
+[[vk::binding(INSTANCES_BINDING, PER_OBJECT)]] ByteAddressBuffer Vertices : register(t0);
 [[vk::binding(BINDING_START, PER_OBJECT)]] StructuredBuffer<float4x4> Transforms : register(t1);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b1) {
@@ -21,7 +21,7 @@
 	float Depth;
 }
 
-#include <include/util.hlsli>
+#include <util.hlsli>
 
 struct v2f {
 	float4 position : SV_Position;

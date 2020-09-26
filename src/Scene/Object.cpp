@@ -3,10 +3,9 @@
 #include <Scene/Scene.hpp>
 
 using namespace std;
+using namespace stm;
 
-Object::Object(const string& name) : mName(name) {
-	DirtyTransform();
-}
+Object::Object(const string& name, Scene* scene) : mName(name), mScene(scene) { DirtyTransform(); }
 Object::~Object() {
 	while (mChildren.size()) {
 		Object* c = mChildren.back();
@@ -16,7 +15,7 @@ Object::~Object() {
 		c->EnabledSelf(c->mEnabled);
 	}
 	if (mParent) mParent->RemoveChild(this);
-	if (mScene) mScene->DestroyObject(this, false);
+	if (mScene) mScene->RemoveObject(this);
 }
 
 bool Object::UpdateTransform() {
@@ -60,7 +59,7 @@ void Object::RemoveChild(Object* c) {
 }
 
 void Object::DirtyTransform() {
-	if (mScene && Bounds()) mScene->BvhDirty(this);
+	if (Bounds()) mScene->BvhDirty(this);
 	mTransformDirty = true;
 	queue<Object*> objs;
 	for (Object* c : mChildren) objs.push(c);
@@ -68,7 +67,7 @@ void Object::DirtyTransform() {
 		Object* c = objs.front();
 		objs.pop();
 		c->mTransformDirty = true;
-		if (mScene && c->Bounds()) mScene->BvhDirty(this);
+		if (c->Bounds()) mScene->BvhDirty(this);
 		for (Object* o : c->mChildren) objs.push(o);
 	}
 }

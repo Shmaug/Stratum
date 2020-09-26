@@ -1,16 +1,16 @@
 #include <Core/EnginePlugin.hpp>
 #include <Scene/Scene.hpp>
 #include <Scene/Renderers/MeshRenderer.hpp>
-#include <Util/Profiler.hpp>
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <ThirdParty/tiny_gltf.h>
+#include <tiny_gltf.h>
 
 #include "RenderVolume.hpp"
 
 using namespace std;
+namespace dcmvs {
 
 vk::Format gltf2vk(int componentType, int componentCount) {
 	switch (componentType) {
@@ -38,8 +38,10 @@ class DicomVis : public EnginePlugin {
 private:
 	Scene* mScene = nullptr;
 	MouseKeyboardInput* mKeyboardInput = nullptr;
-	Camera* mMainCamera = nullptr;
-	RenderVolume* mVolume = nullptr;
+	
+	vector<unique_ptr<Object>> mSceneObjects;
+	unique_ptr<Camera> mMainCamera;
+	unique_ptr<RenderVolume> mVolume;
 
 	float mZoom = 0;
 	bool mShowPerformance = false;
@@ -48,15 +50,15 @@ private:
 
 	void ScanFolders() {
 		fs::path dataPath;
-		vector<fs::path> defaultLocations { "/Data", "/data", "~/Data", "~/data", "C:/Data", "D:/Data", "E:/Data", "F:/Data" "G:/Data", };
-		for (auto it = mScene->Instance()->ArgsBegin(); it != mScene->Instance()->ArgsEnd(); it++)
-			if (*it == "--datapath" && ++it != mScene->Instance()->ArgsEnd())
-					dataPath = *it;
-		auto it = defaultLocations.begin();
-		while (!fs::exists(dataPath) && it != defaultLocations.end()) dataPath = *it++;
-		if (!fs::exists(dataPath)) {
-			fprintf_color(ConsoleColorBits::eRed, stderr, "DicomVis: Could not locate image data path. Please specify with --datapath <path>\n");
-			return;
+		string tmp;
+		if (mScene->mInstance->GetOption("dataPath", tmp))
+				dataPath = tmp;
+		else {
+			vector<fs::path> defaultLocations { "/Data", "/data", "~/Data", "~/data", "C:/Data", "D:/Data", "E:/Data", "F:/Data" "G:/Data", };
+			auto it = defaultLocations.begin();
+			while (!fs::exists(dataPath) && it != defaultLocations.end()) dataPath = *it++;
+			if (!fs::exists(dataPath))
+				throw invalid_argument("could not locate image data path. Specify with --dataPath <path>");
 		}
 
 		for (const auto& p : fs::recursive_directory_iterator(dataPath)) {
@@ -66,9 +68,9 @@ private:
 	}
 	void LoadScene() {
 		fs::path filename;
-		for (auto it = mScene->Instance()->ArgsBegin(); it != mScene->Instance()->ArgsEnd(); it++)
-			if (*it == "--environment" && ++it != mScene->Instance()->ArgsEnd())
-				filename = *it;
+		string tmp;
+		if (mScene->mInstance->GetOption("environment", tmp))
+			filename = tmp;
 
 		tinygltf::Model model;
 		tinygltf::TinyGLTF loader;
@@ -77,29 +79,29 @@ private:
 		if (
 			(filename.extension() == ".glb" && !loader.LoadBinaryFromFile(&model, &err, &warn, filename.string())) ||
 			(filename.extension() == ".gltf" && !loader.LoadASCIIFromFile(&model, &err, &warn, filename.string())) ) {
-			fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", filename.string().c_str(), err.c_str());
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), err.c_str());
 			return;
 		}
 		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 		
-		Device* device = mScene->Instance()->Device();
-		vector<stm_ptr<Buffer>> buffers;
-		vector<stm_ptr<Texture>> images;
-		vector<vector<stm_ptr<Mesh>>> meshes;
-		vector<stm_ptr<Material>> materials;
+		Device* device = mScene->mInstance->Device();
+		vector<shared_ptr<Buffer>> buffers;
+		vector<shared_ptr<Texture>> images;
+		vector<vector<shared_ptr<Mesh>>> meshes;  // meshes from glTF primitives
+		vector<shared_ptr<Material>> materials;
 
 		for (const auto& b : model.buffers)
-			buffers.push_back(new Buffer(b.name, mScene->Instance()->Device(), b.data.data(), b.data.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer));
+			buffers.push_back(make_shared<Buffer>(b.name, device, b.data.data(), b.data.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst));
 
 		for (const auto& i : model.images)
-			images.push_back(new Texture(i.name, device, (void*)i.image.data(), i.image.size(), vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), 1));
+			images.push_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
 
 		for (const auto& m : model.materials) {
-			stm_ptr<Material> mat = new Material(m.name, mScene->Instance()->Device()->AssetManager()->Load<Pipeline>("Shaders/pbr.stmb", "pbr"));
+			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/Shaders/pbr.stmb", "pbr"));
 			materials.push_back(mat);
 		}
 
-		unordered_map<string, VertexAttributeType> semanticMap {
+		map<string, VertexAttributeType> semanticMap {
 			{ "position", VertexAttributeType::ePosition },
 			{ "normal", VertexAttributeType::eNormal },
 			{ "tangent", VertexAttributeType::eTangent },
@@ -125,7 +127,7 @@ private:
 					case TINYGLTF_MODE_TRIANGLE_FAN: topo = vk::PrimitiveTopology::eTriangleFan; break;
 				}
 				
-				stm_ptr<Mesh> mesh(new Mesh(m.name, topo));
+				auto mesh = make_shared<Mesh>(m.name, topo);
 				const auto& indices = model.accessors[prim.indices];
 				const auto& indexBufferView = model.bufferViews[indices.bufferView];
 				mesh->SetIndexBuffer(BufferView(buffers[indexBufferView.buffer], indexBufferView.byteOffset), indices.ByteStride(indexBufferView) == sizeof(uint16_t) ? vk::IndexType::eUint16 : vk::IndexType::eUint32);
@@ -135,13 +137,13 @@ private:
 					string typeName = attrib.first;
 					const auto& accessor = model.accessors[attrib.second];
 
-					// parse typename
+					// parse typename & typeindex
 					transform(typeName.begin(), typeName.end(), typeName.begin(), [](char c) { return std::tolower(c); });
 					uint32_t typeIdx = 0;
-					size_t stridx = typeName.find_first_of("0123456789");
-					if (stridx != string::npos) {
-						typeIdx = atoi(typeName.c_str() + stridx);
-						typeName = typeName.substr(0, stridx);
+					size_t c = typeName.find_first_of("0123456789");
+					if (c != string::npos) {
+						typeIdx = atoi(typeName.c_str() + c);
+						typeName = typeName.substr(0, c);
 					}
 					if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
 
@@ -175,6 +177,7 @@ private:
 				uint32_t primIndex = 0;
 				for (const auto& prim : nodeMesh.primitives) {
 					MeshRenderer* renderer = mScene->CreateObject<MeshRenderer>(nodeMesh.name);
+					mSceneObjects.emplace_back(renderer);
 					renderer->Mesh(meshes[node.mesh][primIndex]);
 					renderer->Material(materials[prim.material]);
 					if (node.translation.size() == 3)
@@ -186,18 +189,16 @@ private:
 					primIndex++;
 				}
 			}
-	
-		buffers.clear();
 	}
 
 protected:
 	PLUGIN_EXPORT bool OnSceneInit(Scene* scene) override {
 		mScene = scene;
-		mKeyboardInput = mScene->Instance()->InputManager()->GetFirst<MouseKeyboardInput>();
+		mKeyboardInput = mScene->mInstance->InputManager().GetFirst<MouseKeyboardInput>();
 
 		mZoom = 3.f;
 		
-		mMainCamera = mScene->CreateObject<Camera>("Camera", set<RenderTargetIdentifier> { "stm_main_render", "stm_main_resolve" "stm_main_depth" });
+		mMainCamera = unique_ptr<Camera>(mScene->CreateObject<Camera>("Camera", set<RenderTargetIdentifier> { "stm_main_render", "stm_main_resolve" "stm_main_depth" }));
 		mMainCamera->Near(.00625f);
 		mMainCamera->Far(1024.f);
 		mMainCamera->FieldOfView(radians(65.f));
@@ -209,11 +210,11 @@ protected:
 		mScene->SetAttachmentInfo("stm_main_resolve", extent, usageFlags | vk::ImageUsageFlagBits::eStorage);
 
 		ScanFolders();
-		//LoadScene();
+		LoadScene();
 
 		return true;
 	}
-	PLUGIN_EXPORT void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) override {
+	PLUGIN_EXPORT void OnUpdate(CommandBuffer& commandBuffer) override {
 		if (mKeyboardInput->KeyDownFirst(KEY_TILDE)) mShowPerformance = !mShowPerformance;
 
 		if (mKeyboardInput->GetPointerLast(0)->mGuiHitT < 0) {
@@ -224,58 +225,54 @@ protected:
 			if (mVolume && mKeyboardInput->KeyDown(MOUSE_LEFT)) {
 				float3 axis = mMainCamera->WorldRotation() * float3(0, 1, 0) * mKeyboardInput->CursorDelta().x - mMainCamera->WorldRotation() * float3(1, 0, 0) * mKeyboardInput->CursorDelta().y;
 				if (dot(axis, axis) > .001f) {
-					mVolume->LocalRotation(quaternion(length(axis) * .003f, -normalize(axis)) * mVolume->LocalRotation());
+					mVolume->LocalRotation(quaternion::AxisAngle(-normalize(axis), length(axis) * .003f) * mVolume->LocalRotation());
 				}
 			}
 		}
 	}
-	PLUGIN_EXPORT void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) override { if (mVolume) mVolume->UpdateBake(commandBuffer); }
+	PLUGIN_EXPORT void OnLateUpdate(CommandBuffer& commandBuffer) override { if (mVolume) mVolume->BakeRender(commandBuffer); }
 	
-	PLUGIN_EXPORT void OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) override {		
-		bool worldSpace = camera->StereoMode() != StereoMode::eNone;
+	PLUGIN_EXPORT void OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) override {		
+		bool worldSpace = camera.StereoMode() != StereoMode::eNone;
 
 		// Draw performance overlay
-		#ifdef PROFILER_ENABLE
-		if (mShowPerformance && !worldSpace) Profiler::DrawGui(gui, (uint32_t)mScene->FPS());
-		#endif
+		if (mShowPerformance && !worldSpace)
+			Profiler::DrawGui(gui, (uint32_t)mScene->FPS());
 
 		if (worldSpace)
-			gui->BeginWorldLayout(GuiContext::LayoutAxis::eVertical, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
+			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
 		else
-			gui->BeginScreenLayout(GuiContext::LayoutAxis::eVertical, fRect2D(10, (float)mScene->Instance()->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
+			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, fRect2D(10, (float)mScene->mInstance->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
 
 
-		gui->LayoutTitle("Load Dataset");
-		gui->LayoutSeparator();
-		float prev = gui->mLayoutTheme.mControlSize;
-		gui->mLayoutTheme.mControlSize = 24;
-		gui->BeginScrollSubLayout(175, mStackFolders.size() * (gui->mLayoutTheme.mControlSize + 2*gui->mLayoutTheme.mControlPadding));
+		gui.LayoutTitle("Load Dataset");
+		gui.LayoutSeparator();
+		float prev = gui.mLayoutTheme.mControlSize;
+		gui.mLayoutTheme.mControlSize = 24;
+		gui.BeginScrollSubLayout(175, mStackFolders.size() * (gui.mLayoutTheme.mControlSize + 2*gui.mLayoutTheme.mControlPadding));
 		
 		for (const auto& folder : mStackFolders)
-			if (gui->LayoutTextButton(folder.stem().string(), TextAnchor::eMin)) {
-				commandBuffer->Device()->Flush();
-				safe_delete(mVolume);
-				try {
-					mVolume = mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer->Device(), folder);
-					mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * float3(0,0,0.5f));
-				} catch (exception& e) {
-					fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to load volume: %s\n", e.what());
-				}
+			if (gui.LayoutTextButton(folder.stem().string(), TextAnchor::eMin)) {
+				commandBuffer.mDevice->Flush();
+				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.mDevice, folder));
+				mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * float3(0,0,0.5f));
 			}
 
-		gui->mLayoutTheme.mControlSize = prev;
-		gui->EndLayout();
+		gui.mLayoutTheme.mControlSize = prev;
+		gui.EndLayout();
 
 		if (mVolume) mVolume->DrawGui(commandBuffer, camera, gui);
 
-		gui->EndLayout();
+		gui.EndLayout();
 	}
 
-	PLUGIN_EXPORT void OnPostProcess(stm_ptr<CommandBuffer> commandBuffer, Framebuffer* framebuffer, const set<Camera*>& cameras) override {
+	PLUGIN_EXPORT void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const set<Camera*>& cameras) override {
 		if (!mVolume) return;
 		for (Camera* camera : cameras)
-			mVolume->Draw(commandBuffer, framebuffer, camera);
+			mVolume->Draw(commandBuffer, framebuffer, *camera);
 	}
 };
 
-ENGINE_PLUGIN(DicomVis)
+}
+
+ENGINE_PLUGIN(dcmvs::DicomVis)

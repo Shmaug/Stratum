@@ -4,11 +4,12 @@
 #include <Core/Framebuffer.hpp>
 
 using namespace std;
+using namespace stm;
 
-RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpass>& subpassArray) : mName(name), mDevice(device), mSubpasses(subpassArray) {
+RenderPass::RenderPass(const string& name, stm::Device* device, const vector<Subpass>& subpassArray) : mName(name), mDevice(device), mSubpasses(subpassArray) {
 		mSubpassHash = 0;
 		for (uint32_t i = 0; i < subpassArray.size(); i++)
-			hash_combine(mSubpassHash, subpassArray[i]);
+			mSubpassHash = hash_combine(mSubpassHash, subpassArray[i]);
 		
 		// build mAttachments and mAttachmentMap
 
@@ -150,9 +151,9 @@ RenderPass::RenderPass(const string& name, ::Device* device, const vector<Subpas
 		renderPassInfo.pSubpasses = subpasses.data();
 		renderPassInfo.dependencyCount = (uint32_t)dependencies.size();
 		renderPassInfo.pDependencies = dependencies.data();
-		mRenderPass = ((vk::Device)*mDevice).createRenderPass(renderPassInfo);
+		mRenderPass = (*mDevice)->createRenderPass(renderPassInfo);
 		mDevice->SetObjectName(mRenderPass, mName + " RenderPass");
 }
 RenderPass::~RenderPass() {
-	mDevice->Destroy(mRenderPass);
+	(*mDevice)->destroyRenderPass(mRenderPass);
 }

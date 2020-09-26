@@ -1,9 +1,14 @@
-#include <Scene/XR.hpp>
+#include "XR.hpp"
+
+#include <vulkan/vulkan.h>
+#include <openxr/openxr_platform.h>
+
 #include <Util/Tokenizer.hpp>
 
 using namespace std;
+using namespace stm;
 
-bool XR::XR_FAILED_MSG(XrResult result, const string& errmsg) {
+bool XR::FailMsg(XrResult result, const string& errmsg) {
 	if (XR_FAILED(result)) {
 		char resultString[XR_MAX_RESULT_STRING_SIZE];
 		xrResultToString(mInstance, result, resultString);
@@ -41,13 +46,13 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 	instanceinfo.enabledExtensionCount = (uint32_t)enabledExtensions.size();
 	instanceinfo.enabledExtensionNames = enabledExtensions.data();
 	instanceinfo.enabledApiLayerCount = 0;
-	if (XR_FAILED_MSG(xrCreateInstance(&instanceinfo, &mInstance), "xrCreateInstance failed")) {
+	if (FailMsg(xrCreateInstance(&instanceinfo, &mInstance), "xrCreateInstance failed")) {
 		mInitialized = false;
 		return;
 	}
 	XrInstanceProperties instanceProperties = {};
 	instanceProperties.type = XR_TYPE_INSTANCE_PROPERTIES;
-	if (XR_FAILED_MSG(xrGetInstanceProperties(mInstance, &instanceProperties), "xrGetInstanceProperties failed")) {
+	if (FailMsg(xrGetInstanceProperties(mInstance, &instanceProperties), "xrGetInstanceProperties failed")) {
 		Cleanup();
 		mInitialized = false;
 		return;
@@ -63,7 +68,7 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 	}
 	mSystemProperties = {};
 	mSystemProperties.type = XR_TYPE_SYSTEM_PROPERTIES;
-	if (XR_FAILED_MSG(xrGetSystemProperties(mInstance, mSystem, &mSystemProperties), "xrGetSystemProperties failed")) {
+	if (FailMsg(xrGetSystemProperties(mInstance, mSystem, &mSystemProperties), "xrGetSystemProperties failed")) {
 		Cleanup();
 		mInitialized = false;
 		return;
@@ -73,7 +78,7 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 XR::~XR() { Cleanup(); }
 
 void XR::Cleanup() {
-	if (mHmdCamera) mScene->DestroyObject(mHmdCamera);
+	safe_delete(mHmdCamera);
 
 	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) delete[] mSwapchainImages[i];
 	for (uint32_t i = 0; i < mSwapchains.size(); i++) xrDestroySwapchain(mSwapchains[i]);
@@ -106,7 +111,7 @@ void XR::Cleanup() {
 
 set<string> XR::InstanceExtensionsRequired() {
 	PFN_xrVoidFunction func;
-	if (XR_FAILED_MSG(xrGetInstanceProcAddr(mInstance, "xrGetVulkanInstanceExtensionsKHR", &func), "Failed to get address of xrGetVulkanInstanceExtensionsKHR")) return {};
+	if (FailMsg(xrGetInstanceProcAddr(mInstance, "xrGetVulkanInstanceExtensionsKHR", &func), "Failed to get address of xrGetVulkanInstanceExtensionsKHR")) return {};
 	PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensions = (PFN_xrGetVulkanInstanceExtensionsKHR)func;
 
 	uint32_t bufSize, len;
@@ -122,7 +127,7 @@ set<string> XR::InstanceExtensionsRequired() {
 }
 set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	PFN_xrVoidFunction func;
-	if (XR_FAILED_MSG(xrGetInstanceProcAddr(mInstance, "xrGetVulkanDeviceExtensionsKHR", &func), "Failed to get address of xrGetVulkanDeviceExtensionsKHR")) return {};
+	if (FailMsg(xrGetInstanceProcAddr(mInstance, "xrGetVulkanDeviceExtensionsKHR", &func), "Failed to get address of xrGetVulkanDeviceExtensionsKHR")) return {};
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensions = (PFN_xrGetVulkanDeviceExtensionsKHR)func;
 
 	uint32_t bufSize, len;
@@ -233,18 +238,18 @@ bool XR::OnSceneInit(Scene* scene) {
 		info.faceCount = 1;
 		info.arraySize = 1;
 		info.mipCount = 1;
-		if (XR_FAILED_MSG(xrCreateSwapchain(mSession, &info, &mSwapchains[i]), "xrCreateSwapchain failed")) {
+		if (FailMsg(xrCreateSwapchain(mSession, &info, &mSwapchains[i]), "xrCreateSwapchain failed")) {
 			Cleanup();
 			return false;
 		}
 
 		uint32_t len;
-		if (XR_FAILED_MSG(xrEnumerateSwapchainImages(mSwapchains[i], 0, &len, nullptr), "xrEnumerateSwapchainImages failed")) {
+		if (FailMsg(xrEnumerateSwapchainImages(mSwapchains[i], 0, &len, nullptr), "xrEnumerateSwapchainImages failed")) {
 			Cleanup();
 			return false;
 		}	               
 
-		maxSwapchainLength = max(maxSwapchainLength, len);
+		maxSwapchainLength = std::max(maxSwapchainLength, len);
 	}
 
 	for (uint32_t i = 0; i < mViewCount; i++) {
@@ -253,7 +258,7 @@ bool XR::OnSceneInit(Scene* scene) {
 			mSwapchainImages[i][j].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
 		
 		uint32_t len;
-		if (XR_FAILED_MSG(xrEnumerateSwapchainImages(mSwapchains[i], maxSwapchainLength, &len, (XrSwapchainImageBaseHeader*)mSwapchainImages[i]), "xrEnumerateSwapchainImages failed")) {
+		if (FailMsg(xrEnumerateSwapchainImages(mSwapchains[i], maxSwapchainLength, &len, (XrSwapchainImageBaseHeader*)mSwapchainImages[i]), "xrEnumerateSwapchainImages failed")) {
 			Cleanup();
 			return false;
 		}	         
@@ -275,7 +280,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	setInfo.type = XR_TYPE_ACTION_SET_CREATE_INFO;
 	strcpy(setInfo.actionSetName, "actionset");
 	strcpy(setInfo.localizedActionSetName, "Action Set");
-	if (XR_FAILED_MSG(xrCreateActionSet(mInstance, &setInfo, &mActionSet), "xrCreateActionSet failed")) {
+	if (FailMsg(xrCreateActionSet(mInstance, &setInfo, &mActionSet), "xrCreateActionSet failed")) {
 		Cleanup();
 		return false;
 	}
@@ -295,7 +300,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	actionInfo.subactionPaths = mHandPaths.data();
 	strcpy(actionInfo.actionName, "triggergrab"); // assuming every controller has some form of main "trigger" button
 	strcpy(actionInfo.localizedActionName, "Grab Object with Trigger Button");
-	if (XR_FAILED_MSG(xrCreateAction(mActionSet, &actionInfo, &mGrabAction), "xrCreateAction failed for triggergrab")) {
+	if (FailMsg(xrCreateAction(mActionSet, &actionInfo, &mGrabAction), "xrCreateAction failed for triggergrab")) {
 		Cleanup();
 		return false;
 	}
@@ -305,7 +310,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	strcpy(actionInfo.localizedActionName, "Hand Pose");
 	actionInfo.countSubactionPaths = (uint32_t)mHandPaths.size();
 	actionInfo.subactionPaths = mHandPaths.data();
-	if (XR_FAILED_MSG(xrCreateAction(mActionSet, &actionInfo, &mPoseAction), "xrCreateAction failed for handpose")) {
+	if (FailMsg(xrCreateAction(mActionSet, &actionInfo, &mPoseAction), "xrCreateAction failed for handpose")) {
 		Cleanup();
 		return false;
 	}
@@ -316,7 +321,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	xrStringToPath(mInstance, "/user/hand/right/input/grip/pose", &posePath[1]);
 
 	XrPath khrSimpleInteractionProfilePath;
-	if (XR_FAILED_MSG(xrStringToPath(mInstance, "/interaction_profiles/khr/simple_controller", &khrSimpleInteractionProfilePath), "xrStringToPath failed for /interaction_profiles/khr/simple_controller")) {
+	if (FailMsg(xrStringToPath(mInstance, "/interaction_profiles/khr/simple_controller", &khrSimpleInteractionProfilePath), "xrStringToPath failed for /interaction_profiles/khr/simple_controller")) {
 		Cleanup();
 		return false;
 	}
@@ -336,7 +341,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	suggestedBindings.interactionProfile = khrSimpleInteractionProfilePath;
 	suggestedBindings.countSuggestedBindings = (uint32_t)bindings.size();
 	suggestedBindings.suggestedBindings = bindings.data();
-	if (XR_FAILED_MSG(xrSuggestInteractionProfileBindings(mInstance, &suggestedBindings), "xrSuggestInteractionProfileBindings failed")) {
+	if (FailMsg(xrSuggestInteractionProfileBindings(mInstance, &suggestedBindings), "xrSuggestInteractionProfileBindings failed")) {
 		Cleanup();
 		return false;
 	}
@@ -349,7 +354,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	actionSpaceInfo.poseInActionSpace.orientation = { 0.f, 0.f, 0.f, 1.f };
 	for (uint32_t i = 0; i < mActionSpaces.size(); i++){
 		actionSpaceInfo.subactionPath = mHandPaths[i];
-		if (XR_FAILED_MSG(xrCreateActionSpace(mSession, &actionSpaceInfo, &mActionSpaces[i]), "xrCreateActionSpace failed")) {
+		if (FailMsg(xrCreateActionSpace(mSession, &actionSpaceInfo, &mActionSpaces[i]), "xrCreateActionSpace failed")) {
 			Cleanup();
 			return false;
 		}
@@ -359,7 +364,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	attachInfo.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO;
 	attachInfo.countActionSets = 1;
 	attachInfo.actionSets = &mActionSet;
-	if (XR_FAILED_MSG(xrAttachSessionActionSets(mSession, &attachInfo), "xrAttachSessionActionSets failed")) {
+	if (FailMsg(xrAttachSessionActionSets(mSession, &attachInfo), "xrAttachSessionActionSets failed")) {
 		Cleanup();
 		return false;
 	}
@@ -374,17 +379,17 @@ bool XR::OnSceneInit(Scene* scene) {
 void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = (vk::Instance)*mScene->Instance();
-	binding.physicalDevice = mScene->Instance()->Device()->PhysicalDevice();
-	binding.device = (vk::Device)*mScene->Instance()->Device();
-	binding.queueFamilyIndex = mScene->Instance()->Device()->PresentQueueFamilyIndex();
-	binding.queueIndex = mScene->Instance()->Device()->PresentQueueIndex();
+	binding.instance = **mScene->mInstance;
+	binding.physicalDevice = mScene->mInstance->Device()->PhysicalDevice();
+	binding.device = **mScene->mInstance->Device();
+	binding.queueFamilyIndex = mScene->mInstance->Window()->PresentQueueFamily();
+	binding.queueIndex = 0;
 
 	XrSessionCreateInfo sessioninfo = {};
 	sessioninfo.type = XR_TYPE_SESSION_CREATE_INFO;
 	sessioninfo.systemId = mSystem;
 	sessioninfo.next = &binding;
-	if (XR_FAILED_MSG(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return;
+	if (FailMsg(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return;
 	printf_color(ConsoleColorBits::eGreen, "%s", "OpenXR Session created.\n");
 
 
@@ -407,7 +412,7 @@ void XR::CreateSession() {
 	referenceSpaceInfo.referenceSpaceType = mReferenceSpaceType;
 	referenceSpaceInfo.poseInReferenceSpace.orientation = { 0.f, 0.f, 0.f, 1.f};
 	referenceSpaceInfo.poseInReferenceSpace.position = { 0.f, 0.f, 0.f };
-	if (XR_FAILED_MSG(xrCreateReferenceSpace(mSession, &referenceSpaceInfo, &mReferenceSpace), "xrCreateReferenceSpace failed")) {
+	if (FailMsg(xrCreateReferenceSpace(mSession, &referenceSpaceInfo, &mReferenceSpace), "xrCreateReferenceSpace failed")) {
 		xrDestroySession(mSession);
 		mSession = XR_NULL_HANDLE;
 		return;
@@ -422,7 +427,7 @@ void XR::CreateSession() {
 	XrSessionBeginInfo begin = {};
 	begin.type = XR_TYPE_SESSION_BEGIN_INFO;
 	begin.primaryViewConfigurationType = mViewConfiguration;
-	if (XR_FAILED_MSG(xrBeginSession(mSession, &begin), "xrBeginSession failed")) {
+	if (FailMsg(xrBeginSession(mSession, &begin), "xrBeginSession failed")) {
 		xrDestroySpace(mReferenceSpace);
 		xrDestroySession(mSession);
 		mSession = XR_NULL_HANDLE;
@@ -438,7 +443,7 @@ void XR::OnFrameStart() {
 
 	XrFrameWaitInfo frameWaitInfo = {};
 	frameWaitInfo.type = XR_TYPE_FRAME_WAIT_INFO;
-	if (XR_FAILED_MSG(xrWaitFrame(mSession, &frameWaitInfo, &mFrameState), "xrWaitFrame failed")) {
+	if (FailMsg(xrWaitFrame(mSession, &frameWaitInfo, &mFrameState), "xrWaitFrame failed")) {
 		Cleanup();
 		return;
 	}
@@ -446,7 +451,7 @@ void XR::OnFrameStart() {
 	#pragma region Poll events
 	XrEventDataBuffer event = {};
 	event.type = XR_TYPE_EVENT_DATA_BUFFER;
-	if (XR_FAILED_MSG(xrPollEvent(mInstance, &event), "xrPollEvent failed")) return;
+	if (FailMsg(xrPollEvent(mInstance, &event), "xrPollEvent failed")) return;
 
 	switch (event.type) {
 	case XR_TYPE_EVENT_DATA_EVENTS_LOST:
@@ -481,7 +486,7 @@ void XR::OnFrameStart() {
 
 	XrFrameBeginInfo frameBeginInfo = {};
 	frameBeginInfo.type = XR_TYPE_FRAME_BEGIN_INFO;
-	if (XR_FAILED_MSG(xrBeginFrame(mSession, &frameBeginInfo), "xrBeginFrame failed")) {
+	if (FailMsg(xrBeginFrame(mSession, &frameBeginInfo), "xrBeginFrame failed")) {
 		Cleanup();
 		return;
 	}
@@ -494,7 +499,7 @@ void XR::OnFrameStart() {
 	syncInfo.type = XR_TYPE_ACTIONS_SYNC_INFO;
 	syncInfo.countActiveActionSets = 1;
 	syncInfo.activeActionSets = &activeActionSet;
-	XR_FAILED_MSG(xrSyncActions(mSession, &syncInfo), "xrSyncActions failed");
+	FailMsg(xrSyncActions(mSession, &syncInfo), "xrSyncActions failed");
 
 	XrActionStateGetInfo getInfo = {};
 	getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
@@ -503,17 +508,17 @@ void XR::OnFrameStart() {
 
 	XrActionStateFloat grabValue = {};
 	grabValue.type = XR_TYPE_ACTION_STATE_FLOAT;
-	XR_FAILED_MSG(xrGetActionStateFloat(mSession, &getInfo, &grabValue), "xrGetActionStateFloat failed for Grab Action");
+	FailMsg(xrGetActionStateFloat(mSession, &getInfo, &grabValue), "xrGetActionStateFloat failed for Grab Action");
 
 	getInfo.action = mPoseAction;
 	XrActionStatePose poseState = {};
 	poseState.type = XR_TYPE_ACTION_STATE_POSE;
-	XR_FAILED_MSG(xrGetActionStatePose(mSession, &getInfo, &poseState), "xrGetActionStatePose failed for Pose Action");
+	FailMsg(xrGetActionStatePose(mSession, &getInfo, &poseState), "xrGetActionStatePose failed for Pose Action");
 
 	vector<XrSpaceLocation> spaceLocation(mActionSpaces.size());
 	for (uint32_t i = 0; i < mActionSpaces.size(); i++) {
 		spaceLocation[i].type = XR_TYPE_SPACE_LOCATION;
-		XR_FAILED_MSG(xrLocateSpace(mActionSpaces[i], mReferenceSpace, mFrameState.predictedDisplayTime, &spaceLocation[i]), "xrLocateSpace failed");
+		FailMsg(xrLocateSpace(mActionSpaces[i], mReferenceSpace, mFrameState.predictedDisplayTime, &spaceLocation[i]), "xrLocateSpace failed");
 	}
 	#pragma endregion
 
@@ -522,7 +527,7 @@ void XR::OnFrameStart() {
 		XrSwapchainImageAcquireInfo swapchainImageAcquireInfo = {};
 		swapchainImageAcquireInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
 		uint32_t bufferIndex;
-		if (XR_FAILED_MSG(xrAcquireSwapchainImage(mSwapchains[i], &swapchainImageAcquireInfo, &bufferIndex), "xrAcquireSwapchainImage failed")) {
+		if (FailMsg(xrAcquireSwapchainImage(mSwapchains[i], &swapchainImageAcquireInfo, &bufferIndex), "xrAcquireSwapchainImage failed")) {
 			Cleanup();
 			return;
 		}
@@ -530,7 +535,7 @@ void XR::OnFrameStart() {
 		XrSwapchainImageWaitInfo swapchainImageWaitInfo = {};
 		swapchainImageWaitInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
 		swapchainImageWaitInfo.timeout = 1000;
-		if (XR_FAILED_MSG(xrWaitSwapchainImage(mSwapchains[i], &swapchainImageWaitInfo), "xrWaitSwapchainImage failed")) {
+		if (FailMsg(xrWaitSwapchainImage(mSwapchains[i], &swapchainImageWaitInfo), "xrWaitSwapchainImage failed")) {
 			Cleanup();
 			return;
 		}
@@ -539,7 +544,7 @@ void XR::OnFrameStart() {
 	}
 }
 
-void XR::PostRender(stm_ptr<CommandBuffer> commandBuffer) {
+void XR::PostRender(CommandBuffer& commandBuffer) {
 	#pragma region Locate views (eyes) within mReferenceSpace
 	uint32_t tmp;
 	vector<XrView> views(mViewCount);
@@ -551,7 +556,7 @@ void XR::PostRender(stm_ptr<CommandBuffer> commandBuffer) {
 	viewLocateInfo.space = mReferenceSpace;
 	XrViewState viewState = {};
 	viewState.type = XR_TYPE_VIEW_STATE;
-	if (XR_FAILED_MSG(xrLocateViews(mSession, &viewLocateInfo, &viewState, mViewCount, &tmp, views.data()), "xrLocateViews failed")) {
+	if (FailMsg(xrLocateViews(mSession, &viewLocateInfo, &viewState, mViewCount, &tmp, views.data()), "xrLocateViews failed")) {
 		Cleanup();
 		return;
 	}
@@ -597,7 +602,7 @@ void XR::OnFrameEnd() {
 	for (uint32_t i = 0; i < mViewCount; i++) {
 		XrSwapchainImageReleaseInfo swapchainImageReleaseInfo = {};
 		swapchainImageReleaseInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
-		if (XR_FAILED_MSG(xrReleaseSwapchainImage(mSwapchains[i], &swapchainImageReleaseInfo), "xrReleaseSwapchainImage failed")) {
+		if (FailMsg(xrReleaseSwapchainImage(mSwapchains[i], &swapchainImageReleaseInfo), "xrReleaseSwapchainImage failed")) {
 			Cleanup();
 			return;
 		}
@@ -618,7 +623,7 @@ void XR::OnFrameEnd() {
 	frameEndInfo.layerCount = 1;
 	frameEndInfo.layers = projectionlayers;
 	frameEndInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-	if (XR_FAILED_MSG(xrEndFrame(mSession, &frameEndInfo), "xrEndFrame failed")) {
+	if (FailMsg(xrEndFrame(mSession, &frameEndInfo), "xrEndFrame failed")) {
 		Cleanup();
 		return;
 	}

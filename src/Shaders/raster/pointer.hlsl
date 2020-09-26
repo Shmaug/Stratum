@@ -4,7 +4,7 @@
 #pragma cull false
 #pragma blend 0 add srcAlpha oneMinusSrcAlpha
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
 [[vk::push_constant]] cbuffer PushConstants : register(b1) {
 	STM_PUSH_CONSTANTS
@@ -14,7 +14,7 @@
 	float3 P1;
 }
 
-#include <include/util.hlsli>
+#include <util.hlsli>
 
 struct v2f {
 	float4 position : SV_Position;

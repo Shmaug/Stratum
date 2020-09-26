@@ -1,4 +1,6 @@
-#include <Input/InputManager.hpp>
+#include "InputManager.hpp"
+
+using namespace stm;
 
 void InputManager::RegisterInputDevice(InputDevice* device) {
 	for (InputDevice* d : mInputDevices)

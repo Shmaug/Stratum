@@ -1,16 +1,8 @@
 #pragma once
 
-#define PROFILER_ENABLE
-
-#ifdef PROFILER_ENABLE
-#define PROFILER_BEGIN(label) Profiler::BeginSample(label);
-#define PROFILER_END Profiler::EndSample();
-#else
-#define PROFILER_BEGIN(label) 
-#define PROFILER_END
-#endif
-
 #include <Util/Util.hpp>
+
+namespace stm {
 
 struct ProfilerSample {
 	std::string mLabel;
@@ -19,16 +11,16 @@ struct ProfilerSample {
 	std::chrono::high_resolution_clock::time_point mStartTime;
 	std::chrono::nanoseconds mDuration;
 	float4 mColor;
-	
-	STRATUM_API ~ProfilerSample();
+	inline ~ProfilerSample() { for (ProfilerSample* c : mChildren) delete c; }
 };
 
 class Profiler {
 public:
+
 	STRATUM_API static void BeginSample(const std::string& label);
 	STRATUM_API static void EndSample();
 
-	STRATUM_API static void DrawGui(GuiContext* gui, uint32_t framerate);
+	STRATUM_API static void DrawGui(GuiContext& gui, uint32_t framerate);
 	STRATUM_API static void ClearAll();
 
 private:
@@ -48,3 +40,5 @@ private:
 	STRATUM_API static float mGraphHeight;
 	STRATUM_API static float mSampleHeight;
 };
+
+}

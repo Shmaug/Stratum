@@ -1,7 +1,11 @@
 #pragma once
 
-#include <Util/Util.hpp>
+#include <Core/Device.hpp>
+#include <Input/MouseKeyboardInput.hpp>
 
+#ifdef WINDOWS
+#include <vulkan/vulkan_win32.h>
+#endif
 #ifdef __linux
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
@@ -10,22 +14,18 @@ namespace x11{
 #include <X11/extensions/Xrandr.h>
 #include <vulkan/vulkan_xlib_xrandr.h>
 };
-#else
-#include <vulkan/vulkan_win32.h>
 #endif
 
-#include <Core/Device.hpp>
-#include <Input/MouseKeyboardInput.hpp>
+namespace stm {
 
 class Window {
 public:
+	Instance* const mInstance;
+
 	STRATUM_API ~Window();
 
 	STRATUM_API void Fullscreen(bool fs);
 	STRATUM_API void Resize(uint32_t w, uint32_t h);
-
-	inline vk::SurfaceKHR Surface() const { return mSurface; }
-	inline vk::SurfaceFormatKHR Format() const { return mFormat; }
 
 	inline bool Fullscreen() const { return mFullscreen; }
 	inline vk::Rect2D ClientRect() const { return mClientRect; };
@@ -36,19 +36,21 @@ public:
 	inline bool VSync() const { return mVSync; }
 	inline void VSync(bool v) { mVSync = v; }
 	
+	inline vk::SurfaceKHR Surface() const { return mSurface; }
 	inline vk::SwapchainKHR Swapchain() const { return mSwapchain; }
+	inline vk::SurfaceFormatKHR SurfaceFormat() const { return mSurfaceFormat; }
 	inline vk::Extent2D SwapchainExtent() const { return mSwapchainExtent; }
 	inline vk::Image BackBuffer() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].first; }
 	inline vk::Image BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].first; }
 	inline vk::ImageView BackBufferView() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].second; }
 	inline vk::ImageView BackBufferView(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].second; }
 	inline Semaphore* ImageAvailableSemaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
+	inline uint32_t PresentQueueFamily() const { return mPresentQueueFamily; }
 
 	#ifdef WINDOWS
 	inline HWND Hwnd() const { return mHwnd; }
 	#endif
-	inline ::Device* Device() const { return mDevice; }
-
+	
 private:
 	friend class Instance;
 
@@ -62,30 +64,31 @@ private:
 	STRATUM_API void AcquireNextImage();
 	/// Waits on all semaphores in waitSemaphores
 	STRATUM_API void Present(const std::set<vk::Semaphore>& waitSemaphores);
-	STRATUM_API void CreateSwapchain(::Device* device);
+	STRATUM_API void CreateSwapchain(stm::Device* device);
 	STRATUM_API void DestroySwapchain();
 
 	vk::SurfaceKHR mSurface;
+	Device* mSwapchainDevice = nullptr;
 	vk::SwapchainKHR mSwapchain;
+	uint32_t mPresentQueueFamily;
 	std::vector<std::pair<vk::Image, vk::ImageView>> mSwapchainImages;
 	std::vector<Semaphore*> mImageAvailableSemaphores;
-
-	Instance* mInstance = nullptr;
-	::Device* mDevice = nullptr;
-	vk::PhysicalDevice mPhysicalDevice;
-
-	vk::DisplayKHR mDirectDisplay;
-
 	vk::Extent2D mSwapchainExtent;
-	vk::SurfaceFormatKHR mFormat;
+	vk::SurfaceFormatKHR mSurfaceFormat;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
+
+	vk::DisplayKHR mDirectDisplay;
 
 	bool mFullscreen = false;
 	bool mVSync = false;
 	vk::Rect2D mClientRect;
 	std::string mTitle;
 
+	#ifdef WINDOWS
+	HWND mHwnd = 0;
+	RECT mWindowedRect;
+	#endif
 	#ifdef __linux
 	xcb_connection_t* mXCBConnection = nullptr;
 	xcb_screen_t* mXCBScreen = nullptr;
@@ -93,10 +96,9 @@ private:
 	xcb_atom_t mXCBProtocols;
 	xcb_atom_t mXCBDeleteWin;
 	vk::Rect2D mWindowedRect;
-	#else
-	HWND mHwnd = 0;
-	RECT mWindowedRect;
 	#endif
 
 	MouseKeyboardInput* mInput = nullptr;
 };
+
+}

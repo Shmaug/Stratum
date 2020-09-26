@@ -1,6 +1,8 @@
 #pragma once
 
-#include <Input/InputDevice.hpp>
+#include "InputDevice.hpp"
+
+namespace stm {
 
 #ifdef WINDOWS
 enum KeyCode {
@@ -235,6 +237,10 @@ enum KeyCode {
 class MouseKeyboardInput : public InputDevice {
 public:
 	STRATUM_API MouseKeyboardInput();
+	inline uint32_t PointerCount() const override { return 1; }
+	inline const InputPointer* GetPointer(uint32_t index) const override { return &mMousePointer; }
+	inline const InputPointer* GetPointerLast(uint32_t index) const override { return &mMousePointerLast; }
+	STRATUM_API void AdvanceFrame() override;
 
 	STRATUM_API void LockMouse(bool l);
 	inline bool LockMouse() const { return mLockMouse; }
@@ -251,11 +257,6 @@ public:
 	inline float2 CursorPos() const { return mCurrent.mCursorPos; }
 	inline float2 LastCursorPos() const { return mLast.mCursorPos; }
 	inline float2 CursorDelta() const { return mCurrent.mCursorDelta; }
-
-	inline uint32_t PointerCount() const override { return 1; }
-	inline const InputPointer* GetPointer(uint32_t index) const override { return &mMousePointer; }
-	inline const InputPointer* GetPointerLast(uint32_t index) const override { return &mMousePointerLast; }
-	STRATUM_API void NextFrame() override;
 
 private:
 	friend class Window;
@@ -276,3 +277,5 @@ private:
 	uint32_t mWindowWidth;
 	uint32_t mWindowHeight;
 };
+
+}

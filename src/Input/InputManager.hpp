@@ -1,6 +1,8 @@
 #pragma once
 
-#include <Input/InputDevice.hpp>
+#include "InputDevice.hpp"
+
+namespace stm {
 
 class InputManager {
 public:
@@ -25,6 +27,7 @@ public:
 	}
 
 private:
-	friend class Stratum;
 	std::vector<InputDevice*> mInputDevices;
 };
+
+}

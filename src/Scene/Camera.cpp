@@ -1,12 +1,10 @@
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
-
-#include <Util/Profiler.hpp>
  
 using namespace std;
+using namespace stm;
 
-Camera::Camera(const string& name, const set<RenderTargetIdentifier>& renderTargets)
-	: Object(name), mRenderTargets(renderTargets), mDrawSkybox(true), mOrthographic(false), mFieldOfView((float)M_PI/4), mNear(.0625f), mFar(1024.f), mAspectRatio(1), mRenderPriority(100), mStereoMode(StereoMode::eNone) {
+Camera::Camera(const string& name, Scene* scene, const set<RenderTargetIdentifier>& renderTargets) : Object(name, scene), mRenderTargets(renderTargets), mFieldOfView((float)M_PI/4) {
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
 	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
@@ -54,8 +52,8 @@ void Camera::WriteUniformBuffer(void* bufferData) {
 	buf.Position[0] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1)).xyz, mNear);
 	buf.Position[1] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1)).xyz, mFar);
 }
-void Camera::SetViewportScissor(stm_ptr<CommandBuffer> commandBuffer, StereoEye eye) {
-	vk::Viewport vp = { 0.f, 0.f, (float)commandBuffer->CurrentFramebuffer()->Extent().width, (float)commandBuffer->CurrentFramebuffer()->Extent().height, 0.f, 1.f };
+void Camera::SetViewportScissor(CommandBuffer& commandBuffer, StereoEye eye) {
+	vk::Viewport vp = { 0.f, 0.f, (float)commandBuffer.CurrentFramebuffer()->Extent().width, (float)commandBuffer.CurrentFramebuffer()->Extent().height, 0.f, 1.f };
 	if (mStereoMode == StereoMode::eHorizontal) {
 		vp.width /= 2;
 		vp.x = eye == StereoEye::eLeft ? 0 : vp.width;
@@ -66,15 +64,15 @@ void Camera::SetViewportScissor(stm_ptr<CommandBuffer> commandBuffer, StereoEye 
 	// make viewport go from y-down (vulkan) to y-up
 	vp.y += vp.height;
 	vp.height = -vp.height;
-	((vk::CommandBuffer)*commandBuffer).setViewport(0, 1, &vp);
-	commandBuffer->PushConstantRef("StereoEye", (uint32_t)eye);
+	commandBuffer->setViewport(0, { vp} );
+	commandBuffer.PushConstantRef("StereoEye", (uint32_t)eye);
 
-	vk::Rect2D scissor { { 0, 0 }, commandBuffer->CurrentFramebuffer()->Extent() };
-	((vk::CommandBuffer)*commandBuffer).setScissor(0, 1, &scissor);
+	vk::Rect2D scissor { { 0, 0 }, commandBuffer.CurrentFramebuffer()->Extent() };
+	commandBuffer->setScissor(0, { scissor });
 }
 
-bool Camera::RendersToSubpass(RenderPass* renderPass, uint32_t subpassIndex) {
-	const Subpass& subpass = renderPass->GetSubpass(subpassIndex);
+bool Camera::RendersToSubpass(RenderPass& renderPass, uint32_t subpassIndex) {
+	const Subpass& subpass = renderPass.GetSubpass(subpassIndex);
 	for (auto& kp : subpass.mAttachments)
 			if (mRenderTargets.count(kp.first) && 
 				 (kp.second.mType == AttachmentType::eColor || 
@@ -141,10 +139,10 @@ bool Camera::UpdateTransform() {
 	return true;
 }
 
-void Camera::OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {
-	if (camera == this) return;
+void Camera::OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {
+	if (&camera == this) return;
 	
-	gui->WireSphere(WorldPosition(), mNear, 1.f);
+	gui.WireSphere(WorldPosition(), mNear, 1.f);
 
 	float3 f0 = ClipToWorld(float3(-1, -1, 0));
 	float3 f1 = ClipToWorld(float3(-1, 1, 0));
@@ -163,7 +161,7 @@ void Camera::OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiCont
 		f2, f6, f7, f3, f2,
 		f6, f4, f5, f7, f3, f1
 	};
-	gui->PolyLine(float4x4(1), points.data(), (uint32_t)points.size(), color, 1.f);
+	gui.PolyLine(float4x4(1), points.data(), (uint32_t)points.size(), color, 1.f);
 
 	if (mStereoMode != StereoMode::eNone) {
 		f0 = ClipToWorld(float3(-1, -1, 0), StereoEye::eRight);
@@ -179,6 +177,6 @@ void Camera::OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiCont
 		vector<float3> points2 {
 			f0, f4, f5, f1, f0, f2, 
 		};
-		gui->PolyLine(float4x4(1), points2.data(), (uint32_t)points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
+		gui.PolyLine(float4x4(1), points2.data(), (uint32_t)points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
 	}
 }

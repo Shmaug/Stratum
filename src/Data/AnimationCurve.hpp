@@ -1,5 +1,7 @@
 #pragma once
 
+namespace stm {
+
 template<typename T>
 class AnimationCurve {
 public:
@@ -162,3 +164,5 @@ private:
 	std::vector<Coeff> mCoefficients;
 	std::vector<Keyframe> mKeyframes;
 };
+
+}

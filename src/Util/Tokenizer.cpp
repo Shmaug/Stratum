@@ -1,10 +1,9 @@
 #include <Util/Tokenizer.hpp>
 
-#include <sstream>
-
 using namespace std;
+using namespace stm;
 
-Tokenizer::Tokenizer(const ifstream& stream, const set<char> delims) : mDelimiters(delims), mCurrent(0) {
+Tokenizer::Tokenizer(const ifstream& stream, const set<char> delims) : mDelimiters(delims) {
     stringstream ss;
     ss << stream.rdbuf();
     string str = ss.str();
@@ -12,14 +11,12 @@ Tokenizer::Tokenizer(const ifstream& stream, const set<char> delims) : mDelimite
     memcpy(mBuffer, str.data(), str.length());
     mLength = str.length();
 }
-Tokenizer::Tokenizer(const string& buffer, const set<char> delims) : mDelimiters(delims), mCurrent(0) {
+Tokenizer::Tokenizer(const string& buffer, const set<char> delims) : mDelimiters(delims) {
     mBuffer = new char[buffer.length()];
     memcpy(mBuffer, buffer.data(), buffer.length());
     mLength = buffer.length();
 }
-Tokenizer::~Tokenizer(){
-    delete[] mBuffer;
-}
+Tokenizer::~Tokenizer() { delete[] mBuffer; }
 
 bool Tokenizer::Next(string& token) {
     // eat up any leading delimeters

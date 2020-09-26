@@ -110,7 +110,7 @@ float3 ShadeSurface(MaterialInfo material, float3 worldPos, float3 normal, float
 
 	float3 eval = 0;
 
-	for (uint l = 0; l < LightCount; l++) {
+	for (uint l = 0; l < Lighting.LightCount; l++) {
 		float3 L;
 		float attenuation = LightAttenuation(l, STRATUM_CAMERA_POSITION, worldPos, normal, depth, L);
 
@@ -131,8 +131,8 @@ float3 ShadeSurface(MaterialInfo material, float3 worldPos, float3 normal, float
 
 	eval.rgb += material.emission;
 
-	float3 env_spec = AmbientLight * (saturate(normal.y) * .5 + .5);
-	float3 env_diff = AmbientLight * (saturate(normal.y) * .5 + .5);
+	float3 env_spec = Lighting.AmbientLight * (saturate(normal.y) * .5 + .5);
+	float3 env_diff = Lighting.AmbientLight * (saturate(normal.y) * .5 + .5);
 
 	uint texWidth, texHeight, numMips;
 	EnvironmentTexture.GetDimensions(0, texWidth, texHeight, numMips);

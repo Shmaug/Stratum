@@ -4,7 +4,7 @@
 #pragma multi_compile SHADING_LOCAL
 
 #include "common.hlsli"
-#include <include/sampling.hlsli>
+#include <sampling.hlsli>
 
 [[vk::binding(4, 0)]] RWTexture2D<float4> RenderTarget : register(u0);
 [[vk::binding(5, 0)]] Texture2DMS<float> DepthBuffer : register(t0);

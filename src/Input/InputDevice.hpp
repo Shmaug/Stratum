@@ -2,7 +2,9 @@
 
 #include <Util/Util.hpp>
 
-#define INPUT_POINTER_NAME_LENGTH 64
+namespace stm {
+
+constexpr size_t INPUT_POINTER_NAME_LENGTH = 64;
 
 // Represents a device capable of "pointing" into the world
 // i.e. a mouse or Vive controller
@@ -33,5 +35,7 @@ public:
 	// Get info about a pointer, one frame ago
 	virtual const InputPointer* GetPointerLast(uint32_t index) const = 0;
 
-	virtual void NextFrame() = 0;
+	virtual void AdvanceFrame() = 0;
 };
+
+}

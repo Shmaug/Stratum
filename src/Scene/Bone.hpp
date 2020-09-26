@@ -2,11 +2,13 @@
 
 #include <Scene/Object.hpp>
 
-class Bone : public virtual Object {
+namespace stm {
+
+class Bone : public Object {
 public:
 	uint32_t mBoneIndex;
 	float4x4 mInverseBind;
-	inline Bone(const std::string& name, uint32_t index) : Object(name), mInverseBind(float4x4(1)), mBoneIndex(index) {}
+	inline Bone(const std::string& name, Scene* scene, uint32_t index) : Object(name, scene), mInverseBind(float4x4(1)), mBoneIndex(index) {}
 };
 
 struct BoneTransform {
@@ -42,4 +44,6 @@ inline BoneTransform lerp(const BoneTransform& p0, const BoneTransform& p1, floa
 inline void lerp(Pose& dest, const Pose& p0, const Pose& p1, float t) {
 	for (uint32_t i = 0; i < dest.size(); i++)
 		dest[i] = lerp(p0[i], p1[i], t);
+}
+
 }

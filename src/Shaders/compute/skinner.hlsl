@@ -1,7 +1,7 @@
 #pragma kernel skin
 #pragma kernel blend
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
 [[vk::binding(0, 0)]] RWByteAddressBuffer Vertices				: register(u0);
 [[vk::binding(1, 0)]] RWByteAddressBuffer BlendTarget0			: register(u1);

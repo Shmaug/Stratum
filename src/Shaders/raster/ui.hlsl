@@ -9,7 +9,7 @@
 
 #pragma static_sampler Sampler
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
 struct GuiRect {
 	float4x4 ObjectToWorld;
@@ -32,7 +32,7 @@ struct GuiRect {
 	float2 ScreenSize;
 }
 
-#include <include/util.hlsli>
+#include <util.hlsli>
 
 struct v2f {
 	[[vk::location(0)]] float4 position : SV_Position;

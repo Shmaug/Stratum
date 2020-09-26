@@ -2,6 +2,8 @@
 
 #include <Util/Util.hpp>
 
+namespace stm { 
+
 class TriangleBvh2 {
 public:
 	struct Primitive {
@@ -31,3 +33,5 @@ private:
 	std::vector<float3> mVertices;
 	uint32_t mLeafSize = 4;
 };
+
+}

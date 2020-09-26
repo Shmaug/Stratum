@@ -1,6 +1,10 @@
 #pragma once
 
-#include <Util/Util.hpp>
+#include <openxr/openxr.h>
+
+#include "PluginManager.hpp"
+#include <Input/InputManager.hpp>
+#include <Input/MouseKeyboardInput.hpp>
 
 #ifdef __linux
 #include <xcb/xcb.h>
@@ -13,48 +17,59 @@ namespace x11{
 };
 #endif
 
-#include <Input/MouseKeyboardInput.hpp>
-#include <openxr/openxr.h>
+namespace stm {
 
 class Instance {
-private:
-	vk::Instance mInstance;
-
 public:
+	Instance() = delete;
+	Instance(const Instance&) = delete;
+	Instance(Instance&&) = delete;
+	Instance& operator=(const Instance&) = delete;
+	Instance& operator=(Instance&&) = delete;
 	STRATUM_API Instance(int argc, char** argv);
 	STRATUM_API ~Instance();
+	inline vk::Instance operator*() const { return mInstance; }
+	inline const vk::Instance* operator->() const { return &mInstance; }
 
-	// Poll events, advance swapchain. Returns false if the program should exit
-	STRATUM_API bool BeginFrame();
-	// Present swapchain
-	STRATUM_API void EndFrame(const std::set<vk::Semaphore>& waitSemaphores);
+	// advance swapchain & poll events. return false if the program should exit
+	STRATUM_API bool AdvanceSwapchain();
+	STRATUM_API void Present(const std::set<vk::Semaphore>& waitSemaphores);
 
-	inline const std::vector<std::string>::const_iterator ArgsBegin() const { return mCmdArguments.begin(); }
-	inline const std::vector<std::string>::const_iterator ArgsEnd() const { return mCmdArguments.end(); }
+	inline bool GetOptionExists(const std::string& name) const {
+		return mOptions.count(name);
+	}
+	inline bool GetOption(const std::string& name, std::string& value) const {
+		if (mOptions.count(name)) {
+			value = mOptions.at(name);
+			return true;
+		}
+		return false;
+	}
 	
-	inline ::Device* Device() const { return mDevice; }
-	inline ::Window* Window() const { return mWindow; }
-
-	inline ::PluginManager* PluginManager() const { return mPluginManager; }
-	inline ::InputManager* InputManager() const { return mInputManager; }
-	inline operator vk::Instance() const { return mInstance; }
+	inline stm::PluginManager& PluginManager() { return mPluginManager; }
+	inline stm::InputManager& InputManager() { return mInputManager; }
+	inline stm::Device* Device() const { return mDevice; }
+	inline stm::Window* Window() const { return mWindow; }
+	
+	static bool sDisableDebugCallback;
 
 private:
-	::Device* mDevice = nullptr;
-	::Window* mWindow = nullptr;
-	::PluginManager* mPluginManager = nullptr;
-	::InputManager* mInputManager = nullptr;
+	vk::Instance mInstance;
+	stm::Device* mDevice = nullptr;
+	stm::Window* mWindow = nullptr;
+	stm::PluginManager mPluginManager;
+	stm::InputManager mInputManager;
 	MouseKeyboardInput* mMouseKeyboardInput = nullptr;
-
 	XrInstance xrInstance = XR_NULL_HANDLE;
 
-	#ifdef ENABLE_DEBUG_LAYERS
-	vk::DebugUtilsMessengerEXT mDebugMessenger;
-	#endif
-
-	std::vector<std::string> mCmdArguments;
+	std::vector<std::string> mCommandLine;
+	std::map<std::string, std::string> mOptions;
 
 	bool mDestroyPending = false;
+	STRATUM_API bool PollEvents();
+	
+	vk::DebugUtilsMessengerEXT mDebugMessenger;
+
 	#ifdef __linux
 	STRATUM_API void ProcessEvent(xcb_generic_event_t* event);
 	STRATUM_API xcb_generic_event_t* PollEvent();
@@ -62,13 +77,12 @@ private:
 	x11::Display* mXDisplay;
 	xcb_connection_t* mXCBConnection;
 	xcb_key_symbols_t* mXCBKeySymbols;
-	#else
+	#endif
+	#ifdef WINDOWS
 	void HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	#endif
 
-	STRATUM_API bool PollEvents();
-	
-public:
-	static bool sDisableDebugCallback;
 };
+
+}

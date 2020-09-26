@@ -1,40 +1,27 @@
 cmake_minimum_required(VERSION 3.7)
 
 project(Stratum)
-option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 
-get_filename_component(STRATUM_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+set(STRATUM_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-set_directory_properties(PROPERTIES
-	CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
-	CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
-	CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/")
+set(CMAKE_CXX_STANDARD 17)
 
-list(APPEND CMAKE_MODULE_PATH "${STRATUM_DIR}/extern/")
-list(APPEND CMAKE_PREFIX_PATH "${STRATUM_DIR}/extern/")
-
-include("cmake/stmutil.cmake")
+list(APPEND CMAKE_MODULE_PATH ${STRATUM_DIR}/extern)
+list(APPEND CMAKE_PREFIX_PATH ${STRATUM_DIR}/extern)
+link_directories(Stratum extern/lib)
 
 find_package(Vulkan REQUIRED)
-find_package(assimp REQUIRED)
-find_package(OpenXR REQUIRED)
-find_package(msdfgen REQUIRED)
+find_package(OpenXR CONFIG REQUIRED)
+find_package(assimp CONFIG REQUIRED)
+find_package(msdfgen CONFIG REQUIRED)
 
-file(GLOB STRATUM_CPP src/**.cpp)
-add_executable(Stratum ${STRATUM_CPP} "stratum.rc")
-set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
-target_compile_definitions(Stratum PUBLIC STRATUM_CORE ${STM_COMPILE_DEFINITIONS})
-target_link_libraries(Stratum Vulkan::Vulkan assimp::assimp msdfgen::msdfgen OpenXR::openxr_loader)
 
-add_subdirectory("ShaderCompiler/")
+set(STRATUM_VERSION_MAJOR 1)
+set(STRATUM_VERSION_MINOR 1)
 
-file(GLOB_RECURSE SHADER_SOURCES "Shaders/**.hlsl" "Shaders/**.frag" "Shaders/**.vert" "Shaders/**.glsl")
-stm_compile_shaders(ADD_DEPENDS Stratum SHADER_SOURCES ${SOURCES})
+option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
 
-add_subdirectory("Plugins/")
+include(cmake/stmutil.cmake)
 
-# Create symbolic link to Assets folder so the executable can find assets
-add_custom_command(
-	TARGET Stratum POST_BUILD
-	DEPENDS "${PROJECT_BINARY_DIR}/bin/Assets"
-	COMMAND ${CMAKE_COMMAND} -E create_symlink "${STRATUM_DIR}/Assets/" "${PROJECT_BINARY_DIR}/bin/Assets")
+add_subdirectory(src)
+add_subdirectory(Plugins/DicomVis)

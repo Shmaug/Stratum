@@ -1,11 +1,12 @@
 #include "ImageLoader.hpp"
 
-#include <ThirdParty/stb_image.h>
+#include <stb_image.h>
 
 #include <dcmtk/dcmimgle/dcmimage.h>
 #include <dcmtk/dcmdata/dctk.h>
 
 using namespace std;
+using namespace dcmvs;
 
 unordered_multimap<string, ImageStackType> ExtensionMap {
 	{ ".dcm", eDicom },
@@ -53,12 +54,12 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			}
 		}
 		return type;
-	} catch (exception e) {
+	} catch (exception&) {
 		return ImageStackType::eNone;
 	}
 }
 
-stm_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
+shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -135,7 +136,7 @@ stm_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device* 
 	for (thread& t : threads) t.join();
 	printf("\rLoading stack: Done           \n");
 
-	stm_ptr<Texture> volume = new Texture(folder.string(), device, pixels, sliceSize*extent.depth, extent, format, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, sliceSize*extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
 
 	if (scale) *scale = float3(.05f, .05f, .05f);
@@ -163,7 +164,7 @@ DcmSlice ReadDicomSlice(const string& file) {
 
 	return { new DicomImage(file.c_str()), s, x };
 }
-stm_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, float3* size) {
+shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, float3* size) {
 	if (!fs::exists(folder)) return nullptr;
 
 	double3 maxSpacing = 0;
@@ -206,13 +207,13 @@ stm_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* dev
 		memcpy(data + i * extent.width * extent.height, pixels, sliceSize);
 	}
 
-	stm_ptr<Texture> tex = new Texture(folder.string(), device, data, extent.depth*sliceSize, extent, vk::Format::eR16Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage);
+	auto tex = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR16Unorm, data, extent.depth*sliceSize, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] data;
 	for (auto& i : images) delete i.image;
 	return tex;
 }
 
-stm_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float3* scale) {
+shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float3* scale) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -238,10 +239,8 @@ stm_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* devic
 		threads.push_back(thread([=, &done]() {
 			for (uint32_t i = j; i < images.size(); i += threadCount) {
 				vector<uint8_t> slice;
-				if (!ReadFile(images[i].string(), slice)) {
-					fprintf_color(ConsoleColorBits::eRed, stderr, "Failed to read file %s\n", images[i].string().c_str());
-					throw;
-				}
+				if (!ReadFile(images[i].string(), slice))
+					throw invalid_argument("failed to read" + images[i].string());
 
 				uint8_t* sliceStart = pixels + sliceSize * i;
 				for (uint32_t y = 0; y < extent.height; y++)
@@ -264,7 +263,7 @@ stm_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* devic
 	for (thread& t : threads) t.join();
 	printf("\rLoading stack: Done           \n");
 
-	stm_ptr<Texture> volume = new Texture(folder.string(), device, pixels, sliceSize * extent.depth, extent, vk::Format::eR8G8B8A8Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+	auto volume = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR8G8B8A8Unorm, pixels, sliceSize * extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
 
 	if (scale) *scale = float3(.00033f * extent.width, .00033f * extent.height, .001f * extent.depth);

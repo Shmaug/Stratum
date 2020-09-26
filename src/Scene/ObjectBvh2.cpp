@@ -2,6 +2,7 @@
 #include <Scene/Scene.hpp>
 
 using namespace std;
+using namespace stm;
 
 ObjectBvh2::ObjectBvh2(const vector<Object*>& objects) {
 	mPrimitives.clear();

@@ -10,8 +10,8 @@
 
 #pragma static_sampler Sampler maxAnisotropy=0 addressMode=clampEdge maxLod=0
 
-#include <include/shadercompat.h>
-#include <include/math.hlsli>
+#include <shadercompat.h>
+#include <math.hlsli>
 
 [[vk::binding(BINDING_START, PER_MATERIAL)]] SamplerState Sampler : register(s0);
 
@@ -19,7 +19,7 @@
 	STM_PUSH_CONSTANTS
 }
 
-#include <include/util.hlsli>
+#include <util.hlsli>
 
 void vsmain(
 	float3 vertex : POSITION,
@@ -37,6 +37,6 @@ float4 fsmain(in float3 viewRay : TEXCOORD0) : SV_Target0 {
 	#ifdef ENVIRONMENT_TEXTURE_HDR
 	color.rgb = pow(color.rgb, 1 / 2.2);
 	#endif
-	color.rgb *= AmbientLight;
+	color.rgb *= Lighting.AmbientLight;
 	return color;
 }

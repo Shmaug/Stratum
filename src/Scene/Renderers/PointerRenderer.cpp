@@ -1,9 +1,7 @@
 #include <Scene/Renderers/PointerRenderer.hpp>
 
 using namespace std;
-
-PointerRenderer::PointerRenderer(const string& name) : Object(name), mColor(1.f), mWidth(.01f), mRayDistance(1.f) {}
-PointerRenderer::~PointerRenderer() {}
+using namespace stm;
 
 bool PointerRenderer::UpdateTransform() {
 	if (!Object::UpdateTransform()) return false;
@@ -12,23 +10,26 @@ bool PointerRenderer::UpdateTransform() {
 	return true;
 }
 
-void PointerRenderer::OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) {
-	GraphicsPipeline* pipeline = commandBuffer->Device()->AssetManager()->Load<Pipeline>("Shaders/pointer.stmb", "Pointer")->GetGraphics(commandBuffer->CurrentShaderPass(), {});
-	commandBuffer->BindPipeline(pipeline);
+void PointerRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera) {
+	GraphicsPipeline* pipeline = commandBuffer.mDevice->LoadAsset<Pipeline>("Assets/Shaders/pointer.stmb", "Pointer")->GetGraphics(commandBuffer.CurrentShaderPass(), {});
+	commandBuffer.BindPipeline(pipeline);
+
+	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
+		commandBuffer.BindDescriptorSet(perCamera, PER_CAMERA);
 
 	float3 p0 = WorldPosition();
 	float3 p1 = WorldPosition() + WorldRotation() * float3(0, 0, mRayDistance);
-	commandBuffer->PushConstantRef("P0", p0);
-	commandBuffer->PushConstantRef("P1", p1);
-	commandBuffer->PushConstantRef("Width", mWidth);
-	commandBuffer->PushConstantRef("Color", mColor);
+	commandBuffer.PushConstantRef("P0", p0);
+	commandBuffer.PushConstantRef("P1", p1);
+	commandBuffer.PushConstantRef("Width", mWidth);
+	commandBuffer.PushConstantRef("Color", mColor);
 
-	camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
-	((vk::CommandBuffer)*commandBuffer).draw(6, 1, 0, 0);
-	commandBuffer->mTriangleCount += 2;
-	if (camera->StereoMode() != StereoMode::eNone) {
-		camera->SetViewportScissor(commandBuffer, StereoEye::eRight);
-		((vk::CommandBuffer)*commandBuffer).draw(6, 1, 0, 0);
-		commandBuffer->mTriangleCount += 2;
+	camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
+	commandBuffer->draw(6, 1, 0, 0);
+	commandBuffer.mTriangleCount += 2;
+	if (camera.StereoMode() != StereoMode::eNone) {
+		camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
+		commandBuffer->draw(6, 1, 0, 0);
+		commandBuffer.mTriangleCount += 2;
 	}
 }

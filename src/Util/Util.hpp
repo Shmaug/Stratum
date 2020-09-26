@@ -1,27 +1,9 @@
 #pragma once
 
+#include <vulkan/vulkan.hpp>
+
 #define _USE_MATH_DEFINES
 #include <cmath>
-
-#ifdef WINDOWS
-
-#ifdef _DEBUG
-#include <stdlib.h>
-#include <crtdbg.h>
-#endif
-
-#include <winsock2.h>
-#include <Windows.h>
-#include <ws2tcpip.h>
-#include <iphlpapi.h>
-#include <stdio.h>
-#include <stdlib.h>
-#undef near
-#undef far
-#undef free
-#else
-#pragma GCC diagnostic ignored "-Wformat-security"
-#endif
 
 #include <fstream>
 #include <iostream>
@@ -37,44 +19,279 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
-
 #include <vector>
 #include <stack>
 #include <queue>
+#include <map>
 #include <unordered_map>
 #include <set>
 #include <list>
 #include <forward_list>
 
-#include <vulkan/vulkan.hpp>
+#include "tvec.hpp"
+#include "tmat.hpp"
+#include "tquat.hpp"
 
-#include <Util/Enums.hpp>
-#include <Util/StratumForward.hpp>
-#include <Util/HelperTypes.hpp>
+#include "Enums.hpp"
+#include "StratumForward.hpp"
+#include "StratumPlatform.hpp"
 
-#ifdef __GNUC__
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
-#endif
+namespace stm {
+	
+typedef tvec<2, int32_t> int2;
+typedef tvec<3, int32_t> int3;
+typedef tvec<4, int32_t> int4;
+typedef tvec<2, uint32_t> uint2;
+typedef tvec<3, uint32_t> uint3;
+typedef tvec<4, uint32_t> uint4;
+typedef tvec<2, double> double2;
+typedef tvec<3, double> double3;
+typedef tvec<4, double> double4;
+typedef tvec<2, float> float2;
+typedef tvec<3, float> float3;
+typedef tvec<4, float> float4;
 
-#ifdef WINDOWS
-#ifdef STRATUM_CORE
-#define STRATUM_API __declspec(dllexport)
-#define PLUGIN_EXPORT
-#else
-#define STRATUM_API __declspec(dllimport)
-#define PLUGIN_EXPORT __declspec(dllexport)
-#endif
-#else
-#define STRATUM_API
-#define PLUGIN_EXPORT
-#endif
+#include <Shaders/include/shadercompat.h>
 
-#define safe_delete(x) {if (x != nullptr) { delete x; x = nullptr; } }
-#define safe_delete_array(x) { if (x != nullptr) { delete[] x; x = nullptr; } }
+// TODO: consider using numbers here instead?
+typedef std::string RenderTargetIdentifier;
+typedef std::string ShaderPassIdentifier;
+
+class Sphere {
+public:
+	float3 mCenter;
+	float mRadius = 0;
+	inline Sphere() = default;
+	inline Sphere(const float3& center, float radius) : mCenter(center), mRadius(radius) {}
+};
+class AABB {
+public:
+	float3 mMin;
+	float3 mMax;
+
+	AABB() = default;
+	inline AABB(const float3& min, const float3& max) : mMin(min), mMax(max) {}
+	inline AABB(const AABB& aabb) : mMin(aabb.mMin), mMax(aabb.mMax) {}
+	inline AABB(const AABB& aabb, const float4x4& transform) : AABB(aabb) { *this *= transform; }
+
+	inline float3 Center() const { return (mMax + mMin) * .5f; }
+	inline float3 HalfSize() const { return (mMax - mMin) * .5f; }
+	inline float3 Size() const { return (mMax - mMin); }
+
+	inline bool Intersects(const float3& point) const {
+		float3 e = (mMax - mMin) * .5f;
+		float3 s = point - (mMax + mMin) * .5f;
+		return
+			(s.x <= e.x && s.x >= -e.x) &&
+			(s.y <= e.y && s.y >= -e.y) &&
+			(s.z <= e.z && s.z >= -e.z);
+	}
+	inline bool Intersects(const Sphere& sphere) const {
+		float3 e = (mMax - mMin) * .5f;
+		float3 s = sphere.mCenter - (mMax + mMin) * .5f;
+		float3 delta = e - s;
+		float sqDist = 0.0f;
+		for (int i = 0; i < 3; i++) {
+			if (s[i] < -e[i]) sqDist += delta[i];
+			if (s[i] >  e[i]) sqDist += delta[i];
+		}
+		return sqDist <= sphere.mRadius * sphere.mRadius;
+	}
+	inline bool Intersects(const AABB& aabb) const {
+		// for each i in (x, y, z) if a_min(i) > b_max(i) or b_min(i) > a_max(i) then return false
+		bool dx = (mMin.x > aabb.mMax.x) || (aabb.mMin.x > mMax.x);
+		bool dy = (mMin.y > aabb.mMax.y) || (aabb.mMin.y > mMax.y);
+		bool dz = (mMin.z > aabb.mMax.z) || (aabb.mMin.z > mMax.z);
+		return !(dx || dy || dz);
+	}
+
+	inline bool Intersects(const float4 frustum[6]) const {
+		float3 center = Center();
+		float3 size = HalfSize();
+		for (uint32_t i = 0; i < 6; i++) {
+			float r = dot(size, abs(frustum[i].xyz));
+			float d = dot(center, frustum[i].xyz) - frustum[i].w;
+			if (d <= -r) return false;
+		}
+		return true;
+	}
+
+	inline void Encapsulate(const float3& p) {
+		mMin = min(mMin, p);
+		mMax = max(mMax, p);
+	}
+	inline void Encapsulate(const AABB& aabb) {
+		mMin = min(aabb.mMin, mMin);
+		mMax = max(aabb.mMax, mMax);
+	}
+
+	inline AABB operator *(const float4x4& transform) {
+		return AABB(*this, transform);
+	}
+	inline AABB operator *=(const float4x4& transform) {
+		float3 corners[8]{
+			mMax,							// 1,1,1
+			float3(mMin.x, mMax.y, mMax.z),	// 0,1,1
+			float3(mMax.x, mMax.y, mMin.z),	// 1,1,0
+			float3(mMin.x, mMax.y, mMin.z),	// 0,1,0
+			float3(mMax.x, mMin.y, mMax.z),	// 1,0,1
+			float3(mMin.x, mMin.y, mMax.z),	// 0,0,1
+			float3(mMax.x, mMin.y, mMin.z),	// 1,0,0
+			mMin,							// 0,0,0
+		};
+		for (uint32_t i = 0; i < 8; i++)
+			corners[i] = (transform * float4(corners[i], 1)).xyz;
+		mMin = corners[0];
+		mMax = corners[0];
+		for (uint32_t i = 1; i < 8; i++) {
+			mMin = min(mMin, corners[i]);
+			mMax = max(mMax, corners[i]);
+		}
+		return *this;
+	}
+};
+class Ray {
+public:
+	float3 mOrigin;
+	float3 mDirection;
+
+	inline Ray() = default;
+	inline Ray(const float3& ro, const float3& rd) : mOrigin(ro), mDirection(rd) {};
+
+	inline float Intersect(const float4& plane) const {
+		return -(dot(mOrigin, plane.xyz) + plane.w) / dot(mDirection, plane.xyz);
+	}
+	inline float Intersect(const float3& planeNormal, const float3& planePoint) const {
+		return -dot(mOrigin - planePoint, planeNormal) / dot(mDirection, planeNormal);
+	}
+
+	inline bool Intersect(const AABB& aabb, float2& t) const {
+		float3 id = 1.f / mDirection;
+
+		float3 pmin = (aabb.mMin - mOrigin) * id;
+		float3 pmax = (aabb.mMax - mOrigin) * id;
+
+		float3 mn, mx;
+		mn.x = id.x >= 0.f ? pmin.x : pmax.x;
+		mn.y = id.y >= 0.f ? pmin.y : pmax.y;
+		mn.z = id.z >= 0.f ? pmin.z : pmax.z;
+		
+		mx.x = id.x >= 0.f ? pmax.x : pmin.x;
+		mx.y = id.y >= 0.f ? pmax.y : pmin.y;
+		mx.z = id.z >= 0.f ? pmax.z : pmin.z;
+
+		t = float2(fmaxf(fmaxf(mn.x, mn.y), mn.z), fminf(fminf(mx.x, mx.y), mx.z));
+		return t.y > t.x;
+	}
+	inline bool Intersect(const Sphere& sphere, float2& t) const {
+		float3 pq = mOrigin - sphere.mCenter;
+		float a = dot(mDirection, mDirection);
+		float b = 2 * dot(pq, mDirection);
+		float c = dot(pq, pq) - sphere.mRadius * sphere.mRadius;
+		float d = b * b - 4 * a * c;
+		if (d < 0.f) return false;
+		d = sqrt(d);
+		t = -.5f * float2(b + d, b - d) / a;
+		return true;
+	}
+
+	inline bool Intersect(float3 v0, float3 v1, float3 v2, float3* tuv) const {
+		// Algorithm from http://jcgt.org/published/0002/01/05/paper.pdf
+
+		v0 -= mOrigin;
+		v1 -= mOrigin;
+		v2 -= mOrigin;
+
+		float3 rd = mDirection;
+		float3 ad = abs(mDirection);
+
+		uint32_t largesti = 0;
+		if (ad[largesti] < ad[1]) largesti = 1;
+		if (ad[largesti] < ad[2]) largesti = 2;
+		 
+		float idz;
+		float2 rdz;
+
+		if (largesti == 0) {
+			v0 = float3(v0.y, v0.z, v0.x);
+			v1 = float3(v1.y, v1.z, v1.x);
+			v2 = float3(v2.y, v2.z, v2.x);
+			idz = 1.f / rd.x;
+			rdz = float2(rd.y, rd.z) * idz;
+		} else if (largesti == 1) {
+			v0 = float3(v0.z, v0.x, v0.y);
+			v1 = float3(v1.z, v1.x, v1.y);
+			v2 = float3(v2.z, v2.x, v2.y);
+			idz = 1.f / rd.y;
+			rdz = float2(rd.z, rd.x) * idz;
+		} else {
+			idz = 1.f / rd.z;
+			rdz = float2(rd.x, rd.y) * idz;
+		}
+
+		v0 = float3(v0.x - v0.z * rdz.x, v0.y - v0.z * rdz.y, v0.z * idz);
+		v1 = float3(v1.x - v1.z * rdz.x, v1.y - v1.z * rdz.y, v1.z * idz);
+		v2 = float3(v2.x - v2.z * rdz.x, v2.y - v2.z * rdz.y, v2.z * idz);
+
+		float u = v2.x * v1.y - v2.y * v1.x;
+		float v = v0.x * v2.y - v0.y * v2.x;
+		float w = v1.x * v0.y - v1.y * v0.x;
+
+		if ((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0)) return false;
+
+		float det = u + v + w;
+		if (det == 0) return false; // co-planar
+
+		float t = u * v0.z + v * v1.z + w * v2.z;
+		if (tuv) *tuv = float3(t, u, v) / det;
+		return true;
+	}
+};
+class fRect2D {
+public:
+	union {
+		float v[4];
+		float4 xyzw;
+		struct {
+			float2 mOffset;
+			// full size of rectangle
+			float2 mSize;
+		};
+	};
+
+	inline fRect2D() : mOffset(0), mSize(0) {};
+	inline fRect2D(const fRect2D& r) : mOffset(r.mOffset), mSize(r.mSize) {};
+	inline fRect2D(const float2& offset, const float2& size) : mOffset(offset), mSize(size) {};
+	inline fRect2D(float ox, float oy, float sx, float sy) : mOffset(float2(ox, oy)), mSize(sx, sy) {};
+
+	inline fRect2D& operator=(const fRect2D & rhs) {
+		mOffset = rhs.mOffset;
+		mSize = rhs.mSize;
+		return *this;
+	}
+
+	inline bool Intersects(const fRect2D& p) const {
+		return !(
+			mOffset.x + mSize.x < p.mOffset.x ||
+			mOffset.y + mSize.y < p.mOffset.y ||
+			mOffset.x > p.mOffset.x + p.mSize.x ||
+			mOffset.y > p.mOffset.y + p.mSize.y);
+	}
+	inline bool Contains(const float2& p) const {
+		return 
+			p.x > mOffset.x && p.y > mOffset.y &&
+			p.x < mOffset.x + mSize.x && p.y < mOffset.y + mSize.y;
+	}
+};
+
+inline constexpr vk::DeviceSize operator"" _kB(vk::DeviceSize x) { return x*1024; }
+inline constexpr vk::DeviceSize operator"" _mB(vk::DeviceSize x) { return x*1024*1024; }
+inline constexpr vk::DeviceSize operator"" _gB(vk::DeviceSize x) { return x*1024*1024*1024; }
+
+template<typename T>
+inline void safe_delete(T*& x) {if (x != nullptr) { delete x; x = nullptr; } }
+template<typename T>
+inline void safe_delete_array(T*& x) { if (x != nullptr) { delete[] x; x = nullptr; } }
 
 template <typename T>
 inline T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
@@ -207,6 +424,8 @@ inline void WriteVector(std::ostream& stream, const std::vector<Tx>& value) {
 	WriteValue<uint64_t>(stream, value.size());
 	if (!value.empty()) stream.write(reinterpret_cast<const char*>(value.data()), sizeof(Tx)*value.size());
 }
+
+
 
 inline vk::AccessFlags GuessAccessMask(vk::ImageLayout layout) {
 	switch (layout) {
@@ -427,7 +646,7 @@ inline const vk::DeviceSize ElementSize(vk::Format format) {
 		return 32;
 
 	}
-	throw;
+	return 0;
 }
 inline uint32_t ChannelCount(vk::Format format) {
 	switch (format) {
@@ -571,7 +790,7 @@ inline uint32_t ChannelCount(vk::Format format) {
 		// TODO: compressed formats
 		
 	}
-	throw;
+	return 0;
 }
 inline bool HasDepthComponent(vk::Format format) {
 	return
@@ -591,14 +810,14 @@ inline bool HasStencilComponent(vk::Format format) {
 }
 
 template<typename T>
-std::string PrintKeys(const std::unordered_map<std::string, T>& map) {
+std::string PrintKeys(const std::map<std::string, T>& map) {
 	std::string str = "";
 	for (const auto& kp : map) str += + "\"" + kp.first + "\", ";
 	if (map.size()) str = str.substr(0, str.length()-1); // remove trailing space
 	return str;
 }
 inline vk::CompareOp atocmp(const std::string& str) {
-	static const std::unordered_map<std::string, vk::CompareOp> map {
+	static const std::map<std::string, vk::CompareOp> map {
 		{ "less",	vk::CompareOp::eLess },
 		{ "greater",	vk::CompareOp::eGreater },
 		{ "lequal",	vk::CompareOp::eLessOrEqual },
@@ -614,16 +833,16 @@ inline vk::CompareOp atocmp(const std::string& str) {
 inline vk::ColorComponentFlags atocolormask(const std::string& str) {
 	vk::ColorComponentFlags mask;
 	for (uint32_t i = 0; i < str.length(); i++) {
-		if (str[i] == 'r') mask |= vk::ColorComponentFlagBits::eR;
+		if      (str[i] == 'r') mask |= vk::ColorComponentFlagBits::eR;
 		else if (str[i] == 'g') mask |= vk::ColorComponentFlagBits::eG;
 		else if (str[i] == 'b') mask |= vk::ColorComponentFlagBits::eB;
 		else if (str[i] == 'a') mask |= vk::ColorComponentFlagBits::eA;
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "Error: Unknown color channel: %c (expected a concatenation of: 'r' 'g' 'b' 'a')\n", str[i]);
+		else fprintf_color(ConsoleColorBits::eYellow, stderr, "Error: Unknown color channel: %c (expected a concatenation of: 'r' 'g' 'b' 'a')\n", str[i]);
 	}
 	return mask;
 }
 inline vk::BlendOp atoblendop(const std::string& str) {
-	static const std::unordered_map<std::string, vk::BlendOp> map {
+	static const std::map<std::string, vk::BlendOp> map {
 		 { "add", vk::BlendOp::eAdd },
 		 { "subtract", vk::BlendOp::eSubtract },
 		 { "reverseSubtract", vk::BlendOp::eReverseSubtract },
@@ -634,7 +853,7 @@ inline vk::BlendOp atoblendop(const std::string& str) {
 	return map.at(str);
 }
 inline vk::BlendFactor atoblendfactor(const std::string& str) {
-	static const std::unordered_map<std::string, vk::BlendFactor> map {
+	static const std::map<std::string, vk::BlendFactor> map {
 		{ "zero", vk::BlendFactor::eZero },
 		{ "one", vk::BlendFactor::eOne },
 		{ "srcColor", vk::BlendFactor::eSrcColor },
@@ -655,7 +874,7 @@ inline vk::BlendFactor atoblendfactor(const std::string& str) {
 	return map.at(str);
 }
 inline vk::Filter atofilter(const std::string& str) {
-	static const std::unordered_map<std::string, vk::Filter> map {
+	static const std::map<std::string, vk::Filter> map {
 		{ "nearest", vk::Filter::eNearest },
 		{ "linear", vk::Filter::eLinear },
 		{ "cubic", vk::Filter::eCubicIMG }
@@ -664,7 +883,7 @@ inline vk::Filter atofilter(const std::string& str) {
 	return map.at(str);
 }
 inline vk::SamplerAddressMode atoaddressmode(const std::string& str) {
-	static const std::unordered_map<std::string, vk::SamplerAddressMode> map {
+	static const std::map<std::string, vk::SamplerAddressMode> map {
 		{ "repeat", vk::SamplerAddressMode::eRepeat },
 		{ "mirroredRepeat", vk::SamplerAddressMode::eRepeat },
 		{ "clampEdge", vk::SamplerAddressMode::eClampToEdge },
@@ -675,7 +894,7 @@ inline vk::SamplerAddressMode atoaddressmode(const std::string& str) {
 	return map.at(str);
 }
 inline vk::BorderColor atobordercolor(const std::string& str) {
-	static const std::unordered_map<std::string, vk::BorderColor> map {
+	static const std::map<std::string, vk::BorderColor> map {
 		{ "floatTransparentBlack", vk::BorderColor::eFloatTransparentBlack },
 		{ "intTransparentBlack", vk::BorderColor::eIntTransparentBlack },
 		{ "floatOpaqueBlack", vk::BorderColor::eFloatOpaqueBlack },
@@ -687,7 +906,7 @@ inline vk::BorderColor atobordercolor(const std::string& str) {
 	return map.at(str);
 }
 inline vk::SamplerMipmapMode atomipmapmode(const std::string& str) {
-	static const std::unordered_map<std::string, vk::SamplerMipmapMode> map {
+	static const std::map<std::string, vk::SamplerMipmapMode> map {
 		{ "nearest", vk::SamplerMipmapMode::eNearest },
 		{ "linear", vk::SamplerMipmapMode::eLinear }
 	};
@@ -695,29 +914,35 @@ inline vk::SamplerMipmapMode atomipmapmode(const std::string& str) {
 	return map.at(str);
 }
 
-inline bool FindQueueFamilies(vk::PhysicalDevice device, vk::SurfaceKHR surface, uint32_t& graphicsFamily, uint32_t& presentFamily) {
-	std::vector<vk::QueueFamilyProperties> queueFamilies = device.getQueueFamilyProperties();
+template <typename T> inline size_t hash_combine(const T& v) { return std::hash<T>().operator()(v); }
+template <typename T, typename... Args>
+inline size_t hash_combine(const T& s0, const Args&... rest) {
+		size_t seed = ((std::hash<T>())).operator()(s0);
+		return seed ^ (hash_combine(rest...) + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
 
-	bool g = false;
-	bool p = false;
+}
 
-	uint32_t i = 0;
-	for (const auto& queueFamily : queueFamilies) {
-		if (queueFamily.queueCount > 0 && queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) {
-			graphicsFamily = i;
-			g = true;
-		}
-
-		vk::Bool32 presentSupport = VK_FALSE;
-		device.getSurfaceSupportKHR(i, surface, &presentSupport);
-
-		if (queueFamily.queueCount > 0 && presentSupport) {
-			presentFamily = i;
-			p = true;
-		}
-
-		i++;
+namespace std {
+	
+template<typename BitType>
+struct hash<vk::Flags<BitType>> {
+	inline size_t operator()(const ::vk::Flags<BitType>& v) const {
+		return stm::hash_combine((::vk::Flags<BitType>::MaskType)v);
 	}
+};
 
-	return g && p;
+template<>
+struct hash<vk::Extent2D> {
+	inline size_t operator()(const vk::Extent2D& v) const {
+		return stm::hash_combine(v.width, v.height);
+	}
+};
+template<>
+struct hash<vk::Extent3D> {
+	inline size_t operator()(const vk::Extent3D& v) const {
+		return stm::hash_combine(v.width, v.height, v.depth);
+	}
+};
+
 }

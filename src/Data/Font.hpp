@@ -2,13 +2,15 @@
 
 #include <Data/Asset.hpp>
 
+namespace stm {
+
 class Font : public Asset {
 public:
 	inline float Ascent(float pixelHeight) const { return mAscent*pixelHeight/mEmSize; }
 	inline float Descent(float pixelHeight) const { return mDescent*pixelHeight/mEmSize; }
 	inline float LineSpace(float pixelHeight) const { return mLineGap*pixelHeight/mEmSize; }
 	STRATUM_API void GenerateGlyphs(std::vector<GlyphRect>& glyphs, AABB& bounds, const std::string& str, float pixelHeight, const float2& offset = 0, TextAnchor horizontalAnchor = TextAnchor::eMin) const;
-	inline stm_ptr<Texture> SDF() const { return mSDF; }
+	inline std::shared_ptr<Texture> SDF() const { return mSDF; }
 
 private:
 	struct Glyph {
@@ -19,8 +21,8 @@ private:
 		uint2 mTextureExtent;
 		std::unordered_map<uint32_t, float> mKerning;
 	};
-	friend class AssetManager;
-	STRATUM_API Font(const fs::path& filename, ::Device* device, const std::string& name);
+	friend class Device;
+	STRATUM_API Font(const fs::path& filename, stm::Device* device, const std::string& name);
 
 	float mEmSize;
 	
@@ -30,8 +32,9 @@ private:
 	float mSpaceAdvance;
 	float mTabAdvance;
 
-	stm_ptr<Texture> mSDF;
+	std::shared_ptr<Texture> mSDF;
 
 	std::unordered_map<uint32_t, Glyph> mGlyphs;
 };
 
+}

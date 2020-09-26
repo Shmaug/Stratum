@@ -1,3 +1,5 @@
+namespace stm {
+
 // Core
 
 class Buffer;
@@ -17,7 +19,6 @@ class Window;
 
 class AnimationCurve;
 class Asset;
-class AssetManager;
 class Font;
 class Material;
 class Mesh;
@@ -36,13 +37,11 @@ class MouseKeyboardInput;
 
 // Scene
 class Camera;
-class ClothRenderer;
 class GuiContext;
-class Light;
-class MeshRenderer;
 class Object;
-class ObjectBvh2;
 class Renderer;
 class Scene;
-class SkinnedMeshRenderer;
-class TriangleBvh2;
+class MeshRenderer;
+class Light;
+
+}

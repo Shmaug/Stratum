@@ -1,5 +1,7 @@
-#include <Input/MouseKeyboardInput.hpp>
+#include "MouseKeyboardInput.hpp"
 #include <Core/Window.hpp>
+
+using namespace stm;
 
 MouseKeyboardInput::MouseKeyboardInput(){
 	memset(&mMousePointer, 0, sizeof(InputPointer));
@@ -32,13 +34,12 @@ void MouseKeyboardInput::LockMouse(bool l) {
 	mLockMouse = l;
 }
 
-void MouseKeyboardInput::NextFrame() {
+void MouseKeyboardInput::AdvanceFrame() {
 	memcpy(&mMousePointerLast, &mMousePointer, sizeof(InputPointer));
 	mMousePointer.mGuiHitT = -1.f;
 	mMousePointer.mPrimaryAxis = 0;
 	mMousePointer.mSecondaryAxis = 0;
 	mMousePointer.mScrollDelta = 0;
-
 	mLast = mCurrent;
 	mCurrent.mScrollDelta = 0;
 	mCurrent.mCursorDelta = 0;

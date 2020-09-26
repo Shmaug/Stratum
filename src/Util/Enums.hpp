@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan.hpp>
 
+namespace stm {
+
 enum class ClearFlagBits {
 	eNone = 0,
 	eDepth = 1,
@@ -54,3 +56,5 @@ enum class VertexAttributeType {
 	ePointSize,
 	eOther
 };
+
+}

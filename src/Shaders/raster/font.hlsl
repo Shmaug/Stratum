@@ -7,7 +7,7 @@
 #pragma blend 0 add srcAlpha oneMinusSrcAlpha add srcAlpha oneMinusSrcAlpha
 #pragma static_sampler Sampler
 
-#include <include/shadercompat.h>
+#include <shadercompat.h>
 
 [[vk::binding(BINDING_START + 0, PER_OBJECT)]] StructuredBuffer<GlyphRect> Glyphs : register(t0);
 [[vk::binding(BINDING_START + 1, PER_OBJECT)]] StructuredBuffer<float4x4> Transforms : register(t1);
@@ -24,7 +24,7 @@
 	uint SdfIndex;
 };
 
-#include <include/util.hlsli>
+#include <util.hlsli>
 
 float Winding(float2 p1, float2 p2, float2 p3) { return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y); }
 bool InTriangle(float2 p, float2 p0, float2 p1, float2 p2) {

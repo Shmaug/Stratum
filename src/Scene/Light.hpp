@@ -2,16 +2,17 @@
 
 #include <Scene/Object.hpp>
 
-enum LightType {
-	LIGHT_TYPE_SUN = LIGHT_SUN,
-	LIGHT_TYPE_POINT = LIGHT_POINT,
-	LIGHT_TYPE_SPOT = LIGHT_SPOT,
+namespace stm {
+
+enum class LightType : uint32_t {
+	eDirectional = LIGHT_SUN,
+	ePoint = LIGHT_POINT,
+	eSpot = LIGHT_SPOT,
 };
 
-class Light : public virtual Object {
+class Light : public Object {
 public:
-	STRATUM_API Light(const std::string& name);
-	STRATUM_API ~Light();
+	inline Light(const std::string& name, Scene* scene) : Object(name, scene) {}
 
 	inline void Color(const float3& c) { mColor = c; }
 	inline float3 Color() const { return mColor; }
@@ -50,30 +51,31 @@ public:
 	inline std::optional<AABB> Bounds() override {
 		float3 c, e;
 		switch (mType) {
-		case LIGHT_TYPE_POINT:
+		case LightType::ePoint:
 			return AABB(WorldPosition() - mRange, WorldPosition() + mRange);
-		case LIGHT_TYPE_SPOT:
+		case LightType::eSpot:
 			e = float3(0, 0, mRange * .5f);
 			c = float3(mRange * float2(sinf(mOuterSpotAngle * .5f)), mRange * .5f);
 			return AABB(c - e, c + e) * ObjectToWorld();
-		case LIGHT_TYPE_SUN:
+		case LightType::eDirectional:
 			return AABB(float3(-1e10f), float3(1e10f));
 		}
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Unknown light type!");
-		throw;
+		return {};
 	}
 
 private:
-	float3 mColor;
-	float mIntensity;
-	LightType mType;
-	// Size of the Physical point/spot light
-	float mRadius;
-	float mRange;
-	float mInnerSpotAngle;
-	float mOuterSpotAngle;
+	float3 mColor = 1;
+	float mIntensity = 1;
+	LightType mType = LightType::ePoint;
+	float mRange = 1;
+	// Size of the physical point/spot light
+	float mRadius = .01f;
+	float mInnerSpotAngle = .34f;
+	float mOuterSpotAngle = .35f;
 
-	bool mCastShadows;
-	float mShadowDistance;
-	uint32_t mCascadeCount;
+	bool mCastShadows = false;
+	uint32_t mCascadeCount = 2;
+	float mShadowDistance = 256; // for directional lights
 };
+
+}

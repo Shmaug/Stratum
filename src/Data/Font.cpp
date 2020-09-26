@@ -1,20 +1,19 @@
-#include <ThirdParty/msdfgen/msdfgen.h>
-#include <ThirdParty/msdfgen/ext/import-font.h>
+#include <msdfgen/msdfgen.h>
+#include <msdfgen/ext/import-font.h>
+
+#include "Font.hpp"
+
+#include <stb_image.h>
+#include <stb_image_write.h>
 
 #include <Core/Buffer.hpp>
 #include <Core/CommandBuffer.hpp>
 #include <Core/DescriptorSet.hpp>
-#include <Data/AssetManager.hpp>
-#include <Data/Font.hpp>
-#include <Data/Pipeline.hpp>
-#include <Data/Texture.hpp>
-
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <ThirdParty/stb_image.h>
-#include <ThirdParty/stb_image_write.h>
+#include "Pipeline.hpp"
+#include "Texture.hpp"
 
 using namespace std;
+using namespace stm;
 
 const string gSampleText = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
 const uint32_t gBitmapPadding = 16;
@@ -90,10 +89,10 @@ inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2
 		}
 }
 
-Font::Font(const fs::path& filename, ::Device* device, const string& name) : Asset(filename, device, name) {
+Font::Font(const fs::path& filename, Device* device, const string& name) : Asset(filename, device, name) {
 	msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
 	msdfgen::FontHandle* font = msdfgen::loadFont(ft, filename.string().c_str());
-	if (!font) throw;
+	if (!font) throw invalid_argument("failed to load font " + filename.string());
 
 	double spaceAdvance, tabAdvance;
 	msdfgen::FontMetrics metrics = {};
@@ -168,7 +167,7 @@ Font::Font(const fs::path& filename, ::Device* device, const string& name) : Ass
 	for (auto& kp : bitmaps) {
 		mGlyphs[kp.first].mTextureOffset = cur + gBitmapPadding;
 		cur.x += kp.second.width();
-		lineHeight = max(lineHeight, (uint32_t)kp.second.height());
+		lineHeight = std::max(lineHeight, (uint32_t)kp.second.height());
 		if (cur.x >= extent.width) {
 			cur.x = 0;
 			cur.y += lineHeight;
@@ -182,7 +181,7 @@ Font::Font(const fs::path& filename, ::Device* device, const string& name) : Ass
 	// Copy bitmap data
 
 	int8_t* data = new int8_t[4*extent.width*extent.height];
-	memset(data, 0x81, 4*extent.width*extent.height);
+	memset(data, 127, 4*extent.width*extent.height);
 
 	for (auto& kp : bitmaps)
 		for (uint32_t y = 0; y < (uint32_t)kp.second.height(); y++) {
@@ -191,7 +190,7 @@ Font::Font(const fs::path& filename, ::Device* device, const string& name) : Ass
 				dst[x] = (uint8_t)(fminf(fmaxf(kp.second.operator()(0, y)[x], -1), 1)*127);
 		}
 
-	mSDF = new Texture(mName+"/SDF", device, data, 4*extent.width*extent.height, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, 0);
+	mSDF = make_shared<Texture>(mName+"/SDF", mDevice, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, data, 4*extent.width*extent.height, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
 	delete[] data;
 
 	msdfgen::destroyFont(font);

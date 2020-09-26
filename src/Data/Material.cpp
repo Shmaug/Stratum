@@ -1,14 +1,12 @@
 #include <Data/Material.hpp>
 #include <Scene/Camera.hpp>
 #include <Scene/Scene.hpp>
-#include <Data/AssetManager.hpp>
 #include <Data/Texture.hpp>
-#include <Util/Profiler.hpp>
 
 using namespace std;
+using namespace stm;
 
-Material::Material(const string& name, stm_ptr<::Pipeline> pipeline)
-	: mName(name), mPipeline(pipeline), mDevice(pipeline->Device()), mCullMode(nullptr), mPolygonMode(nullptr), mCachedDescriptorSet(nullptr), mDescriptorSetDirty(false) {
+Material::Material(const string& name, shared_ptr<stm::Pipeline> pipeline) : mName(name), mPipeline(pipeline), mDevice(pipeline->mDevice){
 	if (GraphicsPipeline* pipeline = mPipeline->GetGraphics("main/forward", mShaderKeywords)) CopyInputSignature(pipeline);
 }
 
@@ -31,7 +29,7 @@ void Material::CopyInputSignature(GraphicsPipeline* pipeline) {
 			mDescriptorParameters[kp.first].resize(kp.second.mBinding.descriptorCount);
 }
 
-void Material::SetUniformBuffer(const string& name, stm_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
+void Material::SetUniformBuffer(const string& name, shared_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = vec[arrayIndex];
@@ -44,7 +42,7 @@ void Material::SetUniformBuffer(const string& name, stm_ptr<Buffer> buffer, vk::
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetStorageBuffer(const string& name, stm_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
+void Material::SetStorageBuffer(const string& name, shared_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, uint32_t arrayIndex) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
@@ -57,7 +55,7 @@ void Material::SetStorageBuffer(const string& name, stm_ptr<Buffer> buffer, vk::
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetSampledTexture(const string& name, stm_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
+void Material::SetSampledTexture(const string& name, shared_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
@@ -71,7 +69,7 @@ void Material::SetSampledTexture(const string& name, stm_ptr<Texture> texture, u
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetStorageTexture(const string& name, stm_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
+void Material::SetStorageTexture(const string& name, shared_ptr<Texture> texture, uint32_t arrayIndex, vk::ImageLayout layout) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
@@ -84,7 +82,7 @@ void Material::SetStorageTexture(const string& name, stm_ptr<Texture> texture, u
 	vec[arrayIndex] = p;
 	mDescriptorSetDirty = true;
 }
-void Material::SetSampler(const string& name, stm_ptr<Sampler> sampler, uint32_t arrayIndex) {
+void Material::SetSampler(const string& name, shared_ptr<Sampler> sampler, uint32_t arrayIndex) {
 	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSetEntry p = {};
@@ -108,31 +106,32 @@ void Material::SetPushParameter(const string& name, vk::DeviceSize dataSize, con
 bool Material::GetPushParameter(const string& name, vk::DeviceSize dataSize, void* data) const {
 	if (!mPushParameters.count(name)) return false;
 	const auto& p = mPushParameters.at(name);
-	memcpy(data, p.second, min(dataSize, p.first));
+	memcpy(data, p.second, std::min(dataSize, p.first));
 	return true;
 }
 
-void Material::OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) {
+void Material::OnLateUpdate(CommandBuffer& commandBuffer) {
 	for (auto& kp : mDescriptorParameters)
 		for (auto& d : kp.second)
 			if (d.mType == vk::DescriptorType::eStorageImage || d.mType == vk::DescriptorType::eSampledImage || d.mType == vk::DescriptorType::eCombinedImageSampler)
-				commandBuffer->TransitionBarrier(d.mTextureValue, d.mImageLayout);
+				commandBuffer.TransitionBarrier(*d.mTextureValue, d.mImageLayout);
 }
 
-void Material::BindDescriptorParameters(stm_ptr<CommandBuffer> commandBuffer) {
-	GraphicsPipeline* pipeline = GetPassPipeline(commandBuffer->CurrentShaderPass());
+void Material::BindDescriptorParameters(CommandBuffer& commandBuffer) {
+	ProfileRegion ps("Material::BindDescriptorParameters");
+
+	GraphicsPipeline* pipeline = GetPassPipeline(commandBuffer.CurrentShaderPass());
 	if (pipeline->mShaderVariant->mDescriptorSetBindings.empty() || pipeline->mDescriptorSetLayouts.size() < PER_MATERIAL) return;
 
 	if (mDescriptorSetDirty || !mCachedDescriptorSet) {
 		if (mCachedDescriptorSet) {
-			commandBuffer->TrackResource(mCachedDescriptorSet);
+			commandBuffer.TrackResource(mCachedDescriptorSet);
 			mCachedDescriptorSet = nullptr;
 		}
 
-		mCachedDescriptorSet = commandBuffer->Device()->GetPooledDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_MATERIAL]);
+		mCachedDescriptorSet = commandBuffer.mDevice->GetPooledDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_MATERIAL]);
 		
 		// set descriptor parameters
-		PROFILER_BEGIN("Write Descriptor Sets");
 		for (auto& kp : mDescriptorParameters) {
 			if (pipeline->mShaderVariant->mDescriptorSetBindings.count(kp.first) == 0) continue;
 
@@ -144,12 +143,11 @@ void Material::BindDescriptorParameters(stm_ptr<CommandBuffer> commandBuffer) {
 				mCachedDescriptorSet->CreateDescriptor(binding.mBinding.binding, kp.second[i]);
 			}
 		}
-		PROFILER_END;
 		mDescriptorSetDirty = false;
 	}
-	commandBuffer->BindDescriptorSet(mCachedDescriptorSet, PER_MATERIAL);
+	commandBuffer.BindDescriptorSet(mCachedDescriptorSet, PER_MATERIAL);
 }
-void Material::PushConstants(stm_ptr<CommandBuffer> commandBuffer) {
+void Material::PushConstants(CommandBuffer& commandBuffer) {
 	for (auto& m : mPushParameters)
-		commandBuffer->PushConstant(m.first, m.second.second, (uint32_t)m.second.first);
+		commandBuffer.PushConstant(m.first, m.second.second, (uint32_t)m.second.first);
 }

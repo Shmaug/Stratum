@@ -1,12 +1,12 @@
-#include <Data/Mesh.hpp>
+#include "Mesh.hpp"
+
 #include <Core/CommandBuffer.hpp>
 #include <Scene/Scene.hpp>
 #include <Scene/Camera.hpp>
 #include <Scene/TriangleBvh2.hpp>
 
-#pragma warning(disable:26451)
-
 using namespace std;
+using namespace stm;
 
 void Mesh::SetAttribute(VertexAttributeType type, uint32_t typeIndex, const BufferView& bufferView, uint32_t elementOffset, uint32_t elementStride, vk::VertexInputRate inputRate) {
 	mPipelineInputs.clear();
@@ -29,10 +29,7 @@ vk::PipelineVertexInputStateCreateInfo Mesh::PipelineInput(GraphicsPipeline* pip
 		if (m.mStage == vk::ShaderStageFlagBits::eVertex)
 			vertexStage = &m;
 
-	if (!vertexStage) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "Error: Pipeline %s does not have a vertex stage.", pipeline->mName.c_str());
-		throw;
-	}
+	if (!vertexStage) throw invalid_argument("pipeline does not have a vertex stage.");
 
 	auto& p = mPipelineInputs[pipeline];
 	vector<vk::VertexInputBindingDescription>& bindingDescriptions = p.mBindingDescriptions;
@@ -66,17 +63,14 @@ vk::PipelineVertexInputStateCreateInfo Mesh::PipelineInput(GraphicsPipeline* pip
 	return p.mCreateInfo;
 }
 
-void Mesh::Draw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, uint32_t instanceCount, uint32_t firstInstance) {
+void Mesh::Draw(CommandBuffer& commandBuffer, Camera* camera, uint32_t instanceCount, uint32_t firstInstance) {
 	for (uint32_t i = 0; i < mVertexAttributes.size(); i++)
 		if (mVertexAttributes[i].mBufferView.mBuffer)
-			commandBuffer->BindVertexBuffer(mVertexAttributes[i].mBufferView, i);
+			commandBuffer.BindVertexBuffer(mVertexAttributes[i].mBufferView, i);
 	if (mIndexBuffer.mBuffer)
-		commandBuffer->BindIndexBuffer(mIndexBuffer, mIndexType);
+		commandBuffer.BindIndexBuffer(mIndexBuffer, mIndexType);
 
-	if (camera) {
-		if (camera->Scene()) camera->Scene()->PushSceneConstants(commandBuffer);
-		camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
-	}
+	if (camera) camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
 
 	uint32_t vertexDrawCount = 0;
 	for (auto& submesh : mSubmeshes) {
@@ -90,15 +84,15 @@ void Mesh::Draw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, uint32_t i
 	}
 
 	if (mTopology == vk::PrimitiveTopology::eTriangleList)
-		commandBuffer->mTriangleCount += instanceCount * (vertexDrawCount / 3);
+		commandBuffer.mTriangleCount += instanceCount * (vertexDrawCount / 3);
 	else if (mTopology == vk::PrimitiveTopology::eTriangleStrip)
-		commandBuffer->mTriangleCount += instanceCount * (vertexDrawCount - 2);
+		commandBuffer.mTriangleCount += instanceCount * (vertexDrawCount - 2);
 	else if (mTopology == vk::PrimitiveTopology::eTriangleFan)
-		commandBuffer->mTriangleCount += instanceCount * (vertexDrawCount - 1);
+		commandBuffer.mTriangleCount += instanceCount * (vertexDrawCount - 1);
 }
-void Mesh::Submesh::Draw(stm_ptr<CommandBuffer> commandBuffer, uint32_t instanceCount, uint32_t firstInstance) {
+void Mesh::Submesh::Draw(CommandBuffer& commandBuffer, uint32_t instanceCount, uint32_t firstInstance) {
 	if (mIndexCount)
-		((vk::CommandBuffer)*commandBuffer).drawIndexed(mIndexCount, instanceCount, mBaseIndex, mBaseVertex, firstInstance);
+		commandBuffer->drawIndexed(mIndexCount, instanceCount, mBaseIndex, mBaseVertex, firstInstance);
 	else
-		((vk::CommandBuffer)*commandBuffer).draw(mVertexCount, instanceCount, mBaseVertex, firstInstance);
+		commandBuffer->draw(mVertexCount, instanceCount, mBaseVertex, firstInstance);
 }

@@ -1,16 +1,18 @@
 #pragma once
 
 #include <Core/CommandBuffer.hpp>
+#include <Core/CommandBuffer.hpp>
+
+namespace stm {
 
 // A hierarchical object in a Scene. Keeps track of a transform internally that is updated on-demand during getter functions
 class Object {
 public:
 	const std::string mName;
+	Scene* const mScene;
 
-	STRATUM_API Object(const std::string& name);
+	Object() = delete;
 	STRATUM_API virtual ~Object();
-
-	inline ::Scene* Scene() const { return mScene; }
 
 	inline float3 WorldPosition() { UpdateTransform(); return mWorldPosition; }
 	inline quaternion WorldRotation() { UpdateTransform(); return mWorldRotation; }
@@ -55,9 +57,7 @@ public:
 	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
 
 private:
-	friend class ::Scene;
-	
-	::Scene* mScene = nullptr;
+	friend class Scene;
 
 	bool mEnabled = true;
 	bool mEnabledHierarchy = true;
@@ -78,11 +78,15 @@ private:
 	std::deque<Object*> mChildren;
 
 protected:
-	inline virtual void OnFixedUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
-	inline virtual void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
-	inline virtual void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) {}
-	inline virtual void OnGui(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, GuiContext* gui) {}
+	STRATUM_API Object(const std::string& name, stm::Scene* scene);
+
+	inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
+	inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
+	inline virtual void OnLateUpdate(CommandBuffer& commandBuffer) {}
+	inline virtual void OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {}
 
 	STRATUM_API virtual void DirtyTransform();
 	STRATUM_API virtual bool UpdateTransform();
 };
+
+}

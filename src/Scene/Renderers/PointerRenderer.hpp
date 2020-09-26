@@ -2,13 +2,14 @@
 
 #include <Scene/Renderers/Renderer.hpp>
 
+namespace stm {
+
 class PointerRenderer : public Renderer {
 public:
-	STRATUM_API PointerRenderer(const std::string& name);
-	STRATUM_API ~PointerRenderer();
+	inline PointerRenderer(const std::string& name, Scene* scene) : Object(name, scene) {}
 	
-	inline virtual uint32_t RenderQueue(const std::string& pass) override { return 5000; }
 	inline virtual std::optional<AABB> Bounds() override { UpdateTransform(); return mAABB; }
+	inline virtual uint32_t RenderQueue(const std::string& pass) override { return 5000; }
 
 	inline void RayDistance(float d) { mRayDistance = d; }
 	inline void Color(const float4& c) { mColor = c; }
@@ -19,12 +20,14 @@ public:
 	inline float Width() const { return mWidth; }
 
 protected:
-	float mRayDistance;
-	float mWidth;
-	float4 mColor;
+	float mRayDistance = 0;
+	float mWidth = 0.01f;
+	float4 mColor = 1;
 
 	AABB mAABB;
 	
-	STRATUM_API virtual void OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera) override;
+	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera, const std::shared_ptr<DescriptorSet>& perCamera) override;
 	STRATUM_API virtual bool UpdateTransform() override;
 };
+
+}

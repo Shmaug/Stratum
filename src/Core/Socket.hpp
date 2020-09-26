@@ -10,6 +10,8 @@
 #include <WS2tcpip.h>
 #endif
 
+namespace stm {
+
 enum SocketType {
 	Listen, Connect
 };
@@ -30,8 +32,8 @@ public:
 	STRATUM_API bool Accept(); // Accept Listen socket
 	STRATUM_API bool Listen(int backlog = 5); // Listen Listen socket
 	STRATUM_API bool Connect(int timeout = 0); // Connect Connect socket
-	STRATUM_API bool Send(const void* buf, std::size_t len, int flags = 0);
-	STRATUM_API int Receive(void* buf, std::size_t len, int flags = 0);
+	STRATUM_API bool Send(const void* buf, size_t len, int flags = 0);
+	STRATUM_API int Receive(void* buf, size_t len, int flags = 0);
 
 	inline bool Valid() const { return mSocket >= 0; }
 	inline void SocketFD(int socket) { mSocket = socket; }
@@ -48,3 +50,5 @@ protected:
 
 	bool mBlockingState;
 };
+
+}

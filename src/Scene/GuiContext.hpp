@@ -4,6 +4,8 @@
 #include <Data/Pipeline.hpp>
 #include <Core/CommandBuffer.hpp>
 
+namespace stm {
+
 class GuiContext {
 public:
 	enum class LayoutAxis : uint32_t {
@@ -19,8 +21,8 @@ public:
 		float4 mSliderColor;
 		float4 mSliderKnobColor;
 
-		Font* mControlFont;
-		Font* mTitleFont;
+		std::shared_ptr<Font> mControlFont;
+		std::shared_ptr<Font> mTitleFont;
 		float mControlFontHeight;
 		float mTitleFontHeight;
 
@@ -77,17 +79,14 @@ private:
 		STRATUM_API fRect2D Get(float size);
 	};
 
-	::Device* mDevice;
-	::InputManager* mInputManager;
-
-	std::vector<stm_ptr<Texture>> mTextureArray;
-	std::unordered_map<stm_ptr<Texture>, uint32_t> mTextureMap;
+	std::vector<std::shared_ptr<Texture>> mTextureArray;
+	std::unordered_map<std::shared_ptr<Texture>, uint32_t> mTextureMap;
 
 	std::vector<GuiString> mScreenStrings;
 	std::vector<GuiString> mWorldStrings;
 
 	std::vector<GlyphRect> mStringGlyphs;
-	std::vector<stm_ptr<Texture>> mUniqueStringSDFs;
+	std::vector<std::shared_ptr<Texture>> mUniqueStringSDFs;
 	std::vector<float4x4> mStringTransforms;
 
 	std::vector<float3> mLinePoints;
@@ -100,26 +99,29 @@ private:
 	std::vector<GuiRect> mWorldRects;
 	std::vector<GuiRect> mWorldTextureRects;
 
-	std::unordered_map<std::string, uint32_t> mHotControl;
-	std::unordered_map<std::string, uint32_t> mLastHotControl;
+	std::map<std::string, uint32_t> mHotControl;
+	std::map<std::string, uint32_t> mLastHotControl;
 	std::unordered_map<uint32_t, std::variant<float, std::string>> mControlData;
 	uint32_t mNextControlId;
 	
 	std::stack<GuiLayout> mLayoutStack;
+	std::stack<LayoutTheme> mLayoutThemeStack;
 
-	stm_ptr<Texture> mIconsTexture;
+	std::shared_ptr<Texture> mIconsTexture;
 
 	friend class Scene;
-	STRATUM_API GuiContext(::Device* device, ::InputManager* inputManager);
+	STRATUM_API GuiContext(Device* device, InputManager* inputManager);
 	STRATUM_API void Reset();
-	STRATUM_API void OnPreRender(stm_ptr<CommandBuffer> commandBuffer);
-	STRATUM_API void OnDraw(stm_ptr<CommandBuffer> commandBuffer, Camera* camera, stm_ptr<DescriptorSet> perCamera);
+	STRATUM_API void OnPreRender(CommandBuffer& commandBuffer);
+	STRATUM_API void OnDraw(CommandBuffer& commandBuffer, Camera& camera, std::shared_ptr<DescriptorSet> perCamera);
 
 public:
+	stm::Device* const mDevice;
+	stm::InputManager* const mInputManager;
 	LayoutTheme mLayoutTheme;
 
-	inline ::Device* Device() const { return mDevice; }
-	inline ::InputManager* InputManager() const { return mInputManager; }
+	inline void PushLayoutTheme() { mLayoutThemeStack.push(mLayoutTheme); }
+	inline void PopLayoutTheme() { mLayoutTheme = mLayoutThemeStack.top(); mLayoutThemeStack.pop(); }
 
 	STRATUM_API fRect2D BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect);
 	STRATUM_API fRect2D BeginWorldLayout(LayoutAxis axis, const float4x4& transform, const fRect2D& rect);
@@ -133,7 +135,7 @@ public:
 	STRATUM_API void LayoutSpace(float size);
 	STRATUM_API void LayoutSeparator();
 	STRATUM_API bool LayoutTextButton(const std::string& text, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid);
-	STRATUM_API bool LayoutImageButton(const float2& size, stm_ptr<Texture> texture, const float4& textureST = float4(1, 1, 0, 0));
+	STRATUM_API bool LayoutImageButton(const float2& size, std::shared_ptr<Texture> texture, const float4& textureST = float4(1, 1, 0, 0));
 	STRATUM_API void LayoutLabel(const std::string& text, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid);
 	STRATUM_API void LayoutTitle(const std::string& text, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid);
 	STRATUM_API bool LayoutToggle(const std::string& label, bool& value);
@@ -153,33 +155,33 @@ public:
 	STRATUM_API void WireSphere(const float3& center, float radius, const float4& color);
 
 	// Draw a string on the screen. Returns the bounds of the drawn glyphs
-	STRATUM_API void DrawString(const float2& screenPos, float z, Font* font, float pixelHeight, const std::string& str, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMin, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API void DrawString(const float2& screenPos, float z, std::shared_ptr<Font> font, float pixelHeight, const std::string& str, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMin, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	// Draw a string in the world. Returns the bounds of the drawn glyphs
-	STRATUM_API void DrawString(const float4x4& transform, const float2& offset, Font* font, float pixelHeight, const std::string& str, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMin, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API void DrawString(const float4x4& transform, const float2& offset, std::shared_ptr<Font> font, float pixelHeight, const std::string& str, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMin, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 
 	// Draw a rectangle on the screen, "size" pixels big with the bottom-left corner at screenPos
-	STRATUM_API void Rect(const fRect2D& screenRect, float z, const float4& color, stm_ptr<Texture> texture = nullptr, const float4& textureST = float4(1,1,0,0), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API void Rect(const fRect2D& screenRect, float z, const float4& color, std::shared_ptr<Texture> texture = nullptr, const float4& textureST = float4(1,1,0,0), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	// Draw a rectangle in the world, "size" units big with the bottom-left corner at screenPos
-	STRATUM_API void Rect(const float4x4& transform, const fRect2D& rect, const float4& color, stm_ptr<Texture> texture = nullptr, const float4& textureST = float4(1, 1, 0, 0), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API void Rect(const float4x4& transform, const fRect2D& rect, const float4& color, std::shared_ptr<Texture> texture = nullptr, const float4& textureST = float4(1, 1, 0, 0), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 
 	// Draw a label on the screen, "size" pixels big with the bottom-left corner at screenPos
-	STRATUM_API void Label(const fRect2D& screenRect, float z, Font* font, float fontPixelHeight,
+	STRATUM_API void Label(const fRect2D& screenRect, float z, std::shared_ptr<Font> font, float fontPixelHeight,
 		const std::string& text, const float4& textColor, const float4& bgcolor,
 		TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	// Draw a label in the world, "size" units big with the bottom-left corner at screenPos
-	STRATUM_API void Label(const float4x4& transform, const fRect2D& rect, Font* font, float fontPixelHeight,
+	STRATUM_API void Label(const float4x4& transform, const fRect2D& rect, std::shared_ptr<Font> font, float fontPixelHeight,
 		const std::string& text, const float4& textColor, const float4& bgcolor,
 		TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	
 	// Draw a button on the screen, "size" pixels big with the bottom-left corner at screenPos
-	STRATUM_API bool TextButton(const fRect2D& screenRect, float z, Font* font, float fontPixelHeight, const std::string& text, const float4& textColor, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API bool TextButton(const fRect2D& screenRect, float z, std::shared_ptr<Font> font, float fontPixelHeight, const std::string& text, const float4& textColor, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	// Draw a button in the world, "size" units big with the bottom-left corner at screenPos
-	STRATUM_API bool TextButton(const float4x4& transform, const fRect2D& rect, Font* font, float fontPixelHeight, const std::string& text, const float4& textColor, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API bool TextButton(const float4x4& transform, const fRect2D& rect, std::shared_ptr<Font> font, float fontPixelHeight, const std::string& text, const float4& textColor, const float4& color, TextAnchor horizontalAnchor = TextAnchor::eMid, TextAnchor verticalAnchor = TextAnchor::eMid, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 
 	// Draw a button on the screen, "size" pixels big with the bottom-left corner at screenPos
-	STRATUM_API bool ImageButton(const fRect2D& screenRect, float z, stm_ptr<Texture> texture, const float4& color = 1, const float4& textureST = float4(0, 0, 1, 1), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API bool ImageButton(const fRect2D& screenRect, float z, std::shared_ptr<Texture> texture, const float4& color = 1, const float4& textureST = float4(0, 0, 1, 1), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 	// Draw a button in the world, "size" units big with the bottom-left corner at screenPos
-	STRATUM_API bool ImageButton(const float4x4& transform, const fRect2D& rect, stm_ptr<Texture> texture, const float4& color = 1, const float4& textureST = float4(0, 0, 1, 1), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
+	STRATUM_API bool ImageButton(const float4x4& transform, const fRect2D& rect, std::shared_ptr<Texture> texture, const float4& color = 1, const float4& textureST = float4(0, 0, 1, 1), const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 
 	STRATUM_API bool Slider(const fRect2D& screenRect, float z, float& value, float minimum, float maximum, LayoutAxis axis, float knobSize,
 		const float4& barColor, const float4& knobColor, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
@@ -191,3 +193,5 @@ public:
 	STRATUM_API bool RangeSlider(const float4x4& transform, const fRect2D& rect, float2& values, float minimum, float maximum, LayoutAxis axis, float knobSize,
 		const float4& barColor, const float4& knobColor, const fRect2D& clipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f));
 };
+
+}
