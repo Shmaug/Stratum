@@ -1,4 +1,4 @@
-#include <Scene/Renderers/SkinnedMeshRenderer.hpp>
+#include "SkinnedMeshRenderer.hpp"
 
 using namespace std;
 using namespace stm;

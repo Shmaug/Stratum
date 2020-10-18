@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Scene/Renderers/Renderer.hpp>
+#include "Renderer.hpp"
 
 namespace stm {
 

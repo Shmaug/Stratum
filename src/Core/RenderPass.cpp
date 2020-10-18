@@ -1,7 +1,9 @@
-#include <Core/RenderPass.hpp>
-#include <Data/Texture.hpp>
-#include <Core/CommandBuffer.hpp>
-#include <Core/Framebuffer.hpp>
+#include "RenderPass.hpp"
+
+#include "../Data/Texture.hpp"
+
+#include "CommandBuffer.hpp"
+#include "Framebuffer.hpp"
 
 using namespace std;
 using namespace stm;

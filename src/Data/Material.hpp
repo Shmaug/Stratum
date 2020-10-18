@@ -1,19 +1,24 @@
 #pragma once
 
-#include <Core/DescriptorSet.hpp>
-#include <Data/Pipeline.hpp>
+#include "../Core/DescriptorSet.hpp"
+
+#include "Shader.hpp"
 
 namespace stm {
 
 class Material {
+private:
+	std::shared_ptr<stm::Shader> mShader;
 public:
 	const std::string mName;
 	Device* const mDevice;
 
-	STRATUM_API Material(const std::string& name, std::shared_ptr<stm::Pipeline> pipeline);
+	STRATUM_API Material(const std::string& name, std::shared_ptr<stm::Shader> shader);
 
-	inline std::shared_ptr<stm::Pipeline> Pipeline() const { return mPipeline; };
-	inline GraphicsPipeline* GetPassPipeline(const std::string& pass) const { return mPipeline->GetGraphics(pass, mShaderKeywords); }
+	inline std::shared_ptr<stm::Shader> Shader() const { return mShader; };
+	inline GraphicsPipeline* GetPipeline(CommandBuffer& commandBuffer, const string& shaderPass, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput) const {
+		return mShader->GetPipeline(mShaderKeywords, commandBuffer, shaderPass, topology, vertexInput, mCullMode, mPolygonMode)
+	}
 
 	// Enable a keyword to be used to select a shader variant
 	STRATUM_API void EnableKeyword(const std::string& kw);
@@ -22,7 +27,6 @@ public:
 
 	inline void CullMode(vk::Optional<const vk::CullModeFlags> c) { mCullMode = c; }
 	inline vk::Optional<const vk::CullModeFlags> CullMode() const { return mCullMode; }
-
 	inline void PolygonMode(vk::Optional<const vk::PolygonMode> m) { mPolygonMode = m; }
 	inline vk::Optional<const vk::PolygonMode> PolygonMode() const { return mPolygonMode; }
 
@@ -56,10 +60,9 @@ private:
 	STRATUM_API void BindDescriptorParameters(CommandBuffer& commandBuffer);
 	STRATUM_API void PushConstants(CommandBuffer& commandBuffer);
 
-	std::shared_ptr<stm::Pipeline> mPipeline;
 
 	std::set<std::string> mShaderKeywords;
-	std::map<std::string, PipelineVariant> mPassCache;
+	std::map<std::string, GraphicsPipeline*> mPassCache;
 
 	std::map<std::string, std::vector<DescriptorSetEntry>> mDescriptorParameters;
 	std::map<std::string, std::pair<vk::DeviceSize, void*>> mPushParameters;

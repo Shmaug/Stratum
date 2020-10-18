@@ -1,4 +1,4 @@
-#include <Scene/Renderers/PointerRenderer.hpp>
+#include "PointerRenderer.hpp"
 
 using namespace std;
 using namespace stm;

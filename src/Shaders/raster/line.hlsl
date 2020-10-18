@@ -36,11 +36,7 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	p = mul(Transforms[TransformIndex], float4(p, 1.0)).xyz;
 	o.position = float4((p.xy / ScreenSize) * 2 - 1, p.z, 1);
 	#else
-	float4x4 o2w = Transforms[TransformIndex];
-	o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
-	o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
-	o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
-	o.position = mul(STRATUM_MATRIX_VP, mul(o2w, float4(p, 1.0)));
+	o.position = mul(STRATUM_MATRIX_VP, mul(ApplyCameraTranslation(Transforms[TransformIndex].ObjectToWorld), float4(p, 1.0)));
 	#endif
 	o.clipPos = (p - ClipBounds.xy) / ClipBounds.zw;
 

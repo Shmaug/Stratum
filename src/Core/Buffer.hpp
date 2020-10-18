@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Core/Device.hpp>
+#include "../Core/Device.hpp"
 
 namespace stm {
 
@@ -42,26 +42,28 @@ private:
 	vk::SharingMode mSharingMode;
 };
 
-class BufferView {
+class ArrayBufferView {
 public:
 	std::shared_ptr<Buffer> mBuffer;
-	vk::DeviceSize mByteOffset = 0;
-	BufferView() = default;
-	BufferView(BufferView&&) = default;
-	BufferView(const BufferView&) = default;
-	BufferView& operator =(const BufferView&) = default;
-	BufferView& operator =(BufferView&&) = default;
-	inline BufferView(std::shared_ptr<Buffer> buffer, vk::DeviceSize offset = 0) : mBuffer(buffer), mByteOffset(offset) {};
-	inline bool operator==(const BufferView& rhs) const { return mBuffer == rhs.mBuffer && mByteOffset == rhs.mByteOffset; }
+	vk::DeviceSize mBufferOffset = 0;
+	vk::DeviceSize mElementSize = 0;
+	ArrayBufferView() = default;
+	ArrayBufferView(ArrayBufferView&&) = default;
+	ArrayBufferView(const ArrayBufferView&) = default;
+	ArrayBufferView& operator =(const ArrayBufferView&) = default;
+	ArrayBufferView& operator =(ArrayBufferView&&) = default;
+	inline ArrayBufferView(std::shared_ptr<Buffer> buffer, vk::DeviceSize bufferOffset = 0, vk::DeviceSize elementSize = 0)
+		: mBuffer(buffer), mBufferOffset(bufferOffset), mElementSize(elementSize) {};
+	inline bool operator==(const ArrayBufferView& rhs) const { return mBuffer == rhs.mBuffer && mBufferOffset == rhs.mBufferOffset && mElementSize == rhs.mElementSize; }
 };
 
 }
 
 namespace std {
 template<>
-struct hash<stm::BufferView> {
-	inline size_t operator()(const stm::BufferView& v) const {
-		return stm::hash_combine(v.mBuffer, v.mByteOffset);
+struct hash<stm::ArrayBufferView> {
+	inline size_t operator()(const stm::ArrayBufferView& v) const {
+		return stm::hash_combine(v.mBuffer, v.mBufferOffset, v.mElementSize);
 	}
 };
 }

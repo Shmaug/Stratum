@@ -2,7 +2,7 @@
 #include <spirv_cross/spirv_cross.hpp>
 #include <shaderc/shaderc.hpp>
 
-#include <Data/Shader.hpp>
+#include "Data/Shader.hpp"
 
 using namespace std;
 using namespace stm;
@@ -83,12 +83,13 @@ struct CompilerContext {
 
 	set<string> mMacros;
 	string mOptimizationLevel;
-	Shader* mResult;
+
+	std::vector<Shader::Variant*> mResult;
 };
 
 #define DIRECTIVE_ERR(...) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s(%u): Error: '%s': ", ctx.mFilename.c_str(), ctx.mLineNumber, directiveName.c_str()); fprintf_color(ConsoleColorBits::eRed, stderr, __VA_ARGS__); return false; }
 
-bool DirectiveAssemblyOutput(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveAssemblyOutput(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a filename\n");
 	string filename = *ctx.mCurrentWord;
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an entry point\n");
@@ -99,11 +100,11 @@ bool DirectiveAssemblyOutput(CompilerContext& ctx, const string& directiveName, 
 	while (++ctx.mCurrentWord != ctx.mLineEnd) a.mKeywords.insert(*ctx.mCurrentWord);
 	return true;
 }
-bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an attachment index\n");
 	uint32_t index = atoi(ctx.mCurrentWord->c_str());
 	auto cur = ctx.mCurrentWord;
-	for (auto& v : dest) {
+	for (auto& v : variants) {
 		ctx.mCurrentWord = cur;
 
 		if (v->mBlendStates.size() <= index)
@@ -141,68 +142,62 @@ bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vec
 	}
 	return true;
 }
-bool DirectiveCull(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveCull(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
-	if (*ctx.mCurrentWord == "front") 			for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eFront;
-	else if (*ctx.mCurrentWord == "back") 	for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eBack;
-	else if (*ctx.mCurrentWord == "false") 	for (auto& v : dest) v->mCullMode = vk::CullModeFlagBits::eNone;
+	if (*ctx.mCurrentWord == "front") 			for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eFront;
+	else if (*ctx.mCurrentWord == "back") 	for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eBack;
+	else if (*ctx.mCurrentWord == "false") 	for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eNone;
 	else DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
 	return true;
 }
-bool DirectiveDepthOp(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveDepthOp(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a depth op\n");
-	for (auto& v : dest) v->mDepthStencilState.depthCompareOp = atocmp(*ctx.mCurrentWord);
+	for (auto& v : variants) v->mDepthStencilState.depthCompareOp = atocmp(*ctx.mCurrentWord);
 	return true;
 }
-bool DirectiveFill(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveFill(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
-	if (*ctx.mCurrentWord == "solid") 		 	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::eFill;
-	else if (*ctx.mCurrentWord == "line")  	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::eLine;
-	else if (*ctx.mCurrentWord == "point") 	for (auto& v : dest) v->mPolygonMode = vk::PolygonMode::ePoint;
+	if (*ctx.mCurrentWord == "solid") 		 	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::eFill;
+	else if (*ctx.mCurrentWord == "line")  	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::eLine;
+	else if (*ctx.mCurrentWord == "point") 	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::ePoint;
 	else DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
 	return true;
 }
-bool DirectiveInlineUniformBlock(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveInlineUniformBlock(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a descriptor name\n");
 	ctx.mInlineUniformBlocks.insert(*ctx.mCurrentWord);
 	return true;
 }
-bool DirectiveKernel(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveKernel(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an entry point\n");
-	ctx.mResult->mVariants.push_back({});
-	auto& v = ctx.mResult->mVariants.back();
-	v.mShaderPass = "";
-	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eCompute, *ctx.mCurrentWord, {} });
+	Shader::Variant* v = ctx.mResult.emplace_back(new Shader::Variant());
+	v->mShaderPass = "";
+	v->mModules.emplace_back(nullptr, {}, vk::ShaderStageFlagBits::eCompute, *ctx.mCurrentWord, {});
 	return true;
 }
-bool DirectiveMultiCompile(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
-	size_t kwc = ctx.mResult->mVariants.size();
+bool DirectiveMultiCompile(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
+	size_t kwc = ctx.mResult.size();
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one or more keywords\n");
 	// iterate all the keywords added by this multi_compile
 	while (ctx.mCurrentWord != ctx.mLineEnd) {
-		if (kwc == 0) {
-			// duplicate all existing variants within the current define block, add this keyword to each
-			vector<ShaderVariant> v(dest.size());
-			for (uint32_t i = 0; i < dest.size(); i++) v[i].mKeywords.insert(*ctx.mCurrentWord);
-			// add to variant list after so that vector reallocations dont invalidate dest
-			for (uint32_t i = 0; i < dest.size(); i++) ctx.mResult->mVariants.push_back(v[i]);
-		} else {
+		if (kwc == 0)
+			// duplicate all variants, add this keyword to each
+			for (uint32_t i = 0; i < variants.size(); i++)
+				ctx.mResult.emplace_back(new Shader::Variant(*variants[i]))->mKeywords.insert(*ctx.mCurrentWord);
+		else
 			// duplicate all existing variants, add this keyword to each
-			for (uint32_t i = 0; i < kwc; i++) {
-				ctx.mResult->mVariants.push_back(ctx.mResult->mVariants[i]);
-				ctx.mResult->mVariants.back().mKeywords.insert(*ctx.mCurrentWord);
-			}
-		}
+			for (uint32_t i = 0; i < kwc; i++)
+				ctx.mResult.emplace_back(new Shader::Variant(*ctx.mResult[i]))->mKeywords.insert(*ctx.mCurrentWord);
 		++ctx.mCurrentWord;
 	}
 	return true;
 }
-bool DirectiveOptimization(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveOptimization(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an an optimization level\n");
 	ctx.mOptimizationLevel = *ctx.mCurrentWord;
 	return true;
 }
-bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a pass name\n");
 	string shaderPass = *ctx.mCurrentWord;
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a vertex shader entry point\n");
@@ -210,25 +205,25 @@ bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vect
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a fragment shader entry point\n");
 	string fs = *ctx.mCurrentWord;
 
-	ctx.mResult->mVariants.push_back({});
-	auto& v = ctx.mResult->mVariants.back();
+	ctx.mResult.push_back({});
+	auto& v = ctx.mResult.back();
 	v.mShaderPass = shaderPass;
 	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eVertex, vs, {} });
 	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eFragment, fs, {} });
 	return true;
 }
-bool DirectiveRenderQueue(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveRenderQueue(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an integer\n");
-	for (auto& v : dest) v->mRenderQueue = atoi(ctx.mCurrentWord->c_str());
+	for (auto& v : variants) v->mRenderQueue = atoi(ctx.mCurrentWord->c_str());
 	return true;
 }
-bool DirectiveSampleShading(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveSampleShading(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd || (*ctx.mCurrentWord != "true" && *ctx.mCurrentWord != "false")) DIRECTIVE_ERR("expected 'true' or 'false'\n");
 	bool s = *ctx.mCurrentWord == "true";
-	for (auto& v : dest) v->mSampleShading = s;
+	for (auto& v : variants) v->mSampleShading = s;
 	return true;
 }
-bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an sampler name\n");
 	string name = *ctx.mCurrentWord;
 
@@ -281,25 +276,25 @@ bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, c
 		else DIRECTIVE_ERR("unknown argument %s (expected one of '[min,mag]Filter' 'addressMode[U,V,W]' 'borderColor' 'compareOp' 'maxAnisotropy' 'unnormalizedCoordinates')\n", id.c_str());
 	}
 
-	for (auto& v : dest) v->mImmutableSamplers[name] = samplerInfo;
+	for (auto& v : variants) v->mImmutableSamplers[name] = samplerInfo;
 	return true;
 }
-bool DirectiveZTest(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveZTest(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	if (*ctx.mCurrentWord == "true") for (auto& v : dest) v->mDepthStencilState.depthTestEnable = VK_TRUE;
-	else if (*ctx.mCurrentWord == "false") for (auto& v : dest) v->mDepthStencilState.depthTestEnable = VK_FALSE;
+	if (*ctx.mCurrentWord == "true") for (auto& v : variants) v->mDepthStencilState.depthTestEnable = VK_TRUE;
+	else if (*ctx.mCurrentWord == "false") for (auto& v : variants) v->mDepthStencilState.depthTestEnable = VK_FALSE;
 	else DIRECTIVE_ERR("expected one of 'true' 'false'\n");
 	return true;
 }
-bool DirectiveZWrite(CompilerContext& ctx, const string& directiveName, const vector<ShaderVariant*>& dest) {
+bool DirectiveZWrite(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
 	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	if (*ctx.mCurrentWord == "true") for (auto& v : dest) v->mDepthStencilState.depthWriteEnable = VK_TRUE;
-	else if (*ctx.mCurrentWord == "false") for (auto& v : dest) v->mDepthStencilState.depthWriteEnable = VK_FALSE;
+	if (*ctx.mCurrentWord == "true") for (auto& v : variants) v->mDepthStencilState.depthWriteEnable = VK_TRUE;
+	else if (*ctx.mCurrentWord == "false") for (auto& v : variants) v->mDepthStencilState.depthWriteEnable = VK_FALSE;
 	else DIRECTIVE_ERR("expected one of 'true' 'false'\n");
 	return true;
 }
 
-map<string, bool(*)(CompilerContext&, const string&, const vector<ShaderVariant*>&)> gCompilerDirectives {
+map<string, bool(*)(CompilerContext&, const string&, const vector<Shader::Variant*>&)> gCompilerDirectives {
 	{ "assembly_output", DirectiveAssemblyOutput },
 	{ "blend", DirectiveBlend },
 	{ "cull", DirectiveCull },
@@ -343,8 +338,8 @@ int ParseCompilerDirectives(CompilerContext& ctx, const fs::path& filename, cons
 			ctx.mCurrentWord = ++words.begin();
 			ctx.mLineEnd = words.end();
 
-			vector<ShaderVariant*> variants;
-			for (ShaderVariant& v : ctx.mResult->mVariants) {
+			vector<Shader::Variant*> variants;
+			for (const auto& [kw, v] : ctx.mResult) {
 				bool exclude = false;
 				if (!selectorStack.empty())
 					for (const string& kw : selectorStack.top().second)
@@ -402,7 +397,7 @@ int ParseCompilerDirectives(CompilerContext& ctx, const fs::path& filename, cons
 
 	return 0;
 }
-int SpirvReflection(const CompilerContext& ctx, ShaderVariant& destVariant, SpirvModule& spirv) {
+int SpirvReflection(const CompilerContext& ctx, Shader::Variant& destVariant, SpirvModule& spirv) {
 	spirv_cross::Compiler compiler(spirv.mSpirvBinary.data(), spirv.mSpirvBinary.size());
 	spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 
@@ -613,24 +608,20 @@ int CompileSpirv(const fs::path& filename, const set<string>& macros, const stri
 	for (const uint32_t& c : result) dest.mSpirvBinary.push_back(c);
 	return result.GetCompilationStatus() == shaderc_compilation_status_success ? 0 : 1;
 }
-int CompileShader(const string& filename, Shader& destShader, const set<string>& includePaths) {
-	destShader = {};
-	destShader.mVariants = {};
+Shader CompileShader(const string& filename, const set<string>& includePaths) {
+	Shader destShader;
 	
 	CompilerContext context = {};
 	context.mFilename = filename;
-	context.mResult = &destShader;
 
 	string source;
 	if (!ReadFile(filename, source)) {
 		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Error: Failed to open file for reading\n", filename.c_str());
-		return 1;
+		return destShader;
 	}
-	if (int result = ParseCompilerDirectives(context, filename, source, includePaths)) return result;
+	if (int result = ParseCompilerDirectives(context, filename, source, includePaths)) return destShader;
 
 	shaderc_compilation_status status = shaderc_compilation_status_success;
-	Compiler* compiler = new Compiler();
-
 
 	for (auto& variant : destShader.mVariants) {
 		set<string> macros = context.mMacros;
@@ -639,8 +630,8 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 			
 			set<string> m = macros;
 			m.insert("ENTRYP_" + variant.mModules[i].mEntryPoint);
-			if (int result = CompileSpirv(context.mFilename, m, context.mOptimizationLevel, includePaths, variant.mModules[i])) return result;
-			if (int result = SpirvReflection(context, variant, variant.mModules[i])) return result;
+			if (int result = CompileSpirv(context.mFilename, m, context.mOptimizationLevel, includePaths, variant.mModules[i])) return destShader;
+			if (int result = SpirvReflection(context, variant, variant.mModules[i])) return destShader;
 			
 			// do assembly output
 			for (const auto& assemblyOutput : context.mAssemblyOutputs)
@@ -663,9 +654,8 @@ int CompileShader(const string& filename, Shader& destShader, const set<string>&
 
 		}
 	}
-
-	delete compiler;
-	return 0;
+	
+	return destShader;
 }
 
 int main(int argc, char* argv[]) {
@@ -683,16 +673,7 @@ int main(int argc, char* argv[]) {
 	set<string> globalIncludes;
 	for (int i = 3; i < argc; i++) globalIncludes.emplace(argv[i]);
 
-	Shader shader = {};
-	if (int result = CompileShader(inputFile, shader, globalIncludes)) {
-		printf("%s: Failed to compile (%d)\n", inputFile, result);
-		return EXIT_FAILURE;
-	}
-
-	// write shader
-	ofstream output(outputFile, ios::binary);
-	shader.Write(output);
-	output.close();
+	CompileShader(inputFile, globalIncludes).Write(outputFile);
 
 	return EXIT_SUCCESS;
 }

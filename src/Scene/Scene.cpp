@@ -31,7 +31,6 @@ Scene::Scene(stm::Instance* instance) : mInstance(instance) {
 	AssignRenderNode("Shadows", { shadowSubpass });
 	SetAttachmentInfo("stm_shadow_atlas", { 4096, 4096 }, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
-
 	Subpass depthPrepass = {};
 	depthPrepass.mShaderPass = "forward/depth";
 	depthPrepass.mAttachments["stm_main_depth"] = { AttachmentType::eDepthStencil, vk::Format::eD32Sfloat, sampleCount, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore };
@@ -92,8 +91,8 @@ Scene::Scene(stm::Instance* instance) : mInstance(instance) {
 	auto skyIndexBuffer = make_shared<Buffer>("SkyCube/Indices" , mInstance->Device(), indices, sizeof(uint16_t)*36, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 	
 	auto skyCube = make_shared<Mesh>("SkyCube");
-	skyCube->SetAttribute(VertexAttributeType::ePosition, 0, BufferView(skyVertexBuffer), 0, (uint32_t)sizeof(float3));
-	skyCube->SetIndexBuffer(BufferView(skyIndexBuffer), vk::IndexType::eUint16);
+	skyCube->SetVertexAttribute(VertexAttributeType::ePosition, 0, ArrayBufferView(skyVertexBuffer, 0, sizeof(float3)));
+	skyCube->SetIndexBuffer(ArrayBufferView(skyIndexBuffer, 0, sizeof(uint16_t)));
 	skyCube->AddSubmesh(Mesh::Submesh(8, 0, 36, 0));
 
 	mSkybox = CreateObject<MeshRenderer>("Skybox");

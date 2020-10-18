@@ -1,6 +1,6 @@
 #include "GuiContext.hpp"
 
-#include <Core/EnginePlugin.hpp>
+#include "../Core/EnginePlugin.hpp"
 #include "Camera.hpp"
 #include "Scene.hpp"
 

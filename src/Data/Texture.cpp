@@ -5,9 +5,8 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-#include <Core/Buffer.hpp>
-#include <Core/CommandBuffer.hpp>
-#include <Util/Util.hpp>
+#include "../Core/Buffer.hpp"
+#include "../Core/CommandBuffer.hpp"
 
 #include "Pipeline.hpp"
 

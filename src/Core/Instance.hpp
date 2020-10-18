@@ -3,8 +3,8 @@
 #include <openxr/openxr.h>
 
 #include "PluginManager.hpp"
-#include <Input/InputManager.hpp>
-#include <Input/MouseKeyboardInput.hpp>
+#include "../Input/InputManager.hpp"
+#include "../Input/MouseKeyboardInput.hpp"
 
 #ifdef __linux
 #include <xcb/xcb.h>

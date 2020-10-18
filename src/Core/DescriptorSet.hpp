@@ -1,7 +1,9 @@
 #pragma once
 
-#include <Core/Buffer.hpp>
-#include <Data/Texture.hpp>
+#include "../Data/Texture.hpp"
+
+#include "Pipeline.hpp"
+#include "Buffer.hpp"
 
 namespace stm {
 

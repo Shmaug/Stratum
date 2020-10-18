@@ -62,11 +62,7 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	#ifdef SCREEN_SPACE
 	o.position = float4((p / ScreenSize) * 2 - 1, r.Depth, 1);
 	#else
-	float4x4 o2w = r.ObjectToWorld;
-	o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
-	o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
-	o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
-	o.position = mul(STRATUM_MATRIX_VP, mul(o2w, float4(p, 0, 1.0)));
+	o.position = mul(STRATUM_MATRIX_VP, mul(ApplyCameraTranslation(r.ObjectToWorld), float4(p, 0, 1.0)));
 	#endif
 
 	#ifdef TEXTURED

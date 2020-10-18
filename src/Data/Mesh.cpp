@@ -1,25 +1,12 @@
 #include "Mesh.hpp"
 
-#include <Core/CommandBuffer.hpp>
-#include <Scene/Scene.hpp>
-#include <Scene/Camera.hpp>
-#include <Scene/TriangleBvh2.hpp>
+#include "../Core/CommandBuffer.hpp"
+#include "../Scene/Scene.hpp"
+#include "../Scene/Camera.hpp"
+#include "../Scene/TriangleBvh2.hpp"
 
 using namespace std;
 using namespace stm;
-
-void Mesh::SetAttribute(VertexAttributeType type, uint32_t typeIndex, const BufferView& bufferView, uint32_t elementOffset, uint32_t elementStride, vk::VertexInputRate inputRate) {
-	mPipelineInputs.clear();
-
-	VertexAttribute attribute;
-	attribute.mBufferView = bufferView;
-	attribute.mType = type;
-	attribute.mTypeIndex = typeIndex;
-	attribute.mElementOffset = elementOffset;
-	attribute.mElementStride = elementStride;
-	attribute.mInputRate = inputRate;
-	mVertexAttributes.push_back(attribute);
-}
 
 vk::PipelineVertexInputStateCreateInfo Mesh::PipelineInput(GraphicsPipeline* pipeline) {
 	if (mPipelineInputs.count(pipeline)) return mPipelineInputs.at(pipeline).mCreateInfo;
@@ -32,43 +19,33 @@ vk::PipelineVertexInputStateCreateInfo Mesh::PipelineInput(GraphicsPipeline* pip
 	if (!vertexStage) throw invalid_argument("pipeline does not have a vertex stage.");
 
 	auto& p = mPipelineInputs[pipeline];
-	vector<vk::VertexInputBindingDescription>& bindingDescriptions = p.mBindingDescriptions;
-	vector<vk::VertexInputAttributeDescription>& attributeDescriptions = p.mAttributeDescriptions;
-	for (const auto& input : vertexStage->mInputs) {
-		for (uint32_t i = 0; i < mVertexAttributes.size(); i++) {
-			if (mVertexAttributes[i].mType == input.second.mType && mVertexAttributes[i].mTypeIndex == input.second.mTypeIndex) {
-				vk::VertexInputAttributeDescription attribute;
-				attribute.location = input.second.mLocation;
-				attribute.binding = (uint32_t)bindingDescriptions.size();
-				attribute.format = input.second.mFormat;
-				attribute.offset = mVertexAttributes[i].mElementOffset;
-			
-				vk::VertexInputBindingDescription desc;
-				desc.binding = (uint32_t)bindingDescriptions.size();
-				desc.stride = mVertexAttributes[i].mElementStride;
-				desc.inputRate = mVertexAttributes[i].mInputRate;
-				for (uint32_t j = 0; j < bindingDescriptions.size(); j++)
-					if (bindingDescriptions[j] == desc) {
+	for (const auto& [varName, input] : vertexStage->mInputs) {
+		for (const auto& [idx,attrib] : mVertexAttributes) {
+			if (attrib.mType == input.mType && attrib.mTypeIndex == input.mTypeIndex) {
+				vk::VertexInputAttributeDescription attribute(input.mLocation, (uint32_t)p.mBindingDescriptions.size(), input.mFormat, (uint32_t)attrib.mElementOffset);
+				vk::VertexInputBindingDescription bufferBinding((uint32_t)p.mBindingDescriptions.size(), (uint32_t)attrib.mBufferView.mElementSize, attrib.mInputRate);
+				for (uint32_t j = 0; j < p.mBindingDescriptions.size(); j++)
+					if (p.mBindingDescriptions[j] == bufferBinding) {
 						attribute.binding = j;
 						break;
 					}
-				if (attribute.binding == bindingDescriptions.size())
-					bindingDescriptions.push_back(desc);
-					
-				attributeDescriptions.push_back(attribute);
+				if (attribute.binding == p.mBindingDescriptions.size())
+					p.mBindingDescriptions.push_back(bufferBinding);
+				p.mAttributeDescriptions.push_back(attribute);
 			}
 		}
 	}
-	p.mCreateInfo = vk::PipelineVertexInputStateCreateInfo({}, bindingDescriptions, attributeDescriptions);
+	p.mCreateInfo = vk::PipelineVertexInputStateCreateInfo({}, p.mBindingDescriptions, p.mAttributeDescriptions);
 	return p.mCreateInfo;
 }
 
 void Mesh::Draw(CommandBuffer& commandBuffer, Camera* camera, uint32_t instanceCount, uint32_t firstInstance) {
-	for (uint32_t i = 0; i < mVertexAttributes.size(); i++)
-		if (mVertexAttributes[i].mBufferView.mBuffer)
-			commandBuffer.BindVertexBuffer(mVertexAttributes[i].mBufferView, i);
+	GraphicsPipeline::Instance* pipeline = commandBuffer.CurrentPipelineInstance();
+	for (uint32_t i = 0; i < ; i++)
+		if (VertexAttribute* v = GetAttribute())
+			commandBuffer.BindVertexBuffer(*v->mBufferView.mBuffer, i);
 	if (mIndexBuffer.mBuffer)
-		commandBuffer.BindIndexBuffer(mIndexBuffer, mIndexType);
+		commandBuffer.BindIndexBuffer(mIndexBuffer);
 
 	if (camera) camera->SetViewportScissor(commandBuffer, StereoEye::eLeft);
 

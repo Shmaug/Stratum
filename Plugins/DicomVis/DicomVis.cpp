@@ -85,23 +85,11 @@ private:
 		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 		
 		Device* device = mScene->mInstance->Device();
-		vector<shared_ptr<Buffer>> buffers;
 		vector<shared_ptr<Texture>> images;
-		vector<vector<shared_ptr<Mesh>>> meshes;  // meshes from glTF primitives
 		vector<shared_ptr<Material>> materials;
-
-		for (const auto& b : model.buffers)
-			buffers.push_back(make_shared<Buffer>(b.name, device, b.data.data(), b.data.size(), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst));
-
-		for (const auto& i : model.images)
-			images.push_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
-
-		for (const auto& m : model.materials) {
-			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/Shaders/pbr.stmb", "pbr"));
-			materials.push_back(mat);
-		}
-
-		map<string, VertexAttributeType> semanticMap {
+		vector<vector<shared_ptr<Mesh>>> meshes;  // meshes from glTF primitives
+		unordered_map<uint32_t, Mesh::VertexAttribute> accessorMap;
+		static const map<string, VertexAttributeType> semanticMap {
 			{ "position", VertexAttributeType::ePosition },
 			{ "normal", VertexAttributeType::eNormal },
 			{ "tangent", VertexAttributeType::eTangent },
@@ -112,6 +100,61 @@ private:
 			{ "pointsize", VertexAttributeType::ePointSize }
 		};
 
+		// images+materials
+		for (const auto& i : model.images)
+			images.push_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
+		for (const auto& m : model.materials) {
+			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/Shaders/pbr.stmb", "pbr"));
+			// TODO: read materials
+			materials.push_back(mat);
+		}
+
+		// build accessorMap
+		for (const auto& m : model.meshes)
+			for (const auto& prim : m.primitives) {
+				uint32_t elementOffset = 0;
+				for (const auto& [attribName, accessorIndex] : prim.attributes) {
+					if (accessorMap.count(accessorIndex)) continue;
+
+					const auto& accessor = model.accessors[accessorIndex];
+
+					uint32_t elementStride = 0;
+					switch (accessor.componentType) {
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: 	elementStride = sizeof(uint8_t); break;
+						case TINYGLTF_COMPONENT_TYPE_BYTE: 						elementStride = sizeof(int8_t); break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: 	elementStride = sizeof(uint16_t); break;
+						case TINYGLTF_COMPONENT_TYPE_SHORT: 					elementStride = sizeof(int16_t); break;
+						case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: 		elementStride = sizeof(uint32_t); break;
+						case TINYGLTF_COMPONENT_TYPE_INT: 						elementStride = sizeof(int32_t); break;
+						case TINYGLTF_COMPONENT_TYPE_FLOAT: 					elementStride = sizeof(float); break;
+						case TINYGLTF_COMPONENT_TYPE_DOUBLE: 					elementStride = sizeof(double); break;
+					}
+					switch (accessor.type) {
+						case TINYGLTF_TYPE_SCALAR:  elementStride *= 1; break;
+						case TINYGLTF_TYPE_VEC2: 		elementStride *= 2; break;
+						case TINYGLTF_TYPE_VEC3: 		elementStride *= 3; break;
+						case TINYGLTF_TYPE_VEC4: 		elementStride *= 4; break;
+					}
+					
+					// parse typename & typeindex
+					string typeName;
+					uint32_t typeIdx = 0;
+					transform(attribName.begin(), attribName.end(), typeName.begin(), [&](char c) { return std::tolower(c); });
+					size_t c = typeName.find_first_of("0123456789");
+					if (c != string::npos) {
+						typeIdx = atoi(typeName.c_str() + c);
+						typeName = typeName.substr(0, c);
+					}
+					if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
+					VertexAttributeType type = semanticMap.count(typeName) ? semanticMap.at(typeName) : VertexAttributeType::eOther;
+					
+
+					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(ArrayBufferView(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
+					elementOffset += elementStride;
+				}
+			}
+
+		// meshes
 		for (const auto& m : model.meshes) {
 			meshes.push_back({});
 			for (const auto& prim : m.primitives) {
@@ -128,42 +171,25 @@ private:
 				}
 				
 				auto mesh = make_shared<Mesh>(m.name, topo);
-				const auto& indices = model.accessors[prim.indices];
-				const auto& indexBufferView = model.bufferViews[indices.bufferView];
-				mesh->SetIndexBuffer(BufferView(buffers[indexBufferView.buffer], indexBufferView.byteOffset), indices.ByteStride(indexBufferView) == sizeof(uint16_t) ? vk::IndexType::eUint16 : vk::IndexType::eUint32);
+				mesh->SetIndexBuffer(accessorMap.at(prim.indices));
 				
 				uint32_t vertexCount = 0;
-				for (const auto& attrib : prim.attributes) {
-					string typeName = attrib.first;
-					const auto& accessor = model.accessors[attrib.second];
-
-					// parse typename & typeindex
-					transform(typeName.begin(), typeName.end(), typeName.begin(), [](char c) { return std::tolower(c); });
-					uint32_t typeIdx = 0;
-					size_t c = typeName.find_first_of("0123456789");
-					if (c != string::npos) {
-						typeIdx = atoi(typeName.c_str() + c);
-						typeName = typeName.substr(0, c);
-					}
-					if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
-
-					VertexAttributeType type = semanticMap.count(typeName) ? semanticMap.at(typeName) : VertexAttributeType::eOther;
-
-					uint32_t channelc = 0;
-					switch (accessor.type) {
-						case TINYGLTF_TYPE_SCALAR: channelc = 1; break;
-						case TINYGLTF_TYPE_VEC2: channelc = 2; break;
-						case TINYGLTF_TYPE_VEC3: channelc = 3; break;
-						case TINYGLTF_TYPE_VEC4: channelc = 4; break;
-					}
-					
-					const auto& bufferView = model.bufferViews[accessor.bufferView];
-					mesh->SetAttribute(type, typeIdx, BufferView(buffers[bufferView.buffer], bufferView.byteOffset), (uint32_t)accessor.byteOffset, (uint32_t)bufferView.byteStride);
-
-					vertexCount = (uint32_t)accessor.count;
+				for (const auto& [attribName, accessorIndex] : prim.attributes) {
+					mesh->SetVertexAttribute(accessorMap.at(accessorIndex));
+					vertexCount = max(vertexCount, (uint32_t)model.accessors[accessorIndex].count);
 				}
 
-				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)indices.count, 0, nullptr));
+				if (!mesh->GetAttribute(VertexAttributeType::eTexcoord, 0)) {
+					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/VertexData", device, (sizeof(float4)+sizeof(float2))*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent , 0, ArrayBufferView(b, 0, sizeof(float4)), 0);
+					mesh->SetVertexAttribute(VertexAttributeType::eTexcoord, 0, ArrayBufferView(b, vertexCount*sizeof(float4), sizeof(float2)), 0);
+				} else if (!mesh->GetAttribute(VertexAttributeType::eTangent, 0)) {
+					// TODO: generate tangents
+					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/Tangents", device, sizeof(float4)*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent, 0, ArrayBufferView(b, 0, sizeof(float4)), 0);
+				}
+
+				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)model.accessors[prim.indices].count, 0, nullptr));
 				meshes.back().push_back(mesh);
 			}
 		}

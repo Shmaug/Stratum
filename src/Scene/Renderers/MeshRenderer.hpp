@@ -1,8 +1,9 @@
 #pragma once
 
-#include <Scene/Renderers/Renderer.hpp>
-#include <Data/Material.hpp>
-#include <Data/Mesh.hpp>
+#include "../Data/Material.hpp"
+#include "../Data/Mesh.hpp"
+
+#include "Renderer.hpp"
 
 namespace stm {
 

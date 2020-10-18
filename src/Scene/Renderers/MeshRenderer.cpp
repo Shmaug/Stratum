@@ -1,4 +1,4 @@
-#include <Scene/Renderers/MeshRenderer.hpp>
+#include "MeshRenderer.hpp"
 
 constexpr uint32_t INSTANCE_BATCH_SIZE = 1024;
 

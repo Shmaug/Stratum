@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Pipeline.hpp"
 #include "DescriptorSet.hpp"
 #include "Framebuffer.hpp"
 #include "RenderPass.hpp"
-#include "../Util/Profiler.hpp"
+
+#include "Profiler.hpp"
 
 namespace stm {
 
@@ -74,9 +76,12 @@ public:
 	inline std::shared_ptr<Framebuffer> CurrentFramebuffer() const { return mCurrentFramebuffer; }
 	inline ShaderPassIdentifier CurrentShaderPass() const { return mCurrentShaderPass; }
 	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
+	inline Pipeline* BoundPipeline() const { return mBoundPipeline; }
 
 	STRATUM_API void BindPipeline(ComputePipeline* pipeline);
-	STRATUM_API void BindPipeline(GraphicsPipeline* pipeline, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, const vk::PipelineVertexInputStateCreateInfo& vertexInput = vk::PipelineVertexInputStateCreateInfo(), vk::Optional<const vk::CullModeFlags> cullModeOverride = nullptr, vk::Optional<const vk::PolygonMode> polyModeOverride = nullptr);
+	STRATUM_API void BindPipeline(GraphicsPipeline* pipeline);
+	
+	// Find or create a pipeline using the material's shader, and inputMesh's attribute layout
 	STRATUM_API GraphicsPipeline* BindPipeline(std::shared_ptr<Material> material, Mesh* inputMesh = nullptr);
 
 	// Find the range for a push constant (in the current pipeline's layout) named 'name' and push it
@@ -93,8 +98,8 @@ public:
 	STRATUM_API void DispatchAligned(const uint3& dim);
 	inline void DispatchAligned(uint32_t x, uint32_t y = 1, uint32_t z = 1) { DispatchAligned(uint3(x, y, z)); }
 
-	STRATUM_API void BindVertexBuffer(const BufferView& view, uint32_t index);
-	STRATUM_API void BindIndexBuffer(const BufferView& view, vk::IndexType indexType);
+	STRATUM_API void BindVertexBuffer(const ArrayBufferView& view, uint32_t index);
+	STRATUM_API void BindIndexBuffer(const ArrayBufferView& view);
 	
 	size_t mTriangleCount;
 	
@@ -133,14 +138,10 @@ private:
 	uint32_t mCurrentSubpassIndex = 0;
 	ShaderPassIdentifier mCurrentShaderPass;
 	std::shared_ptr<Material> mBoundMaterial;
-	PipelineVariant* mBoundVariant;
-	vk::Pipeline mBoundPipeline;
-	vk::PipelineLayout mBoundPipelineLayout;
+	Pipeline* mBoundPipeline = nullptr;
+	std::unordered_map<uint32_t, ArrayBufferView> mBoundVertexBuffers;
+	ArrayBufferView mBoundIndexBuffer;
 	std::vector<std::shared_ptr<DescriptorSet>> mBoundDescriptorSets;
-	vk::PipelineBindPoint mCurrentBindPoint;
-
-	std::unordered_map<uint32_t, BufferView> mBoundVertexBuffers;
-	BufferView mBoundIndexBuffer;
 };
 
 class ProfileRegion {

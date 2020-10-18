@@ -2,7 +2,6 @@
 #include "Buffer.hpp"
 #include "Framebuffer.hpp"
 #include "RenderPass.hpp"
-#include "Data/Pipeline.hpp"
 #include "../Scene/Scene.hpp"
 
 using namespace std;
@@ -30,7 +29,7 @@ CommandBuffer::CommandBuffer(const string& name, stm::Device* device, Device::Qu
 }
 CommandBuffer::~CommandBuffer() {
 	if (mState == CommandBufferState::eInFlight)
-		throw logic_error("destroying a CommandBuffer that is in-flight");
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying a CommandBuffer %s that is in-flight\n", mName.c_str());
 	Clear();
 	(*mDevice)->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 	delete mSignalFence;
@@ -65,16 +64,13 @@ void CommandBuffer::Clear() {
 
 	mCurrentFramebuffer.reset();
 	mCurrentRenderPass.reset();
-	mCurrentSubpassIndex = -1;
-	mCurrentShaderPass = "";
+	mCurrentSubpassIndex = 0;
+	mCurrentShaderPass.clear();
 	mBoundMaterial.reset();
-	mBoundVariant = nullptr;
 	mBoundPipeline = nullptr;
-	mBoundPipelineLayout = nullptr;
-	mBoundDescriptorSets.clear();
-
-	mBoundIndexBuffer = {};
 	mBoundVertexBuffers.clear();
+	mBoundIndexBuffer = {};
+	mBoundDescriptorSets.clear();
 }
 void CommandBuffer::Reset(const string& name) {
 	Clear();
@@ -202,14 +198,14 @@ void CommandBuffer::TransitionBarrier(vk::Image image, const vk::ImageSubresourc
 }
 
 void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t set) {
-	if (!mBoundPipeline) throw logic_error("cannot bind a descriptor set without first binding a pipeline\n");
+	if (!mBoundPipelineInstance) throw logic_error("cannot bind a descriptor set without first binding a pipeline\n");
 	if (mBoundDescriptorSets.size() <= set) mBoundDescriptorSets.resize(set + 1);
 	else if (mBoundDescriptorSets[set] == descriptorSet) return;
 	
 	descriptorSet->FlushWrites();
 	if (!mCurrentRenderPass) descriptorSet->TransitionTextures(*this);
 	mBoundDescriptorSets[set] = descriptorSet;
-	mCommandBuffer.bindDescriptorSets(mCurrentBindPoint, mBoundPipelineLayout, set, { *descriptorSet }, {});
+	mCommandBuffer.bindDescriptorSets(mCurrentBindPoint, mBoundPipelineInstance->Layout(), set, { *descriptorSet }, {});
 }
 
 void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, vk::SubpassContents contents) {
@@ -269,60 +265,61 @@ void CommandBuffer::ClearAttachments(const vector<vk::ClearAttachment>& values) 
 }
 
 bool CommandBuffer::PushConstant(const std::string& name, const void* data, uint32_t dataSize) {
-	if (!mBoundVariant || mBoundVariant->mShaderVariant->mPushConstants.count(name) == 0) return false;
-	vk::PushConstantRange range = mBoundVariant->mShaderVariant->mPushConstants.at(name);
-	mCommandBuffer.pushConstants(mBoundPipelineLayout, range.stageFlags, range.offset, std::min(dataSize, range.size), data);
+	if (!mBoundPipelineInstance || mBoundPipelineInstance->Variant()->mShaderVariant->mPushConstants.count(name) == 0) return false;
+	vk::PushConstantRange range = mBoundPipelineInstance->Variant()->mShaderVariant->mPushConstants.at(name);
+	mCommandBuffer.pushConstants(mBoundPipelineInstance->Layout(), range.stageFlags, range.offset, std::min(dataSize, range.size), data);
 	return true;
 }
 
 void CommandBuffer::BindPipeline(ComputePipeline* pipeline) {
-	if (pipeline->mPipeline == mBoundPipeline) return;
-	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->mPipeline);
-	mBoundVariant = pipeline;
-	mBoundPipeline = pipeline->mPipeline;
-	mBoundPipelineLayout = pipeline->mPipelineLayout;
-	mBoundDescriptorSets.clear();
-	mBoundMaterial = nullptr;
-	mCurrentBindPoint = vk::PipelineBindPoint::eCompute;
+	if (mBoundPipeline == pipeline) return;
+	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, **pipeline);
+
+	mBoundMaterial.reset();
+	mBoundPipeline = nullptr;
 	mBoundVertexBuffers.clear();
 	mBoundIndexBuffer = {};
+	mBoundDescriptorSets.clear();
+
+	mBoundPipeline = pipeline;
 }
-void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput, vk::Optional<const vk::CullModeFlags> cullModeOverride, vk::Optional<const vk::PolygonMode> polyModeOverride) {
-	vk::Pipeline vkpipeline = pipeline->GetPipeline(*this, topology, vertexInput, cullModeOverride, polyModeOverride);
-	if (vkpipeline == mBoundPipeline) return;
-	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, vkpipeline);
-	mBoundVariant = pipeline;
-	mBoundPipeline = vkpipeline;
-	mBoundPipelineLayout = pipeline->mPipelineLayout;
-	mBoundDescriptorSets.clear();
-	mBoundMaterial = nullptr;
-	mCurrentBindPoint = vk::PipelineBindPoint::eGraphics;
+void CommandBuffer::BindPipeline(GraphicsPipeline* pipeline) {
+	if (mBoundPipeline == pipeline) return;
+	mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline);
+	
+	mBoundMaterial.reset();
+	mBoundPipeline = nullptr;
 	mBoundVertexBuffers.clear();
 	mBoundIndexBuffer = {};
+	mBoundDescriptorSets.clear();
+
+	mBoundPipeline = pipeline;
 }
 GraphicsPipeline* CommandBuffer::BindPipeline(shared_ptr<Material> material, Mesh* inputMesh) {
-	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass());
+	GraphicsPipeline* pipeline = material->GetPassPipeline(CurrentShaderPass(), inputMesh->Topology(), inputMesh->PipelineInput(pipeline), material->CullMode(), material->PolygonMode());
 	if (!pipeline) return nullptr;
+	
+	BindPipeline(pipeline);
 
-	BindPipeline(pipeline, inputMesh->Topology(), inputMesh->PipelineInput(pipeline), material->CullMode(), material->PolygonMode());
 	if (mBoundMaterial != material) {
 		mBoundMaterial = material;
 		material->BindDescriptorParameters(*this);
 	}
 	material->PushConstants(*this);
+	
 	return pipeline;
 }
 
-void CommandBuffer::BindVertexBuffer(const BufferView& view, uint32_t index) {
+void CommandBuffer::BindVertexBuffer(const ArrayBufferView& view, uint32_t index) {
 	if (mBoundVertexBuffers[index] == view) return;
-	mCommandBuffer.bindVertexBuffers(index, { **view.mBuffer }, { view.mByteOffset });
+	mCommandBuffer.bindVertexBuffers(index, { **view.mBuffer }, { view.mBufferOffset });
 	mBoundVertexBuffers[index] = view;
 }
-void CommandBuffer::BindIndexBuffer(const BufferView& view, vk::IndexType indexType) {
+void CommandBuffer::BindIndexBuffer(const ArrayBufferView& view) {
 	if (mBoundIndexBuffer == view) return;
-	mCommandBuffer.bindIndexBuffer( **view.mBuffer, view.mByteOffset, indexType);
+	mCommandBuffer.bindIndexBuffer(**view.mBuffer, view.mBufferOffset, view.mElementSize == sizeof(uint16_t) ? vk::IndexType::eUint16 : vk::IndexType::eUint32);
 	mBoundIndexBuffer = view;
 }
 
-void CommandBuffer::DispatchAligned(const uint2& dim) {	Dispatch((dim + mBoundVariant->mShaderVariant->mWorkgroupSize.xy - 1) / mBoundVariant->mShaderVariant->mWorkgroupSize.xy); }
-void CommandBuffer::DispatchAligned(const uint3& dim) {	Dispatch((dim + mBoundVariant->mShaderVariant->mWorkgroupSize - 1) / mBoundVariant->mShaderVariant->mWorkgroupSize); }
+void CommandBuffer::DispatchAligned(const uint2& dim) {	Dispatch((dim + mBoundPipelineInstance->Variant()->mShaderVariant->mWorkgroupSize.xy - 1) / mBoundPipelineInstance->Variant()->mShaderVariant->mWorkgroupSize.xy); }
+void CommandBuffer::DispatchAligned(const uint3& dim) {	Dispatch((dim + mBoundPipelineInstance->Variant()->mShaderVariant->mWorkgroupSize - 1) / mBoundPipelineInstance->Variant()->mShaderVariant->mWorkgroupSize); }

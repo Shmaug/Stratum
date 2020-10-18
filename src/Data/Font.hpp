@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Data/Asset.hpp>
+#include "Asset.hpp"
 
 namespace stm {
 

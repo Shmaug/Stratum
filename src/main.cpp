@@ -1,6 +1,6 @@
-﻿#include <Core/PluginManager.hpp>
-#include <Core/Window.hpp>
-#include <Scene/Scene.hpp>
+﻿#include "Core/PluginManager.hpp"
+#include "Core/Window.hpp"
+#include "Scene/Scene.hpp"
 
 using namespace std;
 using namespace stm;

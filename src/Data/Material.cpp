@@ -1,7 +1,7 @@
-#include <Data/Material.hpp>
-#include <Scene/Camera.hpp>
-#include <Scene/Scene.hpp>
-#include <Data/Texture.hpp>
+#include "Material.hpp"
+#include "../Scene/Camera.hpp"
+#include "../Scene/Scene.hpp"
+#include "Texture.hpp"
 
 using namespace std;
 using namespace stm;

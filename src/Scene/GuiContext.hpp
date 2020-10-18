@@ -1,8 +1,7 @@
 #pragma once
 
-#include <Data/Font.hpp>
-#include <Data/Pipeline.hpp>
-#include <Core/CommandBuffer.hpp>
+#include "../Core/CommandBuffer.hpp"
+#include "../Data/Font.hpp"
 
 namespace stm {
 

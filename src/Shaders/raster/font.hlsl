@@ -102,11 +102,7 @@ v2f vsmain(uint id : SV_VertexId, uint instance : SV_InstanceID) {
 	#ifdef SCREEN_SPACE
 		o.position = float4((pos / ScreenSize) * 2 - 1, Depth, 1);
 	#else
-		float4x4 o2w = Transforms[instance];
-		o2w[0][3] += -STRATUM_CAMERA_POSITION.x * o2w[3][3];
-		o2w[1][3] += -STRATUM_CAMERA_POSITION.y * o2w[3][3];
-		o2w[2][3] += -STRATUM_CAMERA_POSITION.z * o2w[3][3];
-		o.position = mul(STRATUM_MATRIX_VP, mul(o2w, float4(pos, 0, 1)));
+		o.position = mul(STRATUM_MATRIX_VP, mul(ApplyCameraTranslation(Transforms[instance]), float4(pos, 0, 1)));
 	#endif
 	return o;
 }

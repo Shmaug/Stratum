@@ -1,13 +1,14 @@
 #pragma once
 
-#include <Core/RenderPass.hpp>
-#include <Data/Font.hpp>
-#include <Data/Material.hpp>
-#include <Data/Mesh.hpp>
-#include <Data/Texture.hpp>
-#include <Input/InputManager.hpp>
-#include <Scene/GuiContext.hpp>
-#include <Scene/ObjectBvh2.hpp>
+#include "../Core/RenderPass.hpp"
+#include "../Data/Font.hpp"
+#include "../Data/Material.hpp"
+#include "../Data/Mesh.hpp"
+#include "../Data/Texture.hpp"
+#include "../Input/InputManager.hpp"
+
+#include "GuiContext.hpp"
+#include "ObjectBvh2.hpp"
 
 namespace stm {
 
