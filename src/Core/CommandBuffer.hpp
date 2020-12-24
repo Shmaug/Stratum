@@ -1,23 +1,16 @@
 #pragma once
 
-#include "Pipeline.hpp"
 #include "DescriptorSet.hpp"
 #include "Framebuffer.hpp"
-#include "RenderPass.hpp"
-
+#include "Pipeline.hpp"
 #include "Profiler.hpp"
 
 namespace stm {
 
 class CommandBuffer {
-private:
-	vk::CommandBuffer mCommandBuffer;
-
 public:
-	const std::string mName;
-	Device* const mDevice;
-	Fence* const mSignalFence;
-
+	size_t mTriangleCount;
+	
 	CommandBuffer() = delete;
 	CommandBuffer(const CommandBuffer&) = delete;
 	CommandBuffer(CommandBuffer&&) = delete;
@@ -27,31 +20,40 @@ public:
 	inline vk::CommandBuffer operator*() const { return mCommandBuffer; }
 	inline const vk::CommandBuffer* operator->() const { return &mCommandBuffer; }
 
-	inline Device::QueueFamily* QueueFamily() const { return mQueueFamily; }
+	inline Device& Device() const { return mDevice; }
+	inline Fence* SignalFence() const { return mSignalFence; }
+	inline stm::QueueFamily* QueueFamily() const { return mQueueFamily; }
 
-	STRATUM_API void Reset(const std::string& name = "Command Buffer");
+	inline shared_ptr<RenderPass> CurrentRenderPass() const { return mCurrentRenderPass; }
+	inline shared_ptr<Framebuffer> CurrentFramebuffer() const { return mCurrentFramebuffer; }
+	inline shared_ptr<Pipeline> BoundPipeline() const { return mBoundPipeline; }
+	inline const Subpass& CurrentSubpass() const { return mCurrentRenderPass->Subpass(mCurrentSubpassIndex); }
+	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
+	inline ShaderPassIdentifier CurrentShaderPass() const { return mCurrentShaderPass; }
 
-	inline void SignalOnComplete(vk::PipelineStageFlags, std::shared_ptr<Semaphore> semaphore) { mSignalSemaphores.push_back(semaphore); };
-	inline void WaitOn(vk::PipelineStageFlags stage, std::shared_ptr<Semaphore> semaphore) { mWaitSemaphores.push_back(std::make_pair(stage, semaphore)); }
+	STRATUM_API void Reset(const string& name = "Command Buffer");
+
+	inline void SignalOnComplete(vk::PipelineStageFlags, shared_ptr<Semaphore> semaphore) { mSignalSemaphores.push_back(semaphore); };
+	inline void WaitOn(vk::PipelineStageFlags stage, shared_ptr<Semaphore> semaphore) { mWaitSemaphores.push_back(make_pair(stage, semaphore)); }
 
 	// Label a region for a tool such as RenderDoc
-	STRATUM_API void BeginLabel(const std::string& label, const float4& color = float4(1,1,1,0));
+	STRATUM_API void BeginLabel(const string& label, const float4& color = { 1,1,1,0 });
 	STRATUM_API void EndLabel();
 
-	STRATUM_API std::shared_ptr<Buffer> GetBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API std::shared_ptr<Texture> GetTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API std::shared_ptr<DescriptorSet> GetDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout);
+	STRATUM_API shared_ptr<Buffer> GetBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API shared_ptr<Texture> GetTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API shared_ptr<DescriptorSet> GetDescriptorSet(const string& name, vk::DescriptorSetLayout layout);
 
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	STRATUM_API void TrackResource(std::shared_ptr<Buffer> resource);
+	STRATUM_API void TrackResource(shared_ptr<Buffer> resource);
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	STRATUM_API void TrackResource(std::shared_ptr<Texture> resource);
+	STRATUM_API void TrackResource(shared_ptr<Texture> resource);
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	STRATUM_API void TrackResource(std::shared_ptr<DescriptorSet> resource);
+	STRATUM_API void TrackResource(shared_ptr<DescriptorSet> resource);
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	STRATUM_API void TrackResource(std::shared_ptr<Framebuffer> resource);
+	STRATUM_API void TrackResource(shared_ptr<Framebuffer> resource);
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	STRATUM_API void TrackResource(std::shared_ptr<RenderPass> resource);
+	STRATUM_API void TrackResource(shared_ptr<RenderPass> resource);
 
 	STRATUM_API void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier);
 	STRATUM_API void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& barrier);
@@ -64,97 +66,94 @@ public:
 	STRATUM_API void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 	STRATUM_API void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
 
-	STRATUM_API void BindDescriptorSet(std::shared_ptr<DescriptorSet> descriptorSet, uint32_t set);
+	STRATUM_API void ClearAttachments(const vector<vk::ClearAttachment>& value);
 
-	STRATUM_API void BeginRenderPass(std::shared_ptr<RenderPass> renderPass, std::shared_ptr<Framebuffer> frameBuffer, vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void BindPipeline(shared_ptr<Pipeline> pipeline);
+	
+	STRATUM_API void BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> frameBuffer, vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void NextSubpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void EndRenderPass();
 
-	STRATUM_API void ClearAttachments(const std::vector<vk::ClearAttachment>& value);
-
-	inline std::shared_ptr<RenderPass> CurrentRenderPass() const { return mCurrentRenderPass; }
-	inline std::shared_ptr<Framebuffer> CurrentFramebuffer() const { return mCurrentFramebuffer; }
-	inline ShaderPassIdentifier CurrentShaderPass() const { return mCurrentShaderPass; }
-	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
-	inline Pipeline* BoundPipeline() const { return mBoundPipeline; }
-
-	STRATUM_API void BindPipeline(ComputePipeline* pipeline);
-	STRATUM_API void BindPipeline(GraphicsPipeline* pipeline);
-	
-	// Find or create a pipeline using the material's shader, and inputMesh's attribute layout
-	STRATUM_API GraphicsPipeline* BindPipeline(std::shared_ptr<Material> material, Mesh* inputMesh = nullptr);
+	STRATUM_API void BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t set);
 
 	// Find the range for a push constant (in the current pipeline's layout) named 'name' and push it
-	STRATUM_API bool PushConstant(const std::string& name, const void* data, uint32_t dataSize);
-	template<typename T>
-	inline bool PushConstantRef(const std::string& name, const T& value) { return PushConstant(name, &value, sizeof(T)); }
+	STRATUM_API bool PushConstant(const string& name, const byte_blob& data);
+	template<typename T> inline bool PushConstantRef(const string& name, const T& value) { return PushConstant(name, byte_blob(sizeof(T), &value)); }
 
 	inline void Dispatch(const uint2& dim) { mCommandBuffer.dispatch(dim.x, dim.y, 1); }
 	inline void Dispatch(const uint3& dim) { mCommandBuffer.dispatch(dim.x, dim.y, dim.z); }
 	inline void Dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
-
-	// Helper to call Dispatch() on ceil(size / workgroupSize)
-	STRATUM_API void DispatchAligned(const uint2& dim);
-	STRATUM_API void DispatchAligned(const uint3& dim);
+	// Call Dispatch() on ceil(size / workgroupSize)
+	inline void DispatchAligned(const uint3& size) {
+		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
+		Dispatch((size + cp->WorkgroupSize() - 1) / cp->WorkgroupSize());
+	}
+	inline void DispatchAligned(const uint2& size) { DispatchAligned(uint3(size, 1)); }
 	inline void DispatchAligned(uint32_t x, uint32_t y = 1, uint32_t z = 1) { DispatchAligned(uint3(x, y, z)); }
 
 	STRATUM_API void BindVertexBuffer(const ArrayBufferView& view, uint32_t index);
 	STRATUM_API void BindIndexBuffer(const ArrayBufferView& view);
-	
-	size_t mTriangleCount;
+
+	STRATUM_API void DrawMesh(Mesh& mesh, uint32_t instanceCount = 1, uint32_t firstInstance = 0);
 	
 private:
+	friend class stm::Device;
+
 	enum class CommandBufferState { eRecording, eInFlight, eDone };
 
-	friend class Device;
-	// assumes a CommandPool has been created for std::this_thread in queueFamily
-	STRATUM_API CommandBuffer(const std::string& name, Device* device, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void Clear();
-
-	STRATUM_API bool CheckDone();
+	vk::CommandBuffer mCommandBuffer;
+	string mName;
+	stm::Device& mDevice;
+	Fence* mSignalFence;
 
 	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT = 0;
 	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT = 0;
 	
-	Device::QueueFamily* mQueueFamily;
+	stm::QueueFamily* mQueueFamily;
 	vk::CommandPool mCommandPool;
 	CommandBufferState mState;
 
-	std::vector<std::shared_ptr<Semaphore>> mSignalSemaphores;
-	std::vector<std::pair<vk::PipelineStageFlags, std::shared_ptr<Semaphore>>> mWaitSemaphores;
+	vector<shared_ptr<Semaphore>> mSignalSemaphores;
+	vector<pair<vk::PipelineStageFlags, shared_ptr<Semaphore>>> mWaitSemaphores;
 
 	// Tracked resources
 
-	std::vector<std::shared_ptr<Buffer>> mBuffers;
-	std::vector<std::shared_ptr<Texture>> mTextures;
-	std::vector<std::shared_ptr<DescriptorSet>> mDescriptorSets;
-	std::vector<std::shared_ptr<Framebuffer>> mFramebuffers;
-	std::vector<std::shared_ptr<RenderPass>> mRenderPasses;
+	vector<shared_ptr<Buffer>> mBuffers;
+	vector<shared_ptr<Texture>> mTextures;
+	vector<shared_ptr<DescriptorSet>> mDescriptorSets;
+	vector<shared_ptr<Framebuffer>> mFramebuffers;
+	vector<shared_ptr<RenderPass>> mRenderPasses;
 
 	// Currently bound objects
 
-	std::shared_ptr<Framebuffer> mCurrentFramebuffer;
-	std::shared_ptr<RenderPass> mCurrentRenderPass;
+	shared_ptr<Framebuffer> mCurrentFramebuffer;
+	shared_ptr<RenderPass> mCurrentRenderPass;
 	uint32_t mCurrentSubpassIndex = 0;
 	ShaderPassIdentifier mCurrentShaderPass;
-	std::shared_ptr<Material> mBoundMaterial;
-	Pipeline* mBoundPipeline = nullptr;
-	std::unordered_map<uint32_t, ArrayBufferView> mBoundVertexBuffers;
+	shared_ptr<Pipeline> mBoundPipeline = nullptr;
+	unordered_map<uint32_t, ArrayBufferView> mBoundVertexBuffers;
 	ArrayBufferView mBoundIndexBuffer;
-	std::vector<std::shared_ptr<DescriptorSet>> mBoundDescriptorSets;
+	vector<shared_ptr<DescriptorSet>> mBoundDescriptorSets;
+	
+	// assumes a CommandPool has been created for this_thread in queueFamily
+	STRATUM_API CommandBuffer(const string& name, stm::Device& device, stm::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API void Clear();
+
+	STRATUM_API bool CheckDone();
+
 };
 
-class ProfileRegion {
+class ProfilerRegion {
 private:
 	CommandBuffer* mCommandBuffer;
 public:
-	inline ProfileRegion(const std::string& label) : ProfileRegion(label, nullptr) {}
-	inline ProfileRegion(const std::string& label, CommandBuffer& cmd) : ProfileRegion(label, &cmd) {}
-	inline ProfileRegion(const std::string& label, CommandBuffer* cmd) : mCommandBuffer(cmd) {
+	inline ProfilerRegion(const string& label) : ProfilerRegion(label, nullptr) {}
+	inline ProfilerRegion(const string& label, CommandBuffer& cmd) : ProfilerRegion(label, &cmd) {}
+	inline ProfilerRegion(const string& label, CommandBuffer* cmd) : mCommandBuffer(cmd) {
 		if (mCommandBuffer) mCommandBuffer->BeginLabel(label);
 		Profiler::BeginSample(label);
 	}
-	inline ~ProfileRegion() {
+	inline ~ProfilerRegion() {
 		Profiler::EndSample();
 		if (mCommandBuffer) mCommandBuffer->EndLabel();
 	}

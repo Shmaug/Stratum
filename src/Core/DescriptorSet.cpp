@@ -1,48 +1,46 @@
-#include <Core/DescriptorSet.hpp>
-#include <Core/CommandBuffer.hpp>
-#include <Core/Device.hpp>
-#include <Core/Buffer.hpp>
-#include <Data/Texture.hpp>
-#include <Data/Pipeline.hpp>
+#include "DescriptorSet.hpp"
 
-using namespace std;
+#include "CommandBuffer.hpp"
+#include "Asset/Texture.hpp"
+
+
 using namespace stm;
 
-inline constexpr uint64_t HashFromBinding(uint64_t binding, uint64_t arrayIndex) { return (binding << 32) | arrayIndex; }
-inline constexpr uint32_t BindingFromHash(uint64_t index) { return (uint32_t)(index >> 32); }
+constexpr inline uint64_t HashFromBinding(uint64_t binding, uint64_t arrayIndex) { return (binding << 32) | arrayIndex; }
+constexpr inline uint32_t BindingFromHash(uint64_t index) { return (uint32_t)(index >> 32); }
 
 DescriptorSetEntry::operator bool() const {
 	switch (mType) {
 	case vk::DescriptorType::eCombinedImageSampler:
-		return mSamplerValue == nullptr || mTextureValue == nullptr || !mImageView;
+		if (!(mImageView.mTexture && mImageView.mView)) return false;
 	case vk::DescriptorType::eSampler:
-		return mSamplerValue == nullptr;
+		return mImageView.mSampler.get();
 	case vk::DescriptorType::eSampledImage:
 	case vk::DescriptorType::eStorageImage:
-		return mTextureValue == nullptr || !mImageView;
+		return mImageView.mTexture && mImageView.mView;
 	case vk::DescriptorType::eUniformTexelBuffer:
 	case vk::DescriptorType::eStorageTexelBuffer:
 	case vk::DescriptorType::eUniformBuffer:
 	case vk::DescriptorType::eStorageBuffer:
 	case vk::DescriptorType::eUniformBufferDynamic:
 	case vk::DescriptorType::eStorageBufferDynamic:
-		return mBufferValue == nullptr;
+		return mBufferView.mBuffer.get();
 	case vk::DescriptorType::eInlineUniformBlockEXT:
-		return mInlineUniformData == nullptr;
+		return mInlineUniformData.size();
 	}
-	return true;
+	return false;
 }
 
 void DescriptorSetEntry::Clear() {
 	switch (mType) {
 	case vk::DescriptorType::eSampler:
-		mSamplerValue.reset();
+		mImageView.mSampler.reset();
 		break;
 	case vk::DescriptorType::eCombinedImageSampler:
-		mSamplerValue.reset();
+		mImageView.mSampler.reset();
 	case vk::DescriptorType::eSampledImage:
 	case vk::DescriptorType::eStorageImage:
-		mTextureValue.reset();
+		mImageView.mTexture.reset();
 		break;
 	case vk::DescriptorType::eUniformTexelBuffer:
 	case vk::DescriptorType::eStorageTexelBuffer:
@@ -50,11 +48,10 @@ void DescriptorSetEntry::Clear() {
 	case vk::DescriptorType::eStorageBuffer:
 	case vk::DescriptorType::eUniformBufferDynamic:
 	case vk::DescriptorType::eStorageBufferDynamic:
-		mBufferValue.reset();
+		mBufferView.mBuffer.reset();
 		break;
 	case vk::DescriptorType::eInlineUniformBlockEXT:
-		safe_delete(mInlineUniformData);
-		mInlineUniformDataSize = 0;
+		mInlineUniformData.clear();
 		break;
 	}
 	mType = {};
@@ -65,19 +62,19 @@ void DescriptorSetEntry::Assign(const DescriptorSetEntry& ds) {
 
 	switch (mType) {
 	case vk::DescriptorType::eCombinedImageSampler:
-		mTextureValue = ds.mTextureValue;
+		mImageView.mTexture = ds.mImageView.mTexture;
 		mImageView = ds.mImageView;
-		mImageLayout = ds.mImageLayout;
+		mImageView.mLayout = ds.mImageView.mLayout;
 	case vk::DescriptorType::eSampler:
-		mSamplerValue = ds.mSamplerValue;
+		mImageView.mSampler = ds.mImageView.mSampler;
 		break;
 
 	case vk::DescriptorType::eInputAttachment:
 	case vk::DescriptorType::eSampledImage:
 	case vk::DescriptorType::eStorageImage:
-		mTextureValue = ds.mTextureValue;
+		mImageView.mTexture = ds.mImageView.mTexture;
 		mImageView = ds.mImageView;
-		mImageLayout = ds.mImageLayout;
+		mImageView.mLayout = ds.mImageView.mLayout;
 		break;
 
 	case vk::DescriptorType::eUniformTexelBuffer:
@@ -86,15 +83,12 @@ void DescriptorSetEntry::Assign(const DescriptorSetEntry& ds) {
 	case vk::DescriptorType::eStorageBuffer:
 	case vk::DescriptorType::eUniformBufferDynamic:
 	case vk::DescriptorType::eStorageBufferDynamic:
-		mBufferValue = ds.mBufferValue;
-		mBufferOffset = ds.mBufferOffset;
-		mBufferRange = ds.mBufferRange;
+		mBufferView.mBuffer = ds.mBufferView.mBuffer;
+		mBufferView.mOffset = ds.mBufferView.mOffset;
+		mBufferView.mRange = ds.mBufferView.mRange;
 		break;
 	case vk::DescriptorType::eInlineUniformBlockEXT:
-		safe_delete(mInlineUniformData);
-		mInlineUniformDataSize = ds.mInlineUniformDataSize;
-		mInlineUniformData = new char[mInlineUniformDataSize];
-		memcpy(mInlineUniformData, ds.mInlineUniformData, mInlineUniformDataSize);
+		mInlineUniformData = ds.mInlineUniformData;
 		break;
 	}
 }
@@ -103,14 +97,14 @@ bool DescriptorSetEntry::operator==(const DescriptorSetEntry& rhs) const {
 	if (rhs.mType != mType || rhs.mArrayIndex != mArrayIndex) return false;
 	switch (mType) {
 	case vk::DescriptorType::eCombinedImageSampler:
-		return rhs.mTextureValue == mTextureValue && rhs.mImageView == mImageView && rhs.mImageLayout == mImageLayout && rhs.mSamplerValue == mSamplerValue;
+		return rhs.mImageView.mTexture == mImageView.mTexture && rhs.mImageView.mView == mImageView.mView && rhs.mImageView.mLayout == mImageView.mLayout && rhs.mImageView.mSampler == mImageView.mSampler;
 	case vk::DescriptorType::eSampler:
-		return rhs.mSamplerValue == mSamplerValue;
+		return rhs.mImageView.mSampler == mImageView.mSampler;
 
 	case vk::DescriptorType::eInputAttachment:
 	case vk::DescriptorType::eSampledImage:
 	case vk::DescriptorType::eStorageImage:
-		return rhs.mTextureValue == mTextureValue && rhs.mImageView == mImageView && rhs.mImageLayout == mImageLayout;
+		return rhs.mImageView.mTexture == mImageView.mTexture && rhs.mImageView.mView == mImageView.mView && rhs.mImageView.mLayout == mImageView.mLayout;
 
 	case vk::DescriptorType::eUniformTexelBuffer:
 	case vk::DescriptorType::eStorageTexelBuffer:
@@ -118,30 +112,27 @@ bool DescriptorSetEntry::operator==(const DescriptorSetEntry& rhs) const {
 	case vk::DescriptorType::eStorageBuffer:
 	case vk::DescriptorType::eUniformBufferDynamic:
 	case vk::DescriptorType::eStorageBufferDynamic:
-		return rhs.mBufferValue == mBufferValue && rhs.mBufferOffset == mBufferOffset && rhs.mBufferValue == mBufferValue;
+		return rhs.mBufferView.mBuffer == mBufferView.mBuffer && rhs.mBufferView.mOffset == mBufferView.mOffset && rhs.mBufferView.mRange == mBufferView.mRange;
 
 	case vk::DescriptorType::eInlineUniformBlockEXT:
-		return mInlineUniformDataSize == rhs.mInlineUniformDataSize && 
-			(mInlineUniformData == rhs.mInlineUniformData ||
-			memcmp(mInlineUniformData, rhs.mInlineUniformData, mInlineUniformDataSize) == 0);
+		return mInlineUniformData == rhs.mInlineUniformData;
 	}
 	return false;
 }
 
-DescriptorSet::DescriptorSet(const string& name, Device* device, vk::DescriptorSetLayout layout) : mName(name), mDevice(device), mLayout(layout) {
+DescriptorSet::DescriptorSet(const string& name, stm::Device& device, vk::DescriptorSetLayout layout) : mName(name), mDevice(device), mLayout(layout) {
 	vk::DescriptorSetAllocateInfo allocInfo = {};
-	allocInfo.descriptorPool = mDevice->mDescriptorPool;
+	allocInfo.descriptorPool = mDevice.mDescriptorPool;
 	allocInfo.descriptorSetCount = 1;
 	allocInfo.pSetLayouts = &layout;
-	lock_guard lock(mDevice->mDescriptorPoolMutex);
-	mDescriptorSet = (*mDevice)->allocateDescriptorSets(allocInfo)[0];
-	mDevice->SetObjectName(mDescriptorSet, mName);
+	mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
+	mDevice.SetObjectName(mDescriptorSet, mName);
 }
 DescriptorSet::~DescriptorSet() {
 	mBoundDescriptors.clear();
 	mPendingWrites.clear();
-	lock_guard lock(mDevice->mDescriptorPoolMutex);
-	(*mDevice)->freeDescriptorSets(mDevice->mDescriptorPool, { mDescriptorSet });
+	lock_guard lock(mDevice.mDescriptorPoolMutex);
+	mDevice->freeDescriptorSets(mDevice.mDescriptorPool, { mDescriptorSet });
 }
 
 void DescriptorSet::CreateDescriptor(uint32_t binding, const DescriptorSetEntry& entry) {
@@ -154,12 +145,12 @@ void DescriptorSet::CreateDescriptor(uint32_t binding, const DescriptorSetEntry&
 	switch (entry.mType) {
     case vk::DescriptorType::eCombinedImageSampler:
     case vk::DescriptorType::eSampler:
-			if (entry.mSamplerValue == nullptr) throw invalid_argument("sampler entry was nullptr");
+			if (entry.mImageView.mSampler == nullptr) throw invalid_argument("sampler entry was nullptr");
 			if (entry.mType == vk::DescriptorType::eSampler) break;
     case vk::DescriptorType::eStorageImage:
     case vk::DescriptorType::eSampledImage:
     case vk::DescriptorType::eInputAttachment:
-			if (!entry.mImageView) throw invalid_argument("image view entry was nullptr\n");
+			if (!entry.mImageView.mView) throw invalid_argument("image view entry was nullptr\n");
 			break;
 
     case vk::DescriptorType::eUniformBuffer:
@@ -168,11 +159,11 @@ void DescriptorSet::CreateDescriptor(uint32_t binding, const DescriptorSetEntry&
     case vk::DescriptorType::eStorageBufferDynamic:
     case vk::DescriptorType::eUniformTexelBuffer:
     case vk::DescriptorType::eStorageTexelBuffer:
-			if (entry.mBufferValue == nullptr) throw invalid_argument("buffer entry was nullptr\n");
+			if (entry.mBufferView.mBuffer == nullptr) throw invalid_argument("buffer entry was nullptr\n");
 			break;
 
     case vk::DescriptorType::eInlineUniformBlockEXT:
-			if (entry.mInlineUniformData == nullptr) throw invalid_argument("inline uniform buffer data entry was nullptr\n");
+			if (!entry.mInlineUniformData.size()) throw invalid_argument("inline uniform buffer data was null\n");
 			break;
 
     case vk::DescriptorType::eAccelerationStructureKHR:
@@ -184,12 +175,10 @@ void DescriptorSet::CreateDescriptor(uint32_t binding, const DescriptorSetEntry&
 	mBoundDescriptors[idx] = entry;
 }
 
-void DescriptorSet::CreateInlineUniformBlock(void* data, size_t dataSize, uint32_t binding){
+void DescriptorSet::CreateInlineUniformBlock(uint32_t binding, const byte_blob& type){
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eInlineUniformBlockEXT;
-	e.mInlineUniformDataSize = dataSize;
-	e.mInlineUniformData = new char[dataSize];
-	memcpy(e.mInlineUniformData, data, dataSize);
+	e.mInlineUniformData = type;
 	CreateDescriptor(binding, e);
 }
 
@@ -197,9 +186,9 @@ void DescriptorSet::CreateUniformBufferDescriptor(shared_ptr<Buffer> buffer, vk:
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eUniformBuffer;
 	e.mArrayIndex = arrayIndex;
-	e.mBufferValue = buffer;
-	e.mBufferOffset = offset;
-	e.mBufferRange = range;
+	e.mBufferView.mBuffer = buffer;
+	e.mBufferView.mOffset = offset;
+	e.mBufferView.mRange = range;
 	CreateDescriptor(binding, e);
 }
 void DescriptorSet::CreateUniformBufferDescriptor(shared_ptr<Buffer> buffer, uint32_t binding, uint32_t arrayIndex) {
@@ -209,9 +198,9 @@ void DescriptorSet::CreateStorageBufferDescriptor(shared_ptr<Buffer> buffer, vk:
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eStorageBuffer;
 	e.mArrayIndex = arrayIndex;
-	e.mBufferValue = buffer;
-	e.mBufferOffset = offset;
-	e.mBufferRange = range;
+	e.mBufferView.mBuffer = buffer;
+	e.mBufferView.mOffset = offset;
+	e.mBufferView.mRange = range;
 	CreateDescriptor(binding, e);
 }
 void DescriptorSet::CreateStorageBufferDescriptor(shared_ptr<Buffer> buffer, uint32_t binding, uint32_t arrayIndex) {
@@ -221,7 +210,7 @@ void DescriptorSet::CreateStorageTexelBufferDescriptor(shared_ptr<Buffer> buffer
 	DescriptorSetEntry e = {};
 	e.mArrayIndex = arrayIndex;
 	e.mType = vk::DescriptorType::eStorageTexelBuffer;
-	e.mBufferValue = buffer;
+	e.mBufferView.mBuffer = buffer;
 	CreateDescriptor(binding, e);
 }
 
@@ -229,20 +218,20 @@ void DescriptorSet::CreateStorageTextureDescriptor(shared_ptr<Texture> texture, 
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eStorageImage;
 	e.mArrayIndex = arrayIndex;
-	e.mTextureValue = texture;
-	e.mImageView = view ? view : texture->View();
-	e.mImageLayout = layout;
-	e.mSamplerValue = nullptr;
+	e.mImageView.mTexture = texture;
+	e.mImageView.mView = view ? view : texture->View();
+	e.mImageView.mLayout = layout;
+	e.mImageView.mSampler = nullptr;
 	CreateDescriptor(binding, e);
 }
 void DescriptorSet::CreateSampledTextureDescriptor(shared_ptr<Texture> texture, uint32_t binding, uint32_t arrayIndex, vk::ImageLayout layout, vk::ImageView view) {
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eSampledImage;
 	e.mArrayIndex = arrayIndex;
-	e.mTextureValue = texture;
-	e.mImageView = view ? view : texture->View();
-	e.mImageLayout = layout;
-	e.mSamplerValue = nullptr;
+	e.mImageView.mTexture = texture;
+	e.mImageView.mView = view ? view : texture->View();
+	e.mImageView.mLayout = layout;
+	e.mImageView.mSampler = nullptr;
 	CreateDescriptor(binding, e);
 }
 
@@ -250,132 +239,46 @@ void DescriptorSet::CreateInputAttachmentDescriptor(shared_ptr<Texture> texture,
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eInputAttachment;
 	e.mArrayIndex = arrayIndex;
-	e.mTextureValue = texture;
-	e.mImageView = view ? view : texture->View();
-	e.mImageLayout = layout;
-	e.mSamplerValue = nullptr;
+	e.mImageView.mTexture = texture;
+	e.mImageView.mView = view ? view : texture->View();
+	e.mImageView.mLayout = layout;
+	e.mImageView.mSampler = nullptr;
 	CreateDescriptor(binding, e);
 }
 
-void DescriptorSet::CreateSamplerDescriptor(std::shared_ptr<Sampler> sampler, uint32_t binding, uint32_t arrayIndex) {
+void DescriptorSet::CreateSamplerDescriptor(shared_ptr<Sampler> sampler, uint32_t binding, uint32_t arrayIndex) {
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eSampler;
 	e.mArrayIndex = arrayIndex;
-	e.mTextureValue = nullptr;
-	e.mSamplerValue = sampler;
-	e.mImageLayout = vk::ImageLayout::eUndefined;
+	e.mImageView.mTexture = nullptr;
+	e.mImageView.mLayout = vk::ImageLayout::eUndefined;
+	e.mImageView.mSampler = sampler;
 	CreateDescriptor(binding, e);
 }
 
-void DescriptorSet::CreateTextureDescriptor(const std::string& bindingName, shared_ptr<Texture> texture, PipelineVariant* pipeline, uint32_t arrayIndex, vk::ImageLayout layout, vk::ImageView view) {
-	if (!pipeline->mShaderVariant->mDescriptorSetBindings.count(bindingName))
-		throw invalid_argument("cannot bind texture to nonexistant descriptor");
-	
-	auto& binding = pipeline->mShaderVariant->mDescriptorSetBindings.at(bindingName);
-	switch (binding.mBinding.descriptorType) {
-    case vk::DescriptorType::eSampler:
-    case vk::DescriptorType::eUniformTexelBuffer:
-    case vk::DescriptorType::eStorageTexelBuffer:
-    case vk::DescriptorType::eUniformBuffer:
-    case vk::DescriptorType::eStorageBuffer:
-    case vk::DescriptorType::eUniformBufferDynamic:
-    case vk::DescriptorType::eStorageBufferDynamic:
-    case vk::DescriptorType::eInlineUniformBlockEXT:
-    case vk::DescriptorType::eAccelerationStructureKHR:
-    case vk::DescriptorType::eCombinedImageSampler:
-			throw invalid_argument("cannot bind texture to binding of type " + to_string(binding.mBinding.descriptorType));
-			break;
-
-    case vk::DescriptorType::eInputAttachment:
-			CreateInputAttachmentDescriptor(texture, binding.mBinding.binding, arrayIndex, layout, view);
-			break;
-    case vk::DescriptorType::eSampledImage:
-			CreateSampledTextureDescriptor(texture, binding.mBinding.binding, arrayIndex, layout, view);
-			break;
-    case vk::DescriptorType::eStorageImage:
-			CreateStorageTextureDescriptor(texture, binding.mBinding.binding, arrayIndex, layout, view);
-			break;
-	}
-}
-void DescriptorSet::CreateBufferDescriptor(const std::string& bindingName, shared_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, PipelineVariant* pipeline, uint32_t arrayIndex) {
-	if (!pipeline->mShaderVariant->mDescriptorSetBindings.count(bindingName))
-		throw invalid_argument("cannot bind buffer to nonexistant descriptor");
-	
-	auto& binding = pipeline->mShaderVariant->mDescriptorSetBindings.at(bindingName);
-	switch (binding.mBinding.descriptorType) {
-    case vk::DescriptorType::eUniformTexelBuffer:
-			CreateUniformBufferDescriptor(buffer, offset, range, binding.mBinding.binding, arrayIndex);
-			break;
-    case vk::DescriptorType::eStorageTexelBuffer:
-			CreateUniformBufferDescriptor(buffer, offset, range, binding.mBinding.binding, arrayIndex);
-			break;
-    case vk::DescriptorType::eUniformBuffer:
-			CreateUniformBufferDescriptor(buffer, offset, range, binding.mBinding.binding, arrayIndex);
-			break;
-    case vk::DescriptorType::eStorageBuffer:
-			CreateStorageBufferDescriptor(buffer, offset, range, binding.mBinding.binding, arrayIndex);
-			break;
-    case vk::DescriptorType::eUniformBufferDynamic:
-    case vk::DescriptorType::eStorageBufferDynamic:
-
-    case vk::DescriptorType::eInlineUniformBlockEXT:
-    case vk::DescriptorType::eSampler:
-    case vk::DescriptorType::eAccelerationStructureKHR:
-    case vk::DescriptorType::eCombinedImageSampler:
-    case vk::DescriptorType::eInputAttachment:
-    case vk::DescriptorType::eSampledImage:
-    case vk::DescriptorType::eStorageImage:
-			throw invalid_argument("cannot bind buffer to binding of type " + to_string(binding.mBinding.descriptorType));
-	}
-}
-void DescriptorSet::CreateSamplerDescriptor(const std::string& bindingName, shared_ptr<Sampler> sampler, PipelineVariant* pipeline, uint32_t arrayIndex) {
-	if (!pipeline->mShaderVariant->mDescriptorSetBindings.count(bindingName))
-		throw invalid_argument("cannot bind sampler to nonexistant descriptor");
-
-	auto& binding = pipeline->mShaderVariant->mDescriptorSetBindings.at(bindingName);
-	switch (binding.mBinding.descriptorType) {
-    case vk::DescriptorType::eSampler:
-			CreateSamplerDescriptor(sampler, binding.mBinding.binding, arrayIndex);
-			break;
-
-    case vk::DescriptorType::eUniformTexelBuffer:
-    case vk::DescriptorType::eStorageTexelBuffer:
-    case vk::DescriptorType::eUniformBuffer:
-    case vk::DescriptorType::eStorageBuffer:
-    case vk::DescriptorType::eUniformBufferDynamic:
-    case vk::DescriptorType::eStorageBufferDynamic:
-    case vk::DescriptorType::eInlineUniformBlockEXT:
-    case vk::DescriptorType::eAccelerationStructureKHR:
-    case vk::DescriptorType::eCombinedImageSampler:
-    case vk::DescriptorType::eInputAttachment:
-    case vk::DescriptorType::eSampledImage:
-    case vk::DescriptorType::eStorageImage:
-			throw invalid_argument("cannot bind sampler to binding of type " + to_string(binding.mBinding.descriptorType));
-	}
-}
-
-void DescriptorSet::TransitionTextures(CommandBuffer& commandBuffer) {
-	for (auto&[idx, entry] : mBoundDescriptors) {
-		switch (entry.mType) {
-			case vk::DescriptorType::eSampler:
-			case vk::DescriptorType::eUniformTexelBuffer:
-			case vk::DescriptorType::eStorageTexelBuffer:
-			case vk::DescriptorType::eUniformBuffer:
-			case vk::DescriptorType::eStorageBuffer:
-			case vk::DescriptorType::eUniformBufferDynamic:
-			case vk::DescriptorType::eStorageBufferDynamic:
-			case vk::DescriptorType::eInlineUniformBlockEXT:
-			case vk::DescriptorType::eAccelerationStructureKHR:
-				break;
-
-			case vk::DescriptorType::eCombinedImageSampler:
-			case vk::DescriptorType::eInputAttachment:
-			case vk::DescriptorType::eSampledImage:
-			case vk::DescriptorType::eStorageImage:
-				commandBuffer.TransitionBarrier(*entry.mTextureValue, entry.mImageLayout);
-				break;
+void DescriptorSet::CreateTextureDescriptor(const string& bindingName, shared_ptr<Texture> texture, Pipeline& pipeline, uint32_t arrayIndex, vk::ImageLayout layout, vk::ImageView view) {
+	for (auto it = pipeline.DescriptorBindings().find(bindingName); it != pipeline.DescriptorBindings().end(); it++)
+		switch (it->second.mBinding.descriptorType) {
+			case vk::DescriptorType::eInputAttachment: 	CreateInputAttachmentDescriptor(texture, it->second.mBinding.binding, arrayIndex, layout, view); continue;
+			case vk::DescriptorType::eSampledImage: 		CreateSampledTextureDescriptor(texture, it->second.mBinding.binding, arrayIndex, layout, view); continue;
+			case vk::DescriptorType::eStorageImage: 		CreateStorageTextureDescriptor(texture, it->second.mBinding.binding, arrayIndex, layout, view); continue;
 		}
-	}
+}
+void DescriptorSet::CreateBufferDescriptor(const string& bindingName, shared_ptr<Buffer> buffer, vk::DeviceSize offset, vk::DeviceSize range, Pipeline& pipeline, uint32_t arrayIndex) {
+	for (auto it = pipeline.DescriptorBindings().find(bindingName); it != pipeline.DescriptorBindings().end(); it++)
+		switch (it->second.mBinding.descriptorType) {
+			case vk::DescriptorType::eUniformTexelBuffer: 	CreateUniformBufferDescriptor(buffer, offset, range, it->second.mBinding.binding, arrayIndex); continue;
+			case vk::DescriptorType::eStorageTexelBuffer: 	CreateUniformBufferDescriptor(buffer, offset, range, it->second.mBinding.binding, arrayIndex); continue;
+			case vk::DescriptorType::eUniformBuffer: 				CreateUniformBufferDescriptor(buffer, offset, range, it->second.mBinding.binding, arrayIndex); continue;
+			case vk::DescriptorType::eStorageBuffer: 				CreateStorageBufferDescriptor(buffer, offset, range, it->second.mBinding.binding, arrayIndex); continue;
+			case vk::DescriptorType::eUniformBufferDynamic: continue;
+			case vk::DescriptorType::eStorageBufferDynamic: continue;
+		}
+}
+void DescriptorSet::CreateSamplerDescriptor(const string& bindingName, shared_ptr<Sampler> sampler, Pipeline& pipeline, uint32_t arrayIndex) {
+	for (auto it = pipeline.DescriptorBindings().find(bindingName); it != pipeline.DescriptorBindings().end(); it++)
+		if (it->second.mBinding.descriptorType == vk::DescriptorType::eSampler)
+			CreateSamplerDescriptor(sampler, it->second.mBinding.binding, arrayIndex);
 }
 
 void DescriptorSet::FlushWrites() {
@@ -399,24 +302,24 @@ void DescriptorSet::FlushWrites() {
 
 		switch (entry.mType) {
     case vk::DescriptorType::eCombinedImageSampler:
-			infos[i].mImageInfo.imageLayout = entry.mImageLayout;
-			infos[i].mImageInfo.imageView = entry.mImageView;
+			infos[i].mImageInfo.imageLayout = entry.mImageView.mLayout;
+			infos[i].mImageInfo.imageView = entry.mImageView.mView;
     case vk::DescriptorType::eSampler:
-			infos[i].mImageInfo.sampler = **entry.mSamplerValue;
+			infos[i].mImageInfo.sampler = **entry.mImageView.mSampler;
 			writes[i].pImageInfo = &infos[i].mImageInfo;
 			break;
 
     case vk::DescriptorType::eInputAttachment:
     case vk::DescriptorType::eSampledImage:
     case vk::DescriptorType::eStorageImage:
-			infos[i].mImageInfo.imageLayout = entry.mImageLayout;
-			infos[i].mImageInfo.imageView = entry.mImageView;
+			infos[i].mImageInfo.imageLayout = entry.mImageView.mLayout;
+			infos[i].mImageInfo.imageView = entry.mImageView.mView;
 			writes[i].pImageInfo = &infos[i].mImageInfo;
 			break;
 
     case vk::DescriptorType::eUniformTexelBuffer:
     case vk::DescriptorType::eStorageTexelBuffer:
-			// TODO: infos[i].mTexelBufferView = entry.mBufferValue->View();
+			// TODO: infos[i].mTexelBufferView = entry.mBufferView.mBuffer->View();
 			throw exception("texel buffers not currently supported in Stratum");
 			writes[i].pTexelBufferView = &infos[i].mTexelBufferView;
 			break;
@@ -425,14 +328,14 @@ void DescriptorSet::FlushWrites() {
     case vk::DescriptorType::eStorageBuffer:
     case vk::DescriptorType::eUniformBufferDynamic:
     case vk::DescriptorType::eStorageBufferDynamic:
-			infos[i].mBufferInfo.buffer = **entry.mBufferValue;
-			infos[i].mBufferInfo.offset = entry.mBufferOffset;
-			infos[i].mBufferInfo.range = entry.mBufferRange;
+			infos[i].mBufferInfo.buffer = **entry.mBufferView.mBuffer;
+			infos[i].mBufferInfo.offset = entry.mBufferView.mOffset;
+			infos[i].mBufferInfo.range = entry.mBufferView.mRange;
 			writes[i].pBufferInfo = &infos[i].mBufferInfo;
 			break;
     case vk::DescriptorType::eInlineUniformBlockEXT:
-			infos[i].mInlineInfo.pData = entry.mInlineUniformData;
-			infos[i].mInlineInfo.dataSize = (uint32_t)entry.mInlineUniformDataSize;
+			infos[i].mInlineInfo.pData = entry.mInlineUniformData.data();
+			infos[i].mInlineInfo.dataSize = (uint32_t)entry.mInlineUniformData.size();
 			writes[i].descriptorCount = infos[i].mInlineInfo.dataSize;
 			writes[i].pNext = &infos[i].mInlineInfo;
 			break;
@@ -441,6 +344,6 @@ void DescriptorSet::FlushWrites() {
 		i++;
 	}
 
-	(*mDevice)->updateDescriptorSets(writes, {});
+	mDevice->updateDescriptorSets(writes, {});
 	mPendingWrites.clear();
 }

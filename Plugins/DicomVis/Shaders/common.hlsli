@@ -1,17 +1,15 @@
 #ifdef __cplusplus
 #define uint uint32_t
-#pragma pack(push)
-#pragma pack(1)
 struct VolumeUniformBuffer {
 
 #else
-#define quaternion float4
+#define fquat float4
 //#pragma inline_uniform_block VolumeUniforms
 
 [[vk::binding(3, 0)]] cbuffer VolumeUniforms : register(b0) {
 #endif
-	quaternion VolumeRotation;
-	quaternion InvVolumeRotation;
+	fquat VolumeRotation;
+	fquat InvVolumeRotation;
 	float3 VolumeScale;
 	float Density;
 	float3 InvVolumeScale;
@@ -25,21 +23,20 @@ struct VolumeUniformBuffer {
 }
 #ifdef __cplusplus
 ;
-#pragma pack(pop)
 #undef uint
 #else
-#undef quaternion
+#undef fquat
 
 // Is the mask colored?
 #pragma multi_compile MASK
 #pragma multi_compile SINGLE_CHANNEL
 #pragma multi_compile GRADIENT_TEXTURE
 
-#ifndef PI
-#define PI (3.1415926535897932)
+#ifndef M_PI
+#define M_PI (3.1415926535897932)
 #endif
-#ifndef INV_PI
-#define INV_PI (1.0 / PI)
+#ifndef M_1_PI
+#define M_1_PI (1.0 / M_PI)
 #endif
 
 #ifdef SINGLE_CHANNEL

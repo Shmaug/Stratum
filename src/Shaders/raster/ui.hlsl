@@ -1,96 +1,87 @@
-#pragma pass forward/transparent vsmain fsmain
+#pragma compile vertex vsmain
+#pragma compile fragment fsmain
 
-#pragma render_queue 4000
-#pragma cull false
-#pragma blend 0 add srcAlpha oneMinusSrcAlpha
+#define gTextureCount 64
 
-#pragma multi_compile TEXTURED
-#pragma multi_compile SCREEN_SPACE
+[[vk::constant_id(0)]] const uint gVertexStride = 12; // stride in bytes of gVertices. Set to 0 to generate a unit quad
+[[vk::constant_id(1)]] const uint gTransformStride = 64; // stride in bytes of gTransforms. Set to 0 for screen-space transform (in pixels)
+[[vk::constant_id(2)]] const float gAlphaClip = -1; // set below 0 to disable
 
-#pragma static_sampler Sampler
+#include <stratum.hlsli>
 
-#include <shadercompat.h>
-
-struct GuiRect {
-	float4x4 ObjectToWorld;
-	float4 ScaleTranslate;
+struct GuiElement {
+	float4 Rect;
 	float4 ClipBounds;
 	float4 Color;
-
-	float4 TextureST;
-	uint TextureIndex;
-	float Depth;
-	uint pad[2];
+	float RectZ;
+	uint pad;
+	uint TextureIndex; // optional
+	uint SdfIndex; // optional
+	float4 TextureRect;
 };
 
-[[vk::binding(BINDING_START + 0, PER_OBJECT)]] Texture2D<float4> Textures[64] : register(t0);
-[[vk::binding(BINDING_START + 1, PER_OBJECT)]] StructuredBuffer<GuiRect> Rects : register(t64);
-[[vk::binding(BINDING_START + 2, PER_OBJECT)]] SamplerState Sampler : register(s0);
+StructuredBuffer<GuiElement> gElements : register(t0, space2);
+ByteAddressBuffer gVertices : register(t1, space2);
+ByteAddressBuffer gTransforms : register(t2, space2); // column-major
+SamplerState gSampler : register(s0, space2);
+Texture2D<float4> gTextures[gTextureCount] : register(t3, space2);
 
-[[vk::push_constant]] cbuffer PushConstants : register(b2) {
-	STM_PUSH_CONSTANTS
-	float2 ScreenSize;
-}
-
-#include <util.hlsli>
+[[vk::push_constant]] struct {
+	uint gStereoEye;
+	float2 gScreenTexelSize;
+} gPushConstants;
 
 struct v2f {
-	[[vk::location(0)]] float4 position : SV_Position;
-	[[vk::location(1)]] float4 color : COLOR0;
-	[[vk::location(2)]] float2 texcoord : TEXCOORD0;
-	[[vk::location(3)]] float2 clipPos : TEXCOORD1;
-	#ifdef TEXTURED
-	[[vk::location(4)]] uint textureIndex : TEXCOORD2;
-	#endif
+	float4 position : SV_Position;
+	float2 clipPos : TEXCOORD0;
+	sample float2 texcoord : TEXCOORD1;
 };
 
-v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
-	static const float2 positions[6] = {
-		float2(0,0),
-		float2(1,0),
-		float2(1,1),
-		float2(0,1),
-		float2(0,0),
-		float2(1,1)
-	};
+static const float2 gUnitQuad[6] = {
+	float2(0,0),
+	float2(1,0),
+	float2(1,1),
+	float2(0,1),
+	float2(0,0),
+	float2(1,1)
+};
 
-	GuiRect r = Rects[instance];
+v2f vsmain(uint instance : SV_InstanceID, uint index : SV_VertexID) {
+	GuiElement elem = gElements[instance];
 
-	float2 p = positions[index] * r.ScaleTranslate.xy + r.ScaleTranslate.zw;
-	
+	float3 p;
+	if (gVertexStride)
+		p = asfloat(gVertices.Load3(index * gVertexStride));
+	else
+		p = float3(gUnitQuad[index%6], 0);
+
+	// fit to elem.Rect, elem.RectZ
+	p = float3(elem.Rect.xy + p.xy*elem.Rect.zw, p.z + elem.RectZ);
+
 	v2f o;
-	#ifdef SCREEN_SPACE
-	o.position = float4((p / ScreenSize) * 2 - 1, r.Depth, 1);
-	#else
-	o.position = mul(STRATUM_MATRIX_VP, mul(ApplyCameraTranslation(r.ObjectToWorld), float4(p, 0, 1.0)));
-	#endif
-
-	#ifdef TEXTURED
-	o.textureIndex = r.TextureIndex;
-	#endif
-
-	#ifdef SCREEN_SPACE
-	o.texcoord = float2(positions[index].x, 1 - positions[index].y) * r.TextureST.xy + r.TextureST.zw;
-	#else
-	o.texcoord = positions[index] * r.TextureST.xy + r.TextureST.zw;
-	#endif
-
-	o.clipPos = (p - r.ClipBounds.xy) / r.ClipBounds.zw;
-	o.color = r.Color;
+	o.clipPos = (p.xy - elem.ClipBounds.xy) / elem.ClipBounds.zw;
+	o.texcoord = elem.TextureRect.xy + p.xy*elem.TextureRect.zw;
+	if (gTransformStride) {
+		uint4 addrs = instance*gTransformStride + uint4(0,16,32,48);
+		float4x4 transform = float4x4(gTransforms.Load4(addrs[0]), gTransforms.Load4(addrs[1]), gTransforms.Load4(addrs[2]), gTransforms.Load4(addrs[3])); 
+		o.position = mul(STRATUM_MATRIX_VP, mul(float4(p, 1.0), transform));
+	} else
+		o.position = float4(p.xy*gPushConstants.gScreenTexelSize*2 - 1, p.z, 1);
 	return o;
 }
 
-float4 fsmain(v2f i) : SV_Target0 {
-	float4 color = i.color;
-
-	#ifdef TEXTURED
-	#ifdef SCREEN_SPACE
-	color *= Textures[i.textureIndex].SampleLevel(Sampler, i.texcoord, 0);
-	#else
-	color *= Textures[i.textureIndex].SampleBias(Sampler, i.texcoord, -1);
-	#endif
-	#endif
-	
-	if (color.a <= 0 || any(i.clipPos < 0) || any(i.clipPos > 1)) discard;
+float4 fsmain(uint instance : SV_InstanceID, v2f i) : SV_Target0 {
+	GuiElement elem = gElements[instance];
+	float4 color = elem.Color;
+	if (gTextureCount && elem.TextureIndex < gTextureCount)
+		color *= gTextures[elem.TextureIndex].Sample(gSampler, i.texcoord);
+	if (gTextureCount && elem.SdfIndex < gTextureCount) {
+		float4 msdf = gTextures[elem.SdfIndex].SampleLevel(gSampler, i.texcoord, 0);
+		float d = max(min(msdf.r, msdf.g), min(max(msdf.r, msdf.g), msdf.b)); // median(msdf.rgb)
+		float w = fwidth(d);
+		color.a *= max(0, smoothstep(0.5 - w, 0.5 + w, d));
+	}
+	color.a *= all(i.clipPos >= 0) * all(i.clipPos <= 1);
+	if (gAlphaClip >= 0 && color.a < gAlphaClip) discard;
 	return color;
 }

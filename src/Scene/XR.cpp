@@ -1,11 +1,6 @@
 #include "XR.hpp"
 
-#include <vulkan/vulkan.h>
-#include <openxr/openxr_platform.h>
 
-#include <Util/Tokenizer.hpp>
-
-using namespace std;
 using namespace stm;
 
 bool XR::FailMsg(XrResult result, const string& errmsg) {
@@ -120,9 +115,9 @@ set<string> XR::InstanceExtensionsRequired() {
 	xrGetVulkanInstanceExtensions(mInstance, mSystem, bufSize, &len, extensions.data());
 
 	set<string> result;
-	Tokenizer t(extensions, { ' ' });
+	stringstream t(extensions);
 	string e;
-	while (t.Next(e)) result.insert(e);
+	while (t >> e) result.insert(e);
 	return result;
 }
 set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
@@ -136,9 +131,9 @@ set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	xrGetVulkanDeviceExtensions(mInstance, mSystem, bufSize, &len, extensions.data());
 
 	set<string> result;
-	Tokenizer t(extensions, { ' ' });
+	stringstream t(extensions);
 	string e;
-	while (t.Next(e)) result.insert(e);
+	while (t >> e) result.insert(e);
 	return result;
 }
 
@@ -249,7 +244,7 @@ bool XR::OnSceneInit(Scene* scene) {
 			return false;
 		}	               
 
-		maxSwapchainLength = std::max(maxSwapchainLength, len);
+		maxSwapchainLength = max(maxSwapchainLength, len);
 	}
 
 	for (uint32_t i = 0; i < mViewCount; i++) {
@@ -379,10 +374,10 @@ bool XR::OnSceneInit(Scene* scene) {
 void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = **mScene->mInstance;
-	binding.physicalDevice = mScene->mInstance->Device()->PhysicalDevice();
-	binding.device = **mScene->mInstance->Device();
-	binding.queueFamilyIndex = mScene->mInstance->Window()->PresentQueueFamily();
+	binding.instance = *mScene->Instance();
+	binding.physicalDevice = mScene->Instance().Device().PhysicalDevice();
+	binding.device = *mScene->Instance().Device();
+	binding.queueFamilyIndex = mScene->Instance().Window().PresentQueueFamily()->mFamilyIndex;
 	binding.queueIndex = 0;
 
 	XrSessionCreateInfo sessioninfo = {};
@@ -563,7 +558,7 @@ void XR::PostRender(CommandBuffer& commandBuffer) {
 	#pragma endregion
 
 	vector<float3> positions(mViewCount);
-	vector<quaternion> rotations(mViewCount);
+	vector<fquat> rotations(mViewCount);
 
 	StereoEye eyes[2] { StereoEye::eLeft, StereoEye::eRight };
 
@@ -579,20 +574,20 @@ void XR::PostRender(CommandBuffer& commandBuffer) {
 			n, mHmdCamera->Far()), eyes[i]);
 			
 		positions[i] = float3(views[i].pose.position.x, views[i].pose.position.y, -views[i].pose.position.z);
-		rotations[i] = quaternion(-views[i].pose.orientation.x, -views[i].pose.orientation.y, views[i].pose.orientation.z, views[i].pose.orientation.w);
+		rotations[i] = fquat(-views[i].pose.orientation.x, -views[i].pose.orientation.y, views[i].pose.orientation.z, views[i].pose.orientation.w);
 	}
 
 	float3 center = (positions[0] + positions[1]) * .5f;
-	quaternion iq = inverse(rotations[0]);
+	fquat iq = inverse(rotations[0]);
 
 	mHmdCamera->LocalPosition(center);
 	mHmdCamera->LocalRotation(rotations[0]);
 
-	mHmdCamera->EyeOffset(iq * (positions[0] - center), quaternion(0,0,0,1), eyes[0]);
+	mHmdCamera->EyeOffset(iq * (positions[0] - center), fquat(0,0,0,1), eyes[0]);
 	mHmdCamera->EyeOffset(iq * (positions[1] - center), iq * rotations[1], eyes[1]);
 
 
-	// FIXME: Copy render result into right and left respectively
+	// TODO: Copy render result into right and left respectively
 	//mHmdCamera->WriteUniformBuffer();
 	vk::Image right = mSwapchainImages[0][mProjectionViews[0].subImage.imageArrayIndex].image;
 	vk::Image left = mSwapchainImages[1][mProjectionViews[1].subImage.imageArrayIndex].image;

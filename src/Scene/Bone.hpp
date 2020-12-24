@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Scene/Object.hpp>
+#include "Object.hpp"
 
 namespace stm {
 
@@ -8,12 +8,12 @@ class Bone : public Object {
 public:
 	uint32_t mBoneIndex;
 	float4x4 mInverseBind;
-	inline Bone(const std::string& name, Scene* scene, uint32_t index) : Object(name, scene), mInverseBind(float4x4(1)), mBoneIndex(index) {}
+	inline Bone(const string& name, stm::Scene& scene, uint32_t index) : Object(name, scene), mInverseBind(float4x4(1)), mBoneIndex(index) {}
 };
 
 struct BoneTransform {
 	float3 mPosition;
-	quaternion mRotation;
+	fquat mRotation;
 	float3 mScale;
 
 	inline BoneTransform operator*(const BoneTransform& rhs) const {
@@ -25,7 +25,7 @@ struct BoneTransform {
 	}
 };
 
-typedef std::vector<BoneTransform> Pose;
+using Pose = vector<BoneTransform>;
 
 inline BoneTransform inverse(const BoneTransform& bt) {
 	BoneTransform t = {};

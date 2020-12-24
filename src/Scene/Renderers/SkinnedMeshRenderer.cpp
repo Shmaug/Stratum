@@ -1,12 +1,12 @@
 #include "SkinnedMeshRenderer.hpp"
 
-using namespace std;
+
 using namespace stm;
 
 void SkinnedMeshRenderer::Rig(const AnimationRig& rig) {
 	mBoneMap.clear();
 	mRig = rig;
-	for (auto b : mRig) mBoneMap.emplace(b->mName, b);
+	for (auto b : mRig) mBoneMap.emplace(b->Name(), b);
 }
 Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 	return mBoneMap.count(boneName) ? mBoneMap.at(boneName) : nullptr;
@@ -14,13 +14,13 @@ Bone* SkinnedMeshRenderer::GetBone(const string& boneName) const {
 
 inline void SkinnedMeshRenderer::Mesh(shared_ptr<stm::Mesh> m) {
 	mMesh = m;
-	mSkinnedMesh = m.get(); // FIXME: make a copy of mMesh
+	mSkinnedMesh = m.get(); // TODO: make a copy of mMesh
 }
 
 void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
-	auto skinner = commandBuffer.mDevice->LoadAsset<Pipeline>("Assets/Shaders/skinner.stmb", "Skinner");
+	auto skinner = commandBuffer.Device().LoadAsset<Shader>("Assets/Shaders/skinner.stmb");
 	
-	// FIXME: fix this to work with new Mesh system
+	// TODO: fix this to work with new Mesh system
 
 	// Shape Keys
 	/*
@@ -74,7 +74,7 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
 		Buffer* poseBuffer = commandBuffer->GetBuffer(mName + " Pose", mRig.size() * sizeof(float4x4), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
 		float4x4* skin = (float4x4*)poseBuffer->Mapped();
 		for (uint32_t i = 0; i < mRig.size(); i++)
-			skin[i] = (WorldToObject() * mRig[i]->ObjectToWorld()) * mRig[i]->mInverseBind; // * vertex;
+			skin[i] = (InverseTransform() * mRig[i]->Transform()) * mRig[i]->mInverseBind; // * vertex;
 
 		ComputePipeline* s = skinner->GetCompute("skin", {});
 		commandBuffer->BindPipeline(s);
@@ -97,38 +97,22 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
 	barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
 	commandBuffer->Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eVertexInput, barrier);
 	*/
-	mMaterial->OnLateUpdate(commandBuffer);
 }
 
-void SkinnedMeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera) {
-	GraphicsPipeline* pipeline = commandBuffer.BindPipeline(mMaterial, mSkinnedMesh);
-
-	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
-		commandBuffer.BindDescriptorSet(perCamera, PER_CAMERA);
-	
-	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
-		// TODO: Cache object descriptorset?
-		auto instanceBuffer = commandBuffer.GetBuffer(mName, sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->Mapped();
-		buf->ObjectToWorld = ObjectToWorld();
-		buf->WorldToObject = WorldToObject();
-		auto perObject = commandBuffer.GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCES_BINDING, 0);
-		commandBuffer.BindDescriptorSet(perObject, PER_OBJECT);
-	}
-
-	mSkinnedMesh->Draw(commandBuffer, &camera);
+void SkinnedMeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
+	mMaterial->Bind(commandBuffer, mSkinnedMesh);
+	commandBuffer.DrawMesh(*mSkinnedMesh);
 }
 
-void SkinnedMeshRenderer::OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {
+void SkinnedMeshRenderer::OnGui(CommandBuffer& commandBuffer, GuiContext& gui) {
 	if (mRig.size()){
 		for (auto b : mRig) {
-			gui.WireSphere(b->WorldPosition(), .01f, float4(0.25f, 1.f, 0.25f, 1.f));
+			gui.WireSphere(b->Position(), .01f, fquat(1), float4(0.25f, 1.f, 0.25f, 1.f));
 			if (Bone* parent = dynamic_cast<Bone*>(b->Parent())) {
 				float3 pts[2];
-				pts[0] = b->WorldPosition();
-				pts[1] = parent->WorldPosition();
-				gui.PolyLine(float4x4(1), pts, 2, float4(0.25f, 1.f, 0.25f, 1.f), 1.5f);
+				pts[0] = b->Position();
+				pts[1] = parent->Position();
+				gui.PolyLine({ {}, {}, float4x4(1) }, pts, 2, 1.5f);
 			}
 		}
 	}

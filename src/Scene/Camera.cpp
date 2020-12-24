@@ -1,46 +1,45 @@
-#include <Scene/Camera.hpp>
-#include <Scene/Scene.hpp>
+#include "Camera.hpp"
  
-using namespace std;
+
 using namespace stm;
 
-Camera::Camera(const string& name, Scene* scene, const set<RenderTargetIdentifier>& renderTargets) : Object(name, scene), mRenderTargets(renderTargets), mFieldOfView((float)M_PI/4) {
+Camera::Camera(const string& name, stm::Scene& scene, const set<RenderTargetIdentifier>& renderTargets) : Object(name, scene), mRenderTargets(renderTargets), mFieldOfView((float)M_PI/4) {
 	mEyeOffsetTranslate[0] = 0;
 	mEyeOffsetTranslate[1] = 0;
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
-	mEyeOffsetRotate[1] = quaternion(0,0,0,1);
+	mEyeOffsetRotate[1] = fquat(0,0,0,1);
+	mEyeOffsetRotate[1] = fquat(0,0,0,1);
 }
 Camera::~Camera() {}
 
 float4 Camera::WorldToClip(const float3& worldPos, StereoEye eye) {
-	UpdateTransform();
-	return mViewProjection[(uint32_t)eye] * float4((worldPos - (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz), 1);
+	ValidateTransform();
+	return mViewProjection[(uint32_t)eye] * float4((worldPos - (float3)(Transform() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1))), 1);
 }
 float3 Camera::ClipToWorld(const float3& clipPos, StereoEye eye) {
-	UpdateTransform();
+	ValidateTransform();
 	float4 wp = mInvViewProjection[(uint32_t)eye] * float4(clipPos, 1);
-	wp.xyz /= wp.w;
-	return (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + wp.xyz;
+	wp /= wp.w;
+	return (float3)(Transform() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)) + (float3)wp;
 }
-Ray Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
-	UpdateTransform();
+fRay Camera::ScreenToWorldRay(const float2& uv, StereoEye eye) {
+	ValidateTransform();
 	float2 clip = 2.f * uv - 1.f;
-	Ray ray;
+	fRay ray;
 	if (mOrthographic) {
 		clip.x *= mAspectRatio;
-		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + WorldRotation() * float3(clip * mOrthographicSize, mNear);
-		ray.mDirection = WorldRotation() * float3(0, 0, 1);
+		ray.mOrigin = (float3)(Transform() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)) + Rotation() * float3(clip * mOrthographicSize, mNear);
+		ray.mDirection = Rotation() * float3(0, 0, 1);
 	} else {
 		float4 p1 = mInvViewProjection[(uint32_t)eye] * float4(clip, .1f, 1);
-		ray.mDirection = normalize(p1.xyz / p1.w);
-		ray.mOrigin = (ObjectToWorld() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)).xyz + mEyeOffsetTranslate[(uint32_t)eye];
+		ray.mDirection = normalize((float3)p1/p1.w);
+		ray.mOrigin = (float3)(Transform() * float4(mEyeOffsetTranslate[(uint32_t)eye], 1)) + mEyeOffsetTranslate[(uint32_t)eye];
 	}
 	return ray;
 }
 
 void Camera::WriteUniformBuffer(void* bufferData) {
-	UpdateTransform();
-	CameraBuffer& buf = *(CameraBuffer*)bufferData;
+	ValidateTransform();
+	CameraData& buf = *(CameraData*)bufferData;
 	buf.View[0] = mView[0];
 	buf.View[1] = mView[1];
 	buf.Projection[0] = mProjection[0];
@@ -49,8 +48,8 @@ void Camera::WriteUniformBuffer(void* bufferData) {
 	buf.ViewProjection[1] = mViewProjection[1];
 	buf.InvProjection[0] = mInvProjection[0];
 	buf.InvProjection[1] = mInvProjection[1];
-	buf.Position[0] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[0], 1)).xyz, mNear);
-	buf.Position[1] = float4((ObjectToWorld() * float4(mEyeOffsetTranslate[1], 1)).xyz, mFar);
+	buf.Position[0] = float4((float3)(Transform() * float4(mEyeOffsetTranslate[0], 1)), mNear);
+	buf.Position[1] = float4((float3)(Transform() * float4(mEyeOffsetTranslate[1], 1)), mFar);
 }
 void Camera::SetViewportScissor(CommandBuffer& commandBuffer, StereoEye eye) {
 	vk::Viewport vp = { 0.f, 0.f, (float)commandBuffer.CurrentFramebuffer()->Extent().width, (float)commandBuffer.CurrentFramebuffer()->Extent().height, 0.f, 1.f };
@@ -72,7 +71,7 @@ void Camera::SetViewportScissor(CommandBuffer& commandBuffer, StereoEye eye) {
 }
 
 bool Camera::RendersToSubpass(RenderPass& renderPass, uint32_t subpassIndex) {
-	const Subpass& subpass = renderPass.GetSubpass(subpassIndex);
+	const Subpass& subpass = renderPass.Subpass(subpassIndex);
 	for (auto& kp : subpass.mAttachments)
 			if (mRenderTargets.count(kp.first) && 
 				 (kp.second.mType == AttachmentType::eColor || 
@@ -81,11 +80,11 @@ bool Camera::RendersToSubpass(RenderPass& renderPass, uint32_t subpassIndex) {
 	return false;
 }
 
-bool Camera::UpdateTransform() {
-	if (!Object::UpdateTransform()) return false;
+bool Camera::ValidateTransform() {
+	if (!Object::ValidateTransform()) return false;
 
-	quaternion q0 = WorldRotation() * mEyeOffsetRotate[0];
-	quaternion q1 = WorldRotation() * mEyeOffsetRotate[1];
+	fquat q0 = Rotation() * mEyeOffsetRotate[0];
+	fquat q1 = Rotation() * mEyeOffsetRotate[1];
 
 	mView[0] = float4x4::Look(0, q0 * float3(0, 0, 1), q0 * float3(0, 1, 0));
 	mView[1] = float4x4::Look(0, q1 * float3(0, 0, 1), q1 * float3(0, 1, 0));
@@ -119,30 +118,28 @@ bool Camera::UpdateTransform() {
 	};
 	for (uint32_t i = 0; i < 8; i++) {
 		float4 c = mInvViewProjection[0] * float4(corners[i], 1);
-		corners[i] = c.xyz / c.w + WorldPosition();
+		corners[i] = (float3)c / c.w + Position();
 	}
 
-	mFrustum[0].xyz = normalize(cross(corners[1] - corners[0], corners[2] - corners[0])); // near
-	mFrustum[1].xyz = normalize(cross(corners[6] - corners[4], corners[5] - corners[4])); // far
-	mFrustum[2].xyz = normalize(cross(corners[5] - corners[1], corners[3] - corners[1])); // right
-	mFrustum[3].xyz = normalize(cross(corners[2] - corners[0], corners[4] - corners[0])); // left
-	mFrustum[4].xyz = normalize(cross(corners[3] - corners[2], corners[6] - corners[2])); // top
-	mFrustum[5].xyz = normalize(cross(corners[4] - corners[0], corners[1] - corners[0])); // bottom
+	mFrustum[0] = float4(normalize(cross(corners[1] - corners[0], corners[2] - corners[0])), 0); // near
+	mFrustum[1] = float4(normalize(cross(corners[6] - corners[4], corners[5] - corners[4])), 0); // far
+	mFrustum[2] = float4(normalize(cross(corners[5] - corners[1], corners[3] - corners[1])), 0); // right
+	mFrustum[3] = float4(normalize(cross(corners[2] - corners[0], corners[4] - corners[0])), 0); // left
+	mFrustum[4] = float4(normalize(cross(corners[3] - corners[2], corners[6] - corners[2])), 0); // top
+	mFrustum[5] = float4(normalize(cross(corners[4] - corners[0], corners[1] - corners[0])), 0); // bottom
 
-	mFrustum[0].w = dot(mFrustum[0].xyz, corners[0]);
-	mFrustum[1].w = dot(mFrustum[1].xyz, corners[4]);
-	mFrustum[2].w = dot(mFrustum[2].xyz, corners[1]);
-	mFrustum[3].w = dot(mFrustum[3].xyz, corners[0]);
-	mFrustum[4].w = dot(mFrustum[4].xyz, corners[2]);
-	mFrustum[5].w = dot(mFrustum[5].xyz, corners[0]);
+	mFrustum[0].w = dot((float3)mFrustum[0], corners[0]);
+	mFrustum[1].w = dot((float3)mFrustum[1], corners[4]);
+	mFrustum[2].w = dot((float3)mFrustum[2], corners[1]);
+	mFrustum[3].w = dot((float3)mFrustum[3], corners[0]);
+	mFrustum[4].w = dot((float3)mFrustum[4], corners[2]);
+	mFrustum[5].w = dot((float3)mFrustum[5], corners[0]);
 
 	return true;
 }
 
-void Camera::OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {
-	if (&camera == this) return;
-	
-	gui.WireSphere(WorldPosition(), mNear, 1.f);
+void Camera::OnGui(CommandBuffer& commandBuffer, GuiContext& gui) {	
+	gui.WireSphere(Position(), mNear, Rotation(), 1.f);
 
 	float3 f0 = ClipToWorld(float3(-1, -1, 0));
 	float3 f1 = ClipToWorld(float3(-1, 1, 0));
@@ -161,7 +158,7 @@ void Camera::OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui
 		f2, f6, f7, f3, f2,
 		f6, f4, f5, f7, f3, f1
 	};
-	gui.PolyLine(float4x4(1), points.data(), (uint32_t)points.size(), color, 1.f);
+	gui.PolyLine({ {}, {}, float4x4(1) }, points.data(), (uint32_t)points.size(), 1.f);
 
 	if (mStereoMode != StereoMode::eNone) {
 		f0 = ClipToWorld(float3(-1, -1, 0), StereoEye::eRight);
@@ -174,9 +171,7 @@ void Camera::OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui
 		f6 = ClipToWorld(float3(1, -1, 1), StereoEye::eRight);
 		f7 = ClipToWorld(float3(1, 1, 1), StereoEye::eRight);
 
-		vector<float3> points2 {
-			f0, f4, f5, f1, f0, f2, 
-		};
-		gui.PolyLine(float4x4(1), points2.data(), (uint32_t)points2.size(), float4(.5f, .5f, 1, .5f), 1.f);
+		vector<float3> points2 { f0, f4, f5, f1, f0, f2 };
+		gui.PolyLine({ {}, {}, float4x4(1) }, points2.data(), (uint32_t)points2.size(), 1.f);
 	}
 }

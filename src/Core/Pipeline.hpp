@@ -1,126 +1,183 @@
 #pragma once
 
-
-#include "../Stratum.hpp"
 #include "RenderPass.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
-class SpirvModule {
-public:
-	struct StageInput {
-		uint32_t mLocation;
-		vk::Format mFormat;
-		VertexAttributeType mType;
-		uint32_t mTypeIndex;
-	};
-	
-	vk::ShaderModule mShaderModule;
-	std::vector<uint32_t> mSpirvBinary;
-	vk::ShaderStageFlagBits mStage;
-	std::string mEntryPoint;
-	std::map<std::string, StageInput> mInputs;
-
-	inline SpirvModule() = default;
-	inline SpirvModule(std::istream& stream) {
-		ReadString(stream, mEntryPoint);
-		ReadValue(stream, mStage);
-		ReadVector(stream, mSpirvBinary);
-		
-		uint64_t inputCount;
-		ReadValue<uint64_t>(stream, inputCount);
-		for (uint32_t i = 0; i < inputCount; i++) {
-			std::string name;
-			ReadString(stream, name);
-			StageInput input;
-			ReadValue(stream, input.mLocation);
-			ReadValue(stream, input.mFormat);
-			ReadValue(stream, input.mType);
-			ReadValue(stream, input.mTypeIndex);
-			mInputs.emplace(name, input);
-		}
-	}
-	inline friend std::ostream& operator<<(std::ostream& stream, const SpirvModule& module) {
-		stream << module.mEntryPoint;
-		stream << module.mStage;
-		stream.write(module.mSpirvBinary.data(), module.mSpirvBinary.size());
-		
-		stream << module.mInputs.size();
-		for (const auto&[name,input] : module.mInputs) {
-			stream << name;
-			stream << input.mLocation;
-			stream << input.mFormat;
-			stream << input.mType;
-			stream << input.mTypeIndex;
-		}
-	}
-};
-
 class Pipeline {
-	friend struct std::hash<stm::Pipeline>;
 protected:
+	// TODO: something more elegant than friend class...
+	friend class ShaderCompiler;
+
 	vk::Pipeline mPipeline;
 	vk::PipelineLayout mLayout;
-	std::vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
-	std::map<std::string, DescriptorBinding> mDescriptorSetBindings;
-	std::map<std::string, vk::PushConstantRange> mPushConstants;
-	std::map<std::string, vk::SamplerCreateInfo> mImmutableSamplers;
-	std::vector<SpirvModule> mModules;
+	vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
+
+	SpirvModuleGroup mSpirvModules;
+	vector<vk::PushConstantRange> mPushConstantRanges;
+	// multimap handles descriptors with the same name and different bindings between stages
+	multimap<string, DescriptorBinding> mDescriptorBindings;
+	// multimap handles push constants with the same name and different ranges between stages
+	multimap<string, vk::PushConstantRange> mPushConstants;
+	map<string, vk::SamplerCreateInfo> mImmutableSamplers;
+
+	size_t mHash = 0;
 
 public:
-	Pipeline(const Pipeline& c) = default;
-	STRATUM_API Pipeline(vk::Pipeline pipeline, vk::PipelineLayout layout, std::vector<vk::DescriptorSetLayout> descriptorSetLayouts={});
 	inline vk::Pipeline operator*() const { return mPipeline; }
 	inline const vk::Pipeline* operator->() const { return &mPipeline; }
 	inline bool operator==(const Pipeline& rhs) const { return rhs.mPipeline == mPipeline; }
+	inline size_t Hash() const { return mHash; }
+
+	virtual vk::PipelineBindPoint BindPoint() const = 0;
 
 	inline vk::PipelineLayout Layout() const { return mLayout; }
-	
-	inline uint32_t GetDescriptorSet(const std::string& descriptorName) const { return mDescriptorSetBindings.at(descriptorName).mSet; }
-	inline uint32_t GetDescriptorLocation(const std::string& descriptorName) const { return mDescriptorSetBindings.at(descriptorName).mBinding.binding; }
+	inline const SpirvModuleGroup& SpirvModules() const { return mSpirvModules; };
+	inline const vector<vk::DescriptorSetLayout>& DescriptorSetLayouts() const { return mDescriptorSetLayouts; };
+	// most of the time, a pipeline wont have named descriptors with different bindings, so there is usually only one item in this range
+	inline const multimap<string, DescriptorBinding>& DescriptorBindings() { return mDescriptorBindings; };
+	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
+	inline const multimap<string, vk::PushConstantRange>& PushConstants() { return mPushConstants; };
+	inline const vector<vk::PushConstantRange>& PushConstantRanges() const { return mPushConstantRanges; };
+
+	inline friend binary_stream& operator<<(binary_stream& stream, const Pipeline& pipeline) {
+		stream << pipeline.mSpirvModules;
+		stream << pipeline.mPushConstantRanges;
+		stream << pipeline.mDescriptorBindings;
+		stream << pipeline.mPushConstants;
+		stream << pipeline.mImmutableSamplers;
+		return stream;
+	}
+	inline friend binary_stream& operator>>(binary_stream& stream, Pipeline& pipeline) {
+		stream >> pipeline.mSpirvModules;
+		stream >> pipeline.mPushConstantRanges;
+		stream >> pipeline.mDescriptorBindings;
+		stream >> pipeline.mPushConstants;
+		stream >> pipeline.mImmutableSamplers;
+		return stream;
+	}
 };
 
 class ComputePipeline : public Pipeline {
-protected:
-	uint3 mWorkgroupSize;
-	STRATUM_API ComputePipeline();
 public:
-	STRATUM_API ComputePipeline(const std::string& name, const SpirvModule& module);
-	inline uint3 WorkgroupSize() const { return mWorkgroupSize; }
+	inline ComputePipeline(const string& name, Device& device, const SpirvModule& spirv) {
+		mSpirvModules = { spirv };
+		mHash = basic_hash(spirv);
+
+		unordered_map<uint32_t, vector<vk::DescriptorSetLayoutBinding>> descriptorSetBindings;
+		for (const auto&[name, binding] : spirv.mDescriptorBindings) {
+			mDescriptorBindings.insert({ name, binding });
+			descriptorSetBindings[binding.mSet].push_back(binding.mBinding);
+		}
+		for (const auto& [name,range] : spirv.mPushConstants) {
+			mPushConstants.insert({ name, range });
+			mPushConstantRanges.push_back(range);
+		}
+
+		for (auto& [index, bindings] : descriptorSetBindings)
+			mDescriptorSetLayouts[index] = device->createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo({}, bindings));
+		mLayout = device->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, mDescriptorSetLayouts, mPushConstantRanges));
+
+		vk::ComputePipelineCreateInfo info;
+		info.stage = vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, spirv.mShaderModule, spirv.mEntryPoint.c_str(), {});
+		info.layout = mLayout;
+		mPipeline = device->createComputePipeline(device.PipelineCache(), info).value;
+		device.SetObjectName(mPipeline, name);
+	}
+
+	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eCompute; }
+	inline uint3 WorkgroupSize() const { return mSpirvModules[0].mWorkgroupSize; }
+	
+	inline friend binary_stream& operator<<(binary_stream& stream, const ComputePipeline& pipeline) { return operator<<(stream, *(Pipeline*)&pipeline); }
+	inline friend binary_stream& operator>>(binary_stream& stream, ComputePipeline& pipeline) { return operator>>(stream, *(Pipeline*)&pipeline); }
 };
 
 class GraphicsPipeline : public Pipeline {
-protected:
-	std::string mShaderPass;
-	std::vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
+private:
+	friend class ShaderCompiler;
+	vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
 	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState;
-	bool mSampleShading = false;
-	uint32_t mRenderQueue = 1000;
+	vector<vk::DynamicState> mDynamicStates;
+	vk::PipelineInputAssemblyStateCreateInfo mInputAssemblyState;
+	vk::PipelineMultisampleStateCreateInfo mMultisampleState;
+	vk::PipelineRasterizationStateCreateInfo mRasterizationState;
+	vk::PipelineViewportStateCreateInfo mViewportState;
+	uint32_t mRenderQueue;
 
-	uint64_t mRenderPassHash;
-	uint32_t mSubpassIndex;
-	vk::PrimitiveTopology mTopology;
-	vk::CullModeFlags mCullMode;
-	vk::PolygonMode mPolygonMode;
-	vk::PipelineVertexInputStateCreateInfo mVertexInput;
+public:
+	inline GraphicsPipeline(const string& name, const RenderPass& renderPass, uint32_t subpassIndex,
+		const SpirvModuleGroup& spirv, const vector<vk::SpecializationInfo*>& specializationInfos = {},
+		const vk::PipelineVertexInputStateCreateInfo& vertexInput = {}, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill,
+		bool sampleShading = false, const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
+		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = { vk::PipelineColorBlendAttachmentState() },
+		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) {
+		
+		mSpirvModules = spirv;
 
-	STRATUM_API GraphicsPipeline(const std::string& name, const std::vector<SpirvModule>& modules, uint32_t subpassIndex,
-		vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInput, vk::CullModeFlags cullMode, vk::PolygonMode polyMode);
+		mHash = basic_hash(renderPass, subpassIndex, topology, vertexInput, cullMode, polygonMode, sampleShading);
+		for (auto state : mBlendStates) mHash = basic_hash(mHash, state);
+		for (auto state : dynamicStates) mHash = basic_hash(mHash, state);
+		for (const SpirvModule& spirv : mSpirvModules) {
+			mHash = basic_hash(mHash, spirv);
+			for (const auto& [name, binding] : spirv.mDescriptorBindings) mDescriptorBindings.insert({ name, binding });
+			for (const auto& [name, range] : spirv.mPushConstants) mPushConstantRanges.push_back(range);
+		}
+		
+		Device& device = renderPass.Device();
+		mLayout = device->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, mDescriptorSetLayouts, mPushConstantRanges));
+		
+		mBlendStates = blendStates;
+		mDepthStencilState = depthStencilState;
+		mDynamicStates = dynamicStates;
+		mInputAssemblyState = { {}, topology };
+		mViewportState = { {}, 1, nullptr, 1, nullptr };
+		mRasterizationState = { {}, false, false, polygonMode, cullMode };
+		mMultisampleState = { {}, vk::SampleCountFlagBits::e1, sampleShading };
+		vk::PipelineColorBlendStateCreateInfo blendState = { {}, false, vk::LogicOp::eCopy, mBlendStates };
+		vk::PipelineDynamicStateCreateInfo dynamicState = { {}, dynamicStates };
+		for (auto& [id, attachment] : renderPass.Subpass(subpassIndex).mAttachments)
+			if (attachment.mType == AttachmentType::eColor || attachment.mType == AttachmentType::eDepthStencil) {
+				mMultisampleState.rasterizationSamples = attachment.mSamples;
+				break;
+			}
+		vector<vk::PipelineShaderStageCreateInfo> stages;
+		for (size_t i = 0; i < mSpirvModules.size(); i++)
+			stages.push_back(vk::PipelineShaderStageCreateInfo({}, mSpirvModules[i].mStage, mSpirvModules[i].mShaderModule, mSpirvModules[i].mEntryPoint.c_str(), specializationInfos[i] ));
+
+		vk::GraphicsPipelineCreateInfo info({}, stages, &vertexInput, &mInputAssemblyState, nullptr, &mViewportState, &mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex);
+		mPipeline = device->createGraphicsPipeline(device.PipelineCache(), info).value;
+		device.SetObjectName(mPipeline, name);
+	}
+	
+	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eGraphics; }
+
+	inline friend binary_stream& operator<<(binary_stream& stream, const GraphicsPipeline& pipeline) {
+		stream << pipeline.mBlendStates;
+		stream << pipeline.mDepthStencilState;
+		stream << pipeline.mDynamicStates;
+		stream << pipeline.mInputAssemblyState;
+		stream << pipeline.mMultisampleState;
+		stream << pipeline.mRasterizationState;
+		stream << pipeline.mViewportState;
+		stream << pipeline.mRenderQueue;
+		return operator<<(stream, *(Pipeline*)&pipeline);
+	}
+	inline friend binary_stream& operator>>(binary_stream& stream, GraphicsPipeline& pipeline) {
+		stream >> pipeline.mBlendStates;
+		stream >> pipeline.mDepthStencilState;
+		stream >> pipeline.mDynamicStates;
+		stream >> pipeline.mInputAssemblyState;
+		stream >> pipeline.mMultisampleState;
+		stream >> pipeline.mRasterizationState;
+		stream >> pipeline.mViewportState;
+		stream >> pipeline.mRenderQueue;
+		return operator>>(stream, *(Pipeline*)&pipeline);
+	}
 };
 
-}
+template<> inline size_t basic_hash(const stm::Pipeline& pipeline) { return pipeline.Hash(); }
+template<> inline size_t basic_hash(const stm::ComputePipeline& pipeline) { return pipeline.Hash(); }
+template<> inline size_t basic_hash(const stm::GraphicsPipeline& pipeline) { return pipeline.Hash(); }
 
-namespace std {
-	template<>
-	struct hash<vk::VertexInputBindingDescription> {
-		size_t operator()(const vk::VertexInputBindingDescription& b) {
-			return stm::hash_combine(b.binding, b.inputRate, b.stride);
-		}
-	};
-	template<>
-	struct hash<vk::VertexInputAttributeDescription> {
-		size_t operator()(const vk::VertexInputAttributeDescription& a) {
-			return stm::hash_combine(a.binding, a.location, a.format, a.offset);
-		}
-	};
 }

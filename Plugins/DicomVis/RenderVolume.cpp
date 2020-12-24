@@ -1,9 +1,9 @@
 #include "RenderVolume.hpp"
 
-using namespace std;
+
 using namespace dcmvs;
 
-RenderVolume::RenderVolume(const string& name, Scene* scene, Device* device, const fs::path& imageStackFolder) : Object(mName, scene) {
+RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, const fs::path& imageStackFolder) : Object(mName, scene) {
   mPrecomputePipeline = device->LoadAsset<Pipeline>("Assets/Shaders/precompute.stmb", "precompute");
   mRenderPipeline = device->LoadAsset<Pipeline>("Assets/Shaders/volume.stmb", "volume");
 
@@ -61,22 +61,22 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   uniforms->InvVolumeScale = 1.f / uniforms->InvVolumeScale;
   uniforms->MaskValue = (uint32_t)mOrganMask;
   uniforms->VolumePosition = WorldPosition();
-  uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice->FrameCount() % 0x00000000FFFFFFFFull);
+  uniforms->FrameIndex = (uint32_t)(commandBuffer.Device().FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
 	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
 
-  set<string> keywords;
-  if (mRawMask) keywords.emplace("MASK");
+  set<string> defines;
+  if (mRawMask) defines.emplace("MASK");
   if (ChannelCount(mRawVolume->Format()) == 1) {
-    keywords.emplace("SINGLE_CHANNEL");
-    if (mColorize) keywords.emplace("COLORIZE");
+    defines.emplace("SINGLE_CHANNEL");
+    if (mColorize) defines.emplace("COLORIZE");
   }
 
   
   // Bake the volume if necessary
   if (mBakeDirty && mBakedVolume) {
-    ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeVolume", keywords);
+    ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeVolume", defines);
     commandBuffer.BindPipeline(pipeline);
 
     auto ds = commandBuffer.GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
@@ -94,7 +94,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
 
   // Bake the gradient if necessary
   if (mGradientDirty && mGradient) {
-    ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeGradient", keywords);
+    ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeGradient", defines);
     commandBuffer.BindPipeline(pipeline);
 
     auto ds = commandBuffer.GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
@@ -126,32 +126,32 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   uniforms->InvVolumeScale = 1.f / uniforms->VolumeScale;
   uniforms->MaskValue = (uint32_t)mOrganMask;
   uniforms->VolumePosition = WorldPosition();
-  uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice->FrameCount() % 0x00000000FFFFFFFFull);
+  uniforms->FrameIndex = (uint32_t)(commandBuffer.Device().FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
 	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
 
-  set<string> keywords;
-  if (mRawMask) keywords.emplace("MASK");
-  if (mBakedVolume) keywords.emplace("BAKED");
+  set<string> defines;
+  if (mRawMask) defines.emplace("MASK");
+  if (mBakedVolume) defines.emplace("BAKED");
   else if (ChannelCount(mRawVolume->Format()) == 1) {
-    keywords.emplace("SINGLE_CHANNEL");
-    if (mColorize) keywords.emplace("COLORIZE");
+    defines.emplace("SINGLE_CHANNEL");
+    if (mColorize) defines.emplace("COLORIZE");
   }
   switch (mShadingMode) {
     case ShadingMode::eLocal:
-      keywords.emplace("SHADING_LOCAL");
+      defines.emplace("SHADING_LOCAL");
       break;
   }
-  if (mGradient) keywords.emplace("GRADIENT_TEXTURE");
+  if (mGradient) defines.emplace("GRADIENT_TEXTURE");
 
   float3 camPos[2] {
-    (camera.ObjectToWorld() * float4(camera.EyeOffsetTranslate(StereoEye::eLeft), 1)).xyz,
-    (camera.ObjectToWorld() * float4(camera.EyeOffsetTranslate(StereoEye::eRight), 1)).xyz
+    (camera.Transform() * float4(camera.EyeOffsetTranslate(StereoEye::eLeft), 1)).xyz,
+    (camera.Transform() * float4(camera.EyeOffsetTranslate(StereoEye::eRight), 1)).xyz
   };
 
 
-  ComputePipeline* pipeline = mRenderPipeline->GetCompute("Render", keywords);
+  ComputePipeline* pipeline = mRenderPipeline->GetCompute("Render", defines);
   commandBuffer.BindPipeline(pipeline);
   auto renderTarget = framebuffer->Attachment("stm_main_resolve");
 

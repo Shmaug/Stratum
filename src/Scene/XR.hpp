@@ -1,11 +1,10 @@
 #pragma once
 
-#include <openxr/openxr.h>
-
-#include "Scene.hpp"
+#include "../Core/Window.hpp"
 #include "Renderers/PointerRenderer.hpp"
 
-struct XrSwapchainImageVulkanKHR;
+#include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
 
 namespace stm {
 
@@ -16,8 +15,8 @@ public:
     
     STRATUM_API bool OnSceneInit(Scene* scene);
 
-    STRATUM_API std::set<std::string> InstanceExtensionsRequired();
-    STRATUM_API std::set<std::string> DeviceExtensionsRequired(vk::PhysicalDevice device);
+    STRATUM_API set<string> InstanceExtensionsRequired();
+    STRATUM_API set<string> DeviceExtensionsRequired(vk::PhysicalDevice device);
 
     STRATUM_API void OnFrameStart();
     STRATUM_API void PostRender(CommandBuffer& commandBuffer);
@@ -30,20 +29,20 @@ private:
     XrSession mSession = XR_NULL_HANDLE;
 
     vk::Format mSwapchainFormat;
-    std::vector<XrSwapchain> mSwapchains;
-    std::vector<XrSwapchainImageVulkanKHR*> mSwapchainImages;
+    vector<XrSwapchain> mSwapchains;
+    vector<XrSwapchainImageVulkanKHR*> mSwapchainImages;
     uint32_t mViewCount = 0;
 
     XrSpace mReferenceSpace = XR_NULL_HANDLE;
     // Spaces for hands, etc
-    std::vector<XrSpace> mActionSpaces;
-    std::vector<XrPath> mHandPaths;
+    vector<XrSpace> mActionSpaces;
+    vector<XrPath> mHandPaths;
     XrActionSet mActionSet = XR_NULL_HANDLE;
 	XrAction mGrabAction = XR_NULL_HANDLE;
 	XrAction mPoseAction = XR_NULL_HANDLE;
 
     XrFrameState mFrameState;
-    std::vector<XrCompositionLayerProjectionView> mProjectionViews;
+    vector<XrCompositionLayerProjectionView> mProjectionViews;
     
     XrViewConfigurationType mViewConfiguration;
     XrReferenceSpaceType mReferenceSpaceType;
@@ -57,7 +56,7 @@ private:
     STRATUM_API void Cleanup();
 
     STRATUM_API void CreateSession();
-    STRATUM_API bool FailMsg(XrResult result, const std::string& errmsg);
+    STRATUM_API bool FailMsg(XrResult result, const string& errmsg);
 };
 
 }

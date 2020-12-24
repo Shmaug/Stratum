@@ -1,30 +1,32 @@
 #pragma once
 
-#include "../Core/Device.hpp"
+#include "Device.hpp"
 
 namespace stm {
 
 class Buffer {
-private:
-	vk::Buffer mBuffer;
-
 public:
-	const std::string mName;
-	Device* const mDevice;
-
-	STRATUM_API Buffer(const std::string& name, Device* device, const void* data, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
-	STRATUM_API Buffer(const std::string& name, Device* device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
+	Buffer() = delete;
+	Buffer(const Buffer&) = delete;
+	STRATUM_API Buffer(const string& name, Device& device, const byte_blob& data, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
+	STRATUM_API Buffer(const string& name, Device& device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
 	STRATUM_API ~Buffer();
 	inline vk::Buffer operator*() const { return mBuffer; }
 	inline const vk::Buffer* operator->() const { return &mBuffer; }
+	inline stm::Device& Device() const { return mDevice; }
 
 	// Copy data from the host to the device
 	// If this buffer is not host visible, then a staging buffer will be created and the data will be copied with Buffer::CopyFrom()
 	// If this buffer is not host visible and does not have the vk::BufferUsageFlagBits::eTransferDst flag, then the buffer will be re-created with vk::BufferUsageFlagBits::eTransferDst
 	// If this buffer is host visible, then the data is immediately memcpy'd
-	STRATUM_API void Copy(const void* data, vk::DeviceSize size);
-	template<typename T>
-	inline void Copy(const std::vector<T>& data) { Copy(data.data(), data.size() * sizeof(T)); }
+	STRATUM_API void Copy(const byte_blob& data);
+	STRATUM_API void Copy(const byte_blob& data, CommandBuffer& commandBuffer);
+	// Copy data from the host to the device
+	// If this buffer is not host visible, then a staging buffer will be created and the data will be copied with Buffer::CopyFrom()
+	// If this buffer is not host visible and does not have the vk::BufferUsageFlagBits::eTransferDst flag, then the buffer will be re-created with vk::BufferUsageFlagBits::eTransferDst
+	// If this buffer is host visible, then the data is immediately memcpy'd
+	template<typename T> inline void Copy(const vector<T>& data) { Copy(data.data(), data.size() * sizeof(T)); }
+
 	STRATUM_API void Copy(const Buffer& src);
 	STRATUM_API void Copy(const Buffer& src, CommandBuffer& commandBuffer);
 
@@ -35,6 +37,9 @@ public:
 	inline const Device::Memory::Block& MemoryBlock() const { return mMemoryBlock; }
 
 private:
+	vk::Buffer mBuffer;
+	stm::Device& mDevice;
+	string mName;
 	Device::Memory::Block mMemoryBlock;
 	vk::DeviceSize mSize = 0;
 	vk::BufferUsageFlags mUsageFlags;
@@ -44,26 +49,15 @@ private:
 
 class ArrayBufferView {
 public:
-	std::shared_ptr<Buffer> mBuffer;
-	vk::DeviceSize mBufferOffset = 0;
-	vk::DeviceSize mElementSize = 0;
+	shared_ptr<Buffer> mBuffer;
+	vk::DeviceSize mBufferOffset;
+	vk::DeviceSize mElementSize;
 	ArrayBufferView() = default;
-	ArrayBufferView(ArrayBufferView&&) = default;
 	ArrayBufferView(const ArrayBufferView&) = default;
-	ArrayBufferView& operator =(const ArrayBufferView&) = default;
-	ArrayBufferView& operator =(ArrayBufferView&&) = default;
-	inline ArrayBufferView(std::shared_ptr<Buffer> buffer, vk::DeviceSize bufferOffset = 0, vk::DeviceSize elementSize = 0)
-		: mBuffer(buffer), mBufferOffset(bufferOffset), mElementSize(elementSize) {};
-	inline bool operator==(const ArrayBufferView& rhs) const { return mBuffer == rhs.mBuffer && mBufferOffset == rhs.mBufferOffset && mElementSize == rhs.mElementSize; }
+	inline ArrayBufferView(shared_ptr<Buffer> buffer, vk::DeviceSize bufferOffset, vk::DeviceSize elementSize) : mBuffer(buffer), mBufferOffset(bufferOffset), mElementSize(elementSize) {};
+	ArrayBufferView& operator=(const ArrayBufferView&) = default;
+	ArrayBufferView& operator=(ArrayBufferView&& v) = default;
+	inline bool operator==(const ArrayBufferView& rhs) const = default;
 };
 
-}
-
-namespace std {
-template<>
-struct hash<stm::ArrayBufferView> {
-	inline size_t operator()(const stm::ArrayBufferView& v) const {
-		return stm::hash_combine(v.mBuffer, v.mBufferOffset, v.mElementSize);
-	}
-};
 }

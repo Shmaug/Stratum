@@ -1,18 +1,22 @@
 #pragma once
 
-#include <Scene/Object.hpp>
+#include "Object.hpp"
 
 namespace stm {
+#ifndef uint
+typedef uint32_t uint;
+#endif
+#include "..\Shaders\include\lighting.hlsli"
 
 enum class LightType : uint32_t {
-	eDirectional = LIGHT_SUN,
-	ePoint = LIGHT_POINT,
-	eSpot = LIGHT_SPOT,
+	eDirectional = LIGHT_DISTANT,
+	ePoint = LIGHT_SPHERE,
+	eSpot = LIGHT_CONE,
 };
 
 class Light : public Object {
 public:
-	inline Light(const std::string& name, Scene* scene) : Object(name, scene) {}
+	inline Light(const string& name, stm::Scene& scene) : Object(name, scene) {}
 
 	inline void Color(const float3& c) { mColor = c; }
 	inline float3 Color() const { return mColor; }
@@ -48,17 +52,17 @@ public:
 	inline void CascadeCount(uint32_t c) { mCascadeCount = c; }
 	inline uint32_t CascadeCount() { return mCascadeCount; }
 	
-	inline std::optional<AABB> Bounds() override {
+	inline optional<fAABB> Bounds() override {
 		float3 c, e;
 		switch (mType) {
 		case LightType::ePoint:
-			return AABB(WorldPosition() - mRange, WorldPosition() + mRange);
+			return fAABB(Position() - mRange, Position() + mRange);
 		case LightType::eSpot:
 			e = float3(0, 0, mRange * .5f);
 			c = float3(mRange * float2(sinf(mOuterSpotAngle * .5f)), mRange * .5f);
-			return AABB(c - e, c + e) * ObjectToWorld();
+			return fAABB(c - e, c + e) * Transform();
 		case LightType::eDirectional:
-			return AABB(float3(-1e10f), float3(1e10f));
+			return fAABB(float3(-1e10f), float3(1e10f));
 		}
 		return {};
 	}

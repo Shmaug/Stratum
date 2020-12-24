@@ -1,598 +1,289 @@
-#include <vulkan/vulkan.hpp>
+#ifdef WITH_DXC
+#include <wrl.h>
+#include <dxc/dxcapi.h>
+#endif
+
 #include <spirv_cross/spirv_cross.hpp>
 #include <shaderc/shaderc.hpp>
 
-#include "Data/Shader.hpp"
+#include "ShaderCompiler.hpp"
 
-using namespace std;
 using namespace stm;
 using namespace shaderc;
 
-shaderc_shader_kind vk_to_shaderc(vk::ShaderStageFlagBits stage) {
-	switch (stage) {
-		case vk::ShaderStageFlagBits::eVertex: return shaderc_vertex_shader;
-		case vk::ShaderStageFlagBits::eFragment: return shaderc_fragment_shader;
-		case vk::ShaderStageFlagBits::eGeometry: return shaderc_geometry_shader;
-		case vk::ShaderStageFlagBits::eTessellationControl: return shaderc_tess_control_shader;
-		case vk::ShaderStageFlagBits::eTessellationEvaluation: return shaderc_tess_evaluation_shader;
-		case vk::ShaderStageFlagBits::eCompute: return shaderc_compute_shader;
-	}
-	return shaderc_vertex_shader;
-}
-
 class Includer : public CompileOptions::IncluderInterface {
 private:
-	set<string> mIncludePaths;
+	set<fs::path> mIncludePaths;
+	map<string, string> mSources;
 
 public:
-	inline Includer(const set<string>& paths) : mIncludePaths(paths) {}
+	Includer(const set<fs::path>& paths) : mIncludePaths(paths) {}
 
-	inline shaderc_include_result* GetInclude(const char* requested_source, shaderc_include_type type, const char* requesting_source, size_t include_depth) override {
-		string fullpath;
-		
+	shaderc_include_result* GetInclude(const char* requested_source, shaderc_include_type type, const char* requesting_source, size_t include_depth) override {
+		fs::path fullpath;
 		if (type == shaderc_include_type_relative)
-			fullpath = fs::absolute(requesting_source).parent_path().string() + "/" + requested_source;
+			fullpath = fs::absolute(requesting_source).parent_path() / requested_source;
 		else
-			for (const string& p : mIncludePaths)
-				if (fs::exists(p + "/" + requested_source))
-					fullpath = p + "/" + requested_source;
+			for (const auto& p : mIncludePaths)
+				if (fs::exists(p / requested_source))
+					fullpath = p / requested_source;
+
+		if (mSources.count(fullpath.string()) == 0) mSources.emplace(fullpath.string(), ReadFile(fullpath));
+		auto it = mSources.find(fullpath.string());
 
 		shaderc_include_result* response = new shaderc_include_result();
-		size_t contentSize;
-		char* contentSource = ReadFile(fullpath, contentSize);
-		if (contentSource == nullptr) {
-			char* err = new char[512];
+		if (it == mSources.end() || it->second.empty()) {
+			char* err = new char[1024];
 			sprintf(err, "%s: Failed to evaluate %s include", requesting_source, type == shaderc_include_type_relative ? "relative" : "standard");
-			response->source_name = new char[1] { '\0' };
+			response->source_name = "\0";
 			response->source_name_length = 0;
 			response->content = err;
 			response->content_length = strlen(response->content);
 			response->user_data = err;
 		} else {
-			char* name = new char[fullpath.length()];
-			memcpy(name, fullpath.c_str(), fullpath.length());
-			response->source_name = name;
-			response->source_name_length = fullpath.length();
-			response->content = contentSource;
-			response->content_length = contentSize;
+			response->source_name = it->first.c_str();
+			response->source_name_length = it->first.length();
+			response->content = it->second.data();
+			response->content_length = it->second.length();
 			response->user_data = nullptr;
 		}
 		return response;
 	}
-	inline void ReleaseInclude(shaderc_include_result* data) override {
-		delete data->source_name;
-		delete data->content;
+	void ReleaseInclude(shaderc_include_result* data) override {
 		if (data->user_data) delete data->user_data;
+		mSources.erase(data->source_name);
 		delete data;
 	}
 };
 
-struct AssemblyOutputInfo {
-	fs::path mFilename;
-	string mEntryPoint;
-	set<string> mKeywords;
+static const unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>> gFormatMap {
+	{ spirv_cross::SPIRType::SByte, 	{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
+	{ spirv_cross::SPIRType::UByte, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
+	{ spirv_cross::SPIRType::Short, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
+	{ spirv_cross::SPIRType::UShort, 	{ vk::Format::eR16Uint, 	vk::Format::eR16G16Uint, 	 vk::Format::eR16G16B16Uint, 		vk::Format::eR16G16B16A16Uint } },
+	{ spirv_cross::SPIRType::Int, 		{ vk::Format::eR32Sint, 	vk::Format::eR32G32Sint, 	 vk::Format::eR32G32B32Sint, 		vk::Format::eR32G32B32A32Sint } },
+	{ spirv_cross::SPIRType::UInt, 		{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+	{ spirv_cross::SPIRType::Int64, 	{ vk::Format::eR64Sint, 	vk::Format::eR64G64Sint, 	 vk::Format::eR64G64B64Sint, 		vk::Format::eR64G64B64A64Sint } },
+	{ spirv_cross::SPIRType::UInt64, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+	{ spirv_cross::SPIRType::Half, 		{ vk::Format::eR16Sfloat, vk::Format::eR16G16Sfloat, vk::Format::eR16G16B16Sfloat,  vk::Format::eR16G16B16A16Sfloat } },
+	{ spirv_cross::SPIRType::Float, 	{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
+	{ spirv_cross::SPIRType::Double, 	{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
 };
-struct CompilerContext {
-	fs::path mFilename;
-	uint32_t mLineNumber;
-	vector<string>::iterator mCurrentWord;
-	vector<string>::iterator mLineEnd;
-
-	set<string> mInlineUniformBlocks;
-	vector<AssemblyOutputInfo> mAssemblyOutputs;
-
-	set<string> mMacros;
-	string mOptimizationLevel;
-
-	std::vector<Shader::Variant*> mResult;
-};
-
-#define DIRECTIVE_ERR(...) { fprintf_color(ConsoleColorBits::eRed, stderr, "%s(%u): Error: '%s': ", ctx.mFilename.c_str(), ctx.mLineNumber, directiveName.c_str()); fprintf_color(ConsoleColorBits::eRed, stderr, __VA_ARGS__); return false; }
-
-bool DirectiveAssemblyOutput(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a filename\n");
-	string filename = *ctx.mCurrentWord;
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an entry point\n");
-	ctx.mAssemblyOutputs.push_back({});
-	AssemblyOutputInfo& a = ctx.mAssemblyOutputs.back();
-	a.mEntryPoint = *ctx.mCurrentWord;
-	a.mFilename = filename;
-	while (++ctx.mCurrentWord != ctx.mLineEnd) a.mKeywords.insert(*ctx.mCurrentWord);
-	return true;
-}
-bool DirectiveBlend(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an attachment index\n");
-	uint32_t index = atoi(ctx.mCurrentWord->c_str());
-	auto cur = ctx.mCurrentWord;
-	for (auto& v : variants) {
-		ctx.mCurrentWord = cur;
-
-		if (v->mBlendStates.size() <= index)
-			for (uint32_t i = 0; i < 1 + index - v->mBlendStates.size(); i++) {
-				vk::PipelineColorBlendAttachmentState defaultBlendState = {};
-				defaultBlendState.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
-				defaultBlendState.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
-				defaultBlendState.srcAlphaBlendFactor = vk::BlendFactor::eSrcAlpha;
-				defaultBlendState.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
-				defaultBlendState.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-				v->mBlendStates.push_back(defaultBlendState);
-			}
-
-		vk::PipelineColorBlendAttachmentState& blendState = v->mBlendStates[index];
-		if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a blend op, or 'false'\n");
-		if (*ctx.mCurrentWord == "false") {
-			blendState.blendEnable = VK_FALSE;
-			if (++ctx.mCurrentWord != ctx.mLineEnd) blendState.colorWriteMask = atocolormask(*ctx.mCurrentWord);
-			continue;
-		}
-		blendState.blendEnable = VK_TRUE;
-		blendState.colorBlendOp = blendState.alphaBlendOp = atoblendop(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a source blend mode\n");
-		blendState.srcColorBlendFactor = atoblendfactor(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a destination blend mode\n");
-		blendState.dstColorBlendFactor = atoblendfactor(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) continue;
-		blendState.alphaBlendOp = atoblendop(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) continue;
-		blendState.srcAlphaBlendFactor = atoblendfactor(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) continue;
-		blendState.dstAlphaBlendFactor = atoblendfactor(*ctx.mCurrentWord);
-		if (++ctx.mCurrentWord == ctx.mLineEnd) continue;
-		blendState.colorWriteMask = atocolormask(*ctx.mCurrentWord);
-	}
-	return true;
-}
-bool DirectiveCull(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
-	if (*ctx.mCurrentWord == "front") 			for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eFront;
-	else if (*ctx.mCurrentWord == "back") 	for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eBack;
-	else if (*ctx.mCurrentWord == "false") 	for (auto& v : variants) v->mCullMode = vk::CullModeFlagBits::eNone;
-	else DIRECTIVE_ERR("expected one of 'front' 'back' 'false'\n");
-	return true;
-}
-bool DirectiveDepthOp(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a depth op\n");
-	for (auto& v : variants) v->mDepthStencilState.depthCompareOp = atocmp(*ctx.mCurrentWord);
-	return true;
-}
-bool DirectiveFill(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
-	if (*ctx.mCurrentWord == "solid") 		 	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::eFill;
-	else if (*ctx.mCurrentWord == "line")  	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::eLine;
-	else if (*ctx.mCurrentWord == "point") 	for (auto& v : variants) v->mPolygonMode = vk::PolygonMode::ePoint;
-	else DIRECTIVE_ERR("expected one of 'solid' 'line' 'point'\n");
-	return true;
-}
-bool DirectiveInlineUniformBlock(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a descriptor name\n");
-	ctx.mInlineUniformBlocks.insert(*ctx.mCurrentWord);
-	return true;
-}
-bool DirectiveKernel(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an entry point\n");
-	Shader::Variant* v = ctx.mResult.emplace_back(new Shader::Variant());
-	v->mShaderPass = "";
-	v->mModules.emplace_back(nullptr, {}, vk::ShaderStageFlagBits::eCompute, *ctx.mCurrentWord, {});
-	return true;
-}
-bool DirectiveMultiCompile(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	size_t kwc = ctx.mResult.size();
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one or more keywords\n");
-	// iterate all the keywords added by this multi_compile
-	while (ctx.mCurrentWord != ctx.mLineEnd) {
-		if (kwc == 0)
-			// duplicate all variants, add this keyword to each
-			for (uint32_t i = 0; i < variants.size(); i++)
-				ctx.mResult.emplace_back(new Shader::Variant(*variants[i]))->mKeywords.insert(*ctx.mCurrentWord);
-		else
-			// duplicate all existing variants, add this keyword to each
-			for (uint32_t i = 0; i < kwc; i++)
-				ctx.mResult.emplace_back(new Shader::Variant(*ctx.mResult[i]))->mKeywords.insert(*ctx.mCurrentWord);
-		++ctx.mCurrentWord;
-	}
-	return true;
-}
-bool DirectiveOptimization(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an an optimization level\n");
-	ctx.mOptimizationLevel = *ctx.mCurrentWord;
-	return true;
-}
-bool DirectivePass(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a pass name\n");
-	string shaderPass = *ctx.mCurrentWord;
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a vertex shader entry point\n");
-	string vs = *ctx.mCurrentWord;
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected a fragment shader entry point\n");
-	string fs = *ctx.mCurrentWord;
-
-	ctx.mResult.push_back({});
-	auto& v = ctx.mResult.back();
-	v.mShaderPass = shaderPass;
-	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eVertex, vs, {} });
-	v.mModules.push_back({ nullptr, {}, vk::ShaderStageFlagBits::eFragment, fs, {} });
-	return true;
-}
-bool DirectiveRenderQueue(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an integer\n");
-	for (auto& v : variants) v->mRenderQueue = atoi(ctx.mCurrentWord->c_str());
-	return true;
-}
-bool DirectiveSampleShading(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd || (*ctx.mCurrentWord != "true" && *ctx.mCurrentWord != "false")) DIRECTIVE_ERR("expected 'true' or 'false'\n");
-	bool s = *ctx.mCurrentWord == "true";
-	for (auto& v : variants) v->mSampleShading = s;
-	return true;
-}
-bool DirectiveStaticSampler(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected an sampler name\n");
-	string name = *ctx.mCurrentWord;
-
-	vk::SamplerCreateInfo samplerInfo = {};
-	samplerInfo.magFilter = vk::Filter::eLinear;
-	samplerInfo.minFilter = vk::Filter::eLinear;
-	samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
-	samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
-	samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
-	samplerInfo.anisotropyEnable = VK_TRUE;
-	samplerInfo.maxAnisotropy = 2;
-	samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
-	samplerInfo.unnormalizedCoordinates = VK_FALSE;
-	samplerInfo.compareEnable = VK_FALSE;
-	samplerInfo.compareOp = vk::CompareOp::eAlways;
-	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-	samplerInfo.minLod = 0;
-	samplerInfo.maxLod = 12;
-	samplerInfo.mipLodBias = 0;
-
-	while (++ctx.mCurrentWord != ctx.mLineEnd) {
-		size_t eq = ctx.mCurrentWord->find('=');
-		if (eq == string::npos) DIRECTIVE_ERR("expected arguments in the form '<arg>=<value>'\n");
-		string id = ctx.mCurrentWord->substr(0, eq);
-		string val = ctx.mCurrentWord->substr(eq + 1);
-
-		if      (id == "magFilter")		  samplerInfo.magFilter = atofilter(val);
-		else if (id == "minFilter")			samplerInfo.minFilter = atofilter(val);
-		else if (id == "filter")				samplerInfo.minFilter = samplerInfo.magFilter = atofilter(val);
-		else if (id == "compareOp") {
-			vk::CompareOp cmp = atocmp(val);
-			samplerInfo.compareEnable = VK_TRUE;
-			samplerInfo.compareOp = cmp;
-		}
-		else if (id == "addressModeU")	samplerInfo.addressModeU = atoaddressmode(val);
-		else if (id == "addressModeV")	samplerInfo.addressModeV = atoaddressmode(val);
-		else if (id == "addressModeW")	samplerInfo.addressModeW = atoaddressmode(val);
-		else if (id == "addressMode")	 	samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW = atoaddressmode(val);
-		else if (id == "maxAnisotropy") {
-			float aniso = (float)atof(val.c_str());
-			samplerInfo.anisotropyEnable = aniso <= 0 ? VK_FALSE : VK_TRUE;
-			samplerInfo.maxAnisotropy = aniso;
-		}
-		else if (id == "borderColor")				samplerInfo.borderColor = atobordercolor(val);
-		else if (id == "unnormalizedCoordinates")	samplerInfo.unnormalizedCoordinates = val == "true" ? VK_TRUE : VK_FALSE;
-		else if (id == "mipmapMode") samplerInfo.mipmapMode = atomipmapmode(val);
-		else if (id == "minLod") samplerInfo.minLod = (float)atof(val.c_str());
-		else if (id == "maxLod") samplerInfo.maxLod = (float)atof(val.c_str());
-		else if (id == "mipLodBias") samplerInfo.mipLodBias = (float)atof(val.c_str());
-		else DIRECTIVE_ERR("unknown argument %s (expected one of '[min,mag]Filter' 'addressMode[U,V,W]' 'borderColor' 'compareOp' 'maxAnisotropy' 'unnormalizedCoordinates')\n", id.c_str());
-	}
-
-	for (auto& v : variants) v->mImmutableSamplers[name] = samplerInfo;
-	return true;
-}
-bool DirectiveZTest(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	if (*ctx.mCurrentWord == "true") for (auto& v : variants) v->mDepthStencilState.depthTestEnable = VK_TRUE;
-	else if (*ctx.mCurrentWord == "false") for (auto& v : variants) v->mDepthStencilState.depthTestEnable = VK_FALSE;
-	else DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	return true;
-}
-bool DirectiveZWrite(CompilerContext& ctx, const string& directiveName, const vector<Shader::Variant*>& variants) {
-	if (++ctx.mCurrentWord == ctx.mLineEnd) DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	if (*ctx.mCurrentWord == "true") for (auto& v : variants) v->mDepthStencilState.depthWriteEnable = VK_TRUE;
-	else if (*ctx.mCurrentWord == "false") for (auto& v : variants) v->mDepthStencilState.depthWriteEnable = VK_FALSE;
-	else DIRECTIVE_ERR("expected one of 'true' 'false'\n");
-	return true;
-}
-
-map<string, bool(*)(CompilerContext&, const string&, const vector<Shader::Variant*>&)> gCompilerDirectives {
-	{ "assembly_output", DirectiveAssemblyOutput },
-	{ "blend", DirectiveBlend },
-	{ "cull", DirectiveCull },
-	{ "depth_op", DirectiveDepthOp },
-	{ "fill", DirectiveFill },
-	{ "inline_uniform_block", DirectiveInlineUniformBlock },
-	{ "kernel", DirectiveKernel },
-	{ "multi_compile", DirectiveMultiCompile },
-	{ "optimization", DirectiveOptimization },
-	{ "pass", DirectivePass },
-	{ "render_queue", DirectiveRenderQueue },
-	{ "sample_shading", DirectiveSampleShading },
-	{ "static_sampler", DirectiveStaticSampler },
-	{ "ztest", DirectiveZTest },
-	{ "zwrite", DirectiveZWrite }
+static const unordered_map<vk::ShaderStageFlagBits, shaderc_shader_kind> gShaderStageMap {
+	{ vk::ShaderStageFlagBits::eVertex, shaderc_vertex_shader },
+	{ vk::ShaderStageFlagBits::eFragment, shaderc_fragment_shader },
+	{ vk::ShaderStageFlagBits::eGeometry, shaderc_geometry_shader },
+	{ vk::ShaderStageFlagBits::eTessellationControl, shaderc_tess_control_shader },
+	{ vk::ShaderStageFlagBits::eTessellationEvaluation, shaderc_tess_evaluation_shader },
+	{ vk::ShaderStageFlagBits::eCompute, shaderc_compute_shader }
 };
 
-int ParseCompilerDirectives(CompilerContext& ctx, const fs::path& filename, const string& source, const set<string>& includePaths, uint32_t includeDepth = 0, stack<pair<string, set<string>>>& selectorStack = stack<pair<string, set<string>>>()) {
+size_t SizeOf(const spirv_cross::SPIRType& type, const spirv_cross::Compiler& compiler) {
+	size_t sz = 0;
+	switch (type.basetype) {
+	case spirv_cross::SPIRType::Boolean:
+	case spirv_cross::SPIRType::SByte:
+	case spirv_cross::SPIRType::UByte:
+		sz = 1;
+		break;
+	case spirv_cross::SPIRType::Short:
+	case spirv_cross::SPIRType::UShort:
+	case spirv_cross::SPIRType::Half:
+		sz = 2;
+		break;
+	case spirv_cross::SPIRType::Int:
+	case spirv_cross::SPIRType::UInt:
+	case spirv_cross::SPIRType::Float:
+		sz = 4;
+		break;
+	case spirv_cross::SPIRType::Int64:
+	case spirv_cross::SPIRType::UInt64:
+	case spirv_cross::SPIRType::Double:
+		sz = 8;
+		break;
+	case spirv_cross::SPIRType::Struct:
+		sz = (uint32_t)compiler.get_declared_struct_size(type);
+		break;
+	case spirv_cross::SPIRType::Unknown:
+	case spirv_cross::SPIRType::Void:
+	case spirv_cross::SPIRType::AtomicCounter:
+	case spirv_cross::SPIRType::Image:
+	case spirv_cross::SPIRType::SampledImage:
+	case spirv_cross::SPIRType::Sampler:
+	case spirv_cross::SPIRType::AccelerationStructure:
+		throw logic_error("Unknown type id " + to_string((size_t)type.basetype));
+	}
+
+	sz *= type.columns * type.vecsize;
+	for (uint32_t dim : type.array) sz *= dim;
+	return sz;
+}
+
+void ShaderCompiler::DirectiveCompile(SpirvModuleGroup& modules, word_iterator arg, const word_iterator& argEnd) {
+	static const map<string, vk::ShaderStageFlagBits> stageMap {
+    { "vertex", vk::ShaderStageFlagBits::eVertex },
+    { "tess_control", vk::ShaderStageFlagBits::eTessellationControl },
+    { "tess_evaluation", vk::ShaderStageFlagBits::eTessellationEvaluation },
+    { "geometry", vk::ShaderStageFlagBits::eGeometry },
+    { "fragment", vk::ShaderStageFlagBits::eFragment }, { "pixel", vk::ShaderStageFlagBits::eFragment },
+    { "compute", vk::ShaderStageFlagBits::eCompute }, { "kernel", vk::ShaderStageFlagBits::eCompute },
+    { "raygen_khr", vk::ShaderStageFlagBits::eRaygenKHR },
+    { "any_hit_khr", vk::ShaderStageFlagBits::eAnyHitKHR },
+    { "closest_hit_khr", vk::ShaderStageFlagBits::eClosestHitKHR },
+    { "miss_khr", vk::ShaderStageFlagBits::eMissKHR },
+    { "intersection_khr", vk::ShaderStageFlagBits::eIntersectionKHR },
+    { "callable_khr", vk::ShaderStageFlagBits::eCallableKHR },
+    { "task_nv", vk::ShaderStageFlagBits::eTaskNV },
+    { "mesh_nv", vk::ShaderStageFlagBits::eMeshNV },
+    { "any_hit_nv", vk::ShaderStageFlagBits::eAnyHitNV },
+    { "callable_nv", vk::ShaderStageFlagBits::eCallableNV },
+    { "closest_hit_nv", vk::ShaderStageFlagBits::eClosestHitNV },
+    { "intersection_nv", vk::ShaderStageFlagBits::eIntersectionNV },
+    { "miss_nv", vk::ShaderStageFlagBits::eMissNV },
+    { "raygen_nv", vk::ShaderStageFlagBits::eRaygenNV }
+	};
+	while (++arg != argEnd) {
+		SpirvModule m;
+		if (!stageMap.count(*arg)) throw logic_error("unknown shader stage: " + *arg);
+		m.mStage = stageMap.at(*arg);
+		if (++arg == argEnd) throw logic_error("expected an entry point");
+		m.mEntryPoint = *arg;
+		modules.mModules.push_back(m);
+	}
+}
+
+SpirvModuleGroup ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
 	uint32_t lineNumber = 0;
+
+	SpirvModuleGroup modules;
 
 	string line;
 	istringstream srcstream(source);
 	while (getline(srcstream, line)) {
 		lineNumber++;
 		istringstream linestream(line);
-		vector<string> words{ istream_iterator<string>{ linestream }, istream_iterator<string>{} };
+		vector<string> words{ istream_iterator<string>(linestream), istream_iterator<string>{} };
 
-		if (words.empty()) continue;
+		if (words.size() < 2 || words[0][0] != '#') continue;
 
-		auto cur = words.begin();
-
-		if ((*cur)[0] != '#') continue;
-
-		if (*cur == "#pragma") {
-			if (++cur == words.end() || gCompilerDirectives.count(*cur) == 0) { continue; }
-
-			auto prevFilename = ctx.mFilename;
-
-			ctx.mFilename = filename;
-			ctx.mLineNumber = lineNumber;
-			ctx.mCurrentWord = ++words.begin();
-			ctx.mLineEnd = words.end();
-
-			vector<Shader::Variant*> variants;
-			for (const auto& [kw, v] : ctx.mResult) {
-				bool exclude = false;
-				if (!selectorStack.empty())
-					for (const string& kw : selectorStack.top().second)
-						if ((kw[0] == '!' && v.mKeywords.count(kw.substr(1))) || (kw[0] != '!' && !v.mKeywords.count(kw))) { exclude = true; break; }
-				if (!exclude) variants.push_back(&v);
+		if (words[0] == "#pragma") {
+			string directive = words[1];
+			if (!gCompilerDirectives.count(directive))
+				throw logic_error(filename.string() + "(" + to_string(lineNumber) + "): Error: Unknown directive '" + words[1] + "'");
+			try {
+				(this->*gCompilerDirectives.at(directive))(modules, words.begin() + 1, words.end());
+			} catch (logic_error e) {
+				throw logic_error(filename.string() + "(" + to_string(lineNumber) + "): " + directive + " Error: " + e.what());
 			}
-			ctx.mFilename = prevFilename;
-			if (!gCompilerDirectives.at(*cur)(ctx, *cur, variants)) {
-				fprintf_color(ConsoleColorBits::eRed, stderr, "%s(%u): Error: Unknown directive '%s'\n", ctx.mFilename.c_str(), ctx.mLineNumber, cur->c_str());
-				return 1;
-			}
-
-		} else if (*cur == "#include") {
-			if (++cur == words.end() || cur->length() <= 2) continue;
+		} else if (words[0] == "#include") {
+			if (words[1].length() <= 2) continue;
 			
 			shaderc_include_type includeType = shaderc_include_type_relative;
-			string includePath = cur->substr(1, cur->length() - 2);
-			if ((*cur)[0] == '<') includeType = shaderc_include_type_standard;
+			string includePath = words[1].substr(1, words[1].length() - 2);
+			if (words[1][0] == '<') includeType = shaderc_include_type_standard;
 			
-			Includer includer(includePaths);
+			Includer includer(mIncludePaths);
 			shaderc_include_result* includeResult = includer.GetInclude(includePath.c_str(), includeType, filename.string().c_str(), includeDepth);
 			if (includeResult->content_length)
-				ParseCompilerDirectives(ctx, includeResult->source_name, includeResult->content, includePaths, includeDepth + 1, selectorStack);
+				ParseCompilerDirectives(includeResult->source_name, includeResult->content, includeDepth + 1);
 			includer.ReleaseInclude(includeResult);
-			
-		} else if (*cur == "#ifdef") {
-			if (++cur == words.end()) continue;
-			set<string> top = selectorStack.empty() ? set<string>() : selectorStack.top().second;
-			top.insert(*cur);
-			selectorStack.push({ "!" + *cur, top});
-		} else if (*cur == "#ifndef") {
-			if (++cur == words.end()) continue;
-			set<string> top = selectorStack.empty() ? set<string>() : selectorStack.top().second;
-			top.insert("!" + *cur);
-			selectorStack.push({ *cur, top });
-		} else if (*cur == "#if") {
-			set<string> top = selectorStack.empty() ? set<string>() : selectorStack.top().second;
-			
-			// TODO: defined() etc
-
-			selectorStack.push({ "", top });
-		} else if (*cur == "#elif" || *cur == "#else" || *cur == "#endif") {
-			string kw = selectorStack.top().first;
-			selectorStack.pop();
-			if (*cur == "#elif" || *cur == "#else") {
-				auto next = selectorStack.empty() ? set<string>() : selectorStack.top().second;
-				if (!kw.empty()) next.insert(kw);
-
-				// defined() etc
-
-				selectorStack.push({ "", next });
-			}
 		}
 	}
 
-	return 0;
+	return modules;
 }
-int SpirvReflection(const CompilerContext& ctx, Shader::Variant& destVariant, SpirvModule& spirv) {
-	spirv_cross::Compiler compiler(spirv.mSpirvBinary.data(), spirv.mSpirvBinary.size());
-	spirv_cross::ShaderResources resources = compiler.get_shader_resources();
-
-	map<string, VertexAttributeType> attributeMap {
-		{ "POSITION", 	VertexAttributeType::ePosition },
-		{ "NORMAL", 		VertexAttributeType::eNormal },
-		{ "TANGENT", 		VertexAttributeType::eTangent },
-		{ "BITANGENT", 	VertexAttributeType::eBitangent },
-		{ "TEXCOORD", 	VertexAttributeType::eTexcoord },
-		{ "COLOR", 			VertexAttributeType::eColor },
-		{ "PSIZE", 			VertexAttributeType::ePointSize },
-		{ "POINTSIZE", 	VertexAttributeType::ePointSize }
-	};
-	
-	unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>> formatMap {
-		{ spirv_cross::SPIRType::SByte, 	{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
-		{ spirv_cross::SPIRType::UByte, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
-		{ spirv_cross::SPIRType::Short, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
-		{ spirv_cross::SPIRType::UShort, 	{ vk::Format::eR16Uint, 	vk::Format::eR16G16Uint, 	 vk::Format::eR16G16B16Uint, 		vk::Format::eR16G16B16A16Uint } },
-		{ spirv_cross::SPIRType::Int, 		{ vk::Format::eR32Sint, 	vk::Format::eR32G32Sint, 	 vk::Format::eR32G32B32Sint, 		vk::Format::eR32G32B32A32Sint } },
-		{ spirv_cross::SPIRType::UInt, 		{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
-		{ spirv_cross::SPIRType::Int64, 	{ vk::Format::eR64Sint, 	vk::Format::eR64G64Sint, 	 vk::Format::eR64G64B64Sint, 		vk::Format::eR64G64B64A64Sint } },
-		{ spirv_cross::SPIRType::UInt64, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
-		{ spirv_cross::SPIRType::Half, 		{ vk::Format::eR16Sfloat, vk::Format::eR16G16Sfloat, vk::Format::eR16G16B16Sfloat,  vk::Format::eR16G16B16A16Sfloat } },
-		{ spirv_cross::SPIRType::Float, 	{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
-		{ spirv_cross::SPIRType::Double, 	{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
-	};
-	
-	auto RegisterResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
-		auto& binding = destVariant.mDescriptorSetBindings[resource.name];
-		binding.mSet = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		binding.mBinding.stageFlags |= spirv.mStage;
-		binding.mBinding.binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
-		if (ctx.mInlineUniformBlocks.count(resource.name)) {
-			binding.mBinding.descriptorType = vk::DescriptorType::eInlineUniformBlockEXT;
-			binding.mBinding.descriptorCount = (uint32_t)compiler.get_declared_struct_size(compiler.get_type(resource.type_id));
-		} else {
-		binding.mBinding.descriptorCount = compiler.get_type(resource.type_id).array.empty() ? 1 : compiler.get_type(resource.type_id).array[0];
-		binding.mBinding.descriptorType = type;
-		}
-	};
-	
-	for (const auto& r : resources.stage_inputs) {
-		auto& input = spirv.mInputs[r.name];
-		auto& type = compiler.get_type(r.base_type_id);
-
-		input.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
-		input.mFormat = formatMap.at(type.basetype)[type.vecsize-1];
-		input.mTypeIndex = 0;
-
-		string semantic = compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
-		if (semantic.empty()) continue;
-
-		size_t semanticIndex = semantic.find_first_of("0123456789");
-		string semanticName = semantic;
-		if (semanticIndex != string::npos) {
-			input.mTypeIndex = atoi(semantic.c_str() + semanticIndex);
-			semanticName = semantic.substr(0, semanticIndex);
-		}
-		if (semanticName.back() == '_') semanticName = semanticName.substr(0, semanticName.length() - 1);
-		input.mType = attributeMap.at(semanticName);
-	}
-	for (const auto& r : resources.separate_images) 	RegisterResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
-	for (const auto& r : resources.storage_images) 		RegisterResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
-	for (const auto& r : resources.sampled_images) 		RegisterResource(r, vk::DescriptorType::eCombinedImageSampler);
-	for (const auto& r : resources.storage_buffers) 	RegisterResource(r, vk::DescriptorType::eStorageBuffer);
-	for (const auto& r : resources.separate_samplers) RegisterResource(r, vk::DescriptorType::eSampler);
-	for (const auto& r : resources.uniform_buffers) 	RegisterResource(r, vk::DescriptorType::eUniformBuffer);
-	for (const auto& r : resources.subpass_inputs) 		RegisterResource(r, vk::DescriptorType::eInputAttachment);
-	for (const auto& r : resources.acceleration_structures) 		RegisterResource(r, vk::DescriptorType::eAccelerationStructureKHR);
-	for (const auto& r : resources.push_constant_buffers) {
-		spirv_cross::SPIRType type = compiler.get_type(r.base_type_id);
-		for (uint32_t i = 0; i < type.member_types.size(); i++) {
-			spirv_cross::SPIRType mtype = compiler.get_type(type.member_types[i]);
-			string name = compiler.get_member_name(r.base_type_id, i);
-			
-			destVariant.mPushConstants[name].stageFlags |= spirv.mStage;
-			destVariant.mPushConstants[name].offset = compiler.type_struct_member_offset(type, i);
-
-			switch (mtype.basetype) {
-			case spirv_cross::SPIRType::Boolean:
-			case spirv_cross::SPIRType::SByte:
-			case spirv_cross::SPIRType::UByte:
-				destVariant.mPushConstants[name].size = 1;
-				break;
-			case spirv_cross::SPIRType::Short:
-			case spirv_cross::SPIRType::UShort:
-			case spirv_cross::SPIRType::Half:
-				destVariant.mPushConstants[name].size = 2;
-				break;
-			case spirv_cross::SPIRType::Int:
-			case spirv_cross::SPIRType::UInt:
-			case spirv_cross::SPIRType::Float:
-				destVariant.mPushConstants[name].size = 4;
-				break;
-			case spirv_cross::SPIRType::Int64:
-			case spirv_cross::SPIRType::UInt64:
-			case spirv_cross::SPIRType::Double:
-				destVariant.mPushConstants[name].size = 8;
-				break;
-			case spirv_cross::SPIRType::Struct:
-				destVariant.mPushConstants[name].size = (uint32_t)compiler.get_declared_struct_size(mtype);
-				break;
-			case spirv_cross::SPIRType::Unknown:
-			case spirv_cross::SPIRType::Void:
-			case spirv_cross::SPIRType::AtomicCounter:
-			case spirv_cross::SPIRType::Image:
-			case spirv_cross::SPIRType::SampledImage:
-			case spirv_cross::SPIRType::Sampler:
-			case spirv_cross::SPIRType::AccelerationStructure:
-				fprintf(stderr, "Warning: Unknown type for push constant: %s\n", name.c_str());
-				destVariant.mPushConstants[name].size = 0;
-				break;
-			}
-
-			destVariant.mPushConstants[name].size *= mtype.columns * mtype.vecsize;
-			for (uint32_t dim : mtype.array) destVariant.mPushConstants[name].size *= dim;
-		}
-	}
-
-	if (spirv.mStage == vk::ShaderStageFlagBits::eCompute) {
-		auto entryPoints = compiler.get_entry_points_and_stages();
-		for (const auto& e : entryPoints) {
-			auto& ep = compiler.get_entry_point(e.name, e.execution_model);
-			destVariant.mWorkgroupSize = { ep.workgroup_size.x, ep.workgroup_size.y, ep.workgroup_size.z };
-		}
-	}
-
-	return 0;
-}
-
-int CompileSpirv(const fs::path& filename, const set<string>& macros, const string& optimizationLevel, const set<string>& includePaths, SpirvModule& dest) {
-	string source;
-	ReadFile(filename, source);
-
+vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const string& entryPoint, vk::ShaderStageFlagBits stage, const set<string>& defines) {
 	bool hlsl = filename.extension() == ".hlsl";
-	// TODO: Try to compile with DXC
-	/*
+	#if WITH_DXC
 	if (hlsl) {
-		string spvFile = fs::temp_directory_path().string() + "/" + p.filename().stem().string() + ".spv";
-		if (fs::exists(spvFile)) fs::remove(spvFile);
-		string cmd = "dxc -spirv ";
-		switch (dest.mStage) {
+		using namespace Microsoft::WRL;
+		ComPtr<IDxcLibrary> library;
+		ComPtr<IDxcCompiler> compiler;
+		DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&library));
+		DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
+
+		ComPtr<IDxcBlobEncoding> sourceBlob;
+		uint32_t codePage = CP_UTF8;
+		library->CreateBlobFromFile(filename.c_str(), &codePage, &sourceBlob);
+		ComPtr<IDxcIncludeHandler> includeHandler;
+		library->CreateIncludeHandler(&includeHandler);
+
+		vector<const wchar_t*> args {
+			L"-spirv",
+			L"-fspv-target-env=vulkan1.2",
+			L"-fspv-reflect",
+			L"-Zpc", // column-major matrix packing
+			L"-Zi",  // debug information
+		};
+
+		vector<wstring> wincludes;
+		for (const auto& p : mIncludePaths) wincludes.push_back(L"-I " + p.wstring());
+		for (const auto& inc : wincludes) args.push_back(inc.c_str());
+
+		wstring entryP = s2ws(entryPoint);
+
+		wstring targetProfile;
+		switch (stage) {
 			case vk::ShaderStageFlagBits::eCompute:
-				cmd += "-T cs_6_6 ";
+				targetProfile = L"cs_6_6";
 				break;
 			case vk::ShaderStageFlagBits::eVertex:
-				cmd += "-T vs_6_6 ";
+				targetProfile = L"vs_6_6";
 				break;
 			case vk::ShaderStageFlagBits::eFragment:
-				cmd += "-T ps_6_6 ";
+				targetProfile = L"ps_6_6";
 				break;
-			default:
-				return 1;
 		}
-		cmd += "-E " + dest.mEntryPoint + " ";
-		cmd += filename + " -Fo " + spvFile;
-		cmd += "-nologo ";
-		if (optimizationLevel == "zero") cmd += "-O0 ";
-
-		for (const string& i : includePaths) cmd += "-I \"" + i + "\" ";
-		for (const string& m : macros) cmd += "-D" + m + " ";
-
-		if (int ret = system(cmd.c_str())) return ret;
-		if (fs::exists(spvFile)) {
-			fs::remove(spvFile);
-
-			vector<uint8_t> spv;
-			ReadFile(spvFile, spv);
-
-			dest.mSpirvBinary.resize(spv.size() / sizeof(uint32_t));
-			memcpy(dest.mSpirvBinary.data(), spv.data(), spv.size());
-
-			return 0;
+		
+		vector<wstring> wdefines;
+		wdefines.reserve(defines.size()*2);
+		vector<DxcDefine> dxcDefines;
+		for (const auto& s : defines) {
+			auto eq = s.find('=');
+			wdefines.push_back(s2ws(s.substr(0,eq)));
+			if (eq == string::npos) wdefines.push_back(wstring());
+			else 										wdefines.push_back(s2ws(s.substr(eq+1)));
+			dxcDefines.push_back({ (wdefines.end()-2)->c_str(), (wdefines.end()-1)->c_str() });
 		}
+
+		ComPtr<IDxcOperationResult> result;
+		compiler->Compile(sourceBlob.Get(), filename.c_str(), entryP.c_str(), targetProfile.c_str(), args.data(), (uint32_t)args.size(), dxcDefines.data(), (uint32_t)dxcDefines.size(), includeHandler.Get(), &result);
+
+		HRESULT status;
+		result->GetStatus(&status);
+		if (status != S_OK) {
+			ComPtr<IDxcBlobEncoding> msg;
+			result->GetErrorBuffer(msg.GetAddressOf());
+			throw logic_error((char*)msg->GetBufferPointer());
+		}
+
+		ComPtr<IDxcBlob> spirvBlob;
+		DXC_OUT_KIND outputKind = (DXC_OUT_KIND)result->GetResult(&spirvBlob);
+		vector<uint32_t> r(spirvBlob->GetBufferSize()/sizeof(uint32_t));
+		memcpy(r.data(), spirvBlob->GetBufferPointer(), spirvBlob->GetBufferSize());
+		return r;
 	}
-	*/
+	#endif
+
+	string source = ReadFile(filename);
 
 	// Compile with shaderc
-
 	CompileOptions options;
-	options.SetHlslFunctionality1(true);
-	options.SetOptimizationLevel(shaderc_optimization_level_zero);
+	if (hlsl) {
+		options.SetHlslFunctionality1(true);
+		options.SetHlslIoMapping(true);
+		options.SetSourceLanguage(shaderc_source_language_hlsl);
+	} else
+		options.SetSourceLanguage(shaderc_source_language_glsl);
 	options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
 	options.SetTargetSpirv(shaderc_spirv_version_1_3);
-	options.SetAutoBindUniforms(false);
+	options.SetOptimizationLevel(shaderc_optimization_level_performance);
+	options.SetAutoMapLocations(true);
 	options.SetGenerateDebugInfo();
-	options.SetSourceLanguage(hlsl ? shaderc_source_language_hlsl : shaderc_source_language_glsl);
-	options.SetIncluder(make_unique<Includer>(includePaths));
-	for (auto& m : macros) options.AddMacroDefinition(m);
-	options.SetOptimizationLevel(shaderc_optimization_level_zero);
-	if (optimizationLevel == "performance") options.SetOptimizationLevel(shaderc_optimization_level_performance);
-	else if (optimizationLevel == "size") options.SetOptimizationLevel(shaderc_optimization_level_size);
+	options.SetIncluder(make_unique<Includer>(mIncludePaths));
+	for (auto& m : defines) options.AddMacroDefinition(m);
 	Compiler compiler;
-	SpvCompilationResult result = compiler.CompileGlslToSpv(source, vk_to_shaderc(dest.mStage), filename.string().c_str(), dest.mEntryPoint.c_str(), options);
+	SpvCompilationResult result = compiler.CompileGlslToSpv(source, gShaderStageMap.at(stage), filename.string().c_str(), entryPoint.c_str(), options);
 	string msg = result.GetErrorMessage();
 	if (msg.size()) {
 		stringstream ss(msg);
@@ -604,76 +295,121 @@ int CompileSpirv(const fs::path& filename, const set<string>& macros, const stri
 				fprintf_color(ConsoleColorBits::eRed, stderr, "%s\n", line.c_str());
 		}
 	}
-	dest.mSpirvBinary.clear();
-	for (const uint32_t& c : result) dest.mSpirvBinary.push_back(c);
-	return result.GetCompilationStatus() == shaderc_compilation_status_success ? 0 : 1;
+	vector<uint32_t> spirv;
+	for (const uint32_t& c : result) spirv.push_back(c);
+	if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+		throw logic_error(result.GetErrorMessage());
+	return spirv;
 }
-Shader CompileShader(const string& filename, const set<string>& includePaths) {
-	Shader destShader;
+void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
+	spirv_cross::Compiler compiler(shaderModule.mSpirv.data(), shaderModule.mSpirv.size());
+	spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+
+	auto RegisterDescriptorResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
+		auto& spirType = compiler.get_type(resource.type_id);
+
+		auto& binding = shaderModule.mDescriptorBindings[resource.name];
+		binding.mSet = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
+		binding.mBinding.stageFlags |= shaderModule.mStage;
+		binding.mBinding.binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
+		binding.mBinding.descriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
+		binding.mBinding.descriptorType = type;
+	};
 	
-	CompilerContext context = {};
-	context.mFilename = filename;
+	for (const auto& r : resources.separate_images) 	RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
+	for (const auto& r : resources.storage_images) 		RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
+	for (const auto& r : resources.sampled_images) 		RegisterDescriptorResource(r, vk::DescriptorType::eCombinedImageSampler);
+	for (const auto& r : resources.storage_buffers) 	RegisterDescriptorResource(r, vk::DescriptorType::eStorageBuffer);
+	for (const auto& r : resources.separate_samplers) RegisterDescriptorResource(r, vk::DescriptorType::eSampler);
+	for (const auto& r : resources.uniform_buffers) 	RegisterDescriptorResource(r, vk::DescriptorType::eUniformBuffer);
+	for (const auto& r : resources.subpass_inputs) 		RegisterDescriptorResource(r, vk::DescriptorType::eInputAttachment);
+	for (const auto& r : resources.acceleration_structures) 		RegisterDescriptorResource(r, vk::DescriptorType::eAccelerationStructureKHR);
+	
+	uint32_t other_idx = 0;
+	for (const auto& r : resources.stage_inputs) {
+		auto& var = shaderModule.mStageInputs[r.name];
+		auto& type = compiler.get_type(r.base_type_id);
 
-	string source;
-	if (!ReadFile(filename, source)) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: Error: Failed to open file for reading\n", filename.c_str());
-		return destShader;
+		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
+		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
+
+		string semantic = compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
+		size_t l = semantic.find_first_of("0123456789");
+		if (l != string::npos)
+			var.mTypeIndex = atoi(semantic.c_str() + l);
+		else {
+			var.mTypeIndex = 0;
+			l = semantic.length();
+		}
+		if (l > 0 && semantic[l-1] == '_') l--;
+		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), tolower);
+		if (gAttributeMap.count(semantic))
+			var.mType = gAttributeMap.at(semantic);
+		else
+			var.mType = VertexAttributeType::eOther;
 	}
-	if (int result = ParseCompilerDirectives(context, filename, source, includePaths)) return destShader;
+	for (const auto& r : resources.stage_outputs) {
+		auto& var = shaderModule.mStageOutputs[r.name];
+		auto& type = compiler.get_type(r.base_type_id);
 
-	shaderc_compilation_status status = shaderc_compilation_status_success;
+		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
+		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
 
-	for (auto& variant : destShader.mVariants) {
-		set<string> macros = context.mMacros;
-		for (const string& kw : variant.mKeywords) macros.insert(kw);
-		for (uint32_t i = 0; i < variant.mModules.size(); i++) {
-			
-			set<string> m = macros;
-			m.insert("ENTRYP_" + variant.mModules[i].mEntryPoint);
-			if (int result = CompileSpirv(context.mFilename, m, context.mOptimizationLevel, includePaths, variant.mModules[i])) return destShader;
-			if (int result = SpirvReflection(context, variant, variant.mModules[i])) return destShader;
-			
-			// do assembly output
-			for (const auto& assemblyOutput : context.mAssemblyOutputs)
-				if (variant.mModules[i].mEntryPoint == assemblyOutput.mEntryPoint) {
-					bool f = true;
-					for (const string& kw : assemblyOutput.mKeywords) if (!variant.mKeywords.count(kw)) { f = false; break; }
-					for (const string& kw : variant.mKeywords) if (!assemblyOutput.mKeywords.count(kw)) { f = false; break; }
-					if (!f) continue;
-					/*
-					// TODO: disassemble without spirv-tools
-					spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
-					string assembly;
-					if (tools.Disassemble(variant.mModules[i].mSpirvBinary, &assembly)) {
-						ofstream out(assemblyOutput.mFilename);
-						out << assembly;
-						printf("Wrote assembly file: %s\n", assemblyOutput.mFilename.string().c_str());
-					}
-					*/
-				}
-
+		string semantic = compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
+		size_t l = semantic.find_first_of("0123456789");
+		if (l != string::npos)
+			var.mTypeIndex = atoi(semantic.c_str() + l);
+		else {
+			var.mTypeIndex = 0;
+			l = semantic.length();
+		}
+		if (l > 0 && semantic[l-1] == '_') l--;
+		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), tolower);
+		if (gAttributeMap.count(semantic))
+			var.mType = gAttributeMap.at(semantic);
+		else
+			var.mType = VertexAttributeType::eOther;
+	}
+	for (const auto& e : compiler.get_entry_points_and_stages()) {
+		auto& ep = compiler.get_entry_point(e.name, e.execution_model);
+		shaderModule.mWorkgroupSize = { ep.workgroup_size.x, ep.workgroup_size.y, ep.workgroup_size.z };
+	}
+	for (const auto& r : resources.push_constant_buffers) {
+		spirv_cross::SPIRType type = compiler.get_type(r.base_type_id);
+		for (uint32_t i = 0; i < type.member_types.size(); i++) {
+			auto& pushConstant = shaderModule.mPushConstants[compiler.get_member_name(r.base_type_id, i)];
+			pushConstant.stageFlags = shaderModule.mStage;
+			pushConstant.offset = compiler.type_struct_member_offset(type, i);
+			pushConstant.size = (uint32_t)SizeOf(compiler.get_type(type.member_types[i]), compiler);
 		}
 	}
-	
-	return destShader;
+	for (const auto& c : compiler.get_specialization_constants()) {
+		auto specConstant = shaderModule.mSpecializationMap[compiler.get_name(c.id)];
+		specConstant.constantID = c.constant_id;
+		specConstant.size = SizeOf(compiler.get_type(compiler.get_constant(c.id).constant_type), compiler);
+	}
 }
 
 int main(int argc, char* argv[]) {
-	const char* inputFile;
-	const char* outputFile;
-
 	if (argc < 2) {
-		fprintf(stderr, "Usage: %s <shader source> <output file> <optional include paths>\n", argv[0]);
+		fprintf_color(ConsoleColorBits::eRed, stderr, "Usage: %s <shader source> <output file> <optional include paths>\n", argv[0]);
 		return EXIT_FAILURE;
-	} else {
-		inputFile = argv[1];
-		outputFile = argv[2];
 	}
 
-	set<string> globalIncludes;
+	const char* inputFile = argv[1];
+	const char* outputFile = argv[2];
+	set<fs::path> globalIncludes;
 	for (int i = 3; i < argc; i++) globalIncludes.emplace(argv[i]);
 
-	CompileShader(inputFile, globalIncludes).Write(outputFile);
+	//try {
+		ShaderCompiler compiler(globalIncludes);
+		SpirvModuleGroup result = compiler(inputFile);
+		binary_stream stream(outputFile);
+		stream << result;
+	//} catch (logic_error e) {
+	//	fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), inputFile);
+	//	throw;
+	//}
 
 	return EXIT_SUCCESS;
 }

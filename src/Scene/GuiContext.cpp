@@ -1,10 +1,7 @@
 #include "GuiContext.hpp"
 
-#include "../Core/EnginePlugin.hpp"
 #include "Camera.hpp"
-#include "Scene.hpp"
 
-using namespace std;
 using namespace stm;
 
 const uint32_t CIRCLE_VERTEX_RESOLUTION = 64;
@@ -18,338 +15,191 @@ const float4 ICON_CHECK_ST = float4(128, 128, 128, 512) / 1024.f;
 const float4 ICON_TRI_RIGHT_ST = float4(128, 128, 384, 512) / 1024.f;
 const float4 ICON_TRI_LEFT_ST = float4(128, 128, 512, 512) / 1024.f;
 
-GuiContext::GuiContext(stm::Device* device, stm::InputManager* inputManager) : mDevice(device), mInputManager(inputManager) {
-	mIconsTexture = mDevice->LoadAsset<Texture>({ "Assets/Textures/icons.png" }, "Icons");
-	Reset();
-}
+// TODO: replace ui input pointer calls with Scene::mInputPointers
 
-void GuiContext::Reset() {
-	mLayoutStack = {};
+GuiContext::GuiContext(stm::Scene& scene) : mScene(scene) {
+	mIconsTexture = mScene.Instance().Device().LoadAsset<Texture>("Assets/Textures/icons.png");
 
-	mNextControlId = 10;
-	mLastHotControl = mHotControl;
-	mHotControl.clear();
-
-	mTextureArray.clear();
-	mTextureMap.clear();
-
-	mWorldRects.clear();
-	mWorldTextureRects.clear();
-	mWorldStrings.clear();
-	mWorldLines.clear();
-
-	mScreenRects.clear();
-	mScreenTextureRects.clear();
-	mScreenStrings.clear();
-	mScreenLines.clear();
+	SpirvModuleGroup uiSpirv("Assets/Shaders/ui.stmb", *scene.Instance().Device());
 	
-	mStringGlyphs.clear();
-	mStringTransforms.clear();
-	mUniqueStringSDFs.clear();
-
-	mLinePoints.clear();
-	mLineTransforms.clear();
-
-	mLayoutThemeStack = {};
-	mLayoutTheme.mBackgroundColor = float4(.21f, .21f, .21f, 1.f);
-	mLayoutTheme.mControlBackgroundColor = float4(.16f, .16f, .16f, 1.f);
-	mLayoutTheme.mTextColor = float4(0.8f, 0.8f, 0.8f, 1.f);
-	mLayoutTheme.mButtonColor = float4(.31f, .31f, .31f, 1.f);
-	mLayoutTheme.mSliderColor = float4(.36f, .36f, .36f, 1.f);
-	mLayoutTheme.mSliderKnobColor = float4(.6f, .6f, .6f, 1.f);
-
-	//mDevice->LoadFont("Assets/Fonts/OpenSans/OpenSans-Regular.ttf"); // preload for profiler
-	mLayoutTheme.mControlFont = mDevice->LoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-SemiBold.ttf", "OpenSans-SemiBold");
-	mLayoutTheme.mTitleFont = mDevice->LoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Bold.ttf", "OpenSans-Bold");
-	mLayoutTheme.mControlFontHeight = 16.f;
-	mLayoutTheme.mTitleFontHeight = 24.f;
-
-	mLayoutTheme.mControlSize = 16;
-	mLayoutTheme.mControlPadding = 2;
-	mLayoutTheme.mSliderBarSize = 2;
-	mLayoutTheme.mSliderKnobSize = 10;
-	mLayoutTheme.mScrollBarThickness = 6;
+	mMaterials["ui"] = make_shared<Material>("GuiContext/UI", uiSpirv);
+	mMaterials["font_ss"] = make_shared<MaterialDerivative>("GuiContext/UI", mMaterials["ui"], { "gScreenSpace", true });
+	mMaterials["ui_ss"]->SetSpecialization("gScreenSpace", true);
+	mMaterials["lines_ss"]->SetSpecialization("gScreenSpace", true);
 }
+
 void GuiContext::OnPreRender(CommandBuffer& commandBuffer) {
 	for (auto& t : mTextureArray) commandBuffer.TransitionBarrier(*t, vk::ImageLayout::eShaderReadOnlyOptimal);
 	for (auto& t : mUniqueStringSDFs) commandBuffer.TransitionBarrier(*t, vk::ImageLayout::eShaderReadOnlyOptimal);
 }
 
-void GuiContext::OnDraw(CommandBuffer& commandBuffer, Camera& camera, shared_ptr<DescriptorSet> perCamera) {
+void GuiContext::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
 	float2 screenSize = float2((float)commandBuffer.CurrentFramebuffer()->Extent().width, (float)commandBuffer.CurrentFramebuffer()->Extent().height);
 
-	auto font = commandBuffer.mDevice->LoadAsset<Pipeline>("Assets/Shaders/font.stmb", "font");
-	auto ui = commandBuffer.mDevice->LoadAsset<Pipeline>("Assets/Shaders/ui.stmb", "ui");
+	auto font     = mMaterials["font"];
+	auto ui       = mMaterials["ui"];
+	auto lines    = mMaterials["lines"];
+	auto font_ss  = mMaterials["font_ss"];
+	auto ui_ss    = mMaterials["ui_ss"];
+	auto lines_ss = mMaterials["lines_ss"];
+	font_ss->SetSpecialization("gScreenSpace", true);
+	ui_ss->SetSpecialization("gScreenSpace", true);
+	lines_ss->SetSpecialization("gScreenSpace", true);
 
 	shared_ptr<Buffer> glyphBuffer;
 	shared_ptr<Buffer> glyphTransforms;
 	if (mStringGlyphs.size()) {
 		glyphBuffer = commandBuffer.GetBuffer("Glyphs", mStringGlyphs.size() * sizeof(GlyphRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		glyphBuffer->Copy(mStringGlyphs);
-
 		if (mStringTransforms.size()) {
 			glyphTransforms = commandBuffer.GetBuffer("Transforms", mStringTransforms.size() * sizeof(float4x4), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 			glyphTransforms->Copy(mStringTransforms);
 		}
 	}
-
+	// TODO: mWorldLines (with polygonal extrusion for antialiasing)
 	if (mWorldRects.size()) {
-		GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer.CurrentShaderPass(), {});
-		if (pipeline) {
-			commandBuffer.BindPipeline(pipeline);
-
-			auto rects = commandBuffer.GetBuffer("WorldRects", mWorldRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-			rects->Copy(mWorldRects);
-
-			auto ds = commandBuffer.GetDescriptorSet("WorldRects", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-			ds->CreateBufferDescriptor("Rects", rects, 0, mWorldRects.size() * sizeof(GuiRect), pipeline);
-			commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
-
-			camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
+		auto screenRects = commandBuffer.GetBuffer("WorldRects", mWorldRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		screenRects->Copy(mWorldRects);
+	
+		ui->SetStorageBuffer("Rects", screenRects, 0, mWorldRects.size() * sizeof(GuiRect));
+		for (uint32_t i = 0; i < mTextureArray.size(); i++)
+			ui->SetSampledTexture("Textures", mTextureArray[i], i);
+		ui->Bind(commandBuffer);
+		
+		camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
+		commandBuffer->draw(6, (uint32_t)mWorldRects.size(), 0, 0);
+		commandBuffer.mTriangleCount += mWorldRects.size()*2;
+		if (camera.StereoMode() != StereoMode::eNone) {
+			camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
 			commandBuffer->draw(6, (uint32_t)mWorldRects.size(), 0, 0);
 			commandBuffer.mTriangleCount += mWorldRects.size()*2;
-			if (camera.StereoMode() != StereoMode::eNone) {
-				camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
-				commandBuffer->draw(6, (uint32_t)mWorldRects.size(), 0, 0);
-				commandBuffer.mTriangleCount += mWorldRects.size()*2;
-			}
-		}
-	}
-	if (mWorldTextureRects.size()) {
-		GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer.CurrentShaderPass(), { "TEXTURED" });
-		if (pipeline) {
-			commandBuffer.BindPipeline(pipeline);
-
-			auto screenRects = commandBuffer.GetBuffer("WorldRects", mWorldTextureRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-			screenRects->Copy(mWorldTextureRects);
-
-			auto ds = commandBuffer.GetDescriptorSet("WorldRects", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-			ds->CreateBufferDescriptor("Rects", screenRects, 0, mWorldTextureRects.size() * sizeof(GuiRect), pipeline);
-			for (uint32_t i = 0; i < mTextureArray.size(); i++)
-				ds->CreateTextureDescriptor("Textures", mTextureArray[i], pipeline, i);
-			commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
-
-			camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
-			commandBuffer->draw(6, (uint32_t)mWorldTextureRects.size(), 0, 0);
-				commandBuffer.mTriangleCount += mWorldTextureRects.size()*2;
-			if (camera.StereoMode() != StereoMode::eNone) {
-				camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
-				commandBuffer->draw(6, (uint32_t)mWorldTextureRects.size(), 0, 0);
-				commandBuffer.mTriangleCount += mWorldTextureRects.size()*2;
-			}
 		}
 	}
 	if (mWorldStrings.size() && mStringGlyphs.size() && mStringTransforms.size()) {
-		GraphicsPipeline* pipeline = font->GetGraphics(commandBuffer.CurrentShaderPass(), {});
-		if (pipeline) {
-			commandBuffer.BindPipeline(pipeline);
-
-			auto ds = commandBuffer.GetDescriptorSet("Screen Strings DescriptorSet", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-			ds->CreateBufferDescriptor("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect), pipeline);
-			ds->CreateBufferDescriptor("Transforms", glyphTransforms, 0, mStringTransforms.size() * sizeof(float4x4), pipeline);
-			for (uint32_t i = 0; i < mUniqueStringSDFs.size(); i++)
-				ds->CreateTextureDescriptor("SDFs", mUniqueStringSDFs[i], pipeline, i);
-			commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
-
-			for (uint32_t i = 0; i < mWorldStrings.size(); i++) {
-				const GuiString& s = mWorldStrings[i];
-				commandBuffer.PushConstantRef("Color", s.mColor);
-				commandBuffer.PushConstantRef("ClipBounds", s.mClipBounds);
-				commandBuffer.PushConstantRef("SdfIndex", s.mSdfIndex);
-				camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
+		font->SetStorageBuffer("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect));
+		font->SetStorageBuffer("Transforms", glyphTransforms, 0, mStringTransforms.size() * sizeof(float4x4));
+		for (uint32_t i = 0; i < mUniqueStringSDFs.size(); i++)
+			font->SetSampledTexture("SDFs", mUniqueStringSDFs[i], i);
+		font->Bind(commandBuffer);
+		
+		for (uint32_t i = 0; i < mWorldStrings.size(); i++) {
+			const GuiString& s = mWorldStrings[i];
+			commandBuffer.PushConstantRef("Color", s.mColor);
+			commandBuffer.PushConstantRef("ClipBounds", s.mClipBounds);
+			commandBuffer.PushConstantRef("SdfIndex", s.mSdfIndex);
+			camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
+			commandBuffer->draw(s.mGlyphCount*6, 1, s.mGlyphIndex*6, i);
+			commandBuffer.mTriangleCount += s.mGlyphCount*2;
+			if (camera.StereoMode() != StereoMode::eNone) {
+				camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
 				commandBuffer->draw(s.mGlyphCount*6, 1, s.mGlyphIndex*6, i);
 				commandBuffer.mTriangleCount += s.mGlyphCount*2;
-				if (camera.StereoMode() != StereoMode::eNone) {
-					camera.SetViewportScissor(commandBuffer, StereoEye::eRight);
-					commandBuffer->draw(s.mGlyphCount*6, 1, s.mGlyphIndex*6, i);
-					commandBuffer.mTriangleCount += s.mGlyphCount*2;
-				}
 			}
 		}
 	}
 
 	if (camera.StereoMode() == StereoMode::eNone) {
 		camera.SetViewportScissor(commandBuffer);
-		
 		if (mScreenRects.size()) {
-			GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer.CurrentShaderPass(), { "SCREEN_SPACE" });
-			if (pipeline) {
-				commandBuffer.BindPipeline(pipeline);
+			auto screenRects = commandBuffer.GetBuffer("ScreenRects", mScreenRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			screenRects->Copy(mScreenRects);
 
-				auto screenRects = commandBuffer.GetBuffer("ScreenRects", mScreenRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-				screenRects->Copy(mScreenRects);
+			ui_ss->SetStorageBuffer("Rects", screenRects, 0, mScreenRects.size() * sizeof(GuiRect));
+			for (uint32_t i = 0; i < mTextureArray.size(); i++)
+				ui_ss->SetSampledTexture("Textures", mTextureArray[i], i);
+			ui_ss->Bind(commandBuffer);
 
-				auto ds = commandBuffer.GetDescriptorSet("ScreenRects", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-				ds->CreateBufferDescriptor("Rects", screenRects, 0, mScreenRects.size() * sizeof(GuiRect), pipeline);
-				commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
+			commandBuffer.PushConstantRef("ScreenSize", screenSize);
 
-				commandBuffer.PushConstantRef("ScreenSize", screenSize);
-
-				commandBuffer->draw(6, (uint32_t)mScreenRects.size(), 0, 0);
-				commandBuffer.mTriangleCount += mScreenRects.size()*2;
-			}
-		}
-		if (mScreenTextureRects.size()) {
-			GraphicsPipeline* pipeline = ui->GetGraphics(commandBuffer.CurrentShaderPass(), { "SCREEN_SPACE", "TEXTURED" });
-			if (pipeline) {
-				commandBuffer.BindPipeline(pipeline);
-
-				auto screenRects = commandBuffer.GetBuffer("ScreenRects", mScreenTextureRects.size() * sizeof(GuiRect), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-				screenRects->Copy(mScreenTextureRects);
-
-				auto ds = commandBuffer.GetDescriptorSet("ScreenRects", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-				ds->CreateBufferDescriptor("Rects", screenRects, 0, mScreenTextureRects.size() * sizeof(GuiRect), pipeline);
-				for (uint32_t i = 0; i < mTextureArray.size(); i++)
-					ds->CreateTextureDescriptor("Textures", mTextureArray[i], pipeline, i);
-				commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
-
-				commandBuffer.PushConstantRef("ScreenSize", screenSize);
-
-				commandBuffer->draw(6, (uint32_t)mScreenTextureRects.size(), 0, 0);
-				commandBuffer.mTriangleCount += mScreenTextureRects.size()*2;
-			}
+			commandBuffer->draw(6, (uint32_t)mScreenRects.size(), 0, 0);
+			commandBuffer.mTriangleCount += mScreenRects.size()*2;
 		}
 		if (mScreenLines.size()) {
-			GraphicsPipeline* pipeline = commandBuffer.mDevice->LoadAsset<Pipeline>("Assets/Shaders/line.stmb", "line")->GetGraphics(commandBuffer.CurrentShaderPass(), { "SCREEN_SPACE" });
-			if (pipeline) {
-				commandBuffer.BindPipeline(pipeline, vk::PrimitiveTopology::eLineStrip);
+			auto pts = commandBuffer.GetBuffer("Line Pts", sizeof(float3) * mLinePoints.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			pts->Copy(mLinePoints);
+			auto transforms = commandBuffer.GetBuffer("Line Transforms", sizeof(float4x4) * mLineTransforms.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			transforms->Copy(mLineTransforms);
+			
+			lines_ss->SetStorageBuffer("Vertices", pts, 0, sizeof(float3) * mLinePoints.size());
+			lines_ss->SetStorageBuffer("Transforms", transforms, 0, sizeof(float4x4) * mLineTransforms.size());
+			lines_ss->Bind(commandBuffer);
 
-				auto pts = commandBuffer.GetBuffer("Line Pts", sizeof(float3) * mLinePoints.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-				auto transforms = commandBuffer.GetBuffer("Line Transforms", sizeof(float4x4) * mLineTransforms.size(), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-				transforms->Copy(mLineTransforms);
-				pts->Copy(mLinePoints);
-				
-				auto ds = commandBuffer.GetDescriptorSet("ScreenLines", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-				ds->CreateBufferDescriptor("Vertices", pts, 0, sizeof(float3) * mLinePoints.size(), pipeline);
-				ds->CreateBufferDescriptor("Transforms", transforms, 0, sizeof(float4x4) * mLineTransforms.size(), pipeline);
-				commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
-
-				commandBuffer.PushConstantRef("ScreenSize", screenSize);
-
-				for (const GuiLine& l : mScreenLines) {
-					commandBuffer.PushConstantRef("Color", l.mColor);
-					commandBuffer.PushConstantRef("ClipBounds", l.mClipBounds);
-					commandBuffer.PushConstantRef("TransformIndex", l.mTransformIndex);
-					commandBuffer->setLineWidth(l.mThickness);
-					commandBuffer->draw(l.mCount, 1, l.mIndex, 0);
-				}
+			commandBuffer.PushConstantRef("ScreenSize", screenSize);
+			for (const GuiLine& l : mScreenLines) {
+				commandBuffer.PushConstantRef("Color", l.mColor);
+				commandBuffer.PushConstantRef("ClipBounds", l.mClipBounds);
+				commandBuffer.PushConstantRef("TransformIndex", l.mTransformIndex);
+				commandBuffer->setLineWidth(l.mThickness);
+				commandBuffer->draw(l.mCount, 1, l.mIndex, 0);
 			}
 		}
 		if (mScreenStrings.size() && mStringGlyphs.size()) {
 			camera.SetViewportScissor(commandBuffer);
-			GraphicsPipeline* pipeline = font->GetGraphics(commandBuffer.CurrentShaderPass(), { "SCREEN_SPACE" });
-			if (pipeline) {
-				commandBuffer.BindPipeline(pipeline);
+			font_ss->SetStorageBuffer("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect));
+			for (uint32_t i = 0; i < mUniqueStringSDFs.size(); i++)
+				font_ss->SetSampledTexture("SDFs", mUniqueStringSDFs[i], i);
+			font_ss->Bind(commandBuffer);
 
-				auto ds = commandBuffer.GetDescriptorSet("Screen Strings DescriptorSet", pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-				ds->CreateBufferDescriptor("Glyphs", glyphBuffer, 0, mStringGlyphs.size() * sizeof(GlyphRect), pipeline);
-				for (uint32_t i = 0; i < mUniqueStringSDFs.size(); i++)
-					ds->CreateTextureDescriptor("SDFs", mUniqueStringSDFs[i], pipeline, i);
-				commandBuffer.BindDescriptorSet(ds, PER_OBJECT);
+			commandBuffer.PushConstantRef("ScreenSize", screenSize);
 
-				commandBuffer.PushConstantRef("ScreenSize", screenSize);
-
-				for (uint32_t i = 0; i < mScreenStrings.size(); i++) {
-					const GuiString& s = mScreenStrings[i];
-					commandBuffer.PushConstantRef("Color", s.mColor);
-					commandBuffer.PushConstantRef("ClipBounds", s.mClipBounds);
-					commandBuffer.PushConstantRef("Depth", s.mDepth);
-					commandBuffer.PushConstantRef("SdfIndex", s.mSdfIndex);
-					commandBuffer->draw(s.mGlyphCount*6, 1, s.mGlyphIndex*6, i);
-					commandBuffer.mTriangleCount += s.mGlyphCount*2;
-				}
+			for (uint32_t i = 0; i < mScreenStrings.size(); i++) {
+				const GuiString& s = mScreenStrings[i];
+				commandBuffer.PushConstantRef("Color", s.mColor);
+				commandBuffer.PushConstantRef("ClipBounds", s.mClipBounds);
+				commandBuffer.PushConstantRef("Depth", s.mDepth);
+				commandBuffer.PushConstantRef("SdfIndex", s.mSdfIndex);
+				commandBuffer->draw(s.mGlyphCount*6, 1, s.mGlyphIndex*6, i);
+				commandBuffer.mTriangleCount += s.mGlyphCount*2;
 			}
 		}
 	}
 }
 
-
-void GuiContext::PolyLine(const float3* points, uint32_t pointCount, const float4& color, float thickness, const float3& offset, const float3& scale, const fRect2D& clipRect) {
-	GuiLine l;
-	l.mColor = color;
-	l.mClipBounds = clipRect;
-	l.mCount = pointCount;
-	l.mIndex = (uint32_t)mLinePoints.size();
-	l.mThickness = thickness;
-	l.mTransformIndex = (uint32_t)mLineTransforms.size();
-	mScreenLines.push_back(l);
-	mLineTransforms.push_back(float4x4::TRS(offset, quaternion(0,0,0,1), scale));
-
-	mLinePoints.resize(mLinePoints.size() + pointCount);
-	memcpy(mLinePoints.data() + l.mIndex, points, pointCount * sizeof(float3));
+void GuiContext::WireCube(const float3& center, const float3& extents, const fquat& rotation, const float4& color) {
+	// TODO: implement WireCube
 }
-void GuiContext::PolyLine(const float4x4& transform, const float3* points, uint32_t pointCount, const float4& color, float thickness, const fRect2D& clipRect) {
-	GuiLine l;
-	l.mColor = color;
-	l.mClipBounds = clipRect;
-	l.mThickness = thickness;
-	l.mIndex = (uint32_t)mLinePoints.size();
-	l.mCount = pointCount;
-	l.mTransformIndex = (uint32_t)mLineTransforms.size();
-	mWorldLines.push_back(l);
-	mLineTransforms.push_back(transform);
-
-	mLinePoints.resize(mLinePoints.size() + pointCount);
-	memcpy(mLinePoints.data() + l.mIndex, points, pointCount * sizeof(float3));
+void GuiContext::WireCircle(const float3& center, float radius, const fquat& rotation, const float4& color) {
+	// TODO: implement WireCircle
+}
+void GuiContext::WireSphere(const float3& center, float radius, const fquat& rotation, const float4& color) {
+	WireCircle(center, radius, rotation, color);
+	WireCircle(center, radius, rotation*fquat(0, .70710678f, 0, .70710678f), color);
+	WireCircle(center, radius, rotation*fquat(.70710678f, 0, 0, .70710678f), color);
 }
 
-void GuiContext::WireCube(const float3& center, const float3& extents, const quaternion& rotation, const float4& color) {
-	// FIXME: implement WireCube
-}
-void GuiContext::WireCircle(const float3& center, float radius, const quaternion& rotation, const float4& color) {
-	// FIXME: implement WireCircle
-}
-void GuiContext::WireSphere(const float3& center, float radius, const float4& color) {
-	WireCircle(center, radius, quaternion(0,0,0,1), color);
-	WireCircle(center, radius, quaternion(0, .70710678f, 0, .70710678f), color);
-	WireCircle(center, radius, quaternion(.70710678f, 0, 0, .70710678f), color);
-}
-
-bool GuiContext::PositionHandle(const string& name, const quaternion& plane, float3& position, float radius, const float4& color) {
+bool GuiContext::PositionHandle(const fquat& plane, float3& position, float radius, const float4& color) {
 	WireCircle(position, radius, plane, color);
 	
-	size_t controlId = hash<string>()(name);
+	size_t controlId = basic_hash(name);
 	bool ret = false;
-
-	for (const InputDevice* d : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < d->PointerCount(); i++) {
-			const InputPointer* p = d->GetPointer(i);
-			const InputPointer* lp = d->GetPointerLast(i);
-
-			float2 t, lt;
-			bool hit = p->mWorldRay.Intersect(Sphere(position, radius), t);
-			bool hitLast = lp->mWorldRay.Intersect(Sphere(position, radius), lt);
-
-			if (!p->mPrimaryButton) {
-				mHotControl.erase(p->mName);
-				continue;
-			}
-			if ((mHotControl.count(p->mName) == 0 || mHotControl.at(p->mName) != controlId) && (!hit || !hitLast || t.x < 0 || lt.x < 0)) continue;
-			mHotControl[p->mName] = (uint32_t)controlId;
-
-			float3 fwd = plane * float3(0,0,1);
-			float3 pos  = p->mWorldRay.mOrigin + p->mWorldRay.mDirection * p->mWorldRay.Intersect(fwd, position);
-			float3 posLast = lp->mWorldRay.mOrigin + lp->mWorldRay.mDirection * lp->mWorldRay.Intersect(fwd, position);
-
-			position += pos - posLast;
-
-			ret = true;
-		}
 	
-	return ret;
+	InputState p, lp;
+	float2 t, lt;
+	bool hit, hitLast;
+	//mScene.Intersect(Sphere(position, radius), t);
+
+	if (!p.mPrimaryButton) {
+		mHotControl.erase(p.Id());
+		return false;
+	}
+	if ((mHotControl.count(p.Id()) == 0 || mHotControl.at(p.Id()) != controlId) && (!hit || !hitLast || t.x < 0 || lt.x < 0)) continue;
+	mHotControl[p.Id()] = (uint32_t)controlId;
+
+	position = p.Transform() * (lp.InverseTransform() * position);
+	return true;
 }
-bool GuiContext::RotationHandle(const string& name, const float3& center, quaternion& rotation, float radius, float sensitivity) {
-	quaternion r = rotation;
+bool GuiContext::RotationHandle(const float3& center, fquat& rotation, float radius, float sensitivity) {
+	fquat r = rotation;
 	WireCircle(center, radius, r, float4(.2f,.2f,1,.5f));
-	r *= quaternion::Euler(0, (float)M_PI/2, 0);
+	r *= fquat::Euler(0, (float)M_PI/2, 0);
 	WireCircle(center, radius, r, float4(1,.2f,.2f,.5f));
-	r *= quaternion::Euler((float)M_PI/2, 0, 0);
+	r *= fquat::Euler((float)M_PI/2, 0, 0);
 	WireCircle(center, radius, r, float4(.2f,1,.2f,.5f));
 
-	size_t controlId = hash<string>()(name);
+	size_t controlId = basic_hash(name);
 	bool ret = false;
 
-	for (const InputDevice* d : mInputManager->InputDevices())
+	for (const InputSystem* d : mInputManager->InputDevices())
 		for (uint32_t i = 0; i < d->PointerCount(); i++) {
 			const InputPointer* p = d->GetPointer(i);
 			const InputPointer* lp = d->GetPointerLast(i);
@@ -374,7 +224,7 @@ bool GuiContext::RotationHandle(const string& name, const float3& center, quater
 			float3 rotAxis = cross(normalize(v), normalize(u));
 			float angle = length(rotAxis);
 			if (fabsf(angle) > .0001f)
-				rotation = quaternion::AxisAngle(rotAxis / angle, asinf(angle) * sensitivity) * rotation;
+				rotation = fquat::AxisAngle(rotAxis / angle, asinf(angle) * sensitivity) * rotation;
 
 			ret = true;
 	}
@@ -382,16 +232,30 @@ bool GuiContext::RotationHandle(const string& name, const float3& center, quater
 }
 
 
-void GuiContext::DrawString(const float2& screenPos, float z, shared_ptr<Font> font, float pixelHeight, const string& str, const float4& color, TextAnchor horizontalAnchor, const fRect2D& clipRect) {
+void GuiContext::PolyLine(const TransformInfo&, const float3* points, uint32_t pointCount, float thickness) {
+	GuiLine l;
+	l.mColor = color;
+	l.mClipBounds = clipRect;
+	l.mCount = pointCount;
+	l.mIndex = (uint32_t)mLinePoints.size();
+	l.mThickness = thickness;
+	l.mTransformIndex = (uint32_t)mLineTransforms.size();
+	mScreenLines.push_back(l);
+	mLineTransforms.push_back(float4x4::TRS(offset, fquat(0,0,0,1), scale));
+
+	mLinePoints.resize(mLinePoints.size() + pointCount);
+	memcpy(mLinePoints.data() + l.mIndex, points, pointCount * sizeof(float3));
+}
+void GuiContext::DrawString(const TransformInfo& transform, const string& str, const FontInfo& font) {
 	if (str.empty()) return;
 	
 	GuiString s;
 	s.mGlyphIndex = (uint32_t)mStringGlyphs.size();
 
-	AABB aabb;
+	fAABB aabb;
 	font->GenerateGlyphs(mStringGlyphs, aabb, str, pixelHeight, screenPos, horizontalAnchor);
 	s.mGlyphCount = (uint32_t)(mStringGlyphs.size() - s.mGlyphIndex);
-	fRect2D r(aabb.mMin.xy, aabb.Size().xy);
+	fRect2D r((float2)aabb.mMin, (float2)aabb.Size());
 	if (s.mGlyphCount == 0 || !r.Intersects(clipRect)) return;
 
 	s.mSdfIndex = (uint32_t)mUniqueStringSDFs.size();
@@ -407,138 +271,31 @@ void GuiContext::DrawString(const float2& screenPos, float z, shared_ptr<Font> f
 	s.mDepth = z;
 	mScreenStrings.push_back(s);
 }
-void GuiContext::DrawString(const float4x4& transform, const float2& offset, shared_ptr<Font> font, float pixelHeight, const string& str, const float4& color, TextAnchor horizontalAnchor, const fRect2D& clipRect) {
-	if (str.empty()) return;
-
-	GuiString s;
-	s.mGlyphIndex = (uint32_t)mStringGlyphs.size();
-
-	AABB aabb;
-	font->GenerateGlyphs(mStringGlyphs, aabb, str, pixelHeight, offset, horizontalAnchor);
-	s.mGlyphCount = (uint32_t)(mStringGlyphs.size() - s.mGlyphIndex);
-	fRect2D r(aabb.Center().xy, aabb.HalfSize().xy);
-	if (s.mGlyphCount == 0 || !r.Intersects(clipRect)) { return; }
-
-	s.mSdfIndex = (uint32_t)mUniqueStringSDFs.size();
-	for (uint32_t i = 0; i < mUniqueStringSDFs.size(); i++)
-		if (mUniqueStringSDFs[i] == font->SDF()) {
-			s.mSdfIndex = i;
-			break;
-		}
-	if (s.mSdfIndex == mUniqueStringSDFs.size()) mUniqueStringSDFs.push_back(font->SDF());
-
-	s.mGlyphIndex = (uint32_t)mStringGlyphs.size();
-
-	s.mColor = color;
-	s.mClipBounds = clipRect;
-	s.mTransformIndex = (uint32_t)mStringTransforms.size();
-	mStringTransforms.push_back(transform);
-	mWorldStrings.push_back(s);
-}
-
-void GuiContext::Rect(const fRect2D& screenRect, float z, const float4& color, shared_ptr<Texture> texture, const float4& textureST, const fRect2D& clipRect) {
-	if (!screenRect.Intersects(clipRect)) return;
-
-	if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
-		float2 c = i->CursorPos();
-		c.y = i->WindowHeight() - c.y;
-		if (screenRect.Contains(c) && clipRect.Contains(c)) const_cast<InputPointer*>(i->GetPointer(0))->mGuiHitT = 0.f;
-	}
+bool GuiContext::Rect(const TransformInfo& transform, const TextureInfo& texture) {
+	if (!transform.mRect.Intersects(transform.mClipRect)) return;
 
 	GuiRect r;
-	r.mScaleTranslate = float4(screenRect.mSize, screenRect.mOffset);
+	r.mScaleTranslate = float4(transform.mRect.mSize, transform.mRect.mOffset);
 	r.mColor = color;
-	r.mClipBounds = clipRect;
+	r.mClipBounds = transform.mClipRect;
 	r.mDepth = z;
-	r.mTextureST = textureST;
+	r.mTextureST = texture.mScaleTranslate;
 
-	if (texture) {
-		if (mTextureMap.count(texture))
-			r.mTextureIndex = mTextureMap.at(texture);
+	if (texture.mTexture) {
+		if (mTextureMap.count(texture.mTexture))
+			r.mTextureIndex = mTextureMap.at(texture.mTexture);
 		else {
 			r.mTextureIndex = (uint32_t)mTextureArray.size();
-			mTextureMap.emplace(texture, (uint32_t)mTextureArray.size());
-			mTextureArray.push_back(texture);
+			mTextureMap.emplace(texture.mTexture, (uint32_t)mTextureArray.size());
+			mTextureArray.push_back(texture.mTexture);
 		}
-		mScreenTextureRects.push_back(r);
+		mScreenRects.push_back(r);
 	} else
 		mScreenRects.push_back(r);
 }
-void GuiContext::Rect(const float4x4& transform, const fRect2D& rect, const float4& color, shared_ptr<Texture> texture, const float4& textureST, const fRect2D& clipRect) {
-	if (!rect.Intersects(clipRect)) return;
-
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices()) {
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			if (rect.Contains(c) && clipRect.Contains(c)) const_cast<InputPointer*>(p)->mGuiHitT = t;
-		}
-	}
-
-
-	GuiRect r;
-	r.mTransform = transform;
-	r.mScaleTranslate = float4(rect.mSize, rect.mOffset);
-	r.mColor = color;
-	r.mClipBounds = clipRect;
-	r.mTextureST = textureST;
-
-	if (texture) {
-		if (mTextureMap.count(texture))
-			r.mTextureIndex = mTextureMap.at(texture);
-		else {
-			r.mTextureIndex = (uint32_t)mTextureArray.size();
-			mTextureMap.emplace(texture, (uint32_t)mTextureArray.size());
-			mTextureArray.push_back(texture);
-		}
-		mWorldTextureRects.push_back(r);
-	} else
-		mWorldRects.push_back(r);
-}
-
-void GuiContext::Label(const fRect2D& screenRect, float z, shared_ptr<Font> font, float fontPixelHeight, const string& text, const float4& textColor, const float4& bgcolor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
-	if (!screenRect.Intersects(clipRect)) return;
-	if (bgcolor.a > 0) Rect(screenRect, z, bgcolor, nullptr, 0, clipRect);
-	if (textColor.a > 0 && text.length()){
-		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mSize.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mSize.x - 2;
-
-		if (verticalAnchor == TextAnchor::eMid) o.y = screenRect.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mSize.y - font->Ascent(fontPixelHeight) - 2;
-		else o.y = -font->Descent(fontPixelHeight) + 2;
-
-		DrawString(screenRect.mOffset + o, z + DEPTH_DELTA, font, fontPixelHeight, text, textColor, horizontalAnchor, clipRect);
-	}
-}
-void GuiContext::Label(const float4x4& transform, const fRect2D& rect, shared_ptr<Font> font, float fontPixelHeight, const string& text, const float4& textColor, const float4& bgcolor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
-	if (!clipRect.Intersects(rect)) return;
-	if (bgcolor.a > 0) Rect(transform, rect, bgcolor, nullptr, 0, clipRect);
-	if (textColor.a > 0 && text.length()) {
-		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = rect.mSize.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = rect.mSize.x - 2;
-
-		if (verticalAnchor == TextAnchor::eMid) o.y = rect.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = rect.mSize.y - font->Ascent(fontPixelHeight) - 2;
-		else o.y = -font->Descent(fontPixelHeight) + 2;
-
-		DrawString(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), rect.mOffset + o, font, fontPixelHeight, text, textColor, horizontalAnchor, clipRect);
-	}
-}
-
-bool GuiContext::TextButton(const fRect2D& screenRect, float z, shared_ptr<Font> font, float fontPixelHeight, const string& text, const float4& textColor, const float4& bgcolor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect) {
+bool GuiContext::TextRect(const TransformInfo& transform, const string& str, const FontInfo& font) {
 	uint32_t controlId = mNextControlId++;
-	if (!screenRect.Intersects(clipRect)) return false;
+	if (!transform.mRect.Intersects(transform.mClipRect)) return false;
 
 	bool hover = false;
 	bool click = false;
@@ -562,10 +319,10 @@ bool GuiContext::TextButton(const fRect2D& screenRect, float z, shared_ptr<Font>
 	if (hover) m = 1.2f;
 	if (click) { m = 0.8f; r.mOffset += float2(1, -1); }
 	
-	if (bgcolor.a > 0)
-		Rect(r, z, float4(bgcolor.rgb * m, bgcolor.a), nullptr, 0, clipRect);
+	if (bgcolor.w > 0)
+		Rect(r, z, float4((float3)bgcolor * m, bgcolor.w), nullptr, 0, clipRect);
 
-	if (textColor.a > 0 && text.length()) {
+	if (textColor.w > 0 && text.length()) {
 		float2 o = 0;
 		if (horizontalAnchor == TextAnchor::eMid) o.x = screenRect.mSize.x * .5f;
 		else if (horizontalAnchor == TextAnchor::eMax) o.x = screenRect.mSize.x - 2;
@@ -574,163 +331,23 @@ bool GuiContext::TextButton(const fRect2D& screenRect, float z, shared_ptr<Font>
 		else if (verticalAnchor == TextAnchor::eMax) o.y = screenRect.mSize.y - font->Ascent(fontPixelHeight) - 2;
 		else o.y = -font->Descent(fontPixelHeight) + 2;
 
-		DrawString(r.mOffset + o, z + DEPTH_DELTA, font, fontPixelHeight, text, float4(textColor.rgb * m, textColor.a), horizontalAnchor, clipRect);
+		DrawString(r.mOffset + o, z + DEPTH_DELTA, font, fontPixelHeight, text, float4((float3)textColor * m, textColor.w), horizontalAnchor, clipRect);
 	}
 	return ret;
 }
-bool GuiContext::TextButton(const float4x4& transform, const fRect2D& rect, shared_ptr<Font> font, float fontPixelHeight, const string& text, const float4& textColor, const float4& bgcolor, TextAnchor horizontalAnchor, TextAnchor verticalAnchor, const fRect2D& clipRect){
+bool GuiContext::Slider(const TransformInfo& transform, float& value, float minimum, float maximum) {
 	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(rect)) return false;
+	if (!transform.mRect.Intersects(transform.mClipRect)) return false;
 
-	bool hover = false;
-	bool click = false;
-	bool first = false;
-
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices()) {
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-			
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-
-			bool hvr = rect.Contains(c) && clipRect.Contains(c);
-			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-			if (hvr || clk) {
-				hover = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			if (clk) {
-				click = true;
-				mHotControl[p->mName] = controlId;
-				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) first = true;
-			}
-		}
-	}
-
-
-	fRect2D r = rect;
-	float m = 1.f;
-	if (hover) m = 1.2f;
-	if (click) { m = 0.8f; r.mOffset += float2(1, -1); }
-
-	if (bgcolor.a > 0)
-		Rect(transform, r, float4(bgcolor.rgb * m, bgcolor.a), nullptr, 0, clipRect);
-	
-	if (textColor.a > 0 && text.length()) {
-		float2 o = 0;
-		if (horizontalAnchor == TextAnchor::eMid) o.x = r.mSize.x * .5f;
-		else if (horizontalAnchor == TextAnchor::eMax) o.x = r.mSize.x - 2;
-
-		if (verticalAnchor == TextAnchor::eMid) o.y = r.mSize.y * .5f - font->Ascent(fontPixelHeight) * .25f;
-		else if (verticalAnchor == TextAnchor::eMax) o.y = r.mSize.y - font->Ascent(fontPixelHeight) - 2;
-		else o.y = -font->Descent(fontPixelHeight) + 2;
-		DrawString(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), r.mOffset + o, font, fontPixelHeight, text, float4(textColor.rgb * m, textColor.a), horizontalAnchor, clipRect);
-	}
-	return hover && first;
-}
-
-bool GuiContext::ImageButton(const fRect2D& screenRect, float z, shared_ptr<Texture> texture, const float4& color, const float4& textureST, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!screenRect.Intersects(clipRect)) return false;
-
-	bool hover = false;
-	bool click = false;
-	bool ret = false;
-
-	if (MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>()) {
-		float2 c = i->CursorPos();
-		c.y = i->WindowHeight() - c.y;
-		const InputPointer* p = i->GetPointer(0);
-
-		hover = screenRect.Contains(c) && clipRect.Contains(c);
-		click = p->mPrimaryButton && (hover || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-		if (hover || click) const_cast<InputPointer*>(i->GetPointer(0))->mGuiHitT = 0.f;
-		if (click) mHotControl[p->mName] = controlId;
-		ret = hover && (p->mPrimaryButton && !i->GetPointerLast(0)->mPrimaryButton);
-	}
-
-	if (color.a > 0) {
-		fRect2D r = screenRect;
-		float m = 1.f;
-		if (hover) m = 1.2f;
-		if (click) { m = 1.5f; r.mOffset += float2(1, -1); }
-		Rect(r, z, float4(color.rgb * m, color.a), texture, textureST, clipRect);
-	}
-	return ret;
-}
-bool GuiContext::ImageButton(const float4x4& transform, const fRect2D& rect, shared_ptr<Texture> texture, const float4& color, const float4& textureST, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(rect)) return false;
-
-	bool hover = false;
-	bool click = false;
-	bool first = false;
-
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices()) {
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-
-			bool hvr = rect.Contains(c) && clipRect.Contains(c);
-			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-			if (hvr || clk) {
-				hover = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			if (clk) {
-				click = true;
-				mHotControl[p->mName] = controlId;
-				if (p->mPrimaryButton && !device->GetPointerLast(i)->mPrimaryButton) first = true;
-			}
-		}
-	}
-
-	if (color.a > 0) {
-		fRect2D r = rect;
-		float m = 1.f;
-		if (hover) m = 1.2f;
-		if (click) { m = 1.5f; r.mOffset += float2(1, -1); }
-		Rect(transform, r, float4(color.rgb * m, color.a), texture, textureST, clipRect);
-	}
-	return hover && first;
-}
-
-bool GuiContext::Slider(const fRect2D& screenRect, float z, float& value, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!screenRect.Intersects(clipRect)) return false;
-
+	LayoutAxis axis = transform.mRect.mSize.y > transform.mRect.mSize.x ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
 	uint32_t scrollAxis = axis == LayoutAxis::eHorizontal ? 0 : 1;
 	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
 
 	bool hover = false;
 	bool click = false;
 	bool ret = false;
-
-	fRect2D barRect = screenRect;
-	fRect2D interactRect = screenRect;
-	if (knobSize > interactRect.mSize[otherAxis]) {
-		interactRect.mOffset[otherAxis] += interactRect.mSize[otherAxis] * .5f - knobSize * .5f;
-		interactRect.mSize[otherAxis] = knobSize;
-	}
+	
+	float w = transform.mRect.mSize[scrollAxis] - transform.mRect.mSize[otherAxis]/2;
 
 	// Modify position from input
 	MouseKeyboardInput* i = mInputManager->GetFirst<MouseKeyboardInput>();
@@ -740,132 +357,34 @@ bool GuiContext::Slider(const fRect2D& screenRect, float z, float& value, float 
 	lastCursor.y = i->WindowHeight() - lastCursor.y;
 	const InputPointer* p = i->GetPointer(0);
 	if ((i->KeyDown(MOUSE_LEFT) && mLastHotControl[p->mName] == controlId) || (i->KeyDownFirst(MOUSE_LEFT) && interactRect.Contains(cursor)) ) {
-		value = minimum + (cursor[scrollAxis] - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
+		value = minimum + (cursor[scrollAxis] - transform.mRect.mOffset[scrollAxis]) / transform.mRect.mSize[scrollAxis] * (maximum - minimum);
 		ret = true;
 		hover = true;
 		click = true;
 	}
 
-	// Derive modified value from modified position
-	value = std::clamp(value, minimum, maximum);
-	
-	fRect2D knobRect(barRect.mOffset, knobSize);
-	knobRect.mOffset[scrollAxis] += (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-	knobRect.mOffset[otherAxis] += barRect.mSize[otherAxis] *.5f;
-	knobRect.mOffset -= knobSize*.5f;
+	value = clamp(value, minimum, maximum);
 
-	bool hvr = (interactRect.Contains(cursor)) && clipRect.Contains(cursor);
-
-	if (hover || click) const_cast<InputPointer*>(i->GetPointer(0))->mGuiHitT = 0.f;
-	if (click) mHotControl[p->mName] = controlId;
+	fRect2D knobRect = transform.mRect;
+	knobRect.mSize[scrollAxis] = knobRect.mSize[otherAxis];
+	knobRect.mOffset[scrollAxis] += ( - knobRect.mSize[scrollAxis]) * (value - minimum) / (maximum - minimum);
 
 	float m = 1.25f;
 	if (hover) m *= 1.2f;
 	if (click) m *= 1.5f;
 
-	Rect(barRect, z, barColor, nullptr, 0, clipRect);
-	Rect(knobRect, z + DEPTH_DELTA, float4(knobColor.rgb * m, knobColor.a), mIconsTexture, ICON_CIRCLE_ST, clipRect);
+	Rect(transform);
+	Rect(transform.Embed(knobRect), { mIconsTexture, ICON_CIRCLE_ST });
 
 	return ret;
 }
-bool GuiContext::Slider(const float4x4& transform, const fRect2D& rect, float& value, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
-	uint32_t controlId = mNextControlId++;
-	if (!clipRect.Intersects(rect)) return false;
-
-	bool ret = false;
-
-	fRect2D barRect = rect;
-
-	uint32_t scrollAxis = axis == LayoutAxis::eHorizontal ? 0 : 1;
-	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
-
-	// Determine knob position
-	float knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-
-	// Modify kob position from input
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			if (rect.Contains(c) && clipRect.Contains(c))
-				knobPos += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
-
-			if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId) {
-				Ray ray = p->mWorldRay;
-				Ray lastRay = device->GetPointerLast(i)->mWorldRay;
-				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-				lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
-				lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
-				float c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
-				float lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
-				knobPos += c - lc;
-				ret = true;
-			}
-		}
-
-	// Derive modified value from modified position
-	value = minimum + (knobPos - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
-	value = std::clamp(value, minimum, maximum);
-	knobPos = barRect.mOffset[scrollAxis] + (value - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-
-	fRect2D knobRect(barRect.mOffset, knobSize);
-	knobRect.mOffset[scrollAxis] += knobPos;
-	knobRect.mOffset -= knobSize*.5f;
-
-	bool hover = false;
-	bool click = false;
-
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			bool hvr = knobRect.Contains(c) && clipRect.Contains(c);
-			bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlId));
-
-			if (hvr || clk) {
-				hover = true;
-				const_cast<InputPointer*>(p)->mGuiHitT = t;
-			}
-			if (clk) {
-				mHotControl[p->mName] = controlId;
-				click = true;
-			}
-		}
-
-	float m = 1.25f;
-	if (hover) m *= 1.2f;
-	if (click) m *= 1.5f;
-
-	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
-	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
-
-	return ret;
-}
-
-bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
+bool GuiContext::RangeSlider(const TransformInfo& transform, float2& values, float minimum, float maximum) {
 	uint32_t controlId[2];
 	controlId[0] = mNextControlId++;
 	controlId[1] = mNextControlId++;
-	if (!screenRect.Intersects(clipRect)) return false;
+	if (!transform.mRect.Intersects(transform.mClipRect)) return false;
 
+	LayoutAxis axis = transform.mRect.mSize.y > transform.mRect.mSize.x ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
 	uint32_t scrollAxis = axis == LayoutAxis::eHorizontal ? 0 : 1;
 	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
 
@@ -918,208 +437,60 @@ bool GuiContext::RangeSlider(const fRect2D& screenRect, float z, float2& values,
 	}
 
 	fRect2D middleRect = barRect;
-	middleRect.mOffset[scrollAxis] = std::min(knobRects[0].mOffset[scrollAxis], knobRects[1].mOffset[scrollAxis]) + knobSize * .5f;
-	middleRect.mSize[scrollAxis] = std::abs(knobRects[1].mOffset[scrollAxis] - knobRects[0].mOffset[scrollAxis]);
+	middleRect.mOffset[scrollAxis] = min(knobRects[0].mOffset[scrollAxis], knobRects[1].mOffset[scrollAxis]) + knobSize * .5f;
+	middleRect.mSize[scrollAxis] = abs(knobRects[1].mOffset[scrollAxis] - knobRects[0].mOffset[scrollAxis]);
 
 	float m = 1.25f;
 	if (hover) m *= 1.2f;
 	if (click) m *= 1.5f;
 
 	Rect(barRect, z, barColor, nullptr, 0, clipRect);
-	Rect(knobRects[0], z, float4(knobColor.rgb * m, knobColor.a), mIconsTexture, ICON_TRI_RIGHT_ST, clipRect);
-	Rect(knobRects[1], z, float4(knobColor.rgb * m, knobColor.a), mIconsTexture, ICON_TRI_LEFT_ST, clipRect);
+	Rect(knobRects[0], z, float4((float3)knobColor * m, knobColor.w), mIconsTexture, ICON_TRI_RIGHT_ST, clipRect);
+	Rect(knobRects[1], z, float4((float3)knobColor * m, knobColor.w), mIconsTexture, ICON_TRI_LEFT_ST, clipRect);
 	if (middleRect.mSize[scrollAxis] > 0)
-		Rect(middleRect, z, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
-	return ret;
-}
-bool GuiContext::RangeSlider(const float4x4& transform, const fRect2D& rect, float2& values, float minimum, float maximum, LayoutAxis axis, float knobSize, const float4& barColor, const float4& knobColor, const fRect2D& clipRect) {
-	uint32_t controlIds[3] = { mNextControlId++, mNextControlId++, mNextControlId++ };
-	if (!clipRect.Intersects(rect)) return false;
-
-	bool ret = false;
-
-	fRect2D barRect = rect;
-
-	uint32_t scrollAxis = axis == LayoutAxis::eHorizontal ? 0 : 1;
-	uint32_t otherAxis = axis == LayoutAxis::eHorizontal ? 1 : 0;
-
-	// Determine knob positions
-	float2 pos = barRect.mOffset[scrollAxis] + (values - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-
-	// Modify kob positions from input
-	float4x4 invTransform = inverse(transform);
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-			if (rect.Contains(c) && clipRect.Contains(c)) {
-				if (c.x < pos[0] + knobSize * .5f)
-					pos[0] += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
-				else if (c.x > pos[1] - knobSize * .5f)
-					pos[1] += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
-				else
-					pos += p->mScrollDelta[scrollAxis] * barRect.mSize[scrollAxis] * .25f;
-			}
-
-			for (uint32_t j = 0; j < 3; j++)
-				if (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]) {
-					Ray ray = p->mWorldRay;
-					Ray lastRay = device->GetPointerLast(i)->mWorldRay;
-					ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-					ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-					lastRay.mOrigin = (invTransform * float4(lastRay.mOrigin, 1)).xyz;
-					lastRay.mDirection = (invTransform * float4(lastRay.mDirection, 0)).xyz;
-					float c = (ray.mOrigin + ray.mDirection * ray.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
-					float lc = (lastRay.mOrigin + lastRay.mDirection * lastRay.Intersect(float4(0, 0, 1, 0)))[scrollAxis];
-					if (j == 2) pos += c - lc;
-					else pos[j] += c - lc;
-					ret = true;
-				}
-		}
-
-	// Derive modified value from modified positions
-	values = minimum + (pos - barRect.mOffset[scrollAxis]) / barRect.mSize[scrollAxis] * (maximum - minimum);
-	values = clamp(values, minimum, maximum);
-	if (values.x > values.y) swap(values.x, values.y);
-
-	// Derive final knob position from the modified, clamped value
-	pos[0] = barRect.mOffset[scrollAxis] + (values[0] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-	pos[1] = barRect.mOffset[scrollAxis] + (values[1] - minimum) / (maximum - minimum) * barRect.mSize[scrollAxis];
-
-	fRect2D middleRect = rect;
-	middleRect.mOffset[otherAxis] += rect.mSize[otherAxis] * .125f;
-	middleRect.mSize[otherAxis] *= 0.75f;
-	middleRect.mOffset[scrollAxis] = pos[0] + knobSize;
-	middleRect.mSize[scrollAxis] = pos[1] - (pos[0] + knobSize);
-
-	fRect2D knobRects[2];
-	knobRects[0] = fRect2D(barRect.mOffset, knobSize);
-	knobRects[1] = fRect2D(barRect.mOffset, knobSize);
-	knobRects[0].mOffset[scrollAxis] += pos[0];
-	knobRects[1].mOffset[scrollAxis] += pos[1];
-	knobRects[0].mOffset -= knobSize*.5f;
-	knobRects[1].mOffset -= knobSize*.5f;
-	
-	bool hover = false;
-	bool click = false;
-
-	for (InputDevice* device : mInputManager->InputDevices())
-		for (uint32_t i = 0; i < device->PointerCount(); i++) {
-			const InputPointer* p = device->GetPointer(i);
-
-			Ray ray = p->mWorldRay;
-			ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-			ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
-
-			float t = ray.Intersect(float4(0, 0, 1, 0));
-			if (p->mGuiHitT > 0 && t > p->mGuiHitT) continue;
-
-			float2 c = (ray.mOrigin + ray.mDirection * t).xy;
-
-			for (uint32_t j = 0; j < 2; j++) {
-				bool hvr = knobRects[j].Contains(c) && clipRect.Contains(c);
-				bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[j]));
-
-				if (hvr || clk) {
-					hover = true;
-					const_cast<InputPointer*>(p)->mGuiHitT = t;
-				}
-				if (clk) {
-					mHotControl[p->mName] = controlIds[j];
-					click = true;
-				}
-			}
-
-			if (middleRect.mSize[scrollAxis] > 0) {
-				bool hvr = middleRect.Contains(c) && clipRect.Contains(c);
-				bool clk = p->mPrimaryButton && (hvr || (mLastHotControl.count(p->mName) && mLastHotControl.at(p->mName) == controlIds[2]));
-
-				if (hvr || clk) {
-					hover = true;
-					const_cast<InputPointer*>(p)->mGuiHitT = t;
-				}
-				if (clk) {
-					mHotControl[p->mName] = controlIds[2];
-					click = true;
-				}
-			}
-		}
-
-	float m = 1.25f;
-	if (hover) m *= 1.2f;
-	if (click) m *= 1.5f;
-
-	Rect(transform, barRect, barColor, nullptr, 0, clipRect);
-	Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[0], float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
-	Rect(transform* float4x4::Translate(float3(0, 0, DEPTH_DELTA)), knobRects[1], float4(knobColor.rgb* m, knobColor.a), nullptr, 0, clipRect);
-	if (middleRect.mSize[scrollAxis] > 0)
-		Rect(transform * float4x4::Translate(float3(0, 0, DEPTH_DELTA)), middleRect, float4(knobColor.rgb * m, knobColor.a), nullptr, 0, clipRect);
+		Rect(middleRect, z, float4((float3)knobColor * m, knobColor.w), nullptr, 0, clipRect);
 	return ret;
 }
 
-
-fRect2D GuiContext::GuiLayout::Get(float size) {
-	fRect2D layoutRect = mRect;
-	switch (mAxis) {
-	case LayoutAxis::eVertical:
-		layoutRect.mSize.y = size;
-		layoutRect.mOffset.y += (mRect.mSize.y - size) - mLayoutPosition;
-		break;
-	case LayoutAxis::eHorizontal:
-		layoutRect.mSize.x = size;
-		layoutRect.mOffset.x += mLayoutPosition;
-		break;
-	}
-	mLayoutPosition += size;
-	return layoutRect;
-}
 
 fRect2D GuiContext::BeginScreenLayout(LayoutAxis axis, const fRect2D& screenRect) {
-	fRect2D layoutRect(screenRect.mOffset + mLayoutTheme.mControlPadding, screenRect.mSize - mLayoutTheme.mControlPadding * 2);
+	fRect2D layoutRect(screenRect.mOffset + mLayoutStyle.mControlPadding, screenRect.mSize - mLayoutStyle.mControlPadding * 2);
 	mLayoutStack.push({ float4x4(1), true, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
-	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(screenRect, START_DEPTH, mLayoutTheme.mBackgroundColor, nullptr, 0);
+	if (mLayoutStyle.mBackgroundColor.w > 0) Rect(screenRect, START_DEPTH, mLayoutStyle.mBackgroundColor, nullptr, 0);
 	return layoutRect;
 }
 fRect2D GuiContext::BeginWorldLayout(LayoutAxis axis, const float4x4& tranform, const fRect2D& rect) {
-	fRect2D layoutRect(rect.mOffset + mLayoutTheme.mControlPadding, rect.mSize - mLayoutTheme.mControlPadding * 2);
+	fRect2D layoutRect(rect.mOffset + mLayoutStyle.mControlPadding, rect.mSize - mLayoutStyle.mControlPadding * 2);
 	mLayoutStack.push({ tranform, false, axis, layoutRect, layoutRect, 0, START_DEPTH + DEPTH_DELTA });
-	if (mLayoutTheme.mBackgroundColor.a > 0) Rect(tranform * float4x4::Translate(float3(0, 0, START_DEPTH)), rect, mLayoutTheme.mBackgroundColor);
+	if (mLayoutStyle.mBackgroundColor.w > 0) Rect(tranform * float4x4::Translate(float3(0, 0, START_DEPTH)), rect, mLayoutStyle.mBackgroundColor);
 	return layoutRect;
 }
 
 fRect2D GuiContext::BeginSubLayout(LayoutAxis axis, float size) {
 	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
+	LayoutSpace(mLayoutStyle.mControlPadding);
 	fRect2D layoutRect = l.Get(size);
-	LayoutSpace(mLayoutTheme.mControlPadding);
+	LayoutSpace(mLayoutStyle.mControlPadding);
 
-	if (mLayoutTheme.mBackgroundColor.a > 0) {
+	if (mLayoutStyle.mBackgroundColor.w > 0) {
 		if (l.mScreenSpace)
-			Rect(layoutRect, l.mLayoutDepth + DEPTH_DELTA, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
+			Rect(layoutRect, l.mLayoutDepth + DEPTH_DELTA, mLayoutStyle.mBackgroundColor, nullptr, 0, l.mClipRect);
 		else
-			Rect(l.mTransform + float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutTheme.mBackgroundColor, nullptr, 0, l.mClipRect);
+			Rect(l.mCachedTransform + float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), layoutRect, mLayoutStyle.mBackgroundColor, nullptr, 0, l.mClipRect);
 	}
 
-	layoutRect.mOffset += mLayoutTheme.mControlPadding;
-	layoutRect.mSize -= mLayoutTheme.mControlPadding * 2;
+	layoutRect.mOffset += mLayoutStyle.mControlPadding;
+	layoutRect.mSize -= mLayoutStyle.mControlPadding * 2;
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, axis, layoutRect, layoutRect, 0, l.mLayoutDepth + 2*DEPTH_DELTA });
+	mLayoutStack.push({ l.mCachedTransform, l.mScreenSpace, axis, layoutRect, layoutRect, 0, l.mLayoutDepth + 2*DEPTH_DELTA });
 
 	return layoutRect;
 }
 fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
+	LayoutSpace(mLayoutStyle.mControlPadding);
 	fRect2D layoutRect = l.Get(size);
-	LayoutSpace(mLayoutTheme.mControlPadding);
+	LayoutSpace(mLayoutStyle.mControlPadding);
 
 	uint32_t controlId = mNextControlId++;
 
@@ -1139,18 +510,18 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 			}
 		}
 	} else {
-		float4x4 invTransform = inverse(l.mTransform);
-		for (const InputDevice* d : mInputManager->InputDevices())
+		float4x4 invTransform = inverse(l.mCachedTransform);
+		for (const InputSystem* d : mInputManager->InputDevices())
 			for (uint32_t i = 0; i < d->PointerCount(); i++) {
 				const InputPointer* p = d->GetPointer(i);
 
-				Ray ray = p->mWorldRay;
-				ray.mOrigin = (invTransform * float4(ray.mOrigin, 1)).xyz;
-				ray.mDirection = (invTransform * float4(ray.mDirection, 0)).xyz;
+				fRay ray = p->mWorldRay;
+				ray.mOrigin = (float3)(invTransform * float4(ray.mOrigin, 1));
+				ray.mDirection = (float3)(invTransform * float4(ray.mDirection, 0));
 
 				float t = ray.Intersect(float4(0, 0, 1, l.mLayoutDepth));
 
-				float2 c = (ray.mOrigin + ray.mDirection * t).xy;
+				float2 c = (float2)(ray.mOrigin + ray.mDirection * t);
 				if (layoutRect.Contains(c) && l.mClipRect.Contains(c)) {
 					scrollAmount -= p->mScrollDelta[l.mAxis == LayoutAxis::eHorizontal ? 0 : 1] * contentSize * .25f;
 					const_cast<InputPointer*>(p)->mGuiHitT = t;
@@ -1159,30 +530,30 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 	}
 
 	float scrollMax = fmaxf(0.f, contentSize - layoutRect.mSize.y);
-	scrollAmount = std::clamp(scrollAmount, 0.f, scrollMax);
+	scrollAmount = clamp(scrollAmount, 0.f, scrollMax);
 
 	mControlData[controlId] = scrollAmount;
 
-	if (mLayoutTheme.mBackgroundColor.a > 0) {
-		float4 c = mLayoutTheme.mBackgroundColor;
+	if (mLayoutStyle.mBackgroundColor.w > 0) {
+		float4 c = mLayoutStyle.mBackgroundColor;
 		c.rgb *= 0.75f;
 		if (l.mScreenSpace)
 			Rect(layoutRect, l.mLayoutDepth, c, nullptr, 0, l.mClipRect);
 		else
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, c, nullptr, 0, l.mClipRect);
+			Rect(l.mCachedTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, c, nullptr, 0, l.mClipRect);
 	}
 
 	fRect2D contentRect = layoutRect;
-	contentRect.mOffset += mLayoutTheme.mControlPadding;
-	contentRect.mSize -= mLayoutTheme.mControlPadding * 2;
+	contentRect.mOffset += mLayoutStyle.mControlPadding;
+	contentRect.mSize -= mLayoutStyle.mControlPadding * 2;
 	switch (l.mAxis) {
 	case LayoutAxis::eHorizontal:
 		contentRect.mOffset.x -= scrollAmount + (layoutRect.mSize.x - contentSize);
-		contentRect.mSize.x = contentSize - mLayoutTheme.mControlPadding * 2;
+		contentRect.mSize.x = contentSize - mLayoutStyle.mControlPadding * 2;
 		break;
 	case LayoutAxis::eVertical:
 		contentRect.mOffset.y += (layoutRect.mSize.y - contentSize) + scrollAmount;
-		contentRect.mSize.y = contentSize - mLayoutTheme.mControlPadding * 2;
+		contentRect.mSize.y = contentSize - mLayoutStyle.mControlPadding * 2;
 		break;
 	}
 	
@@ -1193,7 +564,7 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 
 		switch (l.mAxis) {
 		case LayoutAxis::eHorizontal:
-			slider.mSize = float2(layoutRect.mSize.x * (layoutRect.mSize.x / contentSize), mLayoutTheme.mScrollBarThickness);
+			slider.mSize = float2(layoutRect.mSize.x * (layoutRect.mSize.x / contentSize), mLayoutStyle.mScrollBarThickness);
 			slider.mOffset = layoutRect.mOffset + float2((layoutRect.mSize.x - slider.mSize.x) * (scrollAmount / scrollMax), 0);
 			sliderbg.mOffset = layoutRect.mOffset;
 			sliderbg.mSize = float2(layoutRect.mSize.x, slider.mSize.y);
@@ -1204,7 +575,7 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 			break;
 
 		case LayoutAxis::eVertical:
-			slider.mSize = float2(mLayoutTheme.mScrollBarThickness, layoutRect.mSize.y * (layoutRect.mSize.y / contentSize));
+			slider.mSize = float2(mLayoutStyle.mScrollBarThickness, layoutRect.mSize.y * (layoutRect.mSize.y / contentSize));
 			slider.mOffset = layoutRect.mOffset + float2(layoutRect.mSize.x - slider.mSize.x, (layoutRect.mSize.y - slider.mSize.y) * (1 - scrollAmount / scrollMax));
 			sliderbg.mOffset = layoutRect.mOffset + float2(layoutRect.mSize.x - slider.mSize.x, 0);
 			sliderbg.mSize = float2(slider.mSize.x, layoutRect.mSize.y);
@@ -1223,167 +594,23 @@ fRect2D GuiContext::BeginScrollSubLayout(float size, float contentSize) {
 		slider.mSize[scrollAxis] = fmaxf(0, slider.mSize[scrollAxis] - extent);
 		
 		if (l.mScreenSpace) {
-			Rect(slider, l.mLayoutDepth + DEPTH_DELTA, mLayoutTheme.mSliderColor, nullptr, 0);
-			Rect(slider, l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, nullptr, 0);
+			Rect(slider, l.mLayoutDepth + DEPTH_DELTA, mLayoutStyle.mSliderColor, nullptr, 0);
+			Rect(slider, l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutStyle.mSliderKnobColor, nullptr, 0);
 			
-			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
+			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutStyle.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 			offset[scrollAxis] += floorf(slider.mSize[scrollAxis] - 0.5f);
-			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
+			Rect(fRect2D(offset, extent), l.mLayoutDepth + 2*DEPTH_DELTA, mLayoutStyle.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 		} else {
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), sliderbg, mLayoutTheme.mSliderColor);
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), slider, mLayoutTheme.mSliderKnobColor);
+			Rect(l.mCachedTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + DEPTH_DELTA)), sliderbg, mLayoutStyle.mSliderColor);
+			Rect(l.mCachedTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), slider, mLayoutStyle.mSliderKnobColor);
 			
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
+			Rect(l.mCachedTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutStyle.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 			offset[scrollAxis] += slider.mSize[scrollAxis];
-			Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutTheme.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
+			Rect(l.mCachedTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth + 2*DEPTH_DELTA)), fRect2D(offset, extent), mLayoutStyle.mSliderKnobColor, mIconsTexture, ICON_CIRCLE_ST, l.mClipRect);
 		}
 	}
 
-	mLayoutStack.push({ l.mTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, l.mLayoutDepth + 3*DEPTH_DELTA });
+	mLayoutStack.push({ l.mCachedTransform, l.mScreenSpace, l.mAxis, contentRect, layoutRect, 0, l.mLayoutDepth + 3*DEPTH_DELTA });
 
 	return contentRect;
-}
-void GuiContext::EndLayout() {
-	mLayoutStack.pop();
-}
-
-void GuiContext::LayoutSpace(float size) {
-	mLayoutStack.top().mLayoutPosition += size;
-}
-void GuiContext::LayoutSeparator() {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(2);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	if (l.mScreenSpace)
-		GuiContext::Rect(layoutRect, l.mLayoutDepth, mLayoutTheme.mTextColor, nullptr, 0, l.mClipRect);
-	else
-		GuiContext::Rect(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mTextColor, nullptr, 0, l.mClipRect);
-}
-void GuiContext::LayoutTitle(const string& text, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mTitleFontHeight);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	if (l.mScreenSpace)
-		Label(layoutRect, l.mLayoutDepth, mLayoutTheme.mTitleFont, mLayoutTheme.mTitleFontHeight, text, mLayoutTheme.mTextColor, 0, horizontalAnchor, verticalAnchor, l.mClipRect);
-	else
-		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mTitleFont, mLayoutTheme.mTitleFontHeight, text, mLayoutTheme.mTextColor, 0, horizontalAnchor, verticalAnchor, l.mClipRect);
-}
-void GuiContext::LayoutLabel(const string& text, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mControlSize);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	if (l.mScreenSpace)
-		Label(layoutRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, text, mLayoutTheme.mTextColor, 0, horizontalAnchor, verticalAnchor, l.mClipRect);
-	else
-		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, text, mLayoutTheme.mTextColor, 0, horizontalAnchor, verticalAnchor, l.mClipRect);
-}
-bool GuiContext::LayoutTextButton(const string& text, TextAnchor horizontalAnchor, TextAnchor verticalAnchor) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mControlSize);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	if (l.mScreenSpace)
-		return TextButton(layoutRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, text, mLayoutTheme.mTextColor, mLayoutTheme.mControlBackgroundColor, horizontalAnchor, verticalAnchor, l.mClipRect);
-	else
-		return TextButton(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, text, mLayoutTheme.mTextColor, mLayoutTheme.mControlBackgroundColor, horizontalAnchor, verticalAnchor, l.mClipRect);
-}
-bool GuiContext::LayoutImageButton(const float2& size, shared_ptr<Texture> texture, const float4& textureST) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(size[(uint32_t)l.mAxis]);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	layoutRect.mSize = size;
-
-	if (l.mScreenSpace)
-		return ImageButton(layoutRect, l.mLayoutDepth, texture, mLayoutTheme.mTextColor, textureST, l.mClipRect);
-	else
-		return ImageButton(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, texture, mLayoutTheme.mTextColor, textureST, l.mClipRect);
-}
-bool GuiContext::LayoutToggle(const string& label, bool& value) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mControlSize);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	if (l.mScreenSpace) {
-		Label(layoutRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += layoutRect.mSize.x - mLayoutTheme.mControlSize;
-		layoutRect.mSize = mLayoutTheme.mControlSize;
-		if (ImageButton(layoutRect, l.mLayoutDepth, mIconsTexture, mLayoutTheme.mTextColor, value ? ICON_CHECK_ST : ICON_CHECKBOX_ST, l.mClipRect)) {
-			value = !value;
-			return true;
-		}
-		return false;
-	} else {
-		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += layoutRect.mSize.x - mLayoutTheme.mControlSize;
-		layoutRect.mSize = mLayoutTheme.mControlSize;
-		if (ImageButton(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), layoutRect, mIconsTexture, mLayoutTheme.mTextColor, value ? ICON_CHECK_ST : ICON_CHECKBOX_ST, l.mClipRect)) {
-			value = !value;
-			return true;
-		}
-		return false;
-	}
-}
-bool GuiContext::LayoutSlider(const string& label, float& value, float minimum, float maximum) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mControlSize);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	// make the bar the right size
-	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mSize[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
-	layoutRect.mSize[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
-
-	LayoutAxis axis = l.mAxis == LayoutAxis::eHorizontal ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
-	if (l.mScreenSpace) {
-		fRect2D labelRect = layoutRect;
-		labelRect.mSize.x *= .25f;
-		Label(labelRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
-		return Slider(layoutRect, l.mLayoutDepth, value, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
-	} else {
-		fRect2D labelRect = layoutRect;
-		labelRect.mSize.x *= .25f;
-		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), labelRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
-		return Slider(l.mTransform, layoutRect, value, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
-	}
-}
-bool GuiContext::LayoutRangeSlider(const string& label, float2& values, float minimum, float maximum) {
-	GuiLayout& l = mLayoutStack.top();
-	LayoutSpace(mLayoutTheme.mControlPadding);
-	fRect2D layoutRect = l.Get(mLayoutTheme.mControlSize);
-	LayoutSpace(mLayoutTheme.mControlPadding);
-
-	// make the bar the right size
-	layoutRect.mOffset[(uint32_t)l.mAxis] += (layoutRect.mSize[(uint32_t)l.mAxis] - mLayoutTheme.mSliderBarSize) * .5f;
-	layoutRect.mSize[(uint32_t)l.mAxis] = mLayoutTheme.mSliderBarSize;
-
-	LayoutAxis axis = l.mAxis == LayoutAxis::eHorizontal ? LayoutAxis::eVertical : LayoutAxis::eHorizontal;
-	if (l.mScreenSpace) {
-		fRect2D labelRect = layoutRect;
-		labelRect.mSize.x *= .25f;
-		Label(labelRect, l.mLayoutDepth, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
-		return RangeSlider(layoutRect, l.mLayoutDepth, values, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
-	} else {
-		fRect2D labelRect = layoutRect;
-		labelRect.mSize.x *= .25f;
-		Label(l.mTransform * float4x4::Translate(float3(0, 0, l.mLayoutDepth)), labelRect, mLayoutTheme.mControlFont, mLayoutTheme.mControlFontHeight, label, mLayoutTheme.mTextColor, 0, TextAnchor::eMin, TextAnchor::eMid, l.mClipRect);
-		layoutRect.mOffset.x += labelRect.mSize.x + mLayoutTheme.mSliderKnobSize*.5f;
-		layoutRect.mSize.x -= labelRect.mSize.x + mLayoutTheme.mSliderKnobSize;
-		return RangeSlider(l.mTransform, layoutRect, values, minimum, maximum, axis, mLayoutTheme.mSliderKnobSize, mLayoutTheme.mSliderColor, mLayoutTheme.mSliderKnobColor, l.mClipRect);
-	}
 }

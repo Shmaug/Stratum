@@ -2,19 +2,20 @@
 
 #include <bitset>
 
-#include <Data/Texture.hpp>
 #include "Buffer.hpp"
 #include "CommandBuffer.hpp"
 #include "DescriptorSet.hpp"
 #include "Window.hpp"
 
-using namespace std;
+#include "Asset/Texture.hpp"
+
+
 using namespace stm;
 
-Device::Device(Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mInstance(instance), mPhysicalDevice(physicalDevice), mPhysicalDeviceIndex(physicalDeviceIndex) {
+Device::Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, stm::Instance& instance, const set<string>& deviceExtensions, vector<const char*> validationLayers)
+	: mPhysicalDevice(physicalDevice), mPhysicalDeviceIndex(physicalDeviceIndex), mInstance(instance) {
 
-	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)(*mInstance)->getProcAddr("vkSetDebugUtilsObjectNameEXT");
+	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)mInstance->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
 	mMaxMSAASamples = GetMaxUsableSampleCount();
 
@@ -62,7 +63,8 @@ Device::Device(Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t p
 	
 	#pragma region Create PipelineCache and DesriptorPool
 	vk::PipelineCacheCreateInfo cacheInfo = {};
-	if (!mInstance->GetOptionExists("noPipelineCache")) {
+	string tmp;
+	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
 		try {
 			ifstream cacheFile(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary | ios::ate);
 			if (cacheFile.is_open()) {
@@ -80,90 +82,70 @@ Device::Device(Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t p
 	if (cacheInfo.pInitialData) delete cacheInfo.pInitialData;
 	
 	vector<vk::DescriptorPoolSize> poolSizes {
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								std::min(1024u, mLimits.maxDescriptorSetSamplers)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	std::min(1024u, mLimits.maxDescriptorSetSampledImages)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eInputAttachment, 				std::min(1024u, mLimits.maxDescriptorSetInputAttachments)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					std::min(1024u, mLimits.maxDescriptorSetSampledImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 					std::min(1024u, mLimits.maxDescriptorSetStorageImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					std::min(1024u, mLimits.maxDescriptorSetUniformBuffers)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eUniformBufferDynamic, 	std::min(1024u, mLimits.maxDescriptorSetUniformBuffersDynamic)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					std::min(1024u, mLimits.maxDescriptorSetStorageBuffers)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	std::min(1024u, mLimits.maxDescriptorSetStorageBuffersDynamic))
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(1024u, mLimits.maxDescriptorSetSamplers)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(1024u, mLimits.maxDescriptorSetSampledImages)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eInputAttachment, 				min(1024u, mLimits.maxDescriptorSetInputAttachments)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					min(1024u, mLimits.maxDescriptorSetSampledImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 					min(1024u, mLimits.maxDescriptorSetStorageImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					min(1024u, mLimits.maxDescriptorSetUniformBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eUniformBufferDynamic, 	min(1024u, mLimits.maxDescriptorSetUniformBuffersDynamic)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(1024u, mLimits.maxDescriptorSetStorageBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	min(1024u, mLimits.maxDescriptorSetStorageBuffersDynamic))
 	};
 	mDescriptorPool = mDevice.createDescriptorPool(vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 8192, poolSizes));
 	SetObjectName(mDescriptorPool, name);
 	#pragma endregion
 
 	for (const vk::DeviceQueueCreateInfo& info : queueCreateInfos) {
-		QueueFamily q = {};
-		q.mQueue = mDevice.getQueue(info.queueFamilyIndex, 0);
+		stm::QueueFamily q = {};
 		q.mName = name + "/QueueFamily" + to_string(info.queueFamilyIndex);
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
-		SetObjectName(q.mQueue, q.mName);
-		mQueueFamilies.emplace(info.queueFamilyIndex, q);
+		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.Window().Surface());
+		// TODO: create more queues to utilize more parallelization (if necessary?)
+		for (uint32_t i = 0; i < 1; i++) {
+			q.mQueues.push_back(mDevice.getQueue(info.queueFamilyIndex, i));
+			SetObjectName(q.mQueues[i], q.mName+"/Queue"+to_string(i));
+		}
+		mQueueFamilies.emplace(q.mFamilyIndex, q);
+		mQueueFamilyIndices.push_back(q.mFamilyIndex);
 	}
 
-	mDefaultDescriptorSetLayouts.resize(std::max(PER_CAMERA, PER_OBJECT) + 1);
-	vk::SamplerCreateInfo shadowSamplerInfo;
-	shadowSamplerInfo.addressModeU = shadowSamplerInfo.addressModeV = shadowSamplerInfo.addressModeW = vk::SamplerAddressMode::eClampToBorder;
-	shadowSamplerInfo.anisotropyEnable = false;
-	shadowSamplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-	shadowSamplerInfo.compareEnable = true;
-	shadowSamplerInfo.compareOp = vk::CompareOp::eLess;
-	shadowSamplerInfo.magFilter = shadowSamplerInfo.minFilter = vk::Filter::eLinear;
-	mDefaultImmutableSamplers.push_back(new Sampler("ShadowSampler", this, shadowSamplerInfo));
+	array<uint8_t,4> whitePixels { 0xFF, 0xFF, 0xFF, 0xFF };
+	array<uint8_t,4> blackPixels { 0, 0, 0, 0xFF };
+	array<uint8_t,4> zeroPixels { 0, 0, 0, 0 };
+	array<uint8_t,4> bumpPixels { 0x80, 0x80, 0xFF, 0xFF };
+	array<uint8_t,4*256*256> noisePixels;
+	for (auto& pixel : noisePixels) pixel = rand() % 0xFF;
 	
-	vector<vk::DescriptorSetLayoutBinding> bindings {
-		{ CAMERA_DATA_BINDING, 					vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ LIGHTING_DATA_BINDING, 				vk::DescriptorType::eInlineUniformBlockEXT, sizeof(LightingBuffer), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ LIGHTS_BINDING, 							vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ SHADOWS_BINDING, 							vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ SHADOW_ATLAS_BINDING, 				vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ ENVIRONMENT_TEXTURE_BINDING, 	vk::DescriptorType::eSampledImage, 1, vk::ShaderStageFlagBits::eFragment, nullptr },
-		{ SHADOW_SAMPLER_BINDING, 			vk::DescriptorType::eSampler, 1, vk::ShaderStageFlagBits::eFragment, mDefaultImmutableSamplers[0]->operator->() }
-	};
-	mDefaultDescriptorSetLayouts[PER_CAMERA] = mDevice.createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo({}, bindings));
-	SetObjectName(mDefaultDescriptorSetLayouts[PER_CAMERA], "PER_CAMERA DescriptorSetLayout");
-
-	bindings = { { INSTANCES_BINDING, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr } };
-	mDefaultDescriptorSetLayouts[PER_OBJECT] = mDevice.createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo({}, bindings));
-	SetObjectName(mDefaultDescriptorSetLayouts[PER_OBJECT], "PER_OBJECT DescriptorSetLayout");
-
-	uint8_t whitePixels[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
-	uint8_t blackPixels[4] = { 0, 0, 0, 0xFF };
-	uint8_t transparentBlackPixels[4] = { 0, 0, 0, 0 };
-	uint8_t bumpPixels[4] = { 0x80, 0x80, 0xFF, 0xFF };
-	uint8_t noisePixels[4 * 256*256];
-	for (uint32_t i = 0; i < 4*256*256; i++) noisePixels[i] = rand() % 0xFF;
-	
-	hash<string> strh;
-	mLoadedAssets.emplace(strh("stm_1x1_white_opaque"), 			new Texture("stm_1x1_white_opaque", 			this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, whitePixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
-	mLoadedAssets.emplace(strh("stm_1x1_black_opaque"), 			new Texture("stm_1x1_black_opaque", 			this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, blackPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
-	mLoadedAssets.emplace(strh("stm_1x1_black_transparent"), 	new Texture("stm_1x1_black_transparent", 	this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, transparentBlackPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
-	mLoadedAssets.emplace(strh("stm_1x1_bump"), 							new Texture("stm_1x1_bump", 							this, {   1,   1, 1 }, vk::Format::eR8G8B8A8Unorm, bumpPixels, 4, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst));
-	mLoadedAssets.emplace(strh("stm_noise_rgba_256"), 				new Texture("stm_noise_rgba_256", 				this, { 256, 256, 1 }, vk::Format::eR8G8B8A8Unorm, noisePixels, 4*256*256, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst));
+	mLoadedAssets.emplace(basic_hash("stm_1x1_white_opaque"), 		 make_shared<Texture>("stm_1x1_white_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, whitePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(basic_hash("stm_1x1_black_opaque"), 		 make_shared<Texture>("stm_1x1_black_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, blackPixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(basic_hash("stm_1x1_black_transparent"), make_shared<Texture>("stm_1x1_black_transparent",  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, zeroPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(basic_hash("stm_1x1_bump"), 						 make_shared<Texture>("stm_1x1_bump", 						  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, bumpPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(basic_hash("stm_noise_rgba_256"), 			 make_shared<Texture>("stm_noise_rgba_256", 			  *this, vk::Extent3D(256, 256, 1), vk::Format::eR8G8B8A8Unorm, noisePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc));
 }
 Device::~Device() {
 	Flush();
-	PurgeResourcePools(0);
 
-	mLoadedAssets.clear();
+	UnloadAssets();
+	Flush();
+	
+	PurgeResourcePools(0);
 
 	for (auto& [idx,queueFamily] : mQueueFamilies)
 		for (auto& [tid, p] : queueFamily.mCommandBuffers) {
 			for (CommandBuffer* c : p.second) delete c;
 			mDevice.destroyCommandPool(p.first);
 		}
-	for (auto& s : mDefaultImmutableSamplers) delete s;
-	for (auto& l : mDefaultDescriptorSetLayouts) if (l) mDevice.destroyDescriptorSetLayout(l);
+
 	mDevice.destroyDescriptorPool(mDescriptorPool);
 	
 	mMemoryPool.clear();
 
-	if (!mInstance->GetOptionExists("noPipelineCache")) {
+	string tmp;
+	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
 		try {
-			vector<uint8_t> cacheData = mDevice.getPipelineCacheData(mPipelineCache);
+			auto cacheData = mDevice.getPipelineCacheData(mPipelineCache);
 			ofstream output(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary);
 			output.write((const char*)cacheData.data(), cacheData.size());
 		} catch (exception& e) {
@@ -181,9 +163,9 @@ Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& req
 		if (allocBegin + requirements.size <= blockStart) break;
 		allocBegin = AlignUp(blockEnd, requirements.alignment);
 	}
-	if (allocBegin + requirements.size > mSize) return Block(nullptr, 0);
+	if (allocBegin + requirements.size > mSize) return Block();
 	mBlocks.emplace(allocBegin, allocBegin + requirements.size);
-	return Block(this, allocBegin);
+	return Block(*this, allocBegin);
 }
 void Device::Memory::ReturnBlock(const Device::Memory::Block& block) { mBlocks.erase(block.mOffset); }
 
@@ -191,7 +173,7 @@ Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requi
 	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
 	uint32_t best = numeric_limits<uint32_t>::max();
 	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++) {
-		// skip invalid heaps
+		// skip invalid memory types
 		if ((requirements.memoryTypeBits & (1 << i)) == 0 || (mMemoryProperties.memoryTypes[i].propertyFlags & properties) != properties) continue;
 
 		bitset<32> mask = (uint32_t)(mMemoryProperties.memoryTypes[i].propertyFlags ^ properties);
@@ -205,43 +187,41 @@ Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requi
 		throw invalid_argument("could not find compatible memory type");
 	
 	lock_guard<mutex> lock(mMemoryMutex);
-	for (Memory* memory : mMemoryPool[memoryTypeIndex])
-		if (Memory::Block block = memory->GetBlock(requirements))
-			return block;
+	for (auto& memory : mMemoryPool[memoryTypeIndex]) {
+		Memory::Block block = memory->GetBlock(requirements);
+		if (block.mMemory) return block;
+	}
 	// Failed to sub-allocate a block, allocate new memory
-	return mMemoryPool[memoryTypeIndex].emplace_back(new Memory(this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
+	return mMemoryPool[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
 }
 void Device::FreeMemory(const Memory::Block& block) {
 	lock_guard<mutex> lock(mMemoryMutex);
 	block.mMemory->ReturnBlock(block);
 	auto& allocs = mMemoryPool[block.mMemory->mMemoryTypeIndex];
-	for (auto it = allocs.begin(); it != allocs.end();) {
-		if ((*it)->empty()) {
-			delete *it;
-			it = allocs.erase(it);
-		} else
-			it++;
-	}
+	// free allocations without any blocks in use
+	ranges::remove_if(allocs, [](const auto& x){ x->empty(); });
 }
 
+inline QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
+	for (auto& [queueFamilyIndex, queueFamily] : mQueueFamilies)
+		if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
+			return &queueFamily;
+	return nullptr;
+}
 
 shared_ptr<Buffer> Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags) {
 	{
 		lock_guard lock(mBufferPool.mMutex);
-		auto& pool = mBufferPool.mResources[hash_combine(usage, memoryFlags)];
+		auto& pool = mBufferPool.mResources[basic_hash(usage, memoryFlags)];
 		auto best = pool.end();
-		for (auto it = pool.begin(); it != pool.end(); it++)
-			if (it->mResource->Size() >= size && (best == pool.end() || it->mResource->Size() < best->mResource->Size())) {
-				best = it;
-				if (it->mResource->Size() == size) break;
-			}
+		best = ranges::(pool, []() { return it->mResource->Size() >= size && (best == pool.end() || it->mResource->Size() < best->mResource->Size()) } );
 		if (best != pool.end()) {
 			auto b = best->mResource;
 			pool.erase(best);
 			return b;
 		}
 	}
-	return make_shared<Buffer>(name, this, size, usage, memoryFlags);
+	return make_shared<Buffer>(name, *this, size, usage, memoryFlags);
 }
 shared_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout) {
 	{
@@ -254,24 +234,24 @@ shared_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk:
 			return ds;
 		}
 	}
-	return make_shared<DescriptorSet>(name, this, layout);
+	return make_shared<DescriptorSet>(name, *this, layout);
 }
 shared_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	{
 		lock_guard lock(mTexturePool.mMutex);
-		auto& pool = mTexturePool.mResources[hash_combine(extent, format, mipLevels, sampleCount)];
-		for (auto it = pool.begin(); it != pool.end(); it++)
-			if ((it->mResource->Usage() & usage) && (it->mResource->MemoryProperties() & memoryProperties)) {
-				auto tex = it->mResource;
-				pool.erase(it);
-				return tex;
-			}
+		auto& pool = mTexturePool.mResources[basic_hash(extent, format, mipLevels, sampleCount)];
+		auto it = ranges::find(pool, [](auto i){ return (i.mResource->Usage() & usage) && (i.mResource->MemoryProperties() & memoryProperties) });
+		if (it != pool.end()) {
+			auto tex = it->mResource;
+			pool.erase(it);
+			return tex;
+		}
 	}
-	return make_shared<Texture>(name, this, extent, format, nullptr, 0, usage, mipLevels, sampleCount, memoryProperties);
+	return make_shared<Texture>(name, *this, extent, format, byte_blob(), usage, mipLevels, sampleCount, memoryProperties);
 }
 void Device::PoolResource(shared_ptr<Buffer> buffer) {
 	lock_guard lock(mBufferPool.mMutex);
-	mBufferPool.mResources[hash_combine(buffer->Usage(), buffer->MemoryProperties())].push_back({ buffer, mFrameCount });
+	mBufferPool.mResources[basic_hash(buffer->Usage(), buffer->MemoryProperties())].push_back({ buffer, mFrameCount });
 }
 void Device::PoolResource(shared_ptr<DescriptorSet> descriptorSet) {
 	lock_guard lock(mDescriptorSetPool.mMutex);
@@ -279,7 +259,7 @@ void Device::PoolResource(shared_ptr<DescriptorSet> descriptorSet) {
 }
 void Device::PoolResource(shared_ptr<Texture> texture) {
 	lock_guard lock(mTexturePool.mMutex);
-	mTexturePool.mResources[hash_combine(texture->Extent(), texture->Format(), texture->MipLevels(), texture->SampleCount())].push_back({ texture, mFrameCount });
+	mTexturePool.mResources[basic_hash(texture->Extent(), texture->Format(), texture->MipLevels(), texture->SampleCount())].push_back({ texture, mFrameCount });
 }
 void Device::PurgeResourcePools(uint32_t maxAge) {
 	mDescriptorSetPool.EraseOld(mFrameCount, maxAge);
@@ -292,7 +272,7 @@ void Device::PurgeResourcePools(uint32_t maxAge) {
 				commandBuffer->CheckDone();
 }
 
-CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+CommandBuffer* Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
 	// find most specific queue family
 	QueueFamily* queueFamily = nullptr;
 	for (auto& [i,q] : mQueueFamilies)
@@ -316,10 +296,10 @@ CommandBuffer* Device::GetCommandBuffer(const std::string& name, vk::QueueFlags 
 				commandBuffer->Reset(name);
 				return commandBuffer;
 			}
-	return new CommandBuffer(name, this, queueFamily, level);
+	return new CommandBuffer(name, *this, queueFamily, level);
 }
 void Device::Execute(CommandBuffer* commandBuffer, bool wait) {
-	ProfileRegion ps("CommandBuffer::Execute");
+	ProfilerRegion ps("CommandBuffer::Execute");
 
 	vector<vk::PipelineStageFlags> waitStages;	
 	vector<vk::Semaphore> waitSemaphores;	
@@ -331,13 +311,13 @@ void Device::Execute(CommandBuffer* commandBuffer, bool wait) {
 	}
 	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.push_back(**semaphore);
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily->mQueue.submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mSignalFence);
+	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mSignalFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 
 	lock_guard lock(mQueueMutex);
 	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.push_back(commandBuffer);
 	if (wait) {
-		mDevice.waitForFences({ **commandBuffer->mSignalFence }, true, numeric_limits<uint64_t>::max());
+		auto result = mDevice.waitForFences({ **commandBuffer->mSignalFence }, true, numeric_limits<uint64_t>::max());
 		commandBuffer->mState = CommandBuffer::CommandBufferState::eDone;
 		commandBuffer->Clear();
 	}
@@ -355,7 +335,7 @@ vk::SampleCountFlagBits Device::GetMaxUsableSampleCount() {
 	vk::PhysicalDeviceProperties physicalDeviceProperties;
 	mPhysicalDevice.getProperties(&physicalDeviceProperties);
 
-	vk::SampleCountFlags counts = std::min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
+	vk::SampleCountFlags counts = min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
 	if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; }
 	if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; }
 	if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; }

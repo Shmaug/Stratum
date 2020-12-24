@@ -1,12 +1,11 @@
-#include <Util/Profiler.hpp>
-#include <Scene/Scene.hpp>
+#include "Profiler.hpp"
+#include "Window.hpp"
+#include "../Scene/GuiContext.hpp"
 
-#include <sstream>
 
-using namespace std;
 using namespace stm;
 
-const std::chrono::high_resolution_clock Profiler::mTimer;
+const chrono::high_resolution_clock Profiler::mTimer;
 list<ProfilerSample*> Profiler::mFrames;
 ProfilerSample* Profiler::mCurrentSample = nullptr;
 ProfilerSample* Profiler::mSelectedFrame = nullptr;
@@ -18,7 +17,7 @@ float Profiler::mSampleHeight = 20;
 void Profiler::ClearAll() {
 	safe_delete(mCurrentSample);
 	for (ProfilerSample* frame : Profiler::mFrames) delete frame;
-	Profiler::mFrames.swap(list<ProfilerSample*>());
+	Profiler::mFrames.clear();
 }
 
 void Profiler::BeginSample(const string& label) {
@@ -66,7 +65,7 @@ void Profiler::EndFrame() {
 	mCurrentSample = nullptr;
 
 	uint32_t i = 0;
-	for (auto& it = mFrames.begin(); it != mFrames.end();) {
+	for (auto it = mFrames.begin(); it != mFrames.end();) {
 		if (i >= mHistoryCount) {
 			if (mSelectedFrame == *it) mSelectedFrame = nullptr;
 			delete *it;
@@ -78,33 +77,28 @@ void Profiler::EndFrame() {
 }
 
 void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
-	Device* device = gui.mDevice;
-	auto font = device->LoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", "OpenSans-Regular");
-	MouseKeyboardInput* input = gui.mInputManager->GetFirst<MouseKeyboardInput>();
-	GuiContext::LayoutTheme theme = gui.mLayoutTheme;
+	Device& device = gui.Scene().Instance().Device();
+	auto font = device.LoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf");
 
+	auto style = gui.PushLayoutStyle();
 	float toolbarHeight = 24;
 
-	float4 graphBackgroundColor = gui.mLayoutTheme.mControlBackgroundColor;
+	float4 graphBackgroundColor = style->mControlBackgroundColor;
 	float4 graphTextColor = float4(0.8f, 0.8f, 0.8f, 1);
-	float4 graphAxisColor = gui.mLayoutTheme.mSliderColor;
+	float4 graphAxisColor = style->mSliderColor;
 	float4 graphLineColor = float4(0.1f, 1.f, 0.2f, 1);
-	float4 frameSelectLineColor = gui.mLayoutTheme.mSliderKnobColor;
+	float4 frameSelectLineColor = style->mSliderKnobColor;
 
-	float2 s((float)input->WindowWidth(), (float)input->WindowHeight());
-	float2 c = input->CursorPos();
-	c.y = s.y - c.y;
-
+	float2 s((float)gui.Scene().Instance().Window().SwapchainExtent().width, (float)gui.Scene().Instance().Window().SwapchainExtent().height);
 	fRect2D windowRect(0, 0, s.x, toolbarHeight + mGraphHeight);
 
 	gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, windowRect);
 
 	#pragma region toolbar
-	gui.BeginSubLayout(GuiContext::LayoutAxis::eHorizontal, gui.mLayoutTheme.mControlSize + gui.mLayoutTheme.mControlPadding*2);
-	gui.mLayoutTheme.mControlSize = 140;
+	gui.BeginSubLayout(GuiContext::LayoutAxis::eHorizontal, style->mControlSize + style->mControlPadding*2);
+	style->mControlSize = 140;
 	if (gui.LayoutTextButton(mEnabled ? "PAUSE PROFILER" : "RESUME PROFILER")) mEnabled = !mEnabled;
 	gui.LayoutLabel(to_string(framerate) + " FPS", TextAnchor::eMax);
-	gui.mLayoutTheme = theme;
 	gui.EndLayout();
 	#pragma endregion
 
@@ -115,10 +109,10 @@ void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
 	fRect2D clipRect = gui.LayoutClipRect();
 	float depth = gui.LayoutDepth() - 0.001f;
 
-	gui.mLayoutTheme.mBackgroundColor.xyz *= 0.8f;
-	fRect2D graphRect = gui.BeginSubLayout(GuiContext::LayoutAxis::eVertical, 128);
+	style->mBackgroundColor.xyz *= 0.8f;
+	Rect2D graphRect = gui.BeginSubLayout(GuiContext::LayoutAxis::eVertical, 128);
 	gui.EndLayout();
-	gui.mLayoutTheme = theme;
+	style = style;
 
 	// Generate graph points and vertical selection lines
 	if (mFrames.size()) {

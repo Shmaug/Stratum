@@ -2,27 +2,23 @@
 
 constexpr uint32_t INSTANCE_BATCH_SIZE = 1024;
 
-using namespace std;
+
 using namespace stm;
 
-bool MeshRenderer::UpdateTransform() {
-	if (!Object::UpdateTransform()) return false;
+bool MeshRenderer::ValidateTransform() {
+	if (!Object::ValidateTransform()) return false;
 	mAABB.reset();
 
 	if (mMesh) {
 		for (uint32_t i = 0; i < mMesh->SubmeshCount(); i++)
 			if (mMesh->GetSubmesh(i).mBvh) {
 				if (mAABB)
-					mAABB->Encapsulate(mMesh->GetSubmesh(i).mBvh->Bounds() * ObjectToWorld());
+					mAABB->Encapsulate(mMesh->GetSubmesh(i).mBvh->GetNode(0).mBounds * Transform());
 				else 
-					mAABB = mMesh->GetSubmesh(i).mBvh->Bounds() * ObjectToWorld();
+					mAABB = mMesh->GetSubmesh(i).mBvh->GetNode(0).mBounds * Transform();
 			}
 	}
 	return true;
-}
-
-void MeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
-	mMaterial->OnLateUpdate(commandBuffer);
 }
 
 bool MeshRenderer::TryCombineInstances(CommandBuffer& commandBuffer, Renderer* renderer, shared_ptr<Buffer>& instanceBuffer, uint32_t& instanceCount) {
@@ -33,43 +29,33 @@ bool MeshRenderer::TryCombineInstances(CommandBuffer& commandBuffer, Renderer* r
 
 	// renderer can be instanced with this one
 	if (!instanceBuffer) {
-		instanceBuffer = commandBuffer.GetBuffer(mName + "/Instances", sizeof(InstanceBuffer) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		instanceBuffer = commandBuffer.GetBuffer(Name() + "/Instances", sizeof(InstanceData) * INSTANCE_BATCH_SIZE, vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		instanceCount = 0;
 	}
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->Mapped();
-	buf[instanceCount].ObjectToWorld = ObjectToWorld();
-	buf[instanceCount].WorldToObject = WorldToObject();
+	InstanceData* buf = (InstanceData*)instanceBuffer->Mapped();
+	buf[instanceCount].Transform = Transform();
+	buf[instanceCount].InverseTransform = InverseTransform();
 	instanceCount++;
 	return true;
 }
 
-void MeshRenderer::OnDrawInstanced(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera, const shared_ptr<Buffer>& instanceBuffer, uint32_t instanceCount) {
-	GraphicsPipeline* pipeline = commandBuffer.BindPipeline(mMaterial, mMesh.get());
-	
-	if (pipeline->mShaderVariant->mDescriptorSetBindings.size() > PER_CAMERA)
-		commandBuffer.BindDescriptorSet(perCamera, PER_CAMERA);
-	
-	if (pipeline->mDescriptorSetLayouts.size() > PER_OBJECT && pipeline->mDescriptorSetLayouts[PER_OBJECT]) {
-		auto perObject = commandBuffer.GetDescriptorSet(mName, pipeline->mDescriptorSetLayouts[PER_OBJECT]);
-		perObject->CreateStorageBufferDescriptor(instanceBuffer, INSTANCES_BINDING);
-		commandBuffer.BindDescriptorSet(perObject, PER_OBJECT);
-	}
-	
-	mMesh->Draw(commandBuffer, &camera, instanceCount);
+void MeshRenderer::OnDrawInstanced(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<Buffer>& instanceBuffer, uint32_t instanceCount) {
+	mMaterial->Bind(commandBuffer, mMesh.get());
+	commandBuffer.DrawMesh(*mMesh, instanceCount);
 }
-void MeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<DescriptorSet>& perCamera) {
-	auto instanceBuffer = commandBuffer.GetBuffer(mName + "/Instances", sizeof(InstanceBuffer), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
-	InstanceBuffer* buf = (InstanceBuffer*)instanceBuffer->Mapped();
-	buf->ObjectToWorld = ObjectToWorld();
-	buf->WorldToObject = WorldToObject();
-	OnDrawInstanced(commandBuffer, camera, perCamera, instanceBuffer, 1);
+void MeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
+	auto instanceBuffer = commandBuffer.GetBuffer(Name()+"/Instances", sizeof(InstanceData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible);
+	InstanceData* buf = (InstanceData*)instanceBuffer->Mapped();
+	buf->Transform = Transform();
+	buf->InverseTransform = InverseTransform();
+	OnDrawInstanced(commandBuffer, camera, instanceBuffer, 1);
 }
 
-bool MeshRenderer::Intersect(const Ray& ray, float* t, bool any) {
+bool MeshRenderer::Intersect(const fRay& ray, float* t, bool any) {
 	if (!mMesh) return false;
-	Ray r;
-	r.mOrigin = (WorldToObject() * float4(ray.mOrigin, 1)).xyz;
-	r.mDirection = (WorldToObject() * float4(ray.mDirection, 0)).xyz;
+	fRay r;
+	r.mOrigin = (float3)(InverseTransform() * float4(ray.mOrigin, 1));
+	r.mDirection = (float3)(InverseTransform() * float4(ray.mDirection, 0));
 	bool hit = false;
 	float tmin = 0;
 	for (uint32_t i = 0; i < mMesh->SubmeshCount(); i++) {

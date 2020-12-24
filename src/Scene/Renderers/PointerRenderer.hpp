@@ -6,10 +6,10 @@ namespace stm {
 
 class PointerRenderer : public Renderer {
 public:
-	inline PointerRenderer(const std::string& name, Scene* scene) : Object(name, scene) {}
+	inline PointerRenderer(const string& name, stm::Scene& scene) : Object(name, scene) {}
 	
-	inline virtual std::optional<AABB> Bounds() override { UpdateTransform(); return mAABB; }
-	inline virtual uint32_t RenderQueue(const std::string& pass) override { return 5000; }
+	inline virtual optional<fAABB> Bounds() override { ValidateTransform(); return mAABB; }
+	inline virtual uint32_t RenderQueue(const string& pass) override { return 5000; }
 
 	inline void RayDistance(float d) { mRayDistance = d; }
 	inline void Color(const float4& c) { mColor = c; }
@@ -24,10 +24,10 @@ protected:
 	float mWidth = 0.01f;
 	float4 mColor = 1;
 
-	AABB mAABB;
+	fAABB mAABB;
 	
-	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera, const std::shared_ptr<DescriptorSet>& perCamera) override;
-	STRATUM_API virtual bool UpdateTransform() override;
+	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override;
+	STRATUM_API virtual bool ValidateTransform() override;
 };
 
 }

@@ -23,69 +23,56 @@ struct SubpassAttachment {
 
 struct Subpass {
 	ShaderPassIdentifier mShaderPass;
-	std::map<RenderTargetIdentifier, SubpassAttachment> mAttachments;
+	map<RenderTargetIdentifier, SubpassAttachment> mAttachments;
 	// Generally for dependencies between renderpasses or other situations where dependencies cant be resolved automatically
-	std::map<RenderTargetIdentifier, std::pair<vk::PipelineStageFlags, vk::AccessFlags>> mAttachmentDependencies;
+	map<RenderTargetIdentifier, pair<vk::PipelineStageFlags, vk::AccessFlags>> mAttachmentDependencies;
+
+	inline friend size_t basic_hash(const Subpass& p) {
+		size_t h = basic_hash(p.mShaderPass);
+		for (const auto&[name, attachment] : p.mAttachments)
+			h = basic_hash(h, name, attachment);
+		return h;
+	}
 };
 
 class RenderPass {
-private:
-	vk::RenderPass mRenderPass;
-
 public:
-	const std::string mName;
-	stm::Device* const mDevice;
+	// TODO: consider using numbers here instead?
+	typedef string RenderTargetIdentifier;
+	typedef string ShaderPassIdentifier;
 
-	STRATUM_API RenderPass(const std::string& name, stm::Device* device, const std::vector<Subpass>& subpasses);
+	STRATUM_API RenderPass(const string& name, stm::Device& device, const vector<Subpass>& subpasses);
 	STRATUM_API ~RenderPass();
 
 	inline vk::RenderPass operator*() const { return mRenderPass; }
 	inline const vk::RenderPass* operator ->() const { return &mRenderPass; }
 
-	inline const Subpass& GetSubpass(uint32_t index) const { return mSubpasses[index]; }
+	inline const string& Name() const { return mName; }
+	inline stm::Device& Device() const { return mDevice; }
+
 	inline uint32_t SubpassCount() const { return (uint32_t)mSubpasses.size(); }
+	inline const stm::Subpass& Subpass(uint32_t index) const { return mSubpasses[index]; }
 
 	inline uint32_t AttachmentCount() const { return (uint32_t)mAttachments.size(); }
-	inline vk::AttachmentDescription Attachment(uint32_t index) const { return mAttachments[index]; }
-	inline RenderTargetIdentifier AttachmentName(uint32_t index) const { return mAttachmentNames[index]; }
 	inline uint32_t AttachmentIndex(const RenderTargetIdentifier& name) const { return mAttachmentMap.at(name); }
+	inline RenderTargetIdentifier AttachmentName(uint32_t index) const { return mAttachmentNames[index]; }
 	inline vk::AttachmentDescription Attachment(const RenderTargetIdentifier& name) const { return mAttachments.at(mAttachmentMap.at(name)); }
+	inline vk::AttachmentDescription Attachment(uint32_t index) const { return mAttachments[index]; }
 
 private:
- 	friend struct std::hash<RenderPass>;
  	friend class CommandBuffer;
 
-	std::vector<vk::AttachmentDescription> mAttachments;
-	std::vector<RenderTargetIdentifier> mAttachmentNames;
-	std::map<RenderTargetIdentifier, uint32_t> mAttachmentMap;
-	std::vector<Subpass> mSubpasses;
-	uint64_t mSubpassHash;
+	vk::RenderPass mRenderPass;
+	string mName;
+	stm::Device& mDevice;
+
+	vector<vk::AttachmentDescription> mAttachments;
+	vector<RenderTargetIdentifier> mAttachmentNames;
+	map<RenderTargetIdentifier, uint32_t> mAttachmentMap;
+	vector<stm::Subpass> mSubpasses;
+	size_t mHash;
+
+	inline friend size_t basic_hash(const RenderPass& rp) { return rp.mHash; }
 };
 
 }
-
-namespace std {
-template<>
-struct hash<stm::RenderPass> {
-	inline size_t operator()(const stm::RenderPass& rp) {
-		return rp.mSubpassHash;
-	}
-};
-
-template<>
-struct hash<stm::SubpassAttachment> {
-	inline size_t operator()(const stm::SubpassAttachment& a) {
-		return stm::hash_combine(a.mType, a.mFormat, a.mSamples, a.mLoadOp, a.mStoreOp);
-	}
-};
-
-template<>
-struct hash<stm::Subpass> {
-	inline size_t operator()(const stm::Subpass& p) {
-		size_t h = stm::hash_combine(p.mShaderPass);
-		for (const auto&[name, attachment] : p.mAttachments)
-			h = stm::hash_combine(h, name, attachment);
-		return h;
-	}
-};
-};

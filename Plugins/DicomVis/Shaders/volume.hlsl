@@ -9,14 +9,14 @@
 [[vk::binding(4, 0)]] RWTexture2D<float4> RenderTarget : register(u0);
 [[vk::binding(5, 0)]] Texture2DMS<float> DepthBuffer : register(t0);
 
-[[vk::binding(6, 0)]] Texture2D<float4> EnvironmentTexture	: register(t2);
+[[vk::binding(6, 0)]] Texture2D<float4> gEnvironmentTexture	: register(t2);
 [[vk::binding(7, 0)]] SamplerState Sampler : register(s0);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b0) {
 	float4x4 InvViewProj;
 	uint2 ScreenResolution;
 	uint2 WriteOffset;
-	float3 CameraPosition;
+	float3 gCameraPosition;
 	float SampleRate;
 }
 
@@ -39,7 +39,7 @@ void Render(uint3 index : SV_DispatchThreadID) {
 	float4 projPos = mul(InvViewProj, screenPos);
 	projPos /= projPos.w;
 	float3 rayDirection = normalize(projPos.xyz);
-	float3 rayOrigin = CameraPosition;
+	float3 rayOrigin = gCameraPosition;
 	float3 depthRay = projPos.xyz;
 
 	// world -> uvw

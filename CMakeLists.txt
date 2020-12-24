@@ -4,22 +4,20 @@ project(Stratum)
 
 set(STRATUM_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 list(APPEND CMAKE_MODULE_PATH ${STRATUM_DIR}/extern)
 list(APPEND CMAKE_PREFIX_PATH ${STRATUM_DIR}/extern)
-link_directories(Stratum extern/lib)
 
 find_package(Vulkan REQUIRED)
 find_package(OpenXR CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(msdfgen CONFIG REQUIRED)
 
-
 set(STRATUM_VERSION_MAJOR 1)
-set(STRATUM_VERSION_MINOR 1)
+set(STRATUM_VERSION_MINOR 2)
 
-option(ENABLE_DEBUG_LAYERS "Enable debug layers?" TRUE)
+option(ENABLE_DEBUG_LAYERS "Enable debug layers" TRUE)
 
 include(cmake/stmutil.cmake)
 

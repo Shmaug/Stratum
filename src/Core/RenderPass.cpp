@@ -1,17 +1,17 @@
 #include "RenderPass.hpp"
 
-#include "../Data/Texture.hpp"
+#include "Asset/Texture.hpp"
 
 #include "CommandBuffer.hpp"
 #include "Framebuffer.hpp"
 
-using namespace std;
+
 using namespace stm;
 
-RenderPass::RenderPass(const string& name, stm::Device* device, const vector<Subpass>& subpassArray) : mName(name), mDevice(device), mSubpasses(subpassArray) {
-		mSubpassHash = 0;
+RenderPass::RenderPass(const string& name, stm::Device& device, const vector<stm::Subpass>& subpassArray) : mName(name), mDevice(device), mSubpasses(subpassArray) {
+		mHash = 0;
 		for (uint32_t i = 0; i < subpassArray.size(); i++)
-			mSubpassHash = hash_combine(mSubpassHash, subpassArray[i]);
+			mHash = basic_hash(mHash, subpassArray[i]);
 		
 		// build mAttachments and mAttachmentMap
 
@@ -63,7 +63,6 @@ RenderPass::RenderPass(const string& name, stm::Device* device, const vector<Sub
 
 		uint32_t index = 0;
 		for (const auto& subpass : mSubpasses) {
-			
 			for (auto[name,attachment] : subpass.mAttachments) {
 				vk::SubpassDependency dep = {};
 				dep.dstSubpass = index;
@@ -153,9 +152,9 @@ RenderPass::RenderPass(const string& name, stm::Device* device, const vector<Sub
 		renderPassInfo.pSubpasses = subpasses.data();
 		renderPassInfo.dependencyCount = (uint32_t)dependencies.size();
 		renderPassInfo.pDependencies = dependencies.data();
-		mRenderPass = (*mDevice)->createRenderPass(renderPassInfo);
-		mDevice->SetObjectName(mRenderPass, mName + " RenderPass");
+		mRenderPass = mDevice->createRenderPass(renderPassInfo);
+		mDevice.SetObjectName(mRenderPass, mName + " RenderPass");
 }
 RenderPass::~RenderPass() {
-	(*mDevice)->destroyRenderPass(mRenderPass);
+	mDevice->destroyRenderPass(mRenderPass);
 }

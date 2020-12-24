@@ -5,22 +5,22 @@
 #include <assimp/postprocess.h>
 #include <assimp/material.h>
 
-#include <Core/EnginePlugin.hpp>
-#include <Core/PluginManager.hpp>
+#include "../Core/Window.hpp"
+
 #include "Bone.hpp"
 #include "Light.hpp"
 #include "Renderers/MeshRenderer.hpp"
 
-using namespace std;
+
 using namespace stm;
 
 constexpr uint32_t gMaxLightCount = 64;
 
-Scene::Scene(stm::Instance* instance) : mInstance(instance) {
+Scene::Scene(stm::Instance& instance) : mInstance(instance) {
 	mStartTime = mClock.now();
 	mLastFrame = mStartTime;
 
-	vk::Format renderFormat = mInstance->Window()->SurfaceFormat().format;
+	vk::Format renderFormat = mInstance.Window().SurfaceFormat().format;
 	vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e8;
 	
 	Subpass shadowSubpass = {};
@@ -48,9 +48,9 @@ Scene::Scene(stm::Instance* instance) : mInstance(instance) {
 	transparentSubpass.mAttachments["stm_main_depth"] = opaqueSubpass.mAttachments["stm_main_depth"];
 
 	AssignRenderNode("Main", { depthPrepass, opaqueSubpass, transparentSubpass });
-	SetAttachmentInfo("stm_main_render", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
-	SetAttachmentInfo("stm_main_depth", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc);
-	SetAttachmentInfo("stm_main_resolve", mInstance->Window()->SwapchainExtent(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+	SetAttachmentInfo("stm_main_render", mInstance.Window().SwapchainExtent(), vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
+	SetAttachmentInfo("stm_main_depth", mInstance.Window().SwapchainExtent(), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc);
+	SetAttachmentInfo("stm_main_resolve", mInstance.Window().SwapchainExtent(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 
 	// init environment data
 	
@@ -62,8 +62,8 @@ Scene::Scene(stm::Instance* instance) : mInstance(instance) {
 	samplerInfo.compareEnable = VK_TRUE;
 	samplerInfo.compareOp = vk::CompareOp::eLess;
 	samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-	mShadowSampler = make_shared<Sampler>("ShadowSampler", mInstance->Device(), samplerInfo);
-	mEnvironmentTexture = mInstance->Device()->FindLoadedAsset<Texture>("stm_1x1_white_opaque");
+	mShadowSampler = make_shared<Sampler>("ShadowSampler", mInstance.Device(), samplerInfo);
+	mEnvironmentTexture = mInstance.Device().FindLoadedAsset<Texture>("stm_1x1_white_opaque");
 
 
 	// init skybox
@@ -87,29 +87,54 @@ Scene::Scene(stm::Instance* instance) : mInstance(instance) {
 		6,4,2,4,0,2,
 		4,7,5,4,6,7
 	};
-	auto skyVertexBuffer = make_shared<Buffer>("SkyCube/Vertices", mInstance->Device(), verts, sizeof(float3)*8, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-	auto skyIndexBuffer = make_shared<Buffer>("SkyCube/Indices" , mInstance->Device(), indices, sizeof(uint16_t)*36, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+	auto skyVertexBuffer = make_shared<Buffer>("SkyCube/Vertices", mInstance.Device(), verts, sizeof(float3)*8, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+	auto skyIndexBuffer = make_shared<Buffer>("SkyCube/Indices" , mInstance.Device(), indices, sizeof(uint16_t)*36, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 	
-	auto skyCube = make_shared<Mesh>("SkyCube");
-	skyCube->SetVertexAttribute(VertexAttributeType::ePosition, 0, ArrayBufferView(skyVertexBuffer, 0, sizeof(float3)));
-	skyCube->SetIndexBuffer(ArrayBufferView(skyIndexBuffer, 0, sizeof(uint16_t)));
-	skyCube->AddSubmesh(Mesh::Submesh(8, 0, 36, 0));
-
-	mSkybox = CreateObject<MeshRenderer>("Skybox");
-	mSkybox->Mesh(skyCube);
-	mSkybox->Material(make_shared<Material>("Skybox", mInstance->Device()->LoadAsset<Pipeline>("Assets/Shaders/skybox.stmb", "Skybox")));
-	mSkybox->LocalScale(1e5f);
-
-	mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnSceneInit(this); });
+	MeshRenderer* skybox = CreateObject<MeshRenderer>("Skybox");
+	skybox->Mesh(shared_ptr<Mesh>(new Mesh("SkyCube", 
+		{ { { VertexAttributeType::ePosition, 0 }, VertexAttributeData(ArrayBufferView(skyVertexBuffer, 0, sizeof(float3)), 0, vk::VertexInputRate::eVertex) } },
+		ArrayBufferView(skyIndexBuffer, 0, sizeof(uint16_t)) )));
+	skybox->Mesh()->AddSubmesh(Mesh::Submesh(8, 0, 36, 0));
+	skybox->Material(make_shared<Material>("Skybox", mInstance.Device().LoadAsset<Shader>("Assets/Shaders/skybox.stmb")));
+	skybox->LocalScale(1e5f);
+	mSkybox = skybox;
 }
 Scene::~Scene() {
+	for (Plugin* p : mPlugins) delete p;
 	while (!mObjects.empty()) {
 		Object* o = mObjects.front();
 		RemoveObject(o);
-		safe_delete(o);
+		delete o;
 	}
-	safe_delete(mBvh);
-	for (auto&[name,ctx] : mGuiContexts) safe_delete(ctx);
+	if (mBvh) delete mBvh;
+	for (auto&[name,ctx] : mGuiContexts) delete ctx;
+}
+
+Scene::Plugin* Scene::LoadPlugin(const fs::path& filename) {
+	try {
+		
+#ifdef WINDOWS
+		char* msgBuf;
+		auto throw_if_null = [&](auto ptr){
+			if (ptr == NULL) {
+				FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |  FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&msgBuf, 0, NULL );
+				throw runtime_error(msgBuf);
+			}
+		};
+
+		HMODULE m = LoadLibraryW(filename.c_str());
+		throw_if_null(m);
+		FARPROC funcPtr = GetProcAddress(m, "stm::CreatePlugin");
+		throw_if_null(funcPtr);
+#endif
+#ifdef __linux
+		throw; // TODO loadplugin linux
+#endif
+		Plugin* plugin = ((Plugin*(*)(Scene*))funcPtr)(this);
+		mPlugins.push_back(plugin);
+		return plugin;
+	} catch(exception e) {}
+	return nullptr;
 }
 
 void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Extent2D& extent, vk::ImageUsageFlags usage) {
@@ -118,18 +143,12 @@ void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Exte
 	mRenderGraphDirty = true;
 }
 
-void Scene::MainRenderExtent(const vk::Extent2D& extent) {
-	SetAttachmentInfo("stm_main_render", { extent }, GetAttachmentInfo("stm_main_render").second);
-	SetAttachmentInfo("stm_main_depth", { extent }, GetAttachmentInfo("stm_main_depth").second);
-	SetAttachmentInfo("stm_main_resolve", { extent }, GetAttachmentInfo("stm_main_resolve").second);
-}
-
 void Scene::AssignRenderNode(const string& name, const deque<Subpass>& subpasses) {
 	RenderGraphNode& node = mRenderNodes[name];
 	node.mSubpasses = subpasses;
 	mRenderGraphDirty = true;
 }
-void Scene::DeleteRenderNode(const std::string& name) {
+void Scene::DeleteRenderNode(const string& name) {
 	if (mRenderNodes.count(name) == 0) return;
 	RenderGraphNode& node = mRenderNodes.at(name);
 	mRenderNodes.erase(name);
@@ -163,7 +182,7 @@ void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
 				}
 				subpasses.push_back(node.mSubpasses[i]);
 			}
-			node.mRenderPass = make_shared<RenderPass>(name, mInstance->Device(), subpasses);
+			node.mRenderPass = make_shared<RenderPass>(name, mInstance.Device(), subpasses);
 		}
 
 		// populate newAttachments
@@ -191,7 +210,7 @@ void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
 				}
 			}
 			// ...or just create a new one if not
-			newAttachments.emplace(attachment, make_shared<Texture>(attachment, mInstance->Device(), vk::Extent3D(extent, 1), node.mRenderPass->Attachment(i).format, nullptr, 0, usage, 1, node.mRenderPass->Attachment(i).samples));
+			newAttachments.emplace(attachment, make_shared<Texture>(attachment, mInstance.Device(), vk::Extent3D(extent, 1), node.mRenderPass->Attachment(i).format, byte_blob(), usage, 1, node.mRenderPass->Attachment(i).samples));
 		}
 
 		// release previous framebuffer if invalid
@@ -210,12 +229,12 @@ void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
 	}
 
 	// Delete unused attachments
-	for (auto& it = mAttachments.begin(); it != mAttachments.end();) {
+	for (auto it = mAttachments.begin(); it != mAttachments.end();) {
 		if (newAttachments.count(it->first) && newAttachments.at(it->first) == it->second) { it++; continue; }
 		commandBuffer.TrackResource(it->second);
 		it = mAttachments.erase(it);
 	}
-	for (auto& it = mAttachmentInfo.begin(); it != mAttachmentInfo.end();) {
+	for (auto it = mAttachmentInfo.begin(); it != mAttachmentInfo.end();) {
 		if (newAttachments.count(it->first)) { it++; continue; }
 		it = mAttachmentInfo.erase(it);
 	}
@@ -224,7 +243,7 @@ void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
 
 	// Create new render graph
 	for (auto&[name,node] : mRenderNodes) mRenderGraph.push_back(&node);
-	sort(mRenderGraph.begin(), mRenderGraph.end(), [&](const RenderGraphNode* a, const RenderGraphNode* b) {
+	ranges::sort(mRenderGraph, [&](const RenderGraphNode* a, const RenderGraphNode* b) {
 		// b < a if a depends on b
 		for (const RenderTargetIdentifier& dep : a->mNonSubpassDependencies)
 			for (const Subpass& subpass : b->mSubpasses) {
@@ -238,25 +257,14 @@ void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
 	mRenderGraphDirty = false;
 }
 
-void Scene::RemoveObject(Object* object) {
-	safe_delete(mBvh);
-	for (auto it = mRenderers.begin(); it != mRenderers.end(); it++)
-		if (*it == object) { mRenderers.erase(it); break; }
-	for (auto it = mCameras.begin(); it != mCameras.end(); it++)
-		if (*it == object) { mCameras.erase(it); break; }
-	for (auto it = mLights.begin(); it != mLights.end(); it++)
-		if (*it == object) { mLights.erase(it); break; }
-	for (auto it = mObjects.begin(); it != mObjects.end(); it++)
-		if (*it == object) { mObjects.erase(it); break; }
-	const_cast<Scene*>(object->mScene) = nullptr;
-}
-
 void Scene::Update(CommandBuffer& commandBuffer) {
+	ProfilerRegion ps("Scene::Update");
+	
 	auto t1 = mClock.now();
 	mDeltaTime = (t1 - mLastFrame).count() * 1e-9f;
 	mTotalTime = (t1 - mStartTime).count() * 1e-9f;
 	mLastFrame = t1;
-
+	
 	// count fps
 	mFrameTimeAccum += mDeltaTime;
 	mFpsAccum++;
@@ -266,131 +274,117 @@ void Scene::Update(CommandBuffer& commandBuffer) {
 		mFpsAccum = 0;
 	}
 
+	// TODO: Query input, populate mInputPointers
+
+	mInputStatesPrevious = mInputStates;
+	mInputStates.clear();
+
+	
 	{
-		ProfileRegion ps("FixedUpdate");
-		float physicsTime = 0;
+		ProfilerRegion ps("Fixed Update");
 		mFixedAccumulator += mDeltaTime;
+		float physicsTime = 0;
 		t1 = mClock.now();
 		while (mFixedAccumulator > mFixedTimeStep && physicsTime < mPhysicsTimeLimitPerFrame) {
-			mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnFixedUpdate(commandBuffer); });
-			for (const auto& o : mObjects) if (o->EnabledHierarchy()) o->OnFixedUpdate(commandBuffer);
-
+			ranges::for_each(mPlugins, [&](Plugin* p){ p->OnFixedUpdate(commandBuffer); });
+			for (const auto& o : mObjects) if (o->Enabled()) o->OnFixedUpdate(commandBuffer);
 			mFixedAccumulator -= mFixedTimeStep;
 			physicsTime = (mClock.now() - t1).count() * 1e-9f;
 		}
 	}
 
 	{
-		ProfileRegion ps("Update");
-		for (auto o : mObjects) if (o->EnabledHierarchy()) o->OnUpdate(commandBuffer);
-		mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnUpdate(commandBuffer); });
-		for (auto o : mObjects) if (o->EnabledHierarchy()) o->OnLateUpdate(commandBuffer);
-		mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnLateUpdate(commandBuffer); });
-		mSkybox->Material()->OnLateUpdate(commandBuffer);
-		commandBuffer.TransitionBarrier(*mEnvironmentTexture, vk::ImageLayout::eShaderReadOnlyOptimal);
+		ProfilerRegion ps("OnUpdate(), OnLateUpdate()");
+		ranges::for_each(mPlugins, [&](Plugin* p){ p->OnUpdate(commandBuffer); });
+		for (auto& o : mObjects) if (o->Enabled()) o->OnUpdate(commandBuffer);
+		ranges::for_each(mPlugins, [&](Plugin* p){ p->OnLateUpdate(commandBuffer); });
+		for (auto& o : mObjects) if (o->Enabled()) o->OnLateUpdate(commandBuffer);
 	}
-	
-	mLighting = {};
-	mLighting.mLightingData.AmbientLight = mAmbientLight;
-	mLighting.mLightBuffer = commandBuffer.GetBuffer("Light Buffer", sizeof(GPULight), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	mLighting.mShadowBuffer = commandBuffer.GetBuffer("Shadow Buffer", sizeof(ShadowData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	if (mLights.empty()) {
-		mLighting.mShadowAtlas = commandBuffer.GetTexture("Shadow Atlas", { 1, 1, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
-		mLighting.mLightingData.ShadowTexelSize = 1 / float2((float)mLighting.mShadowAtlas->Extent().width, (float)mLighting.mShadowAtlas->Extent().height);
-	} else {
-		ProfileRegion ps("Gather Lights and Shadows");
-		mLighting.mShadowAtlas = commandBuffer.GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
-		mLighting.mLightingData.ShadowTexelSize = 1 / float2((float)mLighting.mShadowAtlas->Extent().width, (float)mLighting.mShadowAtlas->Extent().height);
 
-		AABB shadowBounds;
-		shadowBounds.mMin = 1e10f;
-		shadowBounds.mMax = -1e10f;
-		for (uint32_t i = 0; i < mRenderers.size(); i++) {
-			auto bounds = mRenderers[i]->Bounds();
-			if (bounds && mRenderers[i]->Visible("forward/depth")) {
-				bounds->mMin -= 1e-2f;
-				bounds->mMax += 1e-2f;
-				shadowBounds.Encapsulate(*bounds);
+	{
+		ProfilerRegion ps("Scene Lighting");
+		mLighting.mLightBuffer = commandBuffer.GetBuffer("Light Buffer", sizeof(LightData), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		if (mLights.empty()) {
+			mLighting.mShadowAtlas = commandBuffer.GetTexture("Shadow Atlas", { 1, 1, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+		} else {
+			ProfilerRegion ps("Gather Lights and Shadows");
+			mLighting.mShadowAtlas = commandBuffer.GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+
+			fAABB shadowBounds;
+			shadowBounds.mMin = 1e10f;
+			shadowBounds.mMax = -1e10f;
+			for (uint32_t i = 0; i < mRenderers.size(); i++) {
+				auto bounds = mRenderers[i]->Bounds();
+				if (bounds && mRenderers[i]->Visible("forward/depth")) {
+					bounds->mMin -= 1e-2f;
+					bounds->mMax += 1e-2f;
+					shadowBounds.Encapsulate(*bounds);
+				}
+			}
+			uint32_t si = 0;
+			uint32_t shadowCount = 0;
+
+			float3 sceneCenter = shadowBounds.Center();
+			float3 sceneExtent = shadowBounds.HalfSize();
+			float shadowExtentMax = fmaxf(fmaxf(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
+
+			mLighting.mLightCount = 0;
+			LightData* lights = (LightData*)mLighting.mLightBuffer->Mapped();
+
+			for (Light* l : mLights) {
+				if (!l->Enabled()) continue;
+				float cosInner = cos(l->InnerSpotAngle());
+				float cosOuter = cos(l->OuterSpotAngle());
+				lights[mLighting.mLightCount].ToLight = l->InverseTransform();
+				lights[mLighting.mLightCount].Emission = l->Color() * l->Intensity();
+				lights[mLighting.mLightCount].Type_ShadowIndex = (uint32_t)l->Type();
+				lights[mLighting.mLightCount].SpotAngleScale = 1.f / fmaxf(.001f, cosInner - cosOuter);
+				lights[mLighting.mLightCount].SpotAngleOffset = -cosOuter * lights[mLighting.mLightCount].SpotAngleScale;
+
+				mLighting.mLightCount++;
+				if (mLighting.mLightCount >= gMaxLightCount) break;
 			}
 		}
-		uint32_t si = 0;
-		uint32_t shadowCount = 0;
-
-		float3 sceneCenter = shadowBounds.Center();
-		float3 sceneExtent = shadowBounds.HalfSize();
-		float shadowExtentMax = fmaxf(fmaxf(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
-
-		mLighting.mLightingData.LightCount = 0;
-		GPULight* lights = (GPULight*)mLighting.mLightBuffer->Mapped();
-		ShadowData* shadows = (ShadowData*)mLighting.mShadowBuffer->Mapped();
-
-		for (Light* l : mLights) {
-			if (!l->EnabledHierarchy()) continue;
-
-			float cosInner = cosf(l->InnerSpotAngle());
-			float cosOuter = cosf(l->OuterSpotAngle());
-
-			lights[mLighting.mLightingData.LightCount].Color = l->Color() * l->Intensity();
-			lights[mLighting.mLightingData.LightCount].Type = (uint32_t)l->Type();
-			lights[mLighting.mLightingData.LightCount].WorldPosition = l->WorldPosition();
-			lights[mLighting.mLightingData.LightCount].InvSqrRange = 1.f / (l->Range() * l->Range());
-			lights[mLighting.mLightingData.LightCount].Direction = -(l->WorldRotation() * float3(0, 0, 1));
-			lights[mLighting.mLightingData.LightCount].SpotAngleScale = 1.f / fmaxf(.001f, cosInner - cosOuter);
-			lights[mLighting.mLightingData.LightCount].SpotAngleOffset = -cosOuter * lights[mLighting.mLightingData.LightCount].SpotAngleScale;
-			lights[mLighting.mLightingData.LightCount].CascadeSplits = 0;
-			lights[mLighting.mLightingData.LightCount].ShadowIndex = -1;
-
-			mLighting.mLightingData.LightCount++;
-			if (mLighting.mLightingData.LightCount >= gMaxLightCount) break;
-		}
+		commandBuffer.TransitionBarrier(*mLighting.mShadowAtlas, vk::ImageLayout::eShaderReadOnlyOptimal);
 	}
-	commandBuffer.TransitionBarrier(*mLighting.mShadowAtlas, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+	if (mInstance.Window().Swapchain()) MainRenderExtent(mInstance.Window().SwapchainExtent());
 }
 
 void Scene::Render(CommandBuffer& commandBuffer) {
-	ProfileRegion ps("Scene::Render", commandBuffer);
+	ProfilerRegion ps("Scene::Render", commandBuffer);
+
+	if (mInstance.Window().Swapchain()) MainRenderExtent(mInstance.Window().SwapchainExtent());
 
 	if (mRenderGraphDirty) BuildRenderGraph(commandBuffer);
 
 	{
-		ProfileRegion ps("Pre-Render & Gui", commandBuffer);
+		ProfilerRegion ps("Pre-Render & Gui", commandBuffer);
 		for (Camera* camera : mCameras) {
-			mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnPreRender(commandBuffer); });
+			ranges::for_each(mPlugins, [&](Plugin* p){ p->OnPreRender(commandBuffer); });
 			
-			if (!mGuiContexts.count(camera)) mGuiContexts.emplace(camera, new GuiContext(mInstance->Device(), &mInstance->InputManager()));
-			if (mGuiContexts.count(camera)) {
-				GuiContext* gui = mGuiContexts.at(camera);
+			if (!mGuiContexts.count(camera))
+				mGuiContexts.emplace(camera, new GuiContext(*this));
+		}
 
-				for (const auto& o : mObjects) if (o->EnabledHierarchy()) o->OnGui(commandBuffer, *camera, *gui);
-				mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnGui(commandBuffer, *camera, *gui); });
+		for (auto& [camera, gui] : mGuiContexts) {
+				ranges::for_each(mPlugins, [&](Plugin* p){ p->OnGui(commandBuffer, *gui); });
+				for (const auto& o : mObjects) if (o->Enabled()) o->OnGui(commandBuffer, *gui);
 				mGuiContexts.emplace(camera, gui);
-
 				gui->OnPreRender(commandBuffer);
-			}
 		}
 	}
 	
 	set<Camera*> passCameras;
-	for (RenderGraphNode* rp : mRenderGraph) {
-		ProfileRegion ps(rp->mRenderPass->mName, commandBuffer);
+	for (auto& rp : mRenderGraph) {
+		ProfilerRegion ps(rp->mRenderPass->Name(), commandBuffer);
 
 		passCameras.clear();
 		commandBuffer.BeginRenderPass(rp->mRenderPass, rp->mFramebuffer);
 		
-		// first shader pass
-		{
-			ProfileRegion ps(rp->mRenderPass->GetSubpass(0).mShaderPass, commandBuffer);
-			for (Camera* camera : mCameras)
-				if (camera->RendersToSubpass(*commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex())) {
-					RenderCamera(commandBuffer, *camera);
-					passCameras.insert(camera);
-				}
-		}
-		
-		// the rest of the shader passes
-		for (uint32_t i = 1; i < rp->mRenderPass->SubpassCount(); i++) {
-			ProfileRegion ps(rp->mRenderPass->GetSubpass(i).mShaderPass, commandBuffer);
-			commandBuffer.NextSubpass();
+		for (uint32_t i = 0; i < rp->mRenderPass->SubpassCount(); i++) {
+			ProfilerRegion ps(rp->mRenderPass->Subpass(i).mShaderPass, commandBuffer);
+			if (i > 0) commandBuffer.NextSubpass();
 			for (Camera* camera : mCameras)
 				if (camera->RendersToSubpass(*commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex())) {
 					RenderCamera(commandBuffer, *camera);
@@ -400,18 +394,15 @@ void Scene::Render(CommandBuffer& commandBuffer) {
 		
 		commandBuffer.EndRenderPass();
 
-		mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnPostProcess(commandBuffer, rp->mFramebuffer, passCameras); });
+		ranges::for_each(mPlugins, [&](Plugin* p){ p->OnPostProcess(commandBuffer, rp->mFramebuffer, passCameras); });
 	}
-
-	// done rendering, can reset the gui contexts
-	for (auto& kp : mGuiContexts) kp.second->Reset();
 }
 void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 	vector<Renderer*> renderers;
 	{
-		ProfileRegion ps("Culling/Sorting");
+		ProfilerRegion ps("Culling/Sorting");
 
-		vector<Object*> objects = BVH()->FrustumCheck(camera.Frustum(), camera.LayerMask());
+		vector<Object*> objects = BVH()->Intersect(camera.Frustum());
 
 		renderers.reserve(objects.size());
 		for (Object* o : objects)
@@ -424,7 +415,7 @@ void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 			if (!r->Bounds() && r->Visible(commandBuffer.CurrentShaderPass()) && (camera.DrawSkybox() || r != mSkybox))
 				renderers.push_back(r);
 
-		sort(renderers.begin(), renderers.end(), [&](Renderer* a, Renderer* b) {
+		ranges::sort(renderers, [&](Renderer* a, Renderer* b) {
 			uint32_t qa = a->RenderQueue(commandBuffer.CurrentShaderPass());
 			uint32_t qb = b->RenderQueue(commandBuffer.CurrentShaderPass());
 			if (qa == qb) {
@@ -442,20 +433,11 @@ void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 
 	camera.AspectRatio((float)commandBuffer.CurrentFramebuffer()->Extent().width / (float)commandBuffer.CurrentFramebuffer()->Extent().height);
 
-	auto cameraBuffer = commandBuffer.GetBuffer("Camera Buffer", sizeof(CameraBuffer), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	auto cameraBuffer = commandBuffer.GetBuffer("Camera Buffer", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	camera.WriteUniformBuffer(cameraBuffer->Mapped());
 	camera.SetViewportScissor(commandBuffer);
 
-	auto perCamera = commandBuffer.GetDescriptorSet("Per Camera", mInstance->Device()->DefaultDescriptorSetLayout(PER_CAMERA));
-	perCamera->CreateUniformBufferDescriptor(cameraBuffer, CAMERA_DATA_BINDING);
-	perCamera->CreateSampledTextureDescriptor(mEnvironmentTexture, ENVIRONMENT_TEXTURE_BINDING);
-	perCamera->CreateInlineUniformBlock(mLighting.mLightingData, LIGHTING_DATA_BINDING);
-	perCamera->CreateStorageBufferDescriptor(mLighting.mLightBuffer, LIGHTS_BINDING);
-	perCamera->CreateStorageBufferDescriptor(mLighting.mShadowBuffer, SHADOWS_BINDING);
-	perCamera->CreateSampledTextureDescriptor(mLighting.mShadowAtlas, SHADOW_ATLAS_BINDING);
-	perCamera->FlushWrites();
-	
-	mInstance->PluginManager().ForEach([&](EnginePlugin* p) { p->OnRenderCamera(commandBuffer, camera, perCamera); });
+	ranges::for_each(mPlugins, [&](Plugin* p){ p->OnRenderCamera(commandBuffer, camera); });
 
 	// draw loop
 
@@ -468,21 +450,29 @@ void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 				continue; // instanced, skip
 			// draw firstInstance
 			if (instanceCount > 1)
-				firstInstance->OnDrawInstanced(commandBuffer, camera, perCamera, instanceBuffer, instanceCount);
+				firstInstance->OnDrawInstanced(commandBuffer, camera, instanceBuffer, instanceCount);
 			else
-				firstInstance->OnDraw(commandBuffer, camera, perCamera);
+				firstInstance->OnDraw(commandBuffer, camera);
 		}
 		instanceCount = 1;
 		firstInstance = renderer;
 	}
 	if (firstInstance)
 		if (instanceCount > 1)
-			firstInstance->OnDrawInstanced(commandBuffer, camera, perCamera, instanceBuffer, instanceCount);
+			firstInstance->OnDrawInstanced(commandBuffer, camera, instanceBuffer, instanceCount);
 		else
-			firstInstance->OnDraw(commandBuffer, camera, perCamera);
+			firstInstance->OnDraw(commandBuffer, camera);
 	
 	if (mGuiContexts.count(&camera))
-		mGuiContexts.at(&camera)->OnDraw(commandBuffer, camera, perCamera);
+		mGuiContexts.at(&camera)->OnDraw(commandBuffer, camera);
+}
+
+void Scene::RemoveObject(Object* object) {
+	InvalidateBvh(object);
+	if (auto r = dynamic_cast<Renderer*>(object)) mRenderers.erase(ranges::find(mRenderers, r));
+	if (auto c = dynamic_cast<Camera*>(object)) mCameras.erase(ranges::find(mCameras, c));
+	if (auto l = dynamic_cast<Light*>(object)) mLights.erase(ranges::find(mLights, l));
+	mObjects.erase(ranges::find(mObjects, object));
 }
 
 vector<Object*> Scene::Objects() const {
@@ -493,9 +483,9 @@ vector<Object*> Scene::Objects() const {
 
 ObjectBvh2* Scene::BVH() {
 	if (!mBvh) {
-		ProfileRegion ps("Build ObjectBvh2");
+		ProfilerRegion ps("Build ObjectBvh2");
 		mBvh = new ObjectBvh2(Objects());
-		mLastBvhBuild = mInstance->Device()->FrameCount();
+		mLastBvhBuild = mInstance.Device().FrameCount();
 	}
 	return mBvh;
 }

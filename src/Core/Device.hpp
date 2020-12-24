@@ -4,75 +4,51 @@
 
 namespace stm {
 
-template<typename T, typename Tk>
-class ResourcePool {
-public:
-	struct PooledResource {
-	public:
-		std::shared_ptr<T> mResource;
-		uint64_t mLastFrameUsed;
-	};
-
-	mutable std::mutex mMutex;
-	std::unordered_map<Tk, std::list<PooledResource>> mResources;
-
-	inline void EraseOld(uint64_t currentFrame, uint64_t maxAge) {
-		std::lock_guard lock(mMutex);
-		for (auto& [key,pool] : mResources)
-			for (auto& it = pool.begin(); it != pool.end();)
-				if (it->mLastFrameUsed + maxAge > currentFrame) it++;
-				else it = pool.erase(it);
-	}
+struct QueueFamily {
+	uint32_t mFamilyIndex = 0;
+	vector<vk::Queue> mQueues;
+	string mName;
+	vk::QueueFamilyProperties mProperties;
+	bool mSurfaceSupport;
+	// CommandBuffers may be in-flight or idle and are managed by stm::Device
+	unordered_map<thread::id, pair<vk::CommandPool, list<CommandBuffer*>>> mCommandBuffers;
 };
 
 class Device {
-private:
-	vk::Device mDevice;
-	const vk::DeviceSize mMemoryBlockSize = 256_mB;
-	
-	struct QueueFamily {
-		// TODO: use more queues for parallelization (if necessary?)
-		vk::Queue mQueue;
-		std::string mName;
-		uint32_t mFamilyIndex = 0;
-		vk::QueueFamilyProperties mProperties;
-		// CommandBuffers may be in-flight or idle
-		std::unordered_map<std::thread::id, std::pair<vk::CommandPool, std::list<CommandBuffer*>>> mCommandBuffers;
-	};
-	
 public:
+	const vk::DeviceSize mMemoryBlockSize = 256_mB;
+
 	class Memory {
 	private:
 		friend class Device;
 		vk::DeviceMemory mDeviceMemory;
-		std::map<vk::DeviceSize /*begin*/, vk::DeviceSize/*end*/> mBlocks;
+		map<vk::DeviceSize /*begin*/, vk::DeviceSize/*end*/> mBlocks;
 
 	public:
-		class Block {
-		public:
+		struct Block {
 			Memory* mMemory = nullptr;
 			vk::DeviceSize mOffset = 0;
 			Block() = default;
-			inline Block(Memory* memory, vk::DeviceSize offset) : mMemory(memory), mOffset(offset) {}
-			inline void* Mapped() const { return (uint8_t*)mMemory->mMapped + mOffset; }
-			inline operator bool() const { return mMemory; }
+			Block(const Block& b) = default;
+			inline Block(Memory& memory, vk::DeviceSize offset) : mMemory(&memory), mOffset(offset) {}
+			inline byte* Mapped() const { return mMemory->mMapped + mOffset; }
 		};
 
-		Device* mDevice = nullptr;
+		Device& mDevice;
 		uint32_t mMemoryTypeIndex = 0;
 		vk::DeviceSize mSize = 0;
-		void* mMapped = nullptr;
+		byte* mMapped = nullptr;
 
-		inline Memory(Device* device, uint32_t memoryTypeIndex, vk::DeviceSize size) : mDevice(device), mMemoryTypeIndex(memoryTypeIndex), mSize(size) {
-			mDeviceMemory = (*mDevice)->allocateMemory(vk::MemoryAllocateInfo(size, memoryTypeIndex));
-			if (mDevice->MemoryProperties().memoryTypes[mMemoryTypeIndex].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
-				mMapped = (*mDevice)->mapMemory(mDeviceMemory, 0, mSize);
+		inline Memory(Device& device, uint32_t memoryTypeIndex, vk::DeviceSize size) : mDevice(device), mMemoryTypeIndex(memoryTypeIndex), mSize(size) {
+			mDeviceMemory = mDevice->allocateMemory(vk::MemoryAllocateInfo(size, memoryTypeIndex));
+			if (mDevice.MemoryProperties().memoryTypes[mMemoryTypeIndex].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
+				mMapped = (byte*)mDevice->mapMemory(mDeviceMemory, 0, mSize);
 		}
 		inline ~Memory() {
 			if (mDeviceMemory) {
 				if (mBlocks.size()) fprintf_color(ConsoleColorBits::eYellow, stderr, "freeing device memory with unfreed blocks");
-				if (mMapped) (*mDevice)->unmapMemory(mDeviceMemory);
-				(*mDevice)->freeMemory(mDeviceMemory);
+				if (mMapped) mDevice->unmapMemory(mDeviceMemory);
+				mDevice->freeMemory(mDeviceMemory);
 			}
 		}
 
@@ -80,13 +56,10 @@ public:
 		inline const vk::DeviceMemory* operator->() const { return &mDeviceMemory; }
 
 		STRATUM_API Block GetBlock(const vk::MemoryRequirements& requirements);
-		STRATUM_API void ReturnBlock(const Memory::Block& block);
+		STRATUM_API void ReturnBlock(const Block& block);
 
 		inline bool empty() const { return mBlocks.empty(); }
 	};
-
-	Instance* const mInstance;
-	const vk::PhysicalDevice mPhysicalDevice;
 
 	Device() = delete;
 	Device(const Device&) = delete;
@@ -97,12 +70,22 @@ public:
 	inline vk::Device operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
 	
+	inline vk::PhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
+	inline uint32_t PhysicalDeviceIndex() const { return mPhysicalDeviceIndex; }
+	inline const vk::PhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
+	inline const vk::PhysicalDeviceLimits& Limits() const { return mLimits; }
+	inline vk::PipelineCache PipelineCache() const { return mPipelineCache; }
+	inline const vector<uint32_t> QueueFamilies(uint32_t index) const { return mQueueFamilyIndices; }
+	STRATUM_API QueueFamily* FindQueueFamily(vk::SurfaceKHR surface);
+	STRATUM_API vk::SampleCountFlagBits GetMaxUsableSampleCount();
+
+	inline Instance& Instance() const { return mInstance; }
+
 	// Allocate device memory. Will attempt to sub-allocate from larger allocations. Host-visible memory is automatically mapped.
-	STRATUM_API Memory::Block AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const std::string& tag = "");
+	STRATUM_API Memory::Block AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag = "");
 	STRATUM_API void FreeMemory(const Memory::Block& allocation);
 
-	template<typename T>
-	inline void SetObjectName(const T& object, const std::string& name) {
+	template<typename T> inline void SetObjectName(const T& object, const string& name) {
 		if (mSetDebugUtilsObjectNameEXT) {
 			vk::DebugUtilsObjectNameInfoEXT info = {};
 			info.objectHandle = *reinterpret_cast<const uint64_t*>(&object);
@@ -112,131 +95,136 @@ public:
 		}
 	}
 	
-	template<typename T, typename... Targs>
-	inline std::shared_ptr<T> FindLoadedAsset(const fs::path& filename) {
-		uint64_t key = hash<string>()(filename.string());
+	template<typename T> inline shared_ptr<T> LoadAsset(const fs::path& filename) {
+		static_assert(is_base_of<Asset, T>::value);
+		uint64_t key = basic_hash(filename.string());
+		lock_guard lock(mAssetMutex);
+		if (mLoadedAssets.count(key) == 0)
+			mLoadedAssets.emplace(key, shared_ptr<T>(new T(*this, filename)));
+		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
+	}
+	template<typename T> inline shared_ptr<T> FindLoadedAsset(const fs::path& filename) const {
+		static_assert(is_base_of<Asset, T>::value);
+		uint64_t key = basic_hash(filename.string());
 		if (mLoadedAssets.count(key) == 0) return nullptr;
 		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
 	}
-	template<typename T, typename... Targs>
-	inline std::shared_ptr<T> LoadAsset(const fs::path& filename, Targs&&... args) {
-		uint64_t key = hash<string>()(filename.string());
-		std::lock_guard lock(mAssetMutex);
-		if (mLoadedAssets.count(key) == 0)
-			mLoadedAssets.emplace(key, shared_ptr<T>(new T(filename, this, args...)));
-		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
-	}
-	inline void UnloadAssets() { std::lock_guard lock(mAssetMutex); mLoadedAssets.clear(); }
+	inline void UnloadAssets() { lock_guard lock(mAssetMutex); mLoadedAssets.clear(); }
 
-	STRATUM_API std::shared_ptr<Buffer> GetPooledBuffer(const std::string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API std::shared_ptr<DescriptorSet> GetPooledDescriptorSet(const std::string& name, vk::DescriptorSetLayout layout);
-	STRATUM_API std::shared_ptr<Texture> GetPooledTexture(const std::string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API shared_ptr<Buffer> GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API shared_ptr<DescriptorSet> GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout);
+	STRATUM_API shared_ptr<Texture> GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(std::shared_ptr<Buffer> resource);
+	STRATUM_API void PoolResource(shared_ptr<Buffer> resource);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(std::shared_ptr<DescriptorSet> resource);
+	STRATUM_API void PoolResource(shared_ptr<DescriptorSet> resource);
 	// Place a resource back in the resource pool
-	STRATUM_API void PoolResource(std::shared_ptr<Texture> resource);
+	STRATUM_API void PoolResource(shared_ptr<Texture> resource);
 
 	STRATUM_API void PurgeResourcePools(uint32_t maxAge);
 
-	STRATUM_API CommandBuffer* GetCommandBuffer(const std::string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API CommandBuffer* GetCommandBuffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	// The CommandBuffer will be managed by the device after being passed in
 	STRATUM_API void Execute(CommandBuffer* commandBuffer, bool wait = false);
 	// Finish all work being done on this device
 	STRATUM_API void Flush();
 
-	STRATUM_API vk::SampleCountFlagBits GetMaxUsableSampleCount();
-
-	inline vk::PhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
-	inline uint32_t PhysicalDeviceIndex() const { return mPhysicalDeviceIndex; }
-	
-	inline const vk::PhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
 	inline uint64_t FrameCount() const { return mFrameCount; }
 
-	inline vk::DescriptorSetLayout DefaultDescriptorSetLayout(uint32_t index) const { return index < mDefaultDescriptorSetLayouts.size() ? mDefaultDescriptorSetLayouts[index] : nullptr; }
-	inline uint32_t DefaultDescriptorSetCount() const { return (uint32_t)mDefaultDescriptorSetLayouts.size(); }
-
-	inline const vk::PhysicalDeviceLimits& Limits() const { return mLimits; }
-	inline vk::PipelineCache PipelineCache() const { return mPipelineCache; }
-
 private:
-	friend class DescriptorSet;
-	friend class CommandBuffer;
+	template<typename T, typename Tk> class ResourcePool {
+	public:
+		struct PooledResource {
+		public:
+			shared_ptr<T> mResource;
+			uint64_t mLastFrameUsed;
+		};
+
+		mutable mutex mMutex;
+		unordered_map<Tk, list<PooledResource>> mResources;
+
+		inline void EraseOld(uint64_t currentFrame, uint64_t maxAge) {
+			lock_guard lock(mMutex);
+			for (auto& [key,pool] : mResources)
+				ranges:::remove_if(pool, [=](const auto& i){ i.mLastFrameUsed + maxAge > currentFrame });
+		}
+	};
+
 	friend class Instance;
-	friend class Window;
-	STRATUM_API Device(Instance* instance, vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, const std::set<std::string>& deviceExtensions, std::vector<const char*> validationLayers);
+	friend class DescriptorSet;
+	STRATUM_API Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, stm::Instance& instance, const set<string>& deviceExtensions, vector<const char*> validationLayers);
 	STRATUM_API void PrintAllocations();
 
+	vk::Device mDevice;
+ 	vk::PhysicalDevice mPhysicalDevice;
 	vk::PipelineCache mPipelineCache;
-	
-	uint64_t mFrameCount = 0;
-	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
-
+	stm::Instance& mInstance;
 	uint32_t mPhysicalDeviceIndex;
+	size_t mFrameCount = 0;
 	vk::PhysicalDeviceMemoryProperties mMemoryProperties;
 	vk::PhysicalDeviceLimits mLimits;
 	vk::SampleCountFlagBits mMaxMSAASamples;
+	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
+	vector<uint32_t> mQueueFamilyIndices;
 
-	std::vector<Sampler*> mDefaultImmutableSamplers;
-	std::vector<vk::DescriptorSetLayout> mDefaultDescriptorSetLayouts;
-	
+
 	ResourcePool<DescriptorSet, vk::DescriptorSetLayout> mDescriptorSetPool;
 	ResourcePool<Buffer, size_t> mBufferPool;
 	ResourcePool<Texture, size_t> mTexturePool;
 	
-	mutable std::mutex mMemoryMutex;
-	std::map<uint32_t /*memoryTypeIndex*/, std::list<Memory*>> mMemoryPool;
+	
+	mutable mutex mQueueMutex;
+	unordered_map<uint32_t, stm::QueueFamily> mQueueFamilies;
 
-	mutable std::mutex mQueueMutex;
-	std::unordered_map<uint32_t, QueueFamily> mQueueFamilies;
+	mutable mutex mMemoryMutex;
+	unordered_map<uint32_t /*memoryTypeIndex*/, list<unique_ptr<Memory>>> mMemoryPool;
 
-	mutable std::mutex mDescriptorPoolMutex;
+	mutable mutex mDescriptorPoolMutex;
 	vk::DescriptorPool mDescriptorPool;
 
-	mutable std::mutex mAssetMutex;
-	std::unordered_map<uint64_t, std::shared_ptr<Asset>> mLoadedAssets;
+	mutable mutex mAssetMutex;
+	unordered_map<size_t, shared_ptr<Asset>> mLoadedAssets;
 };
 
 class Fence {
 private:
 	vk::Fence mFence;
-	Device* mDevice;
+	string mName;
+	Device& mDevice;
 public:
-	const std::string mName;
-	inline Fence::Fence(const std::string& name, Device* device) : mName(name), mDevice(device) {
-		mFence = (*mDevice)->createFence({});
-		mDevice->SetObjectName(mFence, mName);
+	inline Fence(const string& name, Device& device) : mName(name), mDevice(device) {
+		mFence = mDevice->createFence({});
+		mDevice.SetObjectName(mFence, mName);
 	}
-	inline Fence::~Fence() { (*mDevice)->destroyFence(mFence); }
+	inline ~Fence() { mDevice->destroyFence(mFence); }
 	inline vk::Fence& operator*() { return mFence; }
 	inline const vk::Fence* operator->() { return &mFence; }
 };
 class Semaphore {
 private:
 	vk::Semaphore mSemaphore;
-	Device* mDevice;
+	string mName;
+	Device& mDevice;
 public:
-	const std::string mName;
-	inline Semaphore::Semaphore(const std::string& name, Device* device) : mName(name), mDevice(device) {
-		mSemaphore = (*mDevice)->createSemaphore({});
-		mDevice->SetObjectName(mSemaphore, mName);
+	inline Semaphore(const string& name, Device& device) : mName(name), mDevice(device) {
+		mSemaphore = mDevice->createSemaphore({});
+		mDevice.SetObjectName(mSemaphore, mName);
 	}
-	inline Semaphore::~Semaphore() { (*mDevice)->destroySemaphore(mSemaphore); }
+	inline ~Semaphore() { mDevice->destroySemaphore(mSemaphore); }
 	inline vk::Semaphore& operator*() { return mSemaphore; }
 	inline const vk::Semaphore* operator->() { return &mSemaphore; }
 };
 class Sampler {
 private:
 	vk::Sampler mSampler;
-	Device* mDevice;
+	string mName;
+	Device& mDevice;
 public:
-	const std::string mName;
-	inline Sampler::Sampler(const std::string& name, Device* device, const vk::SamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
-		mSampler = (*mDevice)->createSampler(samplerInfo);
-		mDevice->SetObjectName(mSampler, mName);
+	inline Sampler(const string& name, Device& device, const vk::SamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
+		mSampler = mDevice->createSampler(samplerInfo);
+		mDevice.SetObjectName(mSampler, mName);
 	}
-	inline Sampler::Sampler(const std::string& name, Device* device, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : mName(name), mDevice(device) {
+	inline Sampler(const string& name, Device& device, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : mName(name), mDevice(device) {
 		vk::SamplerCreateInfo samplerInfo = {};
 		samplerInfo.magFilter = filter;
 		samplerInfo.minFilter = filter;
@@ -254,11 +242,11 @@ public:
 		samplerInfo.maxLod = (float)maxLod;
 		samplerInfo.mipLodBias = 0;
 
-		mSampler = (*mDevice)->createSampler(samplerInfo);
-		mDevice->SetObjectName(mSampler, mName);
+		mSampler = mDevice->createSampler(samplerInfo);
+		mDevice.SetObjectName(mSampler, mName);
 	}
-	inline Sampler::~Sampler() {
-		(*mDevice)->destroySampler(mSampler);
+	inline ~Sampler() {
+		mDevice->destroySampler(mSampler);
 	}
 	inline vk::Sampler operator*() const { return mSampler; }
 	inline const vk::Sampler* operator->() const { return &mSampler; }

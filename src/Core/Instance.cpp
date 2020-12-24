@@ -1,12 +1,9 @@
 #include "Instance.hpp"
 
-#include <Util/Profiler.hpp>
-#include <Util/Tokenizer.hpp>
-#include "EnginePlugin.hpp"
-#include "Device.hpp"
+#include "CommandBuffer.hpp"
 #include "Window.hpp"
 
-using namespace std;
+
 using namespace stm;
 
 bool Instance::sDisableDebugCallback = false;
@@ -54,8 +51,6 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 Instance::Instance(int argc, char** argv) {
 	gInstance = this;
 
-	vector<XrExtensionProperties> xrExtensions;
-
 	// parse args
 	mCommandLine.resize(argc);
 	for (int i = 0; i < argc; i++) {
@@ -77,47 +72,26 @@ Instance::Instance(int argc, char** argv) {
 
 	uint32_t deviceIndex = 0;
 	vk::Rect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
-	if (GetOption("deviceIndex", arg)) deviceIndex = atoi(arg.c_str());
-	if (GetOption("width", arg)) windowPosition.extent.width = atoi(arg.c_str());
-	if (GetOption("height", arg)) windowPosition.extent.height = atoi(arg.c_str());
-	bool fullscreen = GetOptionExists("fullscreen");
-	bool debugMessenger = false;
-	if (GetOptionExists("debugMessenger")) {
-		debugMessenger = true;
-		mOptions.emplace("ext_debug_utils", "");
-		mOptions.emplace("layer_khronos_validation", "");
+	if (TryGetOption("deviceIndex", arg)) deviceIndex = stoi(arg);
+	if (TryGetOption("width", arg)) windowPosition.extent.width = stoi(arg);
+	if (TryGetOption("height", arg)) windowPosition.extent.height = stoi(arg);
+	bool fullscreen = TryGetOption("fullscreen", arg);
+	bool debugMessenger = TryGetOption("debugMessenger", arg);
+	if (debugMessenger) {
+		mOptions.insert_or_assign("ext_debug_utils", "");
+		mOptions.insert_or_assign("layer_khronos_validation", "");
 	}
-
-	if (GetOptionExists("xr")) {
-		uint32_t tmp;
-		uint32_t xrExtensionCount;
-		xrEnumerateInstanceExtensionProperties(nullptr, 0, &xrExtensionCount, nullptr);
-		if (xrExtensionCount) {
-			xrExtensions.resize(xrExtensionCount);
-			for (uint32_t i = 0; i < xrExtensionCount; i++)
-				xrExtensions[i].type = XR_TYPE_EXTENSION_PROPERTIES;
-			xrEnumerateInstanceExtensionProperties(nullptr, xrExtensionCount, &tmp, xrExtensions.data());
-			printf("Found %u OpenXR extensions.\n", xrExtensionCount);
-		} else {
-			printf_color(ConsoleColorBits::eYellow, "No OpenXR extensions found\n");
-		}
-	}
-
-	if (GetOption("pluginFolder", arg))
-		mPluginManager = stm::PluginManager(arg);
-	mMouseKeyboardInput = new MouseKeyboardInput();
 
 	vector<const char*> validationLayers;
 	set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 
-	if (GetOptionExists("layer_khronos_validation")) validationLayers.push_back("VK_LAYER_KHRONOS_validation");
-	if (GetOptionExists("layer_renderdoc_capture")) {
+	if (TryGetOption("layer_khronos_validation", arg)) validationLayers.push_back("VK_LAYER_KHRONOS_validation");
+	if (TryGetOption("layer_renderdoc_capture", arg)) {
 		validationLayers.push_back("VK_LAYER_RENDERDOC_Capture");
-		mOptions.emplace("noPipelineCache", "");
-		mOptions.emplace("ext_debug_utils", "");
+		mOptions.insert_or_assign("noPipelineCache", "");
+		mOptions.insert_or_assign("ext_debug_utils", "");
 	}
-	if (GetOptionExists("ext_debug_utils"))
-		instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	if (TryGetOption("ext_debug_utils", arg)) instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	
 	#ifdef __linux
 	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
@@ -127,17 +101,9 @@ Instance::Instance(int argc, char** argv) {
 	instanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
 
-	mPluginManager.ForEach([&](EnginePlugin* p){
-		set<string> pluginExtensions = p->InstanceExtensionsRequired();
-		for (const string& e : pluginExtensions) instanceExtensions.insert(e);
-	});
-
 	if (validationLayers.size()) {
-		vector<vk::LayerProperties> availableLayers = vk::enumerateInstanceLayerProperties();
 		set<string> availableLayerSet;
-		for (const vk::LayerProperties& layer : availableLayers)
-			availableLayerSet.insert(layer.layerName);
-
+		for (const auto& layer : vk::enumerateInstanceLayerProperties()) availableLayerSet.insert(layer.layerName);
 		for (auto it = validationLayers.begin(); it != validationLayers.end();) {
 			if (availableLayerSet.count(*it)) it++;
 			else {
@@ -180,21 +146,20 @@ Instance::Instance(int argc, char** argv) {
 	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
 	if (devices.empty()) throw runtime_error("no vulkan devices found");
 	if (deviceIndex >= devices.size()) {
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to device 0\n", deviceIndex);
+		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to 0\n", deviceIndex);
 		deviceIndex = 0;
 	}
 	vk::PhysicalDevice physicalDevice = devices[deviceIndex];
 	auto deviceProperties = physicalDevice.getProperties();
 
-	printf("Using physical device index %u %s\nVulkan %u.%u.%u\n", deviceIndex, deviceProperties.deviceName.data(), VK_VERSION_MAJOR(deviceProperties.apiVersion), VK_VERSION_MINOR(deviceProperties.apiVersion), VK_VERSION_PATCH(deviceProperties.apiVersion));
+	printf("Using physical device %u: %s\nVulkan %u.%u.%u\n", deviceIndex, deviceProperties.deviceName.data(), VK_VERSION_MAJOR(deviceProperties.apiVersion), VK_VERSION_MINOR(deviceProperties.apiVersion), VK_VERSION_PATCH(deviceProperties.apiVersion));
 
 	// Create window
 
 	#ifdef __linux
 	// create xcb connection
 	mXCBConnection = xcb_connect(nullptr, nullptr);
-	if (int err = xcb_connection_has_error(mXCBConnection))
-		 runtime_error("Failed to connect to xcb: " + to_string(err));
+	if (int err = xcb_connection_has_error(mXCBConnection)) throw runtime_error("Failed to connect to xcb: " + to_string(err));
 	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
 
 	// find xcb screen
@@ -207,19 +172,19 @@ Instance::Instance(int argc, char** argv) {
 		vector<vk::QueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
 
-		for (uint32_t q = 0; q < queueFamilyCount; q++){
-			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)){
-				mWindow = new stm::Window(this, applicationName, mMouseKeyboardInput, windowPosition, mXCBConnection, screen);
+		for (uint32_t q = 0; q < queueFamilyCount; q++)
+			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
+				mScreen = screen;
 				break;
 			}
-		}
-		if (mWindow) break;
+		if (mScreen) break;
 	}
-	if (!mWindow) throw runtime_error("Failed to find a device with XCB presentation support!")
+	if (!mScreen) throw runtime_error("Failed to find a device with XCB presentation support!")
 
-	#else
+	#endif
+	#ifdef WINDOWS
 	// Create window class
-	HINSTANCE hInstance = GetModuleHandleA(NULL);
+	mHInstance = GetModuleHandleA(NULL);
 
 	WNDCLASSEXA windowClass = {};
 	windowClass.cbSize = sizeof(WNDCLASSEXA);
@@ -227,55 +192,42 @@ Instance::Instance(int argc, char** argv) {
 	windowClass.lpfnWndProc = &WndProc;
 	windowClass.cbClsExtra = 0;
 	windowClass.cbWndExtra = 0;
-	windowClass.hInstance = hInstance;
-	windowClass.hIcon = ::LoadIcon(hInstance, NULL); //  MAKEINTRESOURCE(APPLICATION_ICON));
+	windowClass.hInstance = mHInstance;
+	windowClass.hIcon = ::LoadIcon(mHInstance, NULL); //  MAKEINTRESOURCE(APPLICATION_ICON));
 	windowClass.hCursor = ::LoadCursor(NULL, IDC_ARROW);
 	windowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 	windowClass.lpszMenuName = NULL;
 	windowClass.lpszClassName = "Stratum";
-	windowClass.hIconSm = ::LoadIcon(hInstance, NULL); //  MAKEINTRESOURCE(APPLICATION_ICON));
+	windowClass.hIconSm = ::LoadIcon(mHInstance, NULL); //  MAKEINTRESOURCE(APPLICATION_ICON));
 	HRESULT hr = ::RegisterClassExA(&windowClass);
 	if (FAILED(hr)) throw runtime_error("Failed to register window class");
 
-	// register raw input devices
-	RAWINPUTDEVICE rID[2];
+	// register raw mMouseKeyboard devices
+	vector<RAWINPUTDEVICE> rID(2);
 	// Mouse
 	rID[0].usUsagePage = 0x01;
 	rID[0].usUsage = 0x02;
-	rID[0].dwFlags = 0;
-	rID[0].hwndTarget = NULL;
 	// Keyboard
 	rID[1].usUsagePage = 0x01;
 	rID[1].usUsage = 0x06;
-	rID[1].dwFlags = 0;
-	rID[1].hwndTarget = NULL;
-	if (RegisterRawInputDevices(rID, 2, sizeof(RAWINPUTDEVICE)) == FALSE) throw runtime_error("Failed to register raw input device(s)");
-	mWindow = new stm::Window(this, appInfo.pApplicationName, mMouseKeyboardInput, windowPosition, hInstance);
+	if (RegisterRawInputDevices(rID.data(), (UINT)rID.size(), sizeof(RAWINPUTDEVICE)) == FALSE) throw runtime_error("Failed to register raw mMouseKeyboard device(s)");
 	#endif
-	mInputManager.RegisterInputDevice(mMouseKeyboardInput);
+
+	mWindow = new stm::Window(*this, appInfo.pApplicationName, windowPosition);
 	
 	if (fullscreen) mWindow->Fullscreen(true);
-
-	set<string> deviceExtensions = {
+	
+	set<string> deviceExtensions {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
-	mPluginManager.ForEach([&](EnginePlugin* p) {
-		set<string> pluginExtensions = p->DeviceExtensionsRequired(physicalDevice);
-		for (const string& e : pluginExtensions) deviceExtensions.insert(e);
-	});
-	
-	mDevice = new stm::Device(this, physicalDevice, deviceIndex, deviceExtensions, validationLayers);
-	mWindow->CreateSwapchain(mDevice);
+	mDevice = new stm::Device(physicalDevice, deviceIndex, *this, deviceExtensions, validationLayers);
+	mWindow->CreateSwapchain(*mDevice);
 }
 Instance::~Instance() {
-	mPluginManager = {};
-	mInputManager.UnregisterInputDevice(mMouseKeyboardInput);
-	safe_delete(mMouseKeyboardInput);
-
-	safe_delete(mWindow);
-	safe_delete(mDevice);
+	delete mWindow;
+	delete mDevice;
 
 	if (mDebugMessenger) {
 		auto vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(mInstance, "vkDestroyDebugUtilsMessengerEXT");
@@ -307,8 +259,8 @@ void Instance::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 		if (mWindow && mWindow->mHwnd == hwnd){
 			RECT cr;
 			GetClientRect(mWindow->mHwnd, &cr);
-			mWindow->mClientRect.offset = { (int32_t)cr.top, (int32_t)cr.left };
-			mWindow->mClientRect.extent = { (uint32_t)((int32_t)cr.right - (int32_t)cr.left), (uint32_t)((int32_t)cr.bottom - (int32_t)cr.top) };
+			mWindow->mClientRect.offset = vk::Offset2D( (int32_t)cr.top, (int32_t)cr.left );
+			mWindow->mClientRect.extent = vk::Extent2D( (uint32_t)((int32_t)cr.right - (int32_t)cr.left), (uint32_t)((int32_t)cr.bottom - (int32_t)cr.top) );
 		}
 		break;
 	}
@@ -327,47 +279,47 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen){
-			mMouseKeyboardInput->mCurrent.mCursorPos = float2((float)mn->event_x, (float)mn->event_y);
+			mWindow->mMouseState.mCursorPos = float2((float)mn->event_x, (float)mn->event_y);
 			if (mWindow->mXCBWindow == mn->event)
 				if (mWindow->mTargetCamera){
-					float2 uv = mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
-					mMouseKeyboardInput->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
+					float2 uv = mWindow->mMouseState.mCursorPos / float2((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
+					mMouseKeyboard->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
 				}
 		}
 		break;
 
 	case XCB_KEY_PRESS:
 		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mMouseKeyboardInput->mCurrent.mKeys[kc] = true;
-		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboardInput->KeyDown(KEY_ENTER) && mMouseKeyboardInput->KeyDown(KEY_LALT))
+		mWindow->mMouseState.mKeys[kc] = true;
+		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_LALT))
 			mWindow->Fullscreen(!mWindow->Fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
 		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mMouseKeyboardInput->mCurrent.mKeys[kc] = false;
+		mWindow->mMouseState.mKeys[kc] = false;
 		break;
 
 	case XCB_BUTTON_PRESS:
 		if (bp->detail == 4){
-			mMouseKeyboardInput->mCurrent.mScrollDelta += 1.0f;
+			mWindow->mMouseState.mScrollDelta += 1.0f;
 			break;
 		}
 		if (bp->detail == 5){
-			mMouseKeyboardInput->mCurrent.mScrollDelta =- 1.0f;
+			mWindow->mMouseState.mScrollDelta =- 1.0f;
 			break;
 		}
 	case XCB_BUTTON_RELEASE:
 		switch (bp->detail){
 		case 1:
-			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mMouseKeyboardInput->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mMouseState.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboard->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 2:
-			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 3:
-			mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mMouseKeyboardInput->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mMouseState.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboard->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		}
 		break;
@@ -406,7 +358,7 @@ xcb_generic_event_t* Instance::PollEvent() {
 bool Instance::PollEvents() {
 	#ifdef __linux
 	xcb_generic_event_t* event;
-	while (event = PollEvent()){
+	while (event = PollEvent()) {
 		if (!event) break;
 		ProcessEvent(event);
 		free(event);
@@ -420,17 +372,15 @@ bool Instance::PollEvents() {
 		mWindow->mClientRect.extent.height = reply->height;
 		free(reply);
 	}
-	
 
-	mMouseKeyboardInput->mCurrent.mCursorDelta = mMouseKeyboardInput->mCurrent.mCursorPos - mMouseKeyboardInput->mLast.mCursorPos;
-	mMouseKeyboardInput->mWindowWidth = mWindow->mClientRect.extent.width;
-	mMouseKeyboardInput->mWindowHeight = mWindow->mClientRect.extent.height;
+	mWindow->mMouseState.mCursorDelta = mWindow->mMouseState.mCursorPos - mMouseKeyboard->mLast.mCursorPos;
+	mMouseKeyboard->mWindowExtentWidth = mWindow->mClientRect.extent;
 	if (mDestroyPending) return false;
-
-	#elif defined(WINDOWS)
+	#endif
+	#ifdef WINDOWS	
+	MSG msg = {};
 	while (true) {
 		if (mDestroyPending) return false;
-		MSG msg = {};
 		if (!GetMessageA(&msg, NULL, 0, 0)) return false;
 		TranslateMessage(&msg);
 		DispatchMessageA(&msg);
@@ -441,75 +391,39 @@ bool Instance::PollEvents() {
 		case WM_INPUT: {
 			uint32_t dwSize = 0;
 			GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
-			uint8_t* lpb = new uint8_t[dwSize];
-			if (GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) {
-				delete[] lpb;
-				break;
-			}
-			RAWINPUT* raw = (RAWINPUT*)lpb;
+			byte_blob lpb(dwSize, nullptr);
+			if (GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, lpb.data(), &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) break;
+			const RAWINPUT& raw = (RAWINPUT)lpb;
 
-			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				mMouseKeyboardInput->mCurrent.mCursorDelta += float2((float)raw->data.mouse.lLastX, (float)raw->data.mouse.lLastY);
-				mMouseKeyboardInput->mMousePointer.mPrimaryAxis += raw->data.mouse.lLastX;
-				mMouseKeyboardInput->mMousePointer.mSecondaryAxis += raw->data.mouse.lLastY;
+			if (raw.header.dwType == RIM_TYPEMOUSE) {
+				mWindow->mMouseState.mCursorDelta += float2((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_LEFT] = true;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mMouseState.mKeys[MOUSE_LEFT] = false;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mMouseState.mKeys[MOUSE_RIGHT] = true;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mMouseState.mKeys[MOUSE_RIGHT] = false;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = true;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = false;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_X1] = true;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mWindow->mMouseState.mKeys[MOUSE_X1] = false;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_X2] = true;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mWindow->mMouseState.mKeys[MOUSE_X2] = false;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) mWindow->mMouseState.mScrollDelta += (short)(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
 
-				if (mMouseKeyboardInput->mLockMouse) {
+				if (mWindow->mLockMouse) {
 					RECT rect;
 					GetWindowRect(msg.hwnd, &rect);
 					SetCursorPos((rect.right + rect.left) / 2, (rect.bottom + rect.top) / 2);
 				}
-
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) {
-					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = true;
-					mMouseKeyboardInput->mMousePointer.mPrimaryButton = true;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP) {
-					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_LEFT] = false;
-					mMouseKeyboardInput->mMousePointer.mPrimaryButton = false;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN) {
-					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = true;
-					mMouseKeyboardInput->mMousePointer.mSecondaryButton = true;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP) {
-					mMouseKeyboardInput->mCurrent.mKeys[MOUSE_RIGHT] = false;
-					mMouseKeyboardInput->mMousePointer.mSecondaryButton = false;
-				}
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_MIDDLE] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X1] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X1] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X2] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mMouseKeyboardInput->mCurrent.mKeys[MOUSE_X2] = false;
-
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) {
-					mMouseKeyboardInput->mCurrent.mScrollDelta += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
-					mMouseKeyboardInput->mMousePointer.mScrollDelta.x += (short)(raw->data.mouse.usButtonData) / (float)WHEEL_DELTA;
-				}
 			}
-			if (raw->header.dwType == RIM_TYPEKEYBOARD) {
-				USHORT key = raw->data.keyboard.VKey;
+			if (raw.header.dwType == RIM_TYPEKEYBOARD) {
+				USHORT key = raw.data.keyboard.VKey;
 				if (key == VK_SHIFT) key = VK_LSHIFT;
 				if (key == VK_MENU) key = VK_LMENU;
 				if (key == VK_CONTROL) key = VK_LCONTROL;
-				mMouseKeyboardInput->mCurrent.mKeys[(KeyCode)key] = (raw->data.keyboard.Flags & RI_KEY_BREAK) == 0;
-
-				if ((raw->data.keyboard.Flags & RI_KEY_BREAK) == 0 &&
-					((KeyCode)raw->data.keyboard.VKey == KEY_LALT || (KeyCode)raw->data.keyboard.VKey == KEY_ENTER) &&
-					mMouseKeyboardInput->KeyDown(KEY_LALT) && mMouseKeyboardInput->KeyDown(KEY_ENTER)) {
-					if (mWindow->mHwnd == msg.hwnd)
-						mWindow->Fullscreen(!mWindow->Fullscreen());
-				}
+				mWindow->mMouseState.mKeys[(KeyCode)key] = (raw.data.keyboard.Flags & RI_KEY_BREAK) == 0;
 			}
-			delete[] lpb;
 			break;
 		}
-		case WM_SETFOCUS:
-			printf("Got focus\n");
-			break;
-		case WM_KILLFOCUS:
-			printf("Lost focus\n");
-			break;
 		}
 
 		if (msg.message == WM_PAINT) break; // break and allow a frame to execute
@@ -518,31 +432,25 @@ bool Instance::PollEvents() {
 	POINT pt;
 	GetCursorPos(&pt);
 	ScreenToClient(mWindow->mHwnd, &pt);
-	mMouseKeyboardInput->mCurrent.mCursorPos = float2((float)pt.x, (float)pt.y);
-	mMouseKeyboardInput->mWindowWidth = mWindow->mClientRect.extent.width;
-	mMouseKeyboardInput->mWindowHeight = mWindow->mClientRect.extent.height;
+	mWindow->mMouseState.mCursorPos = float2((float)pt.x, (float)pt.y);
 	#endif
-	
 	return true;
 }
 
-bool Instance::AdvanceSwapchain() {
+bool Instance::AdvanceFrame() {
 	Profiler::BeginFrame(mDevice->FrameCount());
-	ProfileRegion ps("Instance::AdvanceSwapchain");
-
-	for (InputDevice* d : mInputManager.InputDevices()) d->AdvanceFrame();
+	ProfilerRegion ps("Instance::AdvanceFrame");
 
 	if (!PollEvents()) return false; // Window was closed
 	mWindow->AcquireNextImage();
 	
-	// FIXME: replace mScene->mCameras[0]
-	//mMouseKeyboardInput->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mMouseKeyboardInput->mCurrent.mCursorPos / float2((float)mMouseKeyboardInput->mWindowWidth, (float)mMouseKeyboardInput->mWindowHeight));	
+	// TODO: replace mScene->mCameras[0]
+	//mMouseKeyboard->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mWindow->mMouseState.mCursorPos / float2((float)mMouseKeyboard->mWindowWidth, (float)mMouseKeyboard->mWindowHeight));	
 	return true;
 }
-void Instance::Present(const std::set<vk::Semaphore>& presentWaitSemaphores) {
+void Instance::PresentFrame(const set<vk::Semaphore>& presentWaitSemaphores) {
 	{
-		ProfileRegion ps("Instance::Present");
-		mPluginManager.ForEach([&](EnginePlugin*p ) { p->PrePresent(); });
+		ProfilerRegion ps("Instance::PresentFrame");
 		mWindow->Present(presentWaitSemaphores);
 		mDevice->PurgeResourcePools(mWindow->BackBufferCount() + 1);
 	}

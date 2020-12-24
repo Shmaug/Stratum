@@ -9,7 +9,7 @@
 
 #include "RenderVolume.hpp"
 
-using namespace std;
+
 namespace dcmvs {
 
 vk::Format gltf2vk(int componentType, int componentCount) {
@@ -46,12 +46,12 @@ private:
 	float mZoom = 0;
 	bool mShowPerformance = false;
 
-	std::set<fs::path> mStackFolders;
+	set<fs::path> mStackFolders;
 
 	void ScanFolders() {
 		fs::path dataPath;
 		string tmp;
-		if (mScene->mInstance->GetOption("dataPath", tmp))
+		if (mScene->Instance()->GetOption("dataPath", tmp))
 				dataPath = tmp;
 		else {
 			vector<fs::path> defaultLocations { "/Data", "/data", "~/Data", "~/data", "C:/Data", "D:/Data", "E:/Data", "F:/Data" "G:/Data", };
@@ -69,13 +69,13 @@ private:
 	void LoadScene() {
 		fs::path filename;
 		string tmp;
-		if (mScene->mInstance->GetOption("environment", tmp))
+		if (mScene->Instance()->GetOption("environment", tmp))
 			filename = tmp;
 
 		tinygltf::Model model;
 		tinygltf::TinyGLTF loader;
-		std::string err;
-		std::string warn;
+		string err;
+		string warn;
 		if (
 			(filename.extension() == ".glb" && !loader.LoadBinaryFromFile(&model, &err, &warn, filename.string())) ||
 			(filename.extension() == ".gltf" && !loader.LoadASCIIFromFile(&model, &err, &warn, filename.string())) ) {
@@ -84,7 +84,7 @@ private:
 		}
 		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 		
-		Device* device = mScene->mInstance->Device();
+		Device& device = mScene->Instance()->Device();
 		vector<shared_ptr<Texture>> images;
 		vector<shared_ptr<Material>> materials;
 		vector<vector<shared_ptr<Mesh>>> meshes;  // meshes from glTF primitives
@@ -139,10 +139,10 @@ private:
 					// parse typename & typeindex
 					string typeName;
 					uint32_t typeIdx = 0;
-					transform(attribName.begin(), attribName.end(), typeName.begin(), [&](char c) { return std::tolower(c); });
+					ranges::transform(attribName.begin(), attribName.end(), typeName.begin(), [&](char c) { return tolower(c); });
 					size_t c = typeName.find_first_of("0123456789");
 					if (c != string::npos) {
-						typeIdx = atoi(typeName.c_str() + c);
+						typeIdx = stoi(typeName.substr(c));
 						typeName = typeName.substr(0, c);
 					}
 					if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
@@ -209,7 +209,7 @@ private:
 					if (node.translation.size() == 3)
 						renderer->LocalPosition((float)node.translation[0], (float)node.translation[1], (float)node.translation[2]);
 					if (node.rotation.size() == 4)
-						renderer->LocalRotation(quaternion((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]));
+						renderer->LocalRotation(fquat((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]));
 					if (node.scale.size() == 3)
 						renderer->LocalScale((float)node.scale[0], (float)node.scale[1], (float)node.scale[2]);
 					primIndex++;
@@ -220,7 +220,7 @@ private:
 protected:
 	PLUGIN_EXPORT bool OnSceneInit(Scene* scene) override {
 		mScene = scene;
-		mKeyboardInput = mScene->mInstance->InputManager().GetFirst<MouseKeyboardInput>();
+		mKeyboardInput = mScene->Instance()->InputManager().GetFirst<MouseKeyboardInput>();
 
 		mZoom = 3.f;
 		
@@ -251,14 +251,14 @@ protected:
 			if (mVolume && mKeyboardInput->KeyDown(MOUSE_LEFT)) {
 				float3 axis = mMainCamera->WorldRotation() * float3(0, 1, 0) * mKeyboardInput->CursorDelta().x - mMainCamera->WorldRotation() * float3(1, 0, 0) * mKeyboardInput->CursorDelta().y;
 				if (dot(axis, axis) > .001f) {
-					mVolume->LocalRotation(quaternion::AxisAngle(-normalize(axis), length(axis) * .003f) * mVolume->LocalRotation());
+					mVolume->LocalRotation(fquat::AxisAngle(-normalize(axis), length(axis) * .003f) * mVolume->LocalRotation());
 				}
 			}
 		}
 	}
 	PLUGIN_EXPORT void OnLateUpdate(CommandBuffer& commandBuffer) override { if (mVolume) mVolume->BakeRender(commandBuffer); }
 	
-	PLUGIN_EXPORT void OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) override {		
+	PLUGIN_EXPORT void OnGui(CommandBuffer& commandBuffer, GuiContext& gui) override {		
 		bool worldSpace = camera.StereoMode() != StereoMode::eNone;
 
 		// Draw performance overlay
@@ -266,25 +266,25 @@ protected:
 			Profiler::DrawGui(gui, (uint32_t)mScene->FPS());
 
 		if (worldSpace)
-			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, float4x4::TRS(float3(-.85f, 1, 0), quaternion(0, 0, 0, 1), .001f), fRect2D(0, 0, 300, 850));
+			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, float4x4::TRS(float3(-.85f, 1, 0), fquat(0, 0, 0, 1), .001f), Rect2D(0, 0, 300, 850));
 		else
-			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, fRect2D(10, (float)mScene->mInstance->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
+			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, Rect2D(10, (float)mScene->Instance()->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
 
 
 		gui.LayoutTitle("Load Dataset");
 		gui.LayoutSeparator();
-		float prev = gui.mLayoutTheme.mControlSize;
-		gui.mLayoutTheme.mControlSize = 24;
-		gui.BeginScrollSubLayout(175, mStackFolders.size() * (gui.mLayoutTheme.mControlSize + 2*gui.mLayoutTheme.mControlPadding));
+		float prev = gui.mLayoutStyle.mControlSize;
+		gui.mLayoutStyle.mControlSize = 24;
+		gui.BeginScrollSubLayout(175, mStackFolders.size() * (gui.mLayoutStyle.mControlSize + 2*gui.mLayoutStyle.mControlPadding));
 		
 		for (const auto& folder : mStackFolders)
 			if (gui.LayoutTextButton(folder.stem().string(), TextAnchor::eMin)) {
-				commandBuffer.mDevice->Flush();
-				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.mDevice, folder));
+				commandBuffer.Device().Flush();
+				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.Device(), folder));
 				mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * float3(0,0,0.5f));
 			}
 
-		gui.mLayoutTheme.mControlSize = prev;
+		gui.mLayoutStyle.mControlSize = prev;
 		gui.EndLayout();
 
 		if (mVolume) mVolume->DrawGui(commandBuffer, camera, gui);

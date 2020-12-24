@@ -3,9 +3,9 @@
 #include <stb_image.h>
 
 #include <dcmtk/dcmimgle/dcmimage.h>
-#include <dcmtk/dcmdata/dctk.h>
+#include <dcmtk/dcmAsset/dctk.h>
 
-using namespace std;
+
 using namespace dcmvs;
 
 unordered_multimap<string, ImageStackType> ExtensionMap {
@@ -34,7 +34,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			for (const auto& p : fs::directory_iterator(folder))
 				if (ExtensionMap.count(p.path().extension().string()))
 					images.push_back(p.path());
-			std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
+			ranges::sort(images, [](const fs::path& a, const fs::path& b) {
 				return a.stem().string() < b.stem().string();
 			});
 
@@ -59,7 +59,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 	}
 }
 
-shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device* device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
+shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device& device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -67,11 +67,11 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eStandard)
 			images.push_back(p.path());
 	if (images.empty()) return nullptr;
-	std::sort(images.begin(), images.end(), [reverse](const fs::path& a, const fs::path& b) {
+	ranges::sort(images, [reverse](const fs::path& a, const fs::path& b) {
 		string astr = a.stem().string();
 		string bstr = b.stem().string();
 		if (astr.find_first_not_of( "0123456789" ) == string::npos && bstr.find_first_not_of( "0123456789" ) == string::npos)
-			return reverse ? atoi(astr.c_str()) > atoi(bstr.c_str()) : atoi(astr.c_str()) < atoi(bstr.c_str());
+			return reverse ? stoi(astr) > stoi(bstr) : stoi(astr) < stoi(bstr);
 		return reverse ? astr > bstr : astr < bstr;
 	});
 
@@ -164,7 +164,7 @@ DcmSlice ReadDicomSlice(const string& file) {
 
 	return { new DicomImage(file.c_str()), s, x };
 }
-shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* device, float3* size) {
+shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& device, float3* size) {
 	if (!fs::exists(folder)) return nullptr;
 
 	double3 maxSpacing = 0;
@@ -177,7 +177,7 @@ shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* 
 
 	if (images.empty()) return nullptr;
 
-	std::sort(images.begin(), images.end(), [](const DcmSlice& a, const DcmSlice& b) {
+	ranges::sort(images, [](const DcmSlice& a, const DcmSlice& b) {
 		return a.location < b.location;
 	});
 
@@ -213,7 +213,7 @@ shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device* 
 	return tex;
 }
 
-shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* device, float3* scale) {
+shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& device, float3* scale) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -221,9 +221,7 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device* de
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eRaw)
 			images.push_back(p.path());
 	if (images.empty()) return nullptr;
-	std::sort(images.begin(), images.end(), [](const fs::path& a, const fs::path& b) {
-		return a.string() < b.string();
-	});
+	ranges::sort(images, [](auto a, auto b) { return a.string() < b.string(); });
 
 	vk::Extent3D extent = { 2048, 1216, (uint32_t)images.size() };
 	size_t pixelCount = extent.width * extent.height;

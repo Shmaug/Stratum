@@ -1,92 +1,86 @@
 #pragma once
 
-#include <Core/CommandBuffer.hpp>
-#include <Core/CommandBuffer.hpp>
+#include "../Core/CommandBuffer.hpp"
+#include "GuiContext.hpp"
 
 namespace stm {
 
-// A hierarchical object in a Scene. Keeps track of a transform internally that is updated on-demand during getter functions
 class Object {
 public:
-	const std::string mName;
-	Scene* const mScene;
-
-	Object() = delete;
+	Object() = delete; // Must be constructed by Scene
 	STRATUM_API virtual ~Object();
 
-	inline float3 WorldPosition() { UpdateTransform(); return mWorldPosition; }
-	inline quaternion WorldRotation() { UpdateTransform(); return mWorldRotation; }
+	inline const string& Name() const { return mName; }
+	inline stm::Scene& Scene() const { return mScene; }
 
-	inline float3 LocalPosition() { UpdateTransform(); return mLocalPosition; }
-	inline quaternion LocalRotation() { UpdateTransform(); return mLocalRotation; }
-	inline float3 LocalScale() { UpdateTransform(); return mLocalScale; }
-	inline float3 WorldScale() { UpdateTransform(); return mWorldScale; }
-
-	inline float4x4 ObjectToParent() { UpdateTransform(); return mObjectToParent; }
-	inline float4x4 ObjectToWorld() { UpdateTransform(); return mObjectToWorld; }
-	inline float4x4 WorldToObject() { UpdateTransform(); return mWorldToObject; }
-
-	inline void LocalPosition(const float3& p) { mLocalPosition = p; DirtyTransform(); }
-	inline void LocalRotation(const quaternion& r) { mLocalRotation = r; DirtyTransform(); }
-	inline void LocalScale(const float3& s) { mLocalScale = s; DirtyTransform(); }
-
-	inline void LocalPosition(float x, float y, float z) { mLocalPosition.x = x; mLocalPosition.y = y; mLocalPosition.z = z; DirtyTransform(); }
-	inline void LocalScale(float x, float y, float z) { mLocalScale.x = x; mLocalScale.y = y; mLocalScale.z = z; DirtyTransform(); }
-	inline void LocalScale(float x) { mLocalScale.x = x; mLocalScale.y = x; mLocalScale.z = x; DirtyTransform(); }
+	inline void LocalPosition(const float3& p) { mLocalPosition = p; InvalidateTransform(); }
+	inline void LocalRotation(const fquat& r) { mLocalRotation = r; InvalidateTransform(); }
+	inline void LocalScale(const float3& s) { mLocalScale = s; InvalidateTransform(); }
+	inline void LocalPosition(float x, float y, float z) { LocalPosition(float3(x,y,z)); }
+	inline void LocalScale(float x, float y, float z) { LocalScale(float3(x,y,z)); }
 	
-	inline virtual std::optional<AABB> Bounds() { return {}; }
+	inline float3 LocalPosition() { ValidateTransform(); return mLocalPosition; }
+	inline fquat LocalRotation() { ValidateTransform(); return mLocalRotation; }
+	inline float3 LocalScale() { ValidateTransform(); return mLocalScale; }
+	inline float3 Position() { ValidateTransform(); return (float3)mCachedTransform[2]; }
+	inline fquat Rotation() { ValidateTransform(); return mCachedRotation; }
+	inline float4x4 LocalTransform() { ValidateTransform(); return mCachedLocalTransform; }
+	inline float4x4 Transform() { ValidateTransform(); return mCachedTransform; }
+	inline float4x4 InverseTransform() { ValidateTransform(); return mCachedInverseTransform; }
 
 	inline Object* Parent() const { return mParent; }
+	inline uint32_t ChildCount() const { return (uint32_t)mChildren.size(); }
+	inline Object* Child(uint32_t index) const { return mChildren[index]; }
 	STRATUM_API void AddChild(Object* obj);
 	STRATUM_API void RemoveChild(Object* obj);
 
-	inline uint32_t ChildCount() const { return (uint32_t)mChildren.size(); }
-	inline Object* Child(uint32_t index) const { return mChildren[index]; }
-
-	inline bool EnabledSelf() const { return mEnabled; };
-	STRATUM_API void EnabledSelf(bool e);
-	STRATUM_API bool EnabledHierarchy() const { return mEnabledHierarchy; }
+	STRATUM_API void Enabled(bool e) { mEnabled = e; }
+	STRATUM_API bool Enabled() const { return mEnabled; }
 	
 	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
 	// Note Renderers should OR this with their PassMask()
 	inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
 	inline virtual uint32_t LayerMask() { return mLayerMask; };
 
+	inline virtual optional<fAABB> Bounds() { return {}; }
+
 	// Returns true when an intersection occurs, assigns t to the intersection time if t is not null
 	// If any is true, will return the first hit, otherwise will return the closest hit
-	inline virtual bool Intersect(const Ray& ray, float* t, bool any) { return false; }
-
-private:
-	friend class Scene;
-
-	bool mEnabled = true;
-	bool mEnabledHierarchy = true;
-	bool mTransformDirty = true;
-	float3 mLocalPosition = 0;
-	quaternion mLocalRotation = quaternion(0,0,0,1);
-	float3 mLocalScale = 1;
-	float3 mWorldPosition;
-	quaternion mWorldRotation;
-	float3 mWorldScale;
-	float4x4 mObjectToParent;
-	float4x4 mObjectToWorld;
-	float4x4 mWorldToObject;
-
-	uint32_t mLayerMask = 1;
-
-	Object* mParent = nullptr;
-	std::deque<Object*> mChildren;
+	inline virtual bool Intersect(const fRay& ray, float* t, bool any) { return false; }
+	inline virtual bool Intersect(const float4 frustum[6]) { return true; }
 
 protected:
-	STRATUM_API Object(const std::string& name, stm::Scene* scene);
+	inline Object(const string& name, stm::Scene& scene) : mName(name), mScene(scene) { InvalidateTransform(); }
 
 	inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
 	inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
 	inline virtual void OnLateUpdate(CommandBuffer& commandBuffer) {}
-	inline virtual void OnGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {}
+	inline virtual void OnGui(CommandBuffer& commandBuffer, GuiContext& gui) {}
 
-	STRATUM_API virtual void DirtyTransform();
-	STRATUM_API virtual bool UpdateTransform();
+	STRATUM_API virtual void InvalidateTransform();
+	STRATUM_API virtual bool ValidateTransform();
+
+private:
+	string mName;
+	stm::Scene& mScene;
+
+	friend class Scene;
+	float3 mLocalPosition = 0;
+	fquat mLocalRotation = fquat(0,0,0,1);
+	float3 mLocalScale = 1;
+	uint32_t mLayerMask = 1;
+	Object* mParent = nullptr;
+	deque<Object*> mChildren;
+	bool mEnabled = true;
+
+	bool mCacheValid = false;
+	float4x4 mCachedLocalTransform;
+	float4x4 mCachedTransform;
+	float4x4 mCachedInverseTransform;
+	fquat mCachedRotation;
 };
+
+inline bool ObjectIntersector::operator()(Object* object, const float4 frustum[6]) { return object->Intersect(frustum); }
+inline bool ObjectIntersector::operator()(Object* object, const fRay& ray, float* t, bool any) { return object->Intersect(ray, t, any); }
 
 }

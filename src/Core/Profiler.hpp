@@ -5,19 +5,18 @@
 namespace stm {
 
 struct ProfilerSample {
-	std::string mLabel;
+	string mLabel;
 	ProfilerSample* mParent;
-	std::list<ProfilerSample*> mChildren;
-	std::chrono::high_resolution_clock::time_point mStartTime;
-	std::chrono::nanoseconds mDuration;
+	list<ProfilerSample*> mChildren;
+	chrono::high_resolution_clock::time_point mStartTime;
+	chrono::nanoseconds mDuration;
 	float4 mColor;
 	inline ~ProfilerSample() { for (ProfilerSample* c : mChildren) delete c; }
 };
 
 class Profiler {
 public:
-
-	STRATUM_API static void BeginSample(const std::string& label);
+	STRATUM_API static void BeginSample(const string& label);
 	STRATUM_API static void EndSample();
 
 	STRATUM_API static void DrawGui(GuiContext& gui, uint32_t framerate);
@@ -29,10 +28,10 @@ private:
 	STRATUM_API static void EndFrame();
 
 	STRATUM_API static bool mEnabled;
-	STRATUM_API static std::list<ProfilerSample*> mFrames;
+	STRATUM_API static list<ProfilerSample*> mFrames;
 	STRATUM_API static ProfilerSample* mCurrentSample;
 	STRATUM_API static uint32_t mHistoryCount;
-	STRATUM_API static const std::chrono::high_resolution_clock mTimer;
+	STRATUM_API static const chrono::high_resolution_clock mTimer;
 
 	// Drawing settings
 	

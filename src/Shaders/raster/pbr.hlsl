@@ -1,110 +1,103 @@
-#pragma pass forward/depth vsmain fsdepth
-#pragma pass forward/opaque vsmain fsmain
+#pragma compile vertex vsmain fragment fsdepth
+#pragma compile vertex vsmain fragment fsmain
 
-#pragma render_queue 1000
-#pragma blend 0 false
+[[vk::constant_id(0)]] const bool gAlphaClip = true;
+[[vk::constant_id(1)]] const uint gTextureCount = 64;
 
-#pragma multi_compile ALPHA_CLIP
+#include <stratum.hlsli>
+#include <lighting.hlsli>
 
-#pragma static_sampler Sampler
-#pragma inline_uniform_block Materials
+StructuredBuffer<InstanceData> gInstances : register(t0, space1);
 
-#include <shadercompat.h>
-
-#if defined(TEXTURED_COLORONLY)
-#define NEED_TEXCOORD
-#elif defined(TEXTURED)
-#define NEED_TEXCOORD
-#define NEED_TANGENT
-#endif
-
-#ifdef ALPHA_CLIP
-#define NEED_TEXCOORD
-#endif
-
-#define TEXTURE_COUNT 64
-
-[[vk::binding(BINDING_START + 0, PER_MATERIAL)]] Texture2D<float4> Textures[TEXTURE_COUNT] : register(t6);
-[[vk::binding(BINDING_START + 1, PER_MATERIAL)]] SamplerState Sampler : register(s0);
-
-[[vk::push_constant]] cbuffer PushConstants : register(b2) {
-	STM_PUSH_CONSTANTS
-	float4 BaseColor;
-	float3 Emission;
-	float Metallic;
-	float Roughness;
-	float BumpStrength;
-	uint BaseColorTextureIndex;
-	uint RoughnessTextureIndex;
-	uint NormalTextureIndex;
-	float4 TextureST;
+Texture2D<float4> gBaseColorTexture 					: register(t0, space2);
+Texture2D<float4> gNormalTexture 							: register(t1, space2);
+Texture2D<float2> gMetallicRoughnessTexture 	: register(t2, space2);
+SamplerState gSampler 												: register(s0, space2);
+cbuffer gMaterial : register(b0, space2) {
+	float4 gTextureST;
+	float4 gBaseColor;
+	float3 gEmission;
+	float gMetallic;
+	float gRoughness;
+	float gBumpStrength;
+	float gAlphaCutoff;
+	uint pad;
 };
 
-#include <util.hlsli>
-#include <shadow.hlsli>
-#include <brdf.hlsli>
+[[vk::push_constant]] struct {
+	uint gStereoEye;
+} gPushConstants;
+
+
+class DisneyBSDF : BSDF {
+	float3 diffuse;
+	float3 specular;
+	float3 emission;
+	float perceptualRoughness;
+	float roughness;
+	float occlusion;
+
+	float3 Evaluate(float3 Li, float3 Lo, float3 position, float3 normal) {
+		return saturate(dot(Li, normal));
+	}
+};
 
 struct v2f {
 	float4 position : SV_Position;
 	float3 normal : NORMAL;
 	float3 tangent : TANGENT;
 	float2 texcoord : TEXCOORD0;
-	float4 worldPos : TEXCOORD1;
-	float4 screenPos : TEXCOORD2;
+	float4 cameraPos : TEXCOORD1;
 };
 
 v2f vsmain(
-	[[vk::location(0)]] float3 vertex : POSITION,
-	[[vk::location(1)]] float3 normal : NORMAL,
-	[[vk::location(2)]] float4 tangent : TANGENT,
-	[[vk::location(3)]] float2 texcoord : TEXCOORD0,
-	uint instance : SV_InstanceID ) {
-	v2f o;
+	float3 vertex : POSITION,
+	float3 normal : NORMAL,
+	float3 tangent : TANGENT,
+	float2 texcoord : TEXCOORD0,
+	uint instanceId : SV_InstanceID ) {
 	
-	float4 worldPos = mul(ApplyCameraTranslation(Instances[instance].ObjectToWorld), float4(vertex, 1.0));
+	InstanceData instance = gInstances[instanceId];
+	float4 cameraPos = mul(instance.Transform, float4(vertex, 1.0));
 
-	o.position = mul(STRATUM_MATRIX_VP, worldPos);
-	o.normal = mul(float4(normal, 1), Instances[instance].WorldToObject).xyz;
-	o.tangent = mul(tangent, Instances[instance].WorldToObject).xyz * tangent.w;
-	o.texcoord = texcoord * TextureST.xy + TextureST.zw;
-	o.worldPos = float4(worldPos.xyz, o.position.z);
-	o.screenPos = ComputeScreenPos(o.position);
-
+	v2f o;
+	o.position = mul(gCamera.View[gPushConstants.gStereoEye], cameraPos);
+	o.normal = mul(float4(normal, 1), instance.InverseTransform).xyz;
+	o.tangent = mul(float4(tangent, 1), instance.InverseTransform).xyz;
+	o.texcoord = texcoord*gTextureST.xy + gTextureST.zw;
+	o.cameraPos = float4(cameraPos.xyz, o.position.z);
 	return o;
 }
 
 float4 fsmain(v2f i) : SV_Target0 {
-	float3 view = normalize(-i.worldPos.xyz);
+	float3 view = normalize(-i.cameraPos.xyz);
 
-	float4 col = BaseColor;
-	float metallic = Metallic;
-	float roughness = Roughness;
+	float4 color = gBaseColor * gBaseColorTexture.Sample(gSampler, i.texcoord);
+	float4 bump = gNormalTexture.Sample(gSampler, i.texcoord);
+	float2 metallicRoughness = gMetallicRoughnessTexture.Sample(gSampler, i.texcoord);
+
 	float occlusion = 1.0;
-	float3 normal = normalize(i.normal) * (dot(i.normal, view) > 0 ? 1 : -1);
 
-	if (BaseColorTextureIndex < TEXTURE_COUNT) col *= Textures[BaseColorTextureIndex].Sample(Sampler, i.texcoord);
-	if (RoughnessTextureIndex < TEXTURE_COUNT) roughness *= Textures[RoughnessTextureIndex].Sample(Sampler, i.texcoord).r;
-	if (NormalTextureIndex < TEXTURE_COUNT) {
-		float4 bump = Textures[NormalTextureIndex].Sample(Sampler, i.texcoord);
-		bump.xyz = bump.xyz * 2 - 1;
-		float3 tangent = normalize(i.tangent);
-		float3 bitangent = normalize(cross(normal, tangent));
-		bump.xy *= BumpStrength;
-		normal = normalize(tangent * bump.x + bitangent * bump.y + normal * bump.z);
-	}
+	float3 normal = normalize(i.normal);
+	if (dot(i.normal, view) < 0) normal = -normal;
 
-	MaterialInfo material;
-	material.diffuse = DiffuseAndSpecularFromMetallic(col.rgb, metallic, material.specular, material.oneMinusReflectivity);
-	material.perceptualRoughness = Roughness;
-	material.roughness = max(.002, material.perceptualRoughness * material.perceptualRoughness);
-	material.occlusion = occlusion;
-	material.emission = Emission;
-	return float4(ShadeSurface(material, i.worldPos.xyz, normal, view, i.worldPos.w, i.screenPos.xy / i.screenPos.w), 1);
+	float3 tangent = normalize(i.tangent);
+	normal = mul(bump.xyz*2-1, float3x3(tangent, normalize(cross(normal, tangent)), normal));
+
+	DisneyBSDF bsdf;
+	bsdf.diffuse = color.rgb;
+	bsdf.specular = color.rgb * metallicRoughness.x;
+	bsdf.emission = gEmission;
+	bsdf.perceptualRoughness = metallicRoughness.y;
+	bsdf.roughness = max(.002, bsdf.perceptualRoughness * bsdf.perceptualRoughness);
+	bsdf.occlusion = occlusion;
+
+	float3 eval = Shade(bsdf, i.cameraPos.xyz, normal, view);
+
+	return float4(eval, color.a);
 }
 
 float fsdepth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {
-	#ifdef ALPHA_CLIP
-	clip((Textures[BaseColorTextureIndex].Sample(Sampler, texcoord) * BaseColor).a - .75);
-	#endif
+	if (gAlphaClip && gBaseColorTexture.Sample(gSampler, texcoord).a * gBaseColor.a < gAlphaCutoff) discard;
 	return position.z;
 }

@@ -1,55 +1,38 @@
-#pragma kernel Reduce
+#pragma compile kernel Reduce3D
+#pragma compile kernel Reduce2D
+#pragma compile kernel Reduce1D
 
-#pragma multi_compile DIM_2D DIM_3D
-#pragma multi_compile FLOAT2 FLOAT3 FLOAT4 UINT UINT2 UINT3 UINT4
+RWTexture3D<float4> Input3 : register(u0);
+RWTexture3D<float4> Output3 : register(u1);
 
-#if defined(UINT4)
-#define TYPE uint4
-#elif defined(UINT3)
-#define TYPE uint3
-#elif defined(UINT2)
-#define TYPE uint2
-#elif defined(UINT)
-#define TYPE uint
+RWTexture2D<float4> Input2: register(u0);
+RWTexture2D<float4> Output2 : register(u1);
 
-#elif defined(FLOAT4)
-#define TYPE float4
-#elif defined(FLOAT3)
-#define TYPE float3
-#elif defined(FLOAT2)
-#define TYPE float2
-#else
-#define TYPE float
-#endif
+RWTexture1D<float4> Input1 : register(u0);
+RWTexture1D<float4> Output1 : register(u1);
 
-#ifdef DIM_3D
-[[vk::binding(0, 0)]] RWTexture3D<TYPE> Input : register(u0);
-[[vk::binding(1, 0)]] RWTexture3D<TYPE> Output : register(u1);
-#elif defined(DIM_2D)
-[[vk::binding(0, 0)]] RWTexture2D<TYPE> Input : register(u0);
-[[vk::binding(1, 0)]] RWTexture2D<TYPE> Output : register(u1);
-#else
-[[vk::binding(0, 0)]] RWTexture1D<TYPE> Input : register(u0);
-[[vk::binding(1, 0)]] RWTexture1D<TYPE> Output : register(u1);
-#endif
-
-[numthreads(64, 1, 1)]
-void Reduce(uint3 index : SV_DispatchThreadID) {
-  TYPE total = 0;
-  #ifdef DIM_3D
+[numthreads(4, 4, 4)]
+void Reduce3D(uint3 index : SV_DispatchThreadID) {
+  float4 total = 0;
   for (uint i = 0; i < 2; i++)
     for (uint j = 0; j < 2; j++)
       for (uint k = 0; k < 2; k++)
-        total += Input[2*index + uint3(i, j, k)];
-  Output[index] = total / 16;
-  #elif defined(DIM_2D)
+        total += Input3[2*index + uint3(i, j, k)];
+  Output3[index] = total / 16;
+}
+[numthreads(8, 8, 1)]
+void Reduce2D(uint3 index : SV_DispatchThreadID) {
+  float4 total = 0;
   for (uint i = 0; i < 2; i++)
     for (uint j = 0; j < 2; j++)
-      total += Input[2*index.xy + uint2(i, j)];
-  Output[index.xy] = total / 4;
-  #else
+      total += Input2[2*index.xy + uint2(i, j)];
+  Output2[index.xy] = total / 4;
+}
+
+[numthreads(64, 1, 1)]
+void Reduce1D(uint3 index : SV_DispatchThreadID) {
+  float4 total = 0;
   for (uint i = 0; i < 2; i++)
-    total += Input[2*index.x + i];
-  Output[index.x] = total / 2;
-  #endif
+    total += Input1[2*index.x + i];
+  Output1[index.x] = total / 2;
 }
