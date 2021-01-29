@@ -11,12 +11,11 @@
 #include "Light.hpp"
 #include "Renderers/MeshRenderer.hpp"
 
-
 using namespace stm;
 
 constexpr uint32_t gMaxLightCount = 64;
 
-Scene::Scene(stm::Instance& instance) : mInstance(instance) {
+Scene::Scene(stm::Instance& instance) : mInstance(instance), mRoot(SceneNode(*this, "")) {
 	mStartTime = mClock.now();
 	mLastFrame = mStartTime;
 
@@ -69,15 +68,15 @@ Scene::Scene(stm::Instance& instance) : mInstance(instance) {
 	// init skybox
 
 	float r = .5f;
-	float3 verts[8] {
-		float3(-r, -r, -r),
-		float3(r, -r, -r),
-		float3(-r, -r,  r),
-		float3(r, -r,  r),
-		float3(-r,  r, -r),
-		float3(r,  r, -r),
-		float3(-r,  r,  r),
-		float3(r,  r,  r),
+	Vector3f verts[8] {
+		Vector3f(-r, -r, -r),
+		Vector3f(r, -r, -r),
+		Vector3f(-r, -r,  r),
+		Vector3f(r, -r,  r),
+		Vector3f(-r,  r, -r),
+		Vector3f(r,  r, -r),
+		Vector3f(-r,  r,  r),
+		Vector3f(r,  r,  r),
 	};
 	uint16_t indices[36] {
 		2,7,6,2,3,7,
@@ -87,13 +86,13 @@ Scene::Scene(stm::Instance& instance) : mInstance(instance) {
 		6,4,2,4,0,2,
 		4,7,5,4,6,7
 	};
-	auto skyVertexBuffer = make_shared<Buffer>("SkyCube/Vertices", mInstance.Device(), verts, sizeof(float3)*8, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+	auto skyVertexBuffer = make_shared<Buffer>("SkyCube/Vertices", mInstance.Device(), verts, sizeof(Vector3f)*8, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 	auto skyIndexBuffer = make_shared<Buffer>("SkyCube/Indices" , mInstance.Device(), indices, sizeof(uint16_t)*36, vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 	
 	MeshRenderer* skybox = CreateObject<MeshRenderer>("Skybox");
 	skybox->Mesh(shared_ptr<Mesh>(new Mesh("SkyCube", 
-		{ { { VertexAttributeType::ePosition, 0 }, VertexAttributeData(ArrayBufferView(skyVertexBuffer, 0, sizeof(float3)), 0, vk::VertexInputRate::eVertex) } },
-		ArrayBufferView(skyIndexBuffer, 0, sizeof(uint16_t)) )));
+		{ { { VertexAttributeType::ePosition, 0 }, VertexAttributeData(Buffer::ArrayView<Vector3f>(skyVertexBuffer), 0, vk::VertexInputRate::eVertex) } },
+		Buffer::ArrayView<uint16_t>(skyIndexBuffer) )));
 	skybox->Mesh()->AddSubmesh(Mesh::Submesh(8, 0, 36, 0));
 	skybox->Material(make_shared<Material>("Skybox", mInstance.Device().LoadAsset<Shader>("Assets/Shaders/skybox.stmb")));
 	skybox->LocalScale(1e5f);
@@ -113,7 +112,7 @@ Scene::~Scene() {
 Scene::Plugin* Scene::LoadPlugin(const fs::path& filename) {
 	try {
 		
-#ifdef WINDOWS
+#ifdef WIN32
 		char* msgBuf;
 		auto throw_if_null = [&](auto ptr){
 			if (ptr == NULL) {
@@ -135,126 +134,6 @@ Scene::Plugin* Scene::LoadPlugin(const fs::path& filename) {
 		return plugin;
 	} catch(exception e) {}
 	return nullptr;
-}
-
-void Scene::SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Extent2D& extent, vk::ImageUsageFlags usage) {
-	// TODO: support specification of finalLayout
-	mAttachmentInfo[name] = { extent, usage };
-	mRenderGraphDirty = true;
-}
-
-void Scene::AssignRenderNode(const string& name, const deque<Subpass>& subpasses) {
-	RenderGraphNode& node = mRenderNodes[name];
-	node.mSubpasses = subpasses;
-	mRenderGraphDirty = true;
-}
-void Scene::DeleteRenderNode(const string& name) {
-	if (mRenderNodes.count(name) == 0) return;
-	RenderGraphNode& node = mRenderNodes.at(name);
-	mRenderNodes.erase(name);
-	mRenderGraphDirty = true;
-}
-
-void Scene::BuildRenderGraph(CommandBuffer& commandBuffer) {
-	mRenderGraph.clear();
-
-	// Create new attachment buffers
-
-	map<RenderTargetIdentifier, shared_ptr<Texture>> newAttachments;
-	for (auto&[name, node] : mRenderNodes) {
-		if (!node.mRenderPass) {
-			// resolve non-subpass dependencies
-			node.mNonSubpassDependencies.clear();
-			vector<Subpass> subpasses;
-			for (uint32_t i = 0; i < node.mSubpasses.size(); i++) {
-				for (auto& dependency : node.mSubpasses[i].mAttachmentDependencies) {
-					bool subpassDependency = false;
-					for (uint32_t j = 0; j < node.mSubpasses.size(); j++) {
-						if (i == j || node.mSubpasses[j].mAttachments.count(dependency.first) == 0) continue;
-						AttachmentType type = node.mSubpasses[j].mAttachments.at(dependency.first).mType;
-						if (type == AttachmentType::eColor || type == AttachmentType::eDepthStencil || type == AttachmentType::eResolve || type == AttachmentType::ePreserve) {
-								subpassDependency = true;
-								break;
-							}
-						}
-					if (!subpassDependency)
-						node.mNonSubpassDependencies.insert(dependency.first);
-				}
-				subpasses.push_back(node.mSubpasses[i]);
-			}
-			node.mRenderPass = make_shared<RenderPass>(name, mInstance.Device(), subpasses);
-		}
-
-		// populate newAttachments
-		for (uint32_t i = 0; i < node.mRenderPass->AttachmentCount(); i++) {
-			const RenderTargetIdentifier& attachment = node.mRenderPass->AttachmentName(i);
-			
-			vk::Extent2D extent = { 1024, 1024 };
-			vk::ImageUsageFlags usage = HasDepthComponent(node.mRenderPass->Attachment(i).format) ? vk::ImageUsageFlagBits::eDepthStencilAttachment : vk::ImageUsageFlagBits::eColorAttachment;
-			if (mAttachmentInfo.count(attachment)) {
-				auto[ext, usg] = mAttachmentInfo.at(attachment);
-				extent = ext;
-				usage = usg;
-			}
-
-			// attempt to re-use attachment if unchanged
-			if (mAttachments.count(attachment)) {
-				auto a = mAttachments.at(attachment);
-				if (mAttachmentInfo.count(attachment) && a->Extent().width == extent.width && a->Extent().height == extent.height && a->Usage() == usage) {
-					newAttachments.emplace(attachment, mAttachments.at(attachment));
-					continue;
-				} else {
-					// mismatch in framebuffer dimensions... need to make a new framebuffer
-					commandBuffer.TrackResource(node.mFramebuffer);
-					node.mFramebuffer.reset();
-				}
-			}
-			// ...or just create a new one if not
-			newAttachments.emplace(attachment, make_shared<Texture>(attachment, mInstance.Device(), vk::Extent3D(extent, 1), node.mRenderPass->Attachment(i).format, byte_blob(), usage, 1, node.mRenderPass->Attachment(i).samples));
-		}
-
-		// release previous framebuffer if invalid
-		if (node.mFramebuffer && node.mFramebuffer->AttachmentCount() != node.mRenderPass->AttachmentCount()) {
-			commandBuffer.TrackResource(node.mFramebuffer);
-			node.mFramebuffer.reset();
-		}
-
-		// create framebuffer if needed
-		if (!node.mFramebuffer) {
-			vector<shared_ptr<Texture>> attachments(node.mRenderPass->AttachmentCount());
-			for (uint32_t i = 0; i < node.mRenderPass->AttachmentCount(); i++)
-				attachments[i] = newAttachments.at(node.mRenderPass->AttachmentName(i));
-			node.mFramebuffer = make_shared<Framebuffer>(name, node.mRenderPass, attachments);
-		}
-	}
-
-	// Delete unused attachments
-	for (auto it = mAttachments.begin(); it != mAttachments.end();) {
-		if (newAttachments.count(it->first) && newAttachments.at(it->first) == it->second) { it++; continue; }
-		commandBuffer.TrackResource(it->second);
-		it = mAttachments.erase(it);
-	}
-	for (auto it = mAttachmentInfo.begin(); it != mAttachmentInfo.end();) {
-		if (newAttachments.count(it->first)) { it++; continue; }
-		it = mAttachmentInfo.erase(it);
-	}
-
-	mAttachments = newAttachments;
-
-	// Create new render graph
-	for (auto&[name,node] : mRenderNodes) mRenderGraph.push_back(&node);
-	ranges::sort(mRenderGraph, [&](const RenderGraphNode* a, const RenderGraphNode* b) {
-		// b < a if a depends on b
-		for (const RenderTargetIdentifier& dep : a->mNonSubpassDependencies)
-			for (const Subpass& subpass : b->mSubpasses) {
-				for (const auto&[name,attachment] : subpass.mAttachments)
-					if (name == dep && (attachment.mType == AttachmentType::eColor || attachment.mType == AttachmentType::eDepthStencil || attachment.mType == AttachmentType::eResolve))
-						return false;
-			}
-		return true;
-	});
-
-	mRenderGraphDirty = false;
 }
 
 void Scene::Update(CommandBuffer& commandBuffer) {
@@ -310,7 +189,7 @@ void Scene::Update(CommandBuffer& commandBuffer) {
 			ProfilerRegion ps("Gather Lights and Shadows");
 			mLighting.mShadowAtlas = commandBuffer.GetTexture("Shadow Atlas", { 4096, 4096, 1 }, vk::Format::eD32Sfloat, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
-			fAABB shadowBounds;
+			AlignedBox3f shadowBounds;
 			shadowBounds.mMin = 1e10f;
 			shadowBounds.mMax = -1e10f;
 			for (uint32_t i = 0; i < mRenderers.size(); i++) {
@@ -324,8 +203,8 @@ void Scene::Update(CommandBuffer& commandBuffer) {
 			uint32_t si = 0;
 			uint32_t shadowCount = 0;
 
-			float3 sceneCenter = shadowBounds.Center();
-			float3 sceneExtent = shadowBounds.HalfSize();
+			Vector3f sceneCenter = shadowBounds.Center();
+			Vector3f sceneExtent = shadowBounds.HalfSize();
 			float shadowExtentMax = fmaxf(fmaxf(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
 
 			mLighting.mLightCount = 0;
@@ -351,53 +230,7 @@ void Scene::Update(CommandBuffer& commandBuffer) {
 	if (mInstance.Window().Swapchain()) MainRenderExtent(mInstance.Window().SwapchainExtent());
 }
 
-void Scene::Render(CommandBuffer& commandBuffer) {
-	ProfilerRegion ps("Scene::Render", commandBuffer);
-
-	if (mInstance.Window().Swapchain()) MainRenderExtent(mInstance.Window().SwapchainExtent());
-
-	if (mRenderGraphDirty) BuildRenderGraph(commandBuffer);
-
-	{
-		ProfilerRegion ps("Pre-Render & Gui", commandBuffer);
-		for (Camera* camera : mCameras) {
-			ranges::for_each(mPlugins, [&](Plugin* p){ p->OnPreRender(commandBuffer); });
-			
-			if (!mGuiContexts.count(camera))
-				mGuiContexts.emplace(camera, new GuiContext(*this));
-		}
-
-		for (auto& [camera, gui] : mGuiContexts) {
-				ranges::for_each(mPlugins, [&](Plugin* p){ p->OnGui(commandBuffer, *gui); });
-				for (const auto& o : mObjects) if (o->Enabled()) o->OnGui(commandBuffer, *gui);
-				mGuiContexts.emplace(camera, gui);
-				gui->OnPreRender(commandBuffer);
-		}
-	}
-	
-	set<Camera*> passCameras;
-	for (auto& rp : mRenderGraph) {
-		ProfilerRegion ps(rp->mRenderPass->Name(), commandBuffer);
-
-		passCameras.clear();
-		commandBuffer.BeginRenderPass(rp->mRenderPass, rp->mFramebuffer);
-		
-		for (uint32_t i = 0; i < rp->mRenderPass->SubpassCount(); i++) {
-			ProfilerRegion ps(rp->mRenderPass->Subpass(i).mShaderPass, commandBuffer);
-			if (i > 0) commandBuffer.NextSubpass();
-			for (Camera* camera : mCameras)
-				if (camera->RendersToSubpass(*commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex())) {
-					RenderCamera(commandBuffer, *camera);
-					passCameras.insert(camera);
-				}
-		}
-		
-		commandBuffer.EndRenderPass();
-
-		ranges::for_each(mPlugins, [&](Plugin* p){ p->OnPostProcess(commandBuffer, rp->mFramebuffer, passCameras); });
-	}
-}
-void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
+void Scene::Render(CommandBuffer& commandBuffer, Camera& camera) {
 	vector<Renderer*> renderers;
 	{
 		ProfilerRegion ps("Culling/Sorting");
@@ -465,27 +298,4 @@ void Scene::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 	
 	if (mGuiContexts.count(&camera))
 		mGuiContexts.at(&camera)->OnDraw(commandBuffer, camera);
-}
-
-void Scene::RemoveObject(Object* object) {
-	InvalidateBvh(object);
-	if (auto r = dynamic_cast<Renderer*>(object)) mRenderers.erase(ranges::find(mRenderers, r));
-	if (auto c = dynamic_cast<Camera*>(object)) mCameras.erase(ranges::find(mCameras, c));
-	if (auto l = dynamic_cast<Light*>(object)) mLights.erase(ranges::find(mLights, l));
-	mObjects.erase(ranges::find(mObjects, object));
-}
-
-vector<Object*> Scene::Objects() const {
-	vector<Object*> objs(mObjects.size());
-	for (uint32_t i = 0; i < mObjects.size(); i++) objs[i] = mObjects[i];
-	return objs;
-}
-
-ObjectBvh2* Scene::BVH() {
-	if (!mBvh) {
-		ProfilerRegion ps("Build ObjectBvh2");
-		mBvh = new ObjectBvh2(Objects());
-		mLastBvhBuild = mInstance.Device().FrameCount();
-	}
-	return mBvh;
 }

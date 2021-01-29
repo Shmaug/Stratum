@@ -7,11 +7,11 @@ struct InstanceData {
 };
 
 struct CameraData {
-	float4x4 View[2];
-	float4x4 Projection[2];
-	float4x4 ViewProjection[2];
-	float4x4 InvProjection[2];
-	float4 Position[2];
+	float4x4 View;
+	float4x4 Projection;
+	float4x4 ViewProjection;
+	float4x4 InvProjection;
+	float4 Position;
 };
 
 struct GlyphRect {
@@ -23,12 +23,12 @@ struct GlyphRect {
 #ifndef __cplusplus
 ConstantBuffer<CameraData> gCamera : register(b0, space0);
 
-#define STRATUM_MATRIX_V gCamera.View[gPushConstants.gStereoEye]
-#define STRATUM_MATRIX_P gCamera.Projection[gPushConstants.gStereoEye]
-#define STRATUM_MATRIX_VP gCamera.ViewProjection[gPushConstants.gStereoEye]
-#define STRATUM_CAMERA_POSITION gCamera.Position[gPushConstants.gStereoEye].xyz
-#define STRATUM_CAMERA_NEAR gCamera.Position[0].w
-#define STRATUM_CAMERA_FAR gCamera.Position[1].w
+#define STRATUM_MATRIX_V gCamera.View
+#define STRATUM_MATRIX_P gCamera.Projection
+#define STRATUM_MATRIX_VP gCamera.ViewProjection
+#define STRATUM_CAMERA_POSITION gCamera.Position.xyz
+#define STRATUM_CAMERA_NEAR 
+#define STRATUM_CAMERA_FAR gCamera.Position.w
 #endif
 
 #endif // STRATUM_H

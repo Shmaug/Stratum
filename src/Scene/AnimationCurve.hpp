@@ -65,7 +65,7 @@ public:
 		
 		// compute curve
 		mCoefficients.resize(mKeyframes.size());
-		memset(mCoefficients.data(), 0, sizeof(float4) * mCoefficients.size());
+		memset(mCoefficients.data(), 0, sizeof(Vector4f) * mCoefficients.size());
 		for (uint32_t i = 0; i < mKeyframes.size() - 1; i++) {
 
 			float ts =  mKeyframes[i + 1].mTime - mKeyframes[i].mTime;
@@ -150,7 +150,7 @@ public:
 	inline ExtrapolateMode ExtrapolateOut() const { return mExtrapolateOut; }
 	inline uint32_t KeyframeCount() const { return (uint32_t)mKeyframes.size(); }
 	inline Keyframe Keyframe(uint32_t index) const { return mKeyframes[index]; }
-	inline float4 CurveCoefficient(uint32_t index) const { return mCoefficients[index]; }
+	inline Vector4f CurveCoefficient(uint32_t index) const { return mCoefficients[index]; }
 
 	inline Keyframe& operator[](uint32_t index) {
 		return mKeyframes[index];

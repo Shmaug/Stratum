@@ -1,34 +1,45 @@
 #pragma once
 
-#include "Device.hpp"
+#include "RenderPass.hpp"
+#include "Asset/Texture.hpp"
 
 namespace stm {
 
 class Framebuffer {
 private:
 	vk::Framebuffer mFramebuffer;
-	vk::Extent2D mExtent;
-	shared_ptr<stm::RenderPass> mRenderPass;
-	map<RenderTargetIdentifier, shared_ptr<Texture>> mAttachments;
-	bool mDeleteAttachments;
+	vk::Extent2D mExtent = { 0, 0 };
+	stm::RenderPass& mRenderPass;
+	vector<shared_ptr<Texture>> mAttachments;
 	string mName;
 
 public:
+	inline Framebuffer(const string& name, stm::RenderPass& renderPass, const vector<shared_ptr<Texture>>& attachments)
+		: mName(name), mRenderPass(renderPass), mAttachments(attachments), mExtent({0, 0}) {
 
-	STRATUM_API Framebuffer(const string& name, shared_ptr<stm::RenderPass> renderPass, const vector<shared_ptr<Texture>>& attachments);
-	STRATUM_API ~Framebuffer();
+		vector<vk::ImageView> views(mAttachments.size());
+		for (uint32_t i = 0; i < mAttachments.size(); i++) {
+			views[i] = *TextureView(mAttachments[i]);
+			mExtent = vk::Extent2D( max(mExtent.width, mAttachments[i]->Extent().width), max(mExtent.height, mAttachments[i]->Extent().height) );
+		}
+		
+		vk::FramebufferCreateInfo info({}, *mRenderPass, views, mExtent.width, mExtent.height, 1);
+		mFramebuffer = renderPass.mDevice->createFramebuffer(info);
+		renderPass.mDevice.SetObjectName(mFramebuffer, mName);
+	}
+	inline ~Framebuffer() { mRenderPass.mDevice->destroyFramebuffer(mFramebuffer); }
 	
 	inline vk::Framebuffer operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };
 	
 	inline const string& Name() const { return mName; }
-
 	inline vk::Extent2D Extent() const { return mExtent; }
-	inline shared_ptr<Texture> Attachment(const RenderTargetIdentifier& id) const { return mAttachments.at(id); }
-	inline uint32_t AttachmentCount() const { return (uint32_t)mAttachments.size(); }
+	inline const vector<shared_ptr<Texture>>& Attachments() const { return mAttachments; }
+	inline stm::RenderPass& RenderPass() const { return mRenderPass; };
 
-	inline shared_ptr<stm::RenderPass> RenderPass() const { return mRenderPass; };
+	inline shared_ptr<Texture> GetAttachment(const RenderAttachmentId& id) const {
+		return mRenderPass.AttachmentMap().count(id) ? mAttachments[mRenderPass.AttachmentMap().at(id)] : nullptr;
+	}
 };
-
 
 }

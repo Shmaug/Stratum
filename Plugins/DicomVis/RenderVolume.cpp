@@ -8,7 +8,7 @@ RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, con
   mRenderPipeline = device->LoadAsset<Pipeline>("Assets/Shaders/volume.stmb", "volume");
 
   ImageStackType type = ImageLoader::FolderStackType(imageStackFolder);
-  float3 stackScale;
+  Vector3f stackScale;
 	switch (type) {
 	case ImageStackType::eStandard:
 		mRawVolume = ImageLoader::LoadStandardStack(imageStackFolder, device, &stackScale);
@@ -53,7 +53,7 @@ void RenderVolume::DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiCont
 void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   if (!mRawVolume || (!mBakeDirty && !mGradientDirty)) return;
 
-  VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->Mapped();
+  VolumeUniformBuffer* uniforms = reinterpret_cast<VolumeUniformBuffer*)mUniformBuffer->Mapped();
   uniforms->VolumeRotation = WorldRotation();
   uniforms->InvVolumeRotation = inverse(uniforms->VolumeRotation);
   uniforms->VolumeScale = WorldScale();
@@ -61,12 +61,12 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   uniforms->InvVolumeScale = 1.f / uniforms->InvVolumeScale;
   uniforms->MaskValue = (uint32_t)mOrganMask;
   uniforms->VolumePosition = WorldPosition();
-  uniforms->FrameIndex = (uint32_t)(commandBuffer.Device().FrameCount() % 0x00000000FFFFFFFFull);
+  uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice.FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
 	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
 
-  set<string> defines;
+  unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
   if (ChannelCount(mRawVolume->Format()) == 1) {
     defines.emplace("SINGLE_CHANNEL");
@@ -126,12 +126,12 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   uniforms->InvVolumeScale = 1.f / uniforms->VolumeScale;
   uniforms->MaskValue = (uint32_t)mOrganMask;
   uniforms->VolumePosition = WorldPosition();
-  uniforms->FrameIndex = (uint32_t)(commandBuffer.Device().FrameCount() % 0x00000000FFFFFFFFull);
+  uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice.FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
 	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
 
-  set<string> defines;
+  unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
   if (mBakedVolume) defines.emplace("BAKED");
   else if (ChannelCount(mRawVolume->Format()) == 1) {
@@ -145,9 +145,9 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   }
   if (mGradient) defines.emplace("GRADIENT_TEXTURE");
 
-  float3 camPos[2] {
-    (camera.Transform() * float4(camera.EyeOffsetTranslate(StereoEye::eLeft), 1)).xyz,
-    (camera.Transform() * float4(camera.EyeOffsetTranslate(StereoEye::eRight), 1)).xyz
+  Vector3f camPos[2] {
+    (camera.Transform() * Vector4f(camera.EyeOffsetTranslate(StereoEye::eLeft), 1)).xyz,
+    (camera.Transform() * Vector4f(camera.EyeOffsetTranslate(StereoEye::eRight), 1)).xyz
   };
 
 
@@ -166,10 +166,10 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
 
   commandBuffer.PushConstantRef("CameraPosition", camPos[0]);
   commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eLeft));
-  commandBuffer.PushConstantRef("WriteOffset", uint2(0, 0));
+  commandBuffer.PushConstantRef("WriteOffset", Vector2u(0, 0));
   commandBuffer.PushConstantRef("SampleRate", mSampleRate);
 
-  uint2 res(renderTarget->Extent().width, renderTarget->Extent().height);
+  Vector2u res(renderTarget->Extent().width, renderTarget->Extent().height);
   switch (camera.StereoMode()) {
   case StereoMode::eNone:
     commandBuffer.PushConstantRef("ScreenResolution", res);
@@ -183,7 +183,7 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
-    commandBuffer.PushConstantRef("WriteOffset", uint2(res.x, 0));
+    commandBuffer.PushConstantRef("WriteOffset", Vector2u(res.x, 0));
     commandBuffer.DispatchAligned(res);
     break;
   case StereoMode::eVertical:
@@ -194,7 +194,7 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
-    commandBuffer.PushConstantRef("WriteOffset", uint2(0, res.y));
+    commandBuffer.PushConstantRef("WriteOffset", Vector2u(0, res.y));
     commandBuffer.DispatchAligned(res);
     break;
   }

@@ -3,7 +3,7 @@
 #include "Device.hpp"
 #include "InputState.hpp"
 
-#ifdef WINDOWS
+#ifdef WIN32
 #include <vulkan/vulkan_win32.h>
 #endif
 #ifdef __linux
@@ -20,7 +20,7 @@ namespace x11 {
 namespace stm {
 
 enum KeyCode {
-#ifdef WINDOWS
+#ifdef WIN32
 	KEY_NONE = 0x00,
 
 	MOUSE_LEFT = 0x01,
@@ -249,8 +249,8 @@ enum KeyCode {
 
 class MouseState : public InputState {
 public:
-	float2 mCursorPos = 0;
-	float2 mCursorDelta = 0;
+	Vector2f mCursorPos = Vector2f(0);
+	Vector2f mCursorDelta = Vector2f(0);
 	float mScrollDelta = 0;
 	unordered_map<KeyCode, bool> mKeys;
 	inline MouseState() : InputState("Mouse") {};
@@ -273,8 +273,8 @@ public:
 	inline vk::Image BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].first; }
 	inline vk::ImageView BackBufferView() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].second; }
 	inline vk::ImageView BackBufferView(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].second; }
-	inline Semaphore* ImageAvailableSemaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
-	inline stm::QueueFamily* PresentQueueFamily() const { return mPresentQueueFamily; }
+	inline Semaphore& ImageAvailableSemaphore() const { return *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
+	inline Device::QueueFamily* PresentQueueFamily() const { return mPresentQueueFamily; }
 
 	inline bool Fullscreen() const { return mFullscreen; }
 	inline string Title() const { return mTitle; }
@@ -283,7 +283,7 @@ public:
 	inline uint32_t BackBufferIndex() const { return mBackBufferIndex; }
 	inline bool AllowTearing() const { return mAllowTearing; }
 
-	#ifdef WINDOWS
+	#ifdef WIN32
 	inline HWND Hwnd() const { return mHwnd; }
 	#endif
 	#ifdef __linux
@@ -292,7 +292,7 @@ public:
 
 	STRATUM_API void AcquireNextImage();
 	// Waits on all semaphores in waitSemaphores
-	STRATUM_API void Present(const set<vk::Semaphore>& waitSemaphores);
+	STRATUM_API void Present(const unordered_set<vk::Semaphore>& waitSemaphores);
 
 
 	STRATUM_API void LockMouse(bool l);
@@ -304,23 +304,23 @@ public:
 	inline bool KeyDown(KeyCode key) { return mMouseState.mKeys[key]; }
 	inline bool KeyUp(KeyCode key) { return !mMouseState.mKeys[key]; }
 	inline float ScrollDelta() const { return mMouseState.mScrollDelta; }
-	inline float2 CursorPos() const { return mMouseState.mCursorPos; }
-	inline float2 LastCursorPos() const { return mLastMouseState.mCursorPos; }
-	inline float2 CursorDelta() const { return mMouseState.mCursorDelta; }
+	inline Vector2f CursorPos() const { return mMouseState.mCursorPos; }
+	inline Vector2f LastCursorPos() const { return mLastMouseState.mCursorPos; }
+	inline Vector2f CursorDelta() const { return mMouseState.mCursorDelta; }
 
 private:
 	friend class Instance;
 
-	STRATUM_API void CreateSwapchain(stm::Device& device);
+	STRATUM_API void CreateSwapchain(Device& device);
 	STRATUM_API void DestroySwapchain();
 	
 	vk::SurfaceKHR mSurface;
 	Instance& mInstance;
 	Device* mSwapchainDevice = nullptr;
-	stm::QueueFamily* mPresentQueueFamily = nullptr;
+	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
 	vector<pair<vk::Image, vk::ImageView>> mSwapchainImages;
-	vector<Semaphore*> mImageAvailableSemaphores;
+	vector<unique_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
 	uint32_t mBackBufferIndex = 0;
@@ -335,7 +335,7 @@ private:
 	stm::MouseState mLastMouseState = {};
 	bool mLockMouse = false;
 
-	#ifdef WINDOWS
+	#ifdef WIN32
 	HWND mHwnd = 0;
 	RECT mWindowedRect;
 	#endif

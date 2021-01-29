@@ -1,30 +1,35 @@
 ﻿#include "Core/Window.hpp"
-#include "Scene/Scene.hpp"
-
+#include "Scene/RenderGraph.hpp"
 
 using namespace stm;
 
 int main(int argc, char** argv) {
-	#if defined(WINDOWS) && defined(_DEBUG)
+	#if defined(WIN32) && defined(_DEBUG)
 	_CrtMemState s0;
 	_CrtMemCheckpoint(&s0);
 	#endif
 
-	Instance* instance = new Instance(argc, argv);
+	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
+	unique_ptr<Scene> scene = make_unique<Scene>(*instance);
 	Window& window = instance->Window();
-	Scene* scene = new Scene(*instance);
+
+	RenderGraph& rg = scene->Root().CreateComponent<RenderGraph>("window_rendergraph");
 
 	auto frameSemaphore = make_shared<Semaphore>("Frame Semaphore", instance->Device());
+	
 	while (instance->AdvanceFrame()) {
-		CommandBuffer* commandBuffer = instance->Device().GetCommandBuffer("Frame CommandBuffer");
+		auto commandBuffer = instance->Device().GetCommandBuffer("Frame CommandBuffer");
 		
 		scene->Update(*commandBuffer);
 		if (window.Swapchain()) {
-			scene->Render(*commandBuffer);
-			// copy to window
-			shared_ptr<Texture> srcImage = scene->HasAttachment("stm_main_resolve") ? scene->GetAttachment("stm_main_resolve") : scene->GetAttachment("stm_main_render");
 
-			commandBuffer->TransitionBarrier(*srcImage, vk::ImageLayout::eTransferSrcOptimal);
+			auto fb = rg.Render(*commandBuffer);
+
+			// copy to window
+			shared_ptr<Texture> srcImage = fb->GetAttachment("stm_main_resolve");
+			if (!srcImage) srcImage = fb->GetAttachment("stm_main_render");
+
+			srcImage->TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
 			commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal);
 			vk::ImageCopy rgn = {};
 			rgn.dstSubresource = rgn.srcSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 };
@@ -34,18 +39,18 @@ int main(int argc, char** argv) {
 			commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eTransfer, frameSemaphore);
 		}
 		
-		instance->Device().Execute(commandBuffer);
-		instance->PresentFrame({ **frameSemaphore, **window.ImageAvailableSemaphore() });
+		instance->Device().Execute(move(commandBuffer));
+		instance->PresentFrame({ **frameSemaphore, *window.ImageAvailableSemaphore() });
 	}
 	instance->Device().Flush();
 	frameSemaphore.reset();
 	
 	instance->Device().UnloadAssets();
 
-	delete scene;
-	delete instance;
+	scene.reset();
+	instance.reset();
 
-	#if defined(WINDOWS) && defined(_DEBUG)
+	#if defined(WIN32) && defined(_DEBUG)
 	_CrtMemState s1;
 	_CrtMemCheckpoint(&s1);
 	_CrtMemState ds;

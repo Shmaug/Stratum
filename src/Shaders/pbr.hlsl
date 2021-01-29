@@ -1,5 +1,5 @@
-#pragma compile vertex vsmain fragment fsdepth
-#pragma compile vertex vsmain fragment fsmain
+#pragma compile vertex vs_pbr fragment fs_pbr_depth
+#pragma compile vertex vs_pbr fragment fs_pbr
 
 [[vk::constant_id(0)]] const bool gAlphaClip = true;
 [[vk::constant_id(1)]] const uint gTextureCount = 64;
@@ -50,7 +50,7 @@ struct v2f {
 	float4 cameraPos : TEXCOORD1;
 };
 
-v2f vsmain(
+v2f vs_pbr(
 	float3 vertex : POSITION,
 	float3 normal : NORMAL,
 	float3 tangent : TANGENT,
@@ -69,7 +69,7 @@ v2f vsmain(
 	return o;
 }
 
-float4 fsmain(v2f i) : SV_Target0 {
+float4 fs_pbr(v2f i) : SV_Target0 {
 	float3 view = normalize(-i.cameraPos.xyz);
 
 	float4 color = gBaseColor * gBaseColorTexture.Sample(gSampler, i.texcoord);
@@ -97,7 +97,7 @@ float4 fsmain(v2f i) : SV_Target0 {
 	return float4(eval, color.a);
 }
 
-float fsdepth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {
+float fs_pbr_depth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {
 	if (gAlphaClip && gBaseColorTexture.Sample(gSampler, texcoord).a * gBaseColor.a < gAlphaCutoff) discard;
 	return position.z;
 }

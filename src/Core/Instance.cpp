@@ -1,8 +1,8 @@
 #include "Instance.hpp"
 
-#include "CommandBuffer.hpp"
 #include "Window.hpp"
-
+#include "CommandBuffer.hpp"
+#include "Profiler.hpp"
 
 using namespace stm;
 
@@ -26,7 +26,7 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBi
 	return VK_FALSE;
 }
 
-#ifdef WINDOWS
+#ifdef WIN32
 LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch (message) {
 	case WM_PAINT:
@@ -83,7 +83,7 @@ Instance::Instance(int argc, char** argv) {
 	}
 
 	vector<const char*> validationLayers;
-	set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 
 	if (TryGetOption("layer_khronos_validation", arg)) validationLayers.push_back("VK_LAYER_KHRONOS_validation");
 	if (TryGetOption("layer_renderdoc_capture", arg)) {
@@ -97,20 +97,19 @@ Instance::Instance(int argc, char** argv) {
 	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
 	mInstanceExtensions.insert(VK_KHR_DISPLAY_EXTENSION_NAME);
 	#endif
-	#ifdef WINDOWS
+	#ifdef WIN32
 	instanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
 
 	if (validationLayers.size()) {
-		set<string> availableLayerSet;
+		unordered_set<string> availableLayerSet;
 		for (const auto& layer : vk::enumerateInstanceLayerProperties()) availableLayerSet.insert(layer.layerName);
-		for (auto it = validationLayers.begin(); it != validationLayers.end();) {
+		for (auto it = validationLayers.begin(); it != validationLayers.end();)
 			if (availableLayerSet.count(*it)) it++;
 			else {
 				fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Removing unsupported validation layer: %s\n", *it);
 				it = validationLayers.erase(it);
 			}
-		}
 	}
 
 	vk::ApplicationInfo appInfo = {};
@@ -182,7 +181,7 @@ Instance::Instance(int argc, char** argv) {
 	if (!mScreen) throw runtime_error("Failed to find a device with XCB presentation support!")
 
 	#endif
-	#ifdef WINDOWS
+	#ifdef WIN32
 	// Create window class
 	mHInstance = GetModuleHandleA(NULL);
 
@@ -213,21 +212,21 @@ Instance::Instance(int argc, char** argv) {
 	if (RegisterRawInputDevices(rID.data(), (UINT)rID.size(), sizeof(RAWINPUTDEVICE)) == FALSE) throw runtime_error("Failed to register raw mMouseKeyboard device(s)");
 	#endif
 
-	mWindow = new stm::Window(*this, appInfo.pApplicationName, windowPosition);
+	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
 	
 	if (fullscreen) mWindow->Fullscreen(true);
 	
-	set<string> deviceExtensions {
+	unordered_set<string> deviceExtensions {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
-	mDevice = new stm::Device(physicalDevice, deviceIndex, *this, deviceExtensions, validationLayers);
+	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, validationLayers);
 	mWindow->CreateSwapchain(*mDevice);
 }
 Instance::~Instance() {
-	delete mWindow;
-	delete mDevice;
+	mWindow.reset();
+	mDevice.reset();
 
 	if (mDebugMessenger) {
 		auto vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(mInstance, "vkDestroyDebugUtilsMessengerEXT");
@@ -246,8 +245,7 @@ Instance::~Instance() {
 	#endif
 }
 
-
-#ifdef WINDOWS
+#ifdef WIN32
 void Instance::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch (message){
 	case WM_DESTROY:
@@ -279,10 +277,10 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen){
-			mWindow->mMouseState.mCursorPos = float2((float)mn->event_x, (float)mn->event_y);
+			mWindow->mMouseState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
 			if (mWindow->mXCBWindow == mn->event)
 				if (mWindow->mTargetCamera){
-					float2 uv = mWindow->mMouseState.mCursorPos / float2((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
+					Vector2f uv = mWindow->mMouseState.mCursorPos / Vector2f((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
 					mMouseKeyboard->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
 				}
 		}
@@ -377,7 +375,7 @@ bool Instance::PollEvents() {
 	mMouseKeyboard->mWindowExtentWidth = mWindow->mClientRect.extent;
 	if (mDestroyPending) return false;
 	#endif
-	#ifdef WINDOWS	
+	#ifdef WIN32	
 	MSG msg = {};
 	while (true) {
 		if (mDestroyPending) return false;
@@ -391,12 +389,12 @@ bool Instance::PollEvents() {
 		case WM_INPUT: {
 			uint32_t dwSize = 0;
 			GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
-			byte_blob lpb(dwSize, nullptr);
+			byte_blob lpb(dwSize);
 			if (GetRawInputData((HRAWINPUT)msg.lParam, RID_INPUT, lpb.data(), &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) break;
 			const RAWINPUT& raw = (RAWINPUT)lpb;
 
 			if (raw.header.dwType == RIM_TYPEMOUSE) {
-				mWindow->mMouseState.mCursorDelta += float2((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
+				mWindow->mMouseState.mCursorDelta += Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_LEFT] = true;
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mMouseState.mKeys[MOUSE_LEFT] = false;
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mMouseState.mKeys[MOUSE_RIGHT] = true;
@@ -432,7 +430,7 @@ bool Instance::PollEvents() {
 	POINT pt;
 	GetCursorPos(&pt);
 	ScreenToClient(mWindow->mHwnd, &pt);
-	mWindow->mMouseState.mCursorPos = float2((float)pt.x, (float)pt.y);
+	mWindow->mMouseState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
 	#endif
 	return true;
 }
@@ -445,10 +443,10 @@ bool Instance::AdvanceFrame() {
 	mWindow->AcquireNextImage();
 	
 	// TODO: replace mScene->mCameras[0]
-	//mMouseKeyboard->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mWindow->mMouseState.mCursorPos / float2((float)mMouseKeyboard->mWindowWidth, (float)mMouseKeyboard->mWindowHeight));	
+	//mMouseKeyboard->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mWindow->mMouseState.mCursorPos / Vector2f((float)mMouseKeyboard->mWindowWidth, (float)mMouseKeyboard->mWindowHeight));	
 	return true;
 }
-void Instance::PresentFrame(const set<vk::Semaphore>& presentWaitSemaphores) {
+void Instance::PresentFrame(const unordered_set<vk::Semaphore>& presentWaitSemaphores) {
 	{
 		ProfilerRegion ps("Instance::PresentFrame");
 		mWindow->Present(presentWaitSemaphores);

@@ -6,7 +6,7 @@
 using namespace stm;
 
 Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
-	#ifdef WINDOWS
+	#ifdef WIN32
 	mWindowedRect = {};
 
 	SetProcessDPIAware();
@@ -96,7 +96,7 @@ Window::~Window() {
 	if (mInstance.XCBConnection() && mXCBWindow)
  		xcb_destroy_window(mInstance.XCBConnection(), mXCBWindow);
  	#endif
-	#ifdef WINDOWS
+	#ifdef WIN32
 	::DestroyWindow(mHwnd);
 	#endif
 }
@@ -114,7 +114,7 @@ void Window::AcquireNextImage() {
 	}
 	mBackBufferIndex = result.value;
 }
-void Window::Present(const set<vk::Semaphore>& waitSemaphores) {
+void Window::Present(const unordered_set<vk::Semaphore>& waitSemaphores) {
 	if (!mSwapchain || mPresentQueueFamily) return;
 	vector<vk::Semaphore> semaphores(waitSemaphores.begin(), waitSemaphores.end());
 	vector<vk::SwapchainKHR> swapchains { mSwapchain };
@@ -132,7 +132,7 @@ xcb_atom_t getReplyAtomFromCookie(xcb_connection_t* connection, xcb_intern_atom_
 #endif
 
 void Window::Resize(uint32_t w, uint32_t h) {
-	#ifdef WINDOWS
+	#ifdef WIN32
 	RECT r;
 	GetWindowRect(mHwnd, &r);
 	int x = r.left, y = r.top;
@@ -147,12 +147,12 @@ void Window::Resize(uint32_t w, uint32_t h) {
 }
 
 void Window::Fullscreen(bool fs) {
-	#ifdef WINDOWS
+	#ifdef WIN32
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
 
-		UINT windowStyle = WS_OVERLAPPEDWINDOW & ~(WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
-		SetWindowLongW(mHwnd, GWL_STYLE, windowStyle);
+		UINT WindowStyle = WS_OVERLAPPEDWINDOW & ~(WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+		SetWindowLongW(mHwnd, GWL_STYLE, WindowStyle);
 
 		HMONITOR hMonitor = MonitorFromWindow(mHwnd, MONITOR_DEFAULTTONEAREST);
 		MONITORINFOEX monitorInfo = {};
@@ -205,18 +205,18 @@ void Window::Fullscreen(bool fs) {
 	#endif
 }
 
-void Window::CreateSwapchain(stm::Device& device) {
+void Window::CreateSwapchain(Device& device) {
 	if (mSwapchain) DestroySwapchain();
 	mSwapchainDevice = &device;
 	mSwapchainDevice->SetObjectName(mSurface, "WindowSurface");
 	
-	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->PhysicalDevice().getSurfaceCapabilitiesKHR(mSurface);
-	vector<vk::SurfaceFormatKHR> formats = mSwapchainDevice->PhysicalDevice().getSurfaceFormatsKHR(mSurface);
-	vector<vk::PresentModeKHR> presentModes = mSwapchainDevice->PhysicalDevice().getSurfacePresentModesKHR(mSurface);
-	vector<vk::QueueFamilyProperties> queueFamilyProperties = mSwapchainDevice->PhysicalDevice().getQueueFamilyProperties();
-	
 	mPresentQueueFamily = mSwapchainDevice->FindQueueFamily(mSurface);
-	if (!mPresentQueueFamily) fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Device does not support the window surface!");
+	if (!mPresentQueueFamily) throw runtime_error("Device does not support the window surface!");
+
+	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->PhysicalDevice().getSurfaceCapabilitiesKHR(mSurface);
+	auto formats 							 = mSwapchainDevice->PhysicalDevice().getSurfaceFormatsKHR(mSurface);
+	auto presentModes 				 = mSwapchainDevice->PhysicalDevice().getSurfacePresentModesKHR(mSurface);
+	auto queueFamilyProperties = mSwapchainDevice->PhysicalDevice().getQueueFamilyProperties();
 
 	// get the size of the swapchain
 	mSwapchainExtent = capabilities.currentExtent;
@@ -259,17 +259,18 @@ void Window::CreateSwapchain(stm::Device& device) {
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
 
-	CommandBuffer* commandBuffer = mSwapchainDevice->GetCommandBuffer("Swapchain Create", vk::QueueFlagBits::eTransfer);
+	auto commandBuffer = mSwapchainDevice->GetCommandBuffer("Swapchain Create", vk::QueueFlagBits::eTransfer);
 	
 	// create per-frame image views and semaphores
-	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) {
-		mSwapchainImages[i].first = images[i];
-		mSwapchainDevice->SetObjectName(mSwapchainImages[i].first, "Swapchain/Image" + to_string(i));
+	uint32_t i = 0;
+	for (auto& [img, view] : mSwapchainImages) {
+		img = images[i];
+		mSwapchainDevice->SetObjectName(img, "SwapchainImage" + to_string(i));
 
-		commandBuffer->TransitionBarrier(mSwapchainImages[i].first, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
+		commandBuffer->TransitionBarrier(img, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
 
 		vk::ImageViewCreateInfo createInfo = {};
-		createInfo.image = mSwapchainImages[i].first;
+		createInfo.image = img;
 		createInfo.viewType = vk::ImageViewType::e2D;
 		createInfo.format = mSurfaceFormat.format;
 		createInfo.components.r = vk::ComponentSwizzle::eIdentity;
@@ -277,21 +278,20 @@ void Window::CreateSwapchain(stm::Device& device) {
 		createInfo.components.b = vk::ComponentSwizzle::eIdentity;
 		createInfo.components.a = vk::ComponentSwizzle::eIdentity;
 		createInfo.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-		mSwapchainImages[i].second = (*mSwapchainDevice)->createImageView(createInfo);
-		mSwapchainDevice->SetObjectName(mSwapchainImages[i].second, "Swapchain/View" + to_string(i));
+		view = (*mSwapchainDevice)->createImageView(createInfo);
+		mSwapchainDevice->SetObjectName(view, "Swapchain/View" + to_string(i));
 		
-		mImageAvailableSemaphores[i] = new Semaphore("Swapchain/ImageAvaiable", *mSwapchainDevice);
+		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiable");
+		i++;
 	}
 	
-	mSwapchainDevice->Execute(commandBuffer);
+	vk::createResultValue(mSwapchainDevice->Execute(move(commandBuffer)).wait(), "Window::CreateSwapchain");
 }
 void Window::DestroySwapchain() {
 	mSwapchainDevice->Flush();
 
-	for (uint32_t i = 0; i < mSwapchainImages.size(); i++) {
-		if (mSwapchainImages[i].second) (*mSwapchainDevice)->destroyImageView(mSwapchainImages[i].second);
-		safe_delete(mImageAvailableSemaphores[i]);
-	}
+	for (auto&[img,view] : mSwapchainImages)
+		if (view) (*mSwapchainDevice)->destroyImageView(view);
 	mSwapchainImages.clear();
 	mImageAvailableSemaphores.clear();
 	if (mSwapchain) (*mSwapchainDevice)->destroySwapchainKHR(mSwapchain);
@@ -299,7 +299,7 @@ void Window::DestroySwapchain() {
 }
 
 void Window::LockMouse(bool l) {
-	#ifdef WINDOWS
+	#ifdef WIN32
 	if (mLockMouse && !l)
 		ShowCursor(TRUE);
 	else if (!mLockMouse && l)

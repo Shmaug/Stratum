@@ -9,11 +9,10 @@
 
 #include "Asset/Texture.hpp"
 
-
 using namespace stm;
 
-Device::Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, stm::Instance& instance, const set<string>& deviceExtensions, vector<const char*> validationLayers)
-	: mPhysicalDevice(physicalDevice), mPhysicalDeviceIndex(physicalDeviceIndex), mInstance(instance) {
+Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers)
+	: mPhysicalDevice(physicalDevice), mInstance(instance) {
 
 	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)mInstance->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
@@ -97,7 +96,7 @@ Device::Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, 
 	#pragma endregion
 
 	for (const vk::DeviceQueueCreateInfo& info : queueCreateInfos) {
-		stm::QueueFamily q = {};
+		QueueFamily q = {};
 		q.mName = name + "/QueueFamily" + to_string(info.queueFamilyIndex);
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
@@ -111,18 +110,18 @@ Device::Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, 
 		mQueueFamilyIndices.push_back(q.mFamilyIndex);
 	}
 
-	array<uint8_t,4> whitePixels { 0xFF, 0xFF, 0xFF, 0xFF };
-	array<uint8_t,4> blackPixels { 0, 0, 0, 0xFF };
-	array<uint8_t,4> zeroPixels { 0, 0, 0, 0 };
-	array<uint8_t,4> bumpPixels { 0x80, 0x80, 0xFF, 0xFF };
-	array<uint8_t,4*256*256> noisePixels;
+	std::array<uint8_t,4> whitePixels { 0xFF, 0xFF, 0xFF, 0xFF };
+	std::array<uint8_t,4> blackPixels { 0, 0, 0, 0xFF };
+	std::array<uint8_t,4> zeroPixels { 0, 0, 0, 0 };
+	std::array<uint8_t,4> bumpPixels { 0x80, 0x80, 0xFF, 0xFF };
+	std::array<uint8_t,4*256*256> noisePixels;
 	for (auto& pixel : noisePixels) pixel = rand() % 0xFF;
 	
-	mLoadedAssets.emplace(basic_hash("stm_1x1_white_opaque"), 		 make_shared<Texture>("stm_1x1_white_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, whitePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
-	mLoadedAssets.emplace(basic_hash("stm_1x1_black_opaque"), 		 make_shared<Texture>("stm_1x1_black_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, blackPixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
-	mLoadedAssets.emplace(basic_hash("stm_1x1_black_transparent"), make_shared<Texture>("stm_1x1_black_transparent",  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, zeroPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
-	mLoadedAssets.emplace(basic_hash("stm_1x1_bump"), 						 make_shared<Texture>("stm_1x1_bump", 						  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, bumpPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
-	mLoadedAssets.emplace(basic_hash("stm_noise_rgba_256"), 			 make_shared<Texture>("stm_noise_rgba_256", 			  *this, vk::Extent3D(256, 256, 1), vk::Format::eR8G8B8A8Unorm, noisePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc));
+	mLoadedAssets.emplace(hash_array("stm_1x1_white_opaque"), 		 make_shared<Texture>("stm_1x1_white_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, whitePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(hash_array("stm_1x1_black_opaque"), 		 make_shared<Texture>("stm_1x1_black_opaque", 		  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, blackPixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(hash_array("stm_1x1_black_transparent"), make_shared<Texture>("stm_1x1_black_transparent",  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, zeroPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(hash_array("stm_1x1_bump"), 						 make_shared<Texture>("stm_1x1_bump", 						  *this, vk::Extent3D(  1,   1, 1), vk::Format::eR8G8B8A8Unorm, bumpPixels,  vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage));
+	mLoadedAssets.emplace(hash_array("stm_noise_rgba_256"), 			 make_shared<Texture>("stm_noise_rgba_256", 			  *this, vk::Extent3D(256, 256, 1), vk::Format::eR8G8B8A8Unorm, noisePixels, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc));
 }
 Device::~Device() {
 	Flush();
@@ -134,7 +133,7 @@ Device::~Device() {
 
 	for (auto& [idx,queueFamily] : mQueueFamilies)
 		for (auto& [tid, p] : queueFamily.mCommandBuffers) {
-			for (CommandBuffer* c : p.second) delete c;
+			for (auto& c : p.second) c.reset();
 			mDevice.destroyCommandPool(p.first);
 		}
 
@@ -157,7 +156,7 @@ Device::~Device() {
 }
 
 Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& requirements) {
-	// find first bit of free space that can fit the required size
+	// find first chunk of free space that can fit the required size
 	vk::DeviceSize allocBegin = 0;
 	for (auto[blockStart, blockEnd] : mBlocks) {
 		if (allocBegin + requirements.size <= blockStart) break;
@@ -199,10 +198,10 @@ void Device::FreeMemory(const Memory::Block& block) {
 	block.mMemory->ReturnBlock(block);
 	auto& allocs = mMemoryPool[block.mMemory->mMemoryTypeIndex];
 	// free allocations without any blocks in use
-	ranges::remove_if(allocs, [](const auto& x){ x->empty(); });
+	erase_if(allocs, [](const auto& x){ return x->empty(); });
 }
 
-inline QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
+inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
 	for (auto& [queueFamilyIndex, queueFamily] : mQueueFamilies)
 		if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
 			return &queueFamily;
@@ -212,13 +211,12 @@ inline QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
 shared_ptr<Buffer> Device::GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags) {
 	{
 		lock_guard lock(mBufferPool.mMutex);
-		auto& pool = mBufferPool.mResources[basic_hash(usage, memoryFlags)];
-		auto best = pool.end();
-		best = ranges::(pool, []() { return it->mResource->Size() >= size && (best == pool.end() || it->mResource->Size() < best->mResource->Size()) } );
-		if (best != pool.end()) {
-			auto b = best->mResource;
-			pool.erase(best);
-			return b;
+		auto& pool = mBufferPool.mResources[hash_combine(usage, memoryFlags)];
+		auto it = ranges::min_element(pool, [&](auto a, auto b) { return a.mResource->size() < b.mResource->size() && a.mResource->size() >= size; });
+		if (it != pool.end()) {
+			auto buf = it->mResource;
+			pool.erase(it);
+			return buf;
 		}
 	}
 	return make_shared<Buffer>(name, *this, size, usage, memoryFlags);
@@ -239,8 +237,8 @@ shared_ptr<DescriptorSet> Device::GetPooledDescriptorSet(const string& name, vk:
 shared_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels, vk::SampleCountFlagBits sampleCount, vk::ImageUsageFlags usage, vk::MemoryPropertyFlags memoryProperties) {
 	{
 		lock_guard lock(mTexturePool.mMutex);
-		auto& pool = mTexturePool.mResources[basic_hash(extent, format, mipLevels, sampleCount)];
-		auto it = ranges::find(pool, [](auto i){ return (i.mResource->Usage() & usage) && (i.mResource->MemoryProperties() & memoryProperties) });
+		auto& pool = mTexturePool.mResources[hash_combine(extent, format, mipLevels, sampleCount)];
+		auto it = ranges::find_if(pool.begin(), pool.end(), [=](const auto& i){ return (i.mResource->Usage() & usage) && (i.mResource->MemoryProperties() & memoryProperties); });
 		if (it != pool.end()) {
 			auto tex = it->mResource;
 			pool.erase(it);
@@ -251,7 +249,7 @@ shared_ptr<Texture> Device::GetPooledTexture(const string& name, const vk::Exten
 }
 void Device::PoolResource(shared_ptr<Buffer> buffer) {
 	lock_guard lock(mBufferPool.mMutex);
-	mBufferPool.mResources[basic_hash(buffer->Usage(), buffer->MemoryProperties())].push_back({ buffer, mFrameCount });
+	mBufferPool.mResources[hash_combine(buffer->Usage(), buffer->MemoryProperties())].push_back({ buffer, mFrameCount });
 }
 void Device::PoolResource(shared_ptr<DescriptorSet> descriptorSet) {
 	lock_guard lock(mDescriptorSetPool.mMutex);
@@ -259,7 +257,7 @@ void Device::PoolResource(shared_ptr<DescriptorSet> descriptorSet) {
 }
 void Device::PoolResource(shared_ptr<Texture> texture) {
 	lock_guard lock(mTexturePool.mMutex);
-	mTexturePool.mResources[basic_hash(texture->Extent(), texture->Format(), texture->MipLevels(), texture->SampleCount())].push_back({ texture, mFrameCount });
+	mTexturePool.mResources[hash_combine(texture->Extent(), texture->Format(), texture->MipLevels(), texture->SampleCount())].push_back({ texture, mFrameCount });
 }
 void Device::PurgeResourcePools(uint32_t maxAge) {
 	mDescriptorSetPool.EraseOld(mFrameCount, maxAge);
@@ -272,7 +270,7 @@ void Device::PurgeResourcePools(uint32_t maxAge) {
 				commandBuffer->CheckDone();
 }
 
-CommandBuffer* Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+unique_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
 	// find most specific queue family
 	QueueFamily* queueFamily = nullptr;
 	for (auto& [i,q] : mQueueFamilies)
@@ -291,36 +289,31 @@ CommandBuffer* Device::GetCommandBuffer(const string& name, vk::QueueFlags queue
 	if (level == vk::CommandBufferLevel::ePrimary)
 		for (auto it = commandBuffers.begin(); it != commandBuffers.end(); it++)
 			if ((*it)->CheckDone()) {
-				CommandBuffer* commandBuffer = *it;
-				commandBuffers.erase(it);
+				unique_ptr<CommandBuffer> commandBuffer = move(*it);
+				erase(commandBuffers, nullptr);
 				commandBuffer->Reset(name);
 				return commandBuffer;
 			}
-	return new CommandBuffer(name, *this, queueFamily, level);
+	return make_unique<CommandBuffer>(*this, name, queueFamily, level);
 }
-void Device::Execute(CommandBuffer* commandBuffer, bool wait) {
+Fence& Device::Execute(unique_ptr<CommandBuffer>&& commandBuffer) {
 	ProfilerRegion ps("CommandBuffer::Execute");
 
 	vector<vk::PipelineStageFlags> waitStages;	
 	vector<vk::Semaphore> waitSemaphores;	
 	vector<vk::Semaphore> signalSemaphores;
-	vector<vk::CommandBuffer> commandBuffers { commandBuffer->mCommandBuffer };
+	vector<vk::CommandBuffer> commandBuffers { **commandBuffer };
 	for (auto& [stage, semaphore] : commandBuffer->mWaitSemaphores) {
 		waitStages.push_back(stage);
 		waitSemaphores.push_back(**semaphore);
 	}
 	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.push_back(**semaphore);
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mSignalFence);
+	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 
 	lock_guard lock(mQueueMutex);
-	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.push_back(commandBuffer);
-	if (wait) {
-		auto result = mDevice.waitForFences({ **commandBuffer->mSignalFence }, true, numeric_limits<uint64_t>::max());
-		commandBuffer->mState = CommandBuffer::CommandBufferState::eDone;
-		commandBuffer->Clear();
-	}
+	return *commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer)->mCompletionFence;
 }
 void Device::Flush() {
 	mDevice.waitIdle();

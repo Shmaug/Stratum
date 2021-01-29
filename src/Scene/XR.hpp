@@ -15,8 +15,8 @@ public:
     
     STRATUM_API bool OnSceneInit(Scene* scene);
 
-    STRATUM_API set<string> InstanceExtensionsRequired();
-    STRATUM_API set<string> DeviceExtensionsRequired(vk::PhysicalDevice device);
+    STRATUM_API unordered_set<string> InstanceExtensionsRequired();
+    STRATUM_API unordered_set<string> DeviceExtensionsRequired(vk::PhysicalDevice device);
 
     STRATUM_API void OnFrameStart();
     STRATUM_API void PostRender(CommandBuffer& commandBuffer);

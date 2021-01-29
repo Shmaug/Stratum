@@ -1,159 +1,294 @@
 #pragma once
 
 #include "../Core/InputState.hpp"
-#include "../Core/RenderPass.hpp"
 #include "../Core/Material.hpp"
-#include "../Core/Asset/Font.hpp"
-#include "../Core/Asset/Mesh.hpp"
-#include "../Core/Asset/Texture.hpp"
 
 namespace stm {
 
-class ObjectIntersector {
+class Scene;
+
+class SceneNode {
 public:
-	bool operator()(Object* object, const float4 frustum[6]);
-	bool operator()(Object* object, const fRay& ray, float* t, bool any);
+	class Component;
+	
+private:
+	deque<unique_ptr<Component>> mComponents;
+	deque<unique_ptr<SceneNode>> mChildren;
+	SceneNode* mParent = nullptr;
+
+	string mName;
+	bool mEnabled = true;
+	uint32_t mLayerMask = 1;
+	
+	Matrix4f mLocalTransform;
+	Matrix4f mGlobalTransform;
+	TransformTraits mLocalTransformType = TransformTraits::Isometry;
+	TransformTraits mGlobalTransformType = TransformTraits::Isometry;
+	bool mTransformValid = false;
+	
+public:
+	stm::Scene& mScene;
+
+	inline SceneNode(stm::Scene& scene, const string& name) : mScene(scene), mName(name) {}
+	inline ~SceneNode() {
+		mComponents.clear();
+		mChildren.clear();
+		if (mParent) mParent->RemoveChild(*this);
+	}
+
+	inline const string& Name() const { return mName; }
+	inline string FullName() const { return mParent ? mParent->FullName()+"/"+mName : mName; }
+
+	inline bool Enabled() const { return mEnabled; }
+	inline void Enabled(bool e) { mEnabled = e; }
+
+	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
+	// Note Renderers should OR this with their PassMask()
+	inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
+	inline virtual uint32_t LayerMask() { return mLayerMask; };
+
+	
+	inline SceneNode* Parent() const { return mParent; }
+	inline const deque<unique_ptr<SceneNode>>& Children() const { return mChildren; }
+
+	inline SceneNode& AddChild(unique_ptr<SceneNode>&& n) {
+		if (n->mParent == this) return *n;
+		if (n->mParent) n = move(n->mParent->RemoveChild(*n));
+		auto& ptr = mChildren.emplace_back(move(n));
+		ptr->mParent = this;
+		ptr->InvalidateTransform();
+		ranges::for_each(mComponents, [&ptr](auto& c){ c->OnAddChild(*ptr); });
+		return *ptr;
+	}
+	inline unique_ptr<SceneNode> RemoveChild(SceneNode& n) {
+		auto it = ranges::find_if(mChildren, [&](const auto& c){ return c.get() == &n; });
+		if (it != mChildren.end()) {
+			unique_ptr<SceneNode> ptr = move(*it);
+			ptr->mParent = nullptr;
+			ptr->InvalidateTransform();
+			erase(mChildren, nullptr);
+			ranges::for_each(mComponents, [&ptr](auto& c){ c->OnRemoveChild(*ptr); });
+			return ptr;
+		}
+		return nullptr;
+	}
+
+	template<typename Callable>
+	inline void for_each_ancestor(Callable&& fn) {
+		SceneNode* n = mParent;
+		while (n) {
+			fn(*n);
+			n = n->mParent;
+		}
+	}
+	template<typename Callable>
+	inline void for_each_descendant(Callable&& fn) {
+		if (mChildren.empty()) return;
+		deque<SceneNode*> nodes(mChildren.size());
+		ranges::transform(mChildren, nodes.begin(), [](const auto& c){return c.get();});
+		while (!nodes.empty()) {
+			auto n = nodes.front();
+			nodes.pop_front();
+			fn(*n);
+			if (n->mChildren.empty()) continue;
+			nodes.resize(nodes.size() + n->mChildren.size());
+			ranges::copy_backward(views::transform(n->mChildren, [](auto& n){return n.get();}), nodes.end());
+		}
+	}
+
+	#pragma region Transform
+	inline const Vector3f Translation() const {
+		switch (mLocalTransformType) {
+			default:
+			case TransformTraits::Projective: return Projective3f(mLocalTransform).translation();
+			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform).translation();
+			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform).translation();
+		}
+	}
+	inline const Matrix3f Rotation() const {
+		switch (mLocalTransformType) {
+			default:
+			case TransformTraits::Projective: return Projective3f(mLocalTransform).rotation();
+			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform).rotation();
+			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform).rotation();
+		}
+	}
+
+	inline const Matrix4f& LocalToParent() const { return mLocalTransform; }
+	inline const Matrix4f& LocalToGlobal() { ValidateTransform(); return mGlobalTransform; }
+
+	template<int Cols>
+	inline const Matrix<float,4,Cols> LocalToParent(const Matrix<float,4,Cols>& v) const {
+		switch (mLocalTransformType) {
+			default:
+			case TransformTraits::Projective: return Projective3f(mLocalTransform) * v;
+			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform) * v;
+			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform) * v;
+		}
+	}
+	template<int Mode>
+	inline const Matrix4f LocalToParent(const Eigen::Transform<float,3,Mode>& v) const {
+		switch (mLocalTransformType) {
+			default:
+			case TransformTraits::Projective: return (Projective3f(mLocalTransform) * v).matrix();
+			case TransformTraits::Affine: 	  return (Affine3f(mLocalTransform) * v).matrix();
+			case TransformTraits::Isometry:   return (Isometry3f(mLocalTransform) * v).matrix();
+		}
+	}
+	
+	template<int Cols>
+	inline const Matrix<float,4,Cols> LocalToGlobal(const Matrix<float,4,Cols>& v) {
+		ValidateTransform();
+		switch (mGlobalTransformType) {
+			default:
+			case TransformTraits::Projective: return Projective3f(mGlobalTransform) * v;
+			case TransformTraits::Affine: 		return Affine3f(mGlobalTransform) * v;
+			case TransformTraits::Isometry: 	return Isometry3f(mGlobalTransform) * v;
+		}
+	}
+	template<int Mode>
+	inline const Matrix4f LocalToGlobal(const Eigen::Transform<float,3,Mode>& v) {
+		ValidateTransform();
+		switch (mGlobalTransformType) {
+			default:
+			case TransformTraits::Projective: return (Projective3f(mGlobalTransform) * v).matrix();
+			case TransformTraits::Affine: 		return (Affine3f(mGlobalTransform) * v).matrix();
+			case TransformTraits::Isometry: 	return (Isometry3f(mGlobalTransform) * v).matrix();
+		}
+	}
+
+	inline void InvalidateTransform() { mTransformValid = false; }
+	inline void ValidateTransform() {
+		if (mTransformValid) return;
+		if (mParent) {
+			switch (mLocalTransformType) {
+				default:
+				case TransformTraits::Projective: mGlobalTransform = mParent->LocalToGlobal(Projective3f(mLocalTransform)); break;
+				case TransformTraits::Affine: 		mGlobalTransform = mParent->LocalToGlobal(Affine3f(mLocalTransform)); break;
+				case TransformTraits::Isometry: 	mGlobalTransform = mParent->LocalToGlobal(Isometry3f(mLocalTransform)); break;
+			}
+			mGlobalTransformType = max(mParent->mGlobalTransformType, mLocalTransformType);
+		} else {
+			mGlobalTransform = mLocalTransform;
+			mGlobalTransformType = mLocalTransformType;
+		}
+		mTransformValid = true;
+		ranges::for_each(mComponents, [&](auto& c) { c->OnValidateTransform(mGlobalTransform, mGlobalTransformType); });
+	}
+	#pragma endregion
+
+	inline const deque<unique_ptr<Component>>& Components() const { return mComponents; }
+
+	template<class C, typename... Args> requires(is_base_of_v<Component,C> && constructible_from<C,SceneNode&,Args...>)
+	inline C& CreateComponent(Args&&... args) {
+		return **mComponents.emplace_back(make_unique<C>(*this, forward<Args>(args)...));
+	}
+	template<class C> requires(is_base_of_v<Component,C>)
+	inline unique_ptr<C> RemoveComponent(C& c) {
+		auto it = ranges::find(mComponents, &c);
+		if (it != mComponents.end()) {
+			unique_ptr<C> r = move(*it);
+			erase(mComponents, nullptr);
+			return r;
+		} else
+			return nullptr;
+	}
+
+	template<class T, typename Callable> requires(is_base_of_v<Component,T>)
+	inline void for_each_component(Callable&& fn) const {
+		for (auto& c : mComponents)
+			if (T* t = dynamic_cast<T*>(c.get()))
+				fn(t);
+	}
+
+	template<class T> requires(is_base_of_v<Component,T>)
+	inline T* get_component() const {
+		for (auto& c : mComponents)
+			if (T* t = dynamic_cast<T*>(c.get()))
+				return t;
+		return nullptr;
+	}
+	
+	template<class T, ranges::range R> requires(is_base_of_v<Component,T>)
+	inline R& get_components(R& dst) const {
+		for_each_component([&](auto& c) { dst.push_back(c); });
+		return dst;
+	}
+	template<class T, ranges::range R = vector<T>> requires(is_base_of_v<Component,T>)
+	inline R get_components() const {
+		R dst;
+		return get_components<T>(dst);
+	}
+
+	class Component {
+	private:
+		string mName;
+		bool mEnabled = true;
+
+	public:
+		SceneNode& mNode;
+
+		inline Component(SceneNode& node, const string& name) : mNode(node), mName(name) {}
+
+		inline const string& Name() const { return mName; }
+		inline string FullName() const { return mNode.FullName()+"/"+mName; }
+
+		inline bool Enabled() const { return mEnabled; }
+		inline void Enabled(bool e) { mEnabled = e; }
+
+	protected:
+		friend class Scene;
+		friend class SceneNode;
+
+		inline virtual void OnAddChild(SceneNode& n) {}
+		inline virtual void OnRemoveChild(SceneNode& n) {}
+		
+		inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
+		inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
+
+		inline virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) {}
+		template<typename T, int Mode> inline void OnValidateTransform(Transform<T,3,Mode>& p) { OnValidateTransform(p.matrix(), Mode); }
+	};
 };
-using ObjectBvh2 = bvh_t<float, Object*, ObjectIntersector>;
 
 class Scene {
 public:
-	class Plugin {
-	public:
-		// Higher priority plugins get called first
-		inline virtual int Priority() { return 50; }
-		
-	protected:
-		friend class Scene;
-		inline virtual void OnPreUpdate(CommandBuffer& commandBuffer) {}
-		inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
-		inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
-		inline virtual void OnLateUpdate(CommandBuffer& commandBuffer) {}
-		// Called before the Scene begins rendering a frame, used to easily queue GUI drawing operations
-		inline virtual void OnGui(CommandBuffer& commandBuffer, GuiContext& gui) {}
-		// Called before the Scene begins rendering a frame
-		inline virtual void OnPreRender(CommandBuffer& commandBuffer) {}
-		// Called during a Subpass for each camera that renders to an attachment that the subpass outputs
-		inline virtual void OnRenderCamera(CommandBuffer& commandBuffer, Camera& camera) {}
-		// Called after the Scene ends a full RenderPass
-		inline virtual void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const set<Camera*>& cameras) {}
-
-		// Called before the window presents the next swapchain image, after the command buffer(s) are executed
-		inline virtual void PrePresent() {}
-	};
-
-	struct LightingData {
-		shared_ptr<Buffer> mLightBuffer;
-		shared_ptr<Texture> mShadowAtlas;
-		float3 mAmbientLight;
-		uint32_t mLightCount;
-	};
+	stm::Instance& mInstance;
 
 	STRATUM_API Scene(stm::Instance& instance);
 	STRATUM_API ~Scene();
 
-	inline stm::Instance& Instance() const { return mInstance; }
-
-	template<class T, typename... Args> requires(derived_from<T, Object> && constructible_from<T, Args...>)
-	inline T* CreateObject(const string& name, Args... args) {
-		T* object = new T(name, *this, args...);
-		mObjects.push_back(object);
-		if (derived_from<Renderer, Object>) mRenderers.push_back((Renderer*)object);
-		if (derived_from<Camera, Object>) mCameras.push_back((Camera*)object);
-		if (derived_from<Light, Object>) mLights.push_back((Light*)object);
-		return object;
-	}
-	STRATUM_API void RemoveObject(Object* object);
-
-	STRATUM_API const deque<Subpass>& GetRenderNode(const string& nodeName) const { return mRenderNodes.at(nodeName).mSubpasses; }
-	STRATUM_API void AssignRenderNode(const string& nodeName, const deque<Subpass>& subpasses);
-	STRATUM_API void DeleteRenderNode(const string& nodeName);
+	inline SceneNode& Root() { return mRoot; }
+	inline const SceneNode& Root() const { return mRoot; }
 
 	STRATUM_API void Update(CommandBuffer& commandBuffer);
-	// Renders RenderNodes in the scene
-	STRATUM_API void Render(CommandBuffer& commandBuffer);
-	// Draw all renderers in view of a camera
-	STRATUM_API void RenderCamera(CommandBuffer& commandBuffer, Camera& camera);
 
-	inline Object* Intersect(const fRay& ray, float* t = nullptr, bool any = false) { return *BVH()->Intersect(ray, t, any); }
-
-	// Setters
-	STRATUM_API void SetAttachmentInfo(const RenderTargetIdentifier& name, const vk::Extent2D& extent, vk::ImageUsageFlags usage);
-	inline void MainRenderExtent(const vk::Extent2D& extent) {
-		SetAttachmentInfo("stm_main_render", { extent }, GetAttachmentInfo("stm_main_render").second);
-		SetAttachmentInfo("stm_main_depth", { extent }, GetAttachmentInfo("stm_main_depth").second);
-		SetAttachmentInfo("stm_main_resolve", { extent }, GetAttachmentInfo("stm_main_resolve").second);
-	}
-	inline void AmbientLight(const float3& t) { mLighting.mAmbientLight = t; }
-	inline void EnvironmentTexture(shared_ptr<Texture> t) { mEnvironmentTexture = t; }
 	inline void FixedTimeStep(float step) { mFixedTimeStep = step; }
 	inline void PhysicsTimeLimitPerFrame(float t) { mPhysicsTimeLimitPerFrame = t; }
-	inline void InvalidateBvh(Object* source = nullptr) { safe_delete(mBvh); }
-
-	// Getters
-	inline bool HasAttachment(const RenderTargetIdentifier& name) const { return mAttachments.count(name); }
-	inline shared_ptr<Texture> GetAttachment(const RenderTargetIdentifier& name) const { return mAttachments.at(name); }
-	STRATUM_API pair<vk::Extent2D, vk::ImageUsageFlags> GetAttachmentInfo(const RenderTargetIdentifier& name) const { return mAttachmentInfo.at(name); };
-	inline float3 AmbientLight() const { return mLighting.mAmbientLight; }
-	inline shared_ptr<Texture> EnvironmentTexture() const { return mEnvironmentTexture; }
+	
 	inline float FixedTimeStep() const { return mFixedTimeStep; }
 	inline float PhysicsTimeLimitPerFrame() const { return mPhysicsTimeLimitPerFrame; }
 	inline float FPS() const { return mFps; }
 	inline float TotalTime() const { return mTotalTime; }
 	inline float DeltaTime() const { return mDeltaTime; }
-	STRATUM_API vector<Object*> Objects() const;
-	STRATUM_API ObjectBvh2* BVH();
-	inline uint64_t LastBvhBuild() { return mLastBvhBuild; }
 
-	STRATUM_API Plugin* LoadPlugin(const fs::path& filename);
-
-	template<class T> inline T* GetPlugin() const {
-		for (const ScenePlugin* p : mPlugins)
-			if (const T* t = dynamic_cast<T*>(p))
-				return t;
-		return nullptr;
+	template<class T, ranges::range R> requires(is_base_of_v<SceneNode::Component,T>)
+	inline R& get_components(R& dst) const {
+		mRoot.for_each_descendant([&](auto& n){ n.get_all<T>(dst); });
+		return dst;
+	}
+	template<class T, ranges::range R = vector<T>> requires(is_base_of_v<SceneNode::Component,T>)
+	inline R get_components() const {
+		R dst;
+		return get_components<T>(dst);
 	}
 
 private:
-	friend class Object;
+	SceneNode mRoot;
 	
-	struct RenderGraphNode {
-		deque<Subpass> mSubpasses;
-		set<RenderTargetIdentifier> mNonSubpassDependencies;
-		shared_ptr<RenderPass> mRenderPass;
-		shared_ptr<Framebuffer> mFramebuffer;
-	};
-
-	STRATUM_API void AddObject(Object* object);
-	STRATUM_API void BuildRenderGraph(CommandBuffer& commandBuffer);
-
 	unordered_map<string, InputState> mInputStates;
 	unordered_map<string, InputState> mInputStatesPrevious;
 	
-	stm::Instance& mInstance;
-	vector<Plugin*> mPlugins;
-
-	bool mRenderGraphDirty = true;
-	vector<RenderGraphNode*> mRenderGraph;
-	map<string, RenderGraphNode> mRenderNodes;
-	map<RenderTargetIdentifier, shared_ptr<Texture>> mAttachments;
-	map<RenderTargetIdentifier, pair<vk::Extent2D, vk::ImageUsageFlags>> mAttachmentInfo;
-	
-	deque<Object*> mObjects;
-	deque<Light*> mLights;
-	deque<Camera*> mCameras;
-	deque<Renderer*> mRenderers;
-	unordered_map<Camera*, GuiContext*> mGuiContexts;
-	
-	ObjectBvh2* mBvh = nullptr;
-	uint64_t mLastBvhBuild = 0;
-
-	Renderer* mSkybox = nullptr;
-	shared_ptr<DescriptorSet> mPerCamera;
-	LightingData mLighting;
-	shared_ptr<Texture> mEnvironmentTexture;
-	shared_ptr<Sampler> mShadowSampler;
-
 	float mPhysicsTimeLimitPerFrame = 0.1f;
 	float mFixedAccumulator = 0;
 	float mFixedTimeStep = 1.f/60.f;

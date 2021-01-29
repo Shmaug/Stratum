@@ -1,5 +1,5 @@
-#pragma compile vertex vsmain
-#pragma compile fragment fsmain
+#pragma compile vertex vs_skybox
+#pragma compile fragment fs_skybox
 
 [[vk::constant_id(0)]] const bool gTonemap = true;
 
@@ -12,7 +12,7 @@ SamplerState gSampler : register(s0, space2);
 	uint gStereoEye;
 } gPushConstants;
 
-void vsmain(
+void vs_skybox(
 	float3 vertex : POSITION,
 	out float4 position : SV_Position,
 	out float3 viewRay : TEXCOORD0) {
@@ -20,7 +20,7 @@ void vsmain(
 	viewRay = mul(vertex, (float3x3)STRATUM_MATRIX_V);
 }
 
-float4 fsmain(in float3 viewRay : TEXCOORD0) : SV_Target0 {
+float4 fs_skybox(in float3 viewRay : TEXCOORD0) : SV_Target0 {
 	float3 ray = normalize(viewRay);
 	float4 color = 1;
 	float2 envuv = float2(atan2(ray.z, ray.x) * M_1_PI * .5 + .5, acos(ray.y) * M_1_PI);

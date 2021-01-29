@@ -10,7 +10,7 @@ struct ProfilerSample {
 	list<ProfilerSample*> mChildren;
 	chrono::high_resolution_clock::time_point mStartTime;
 	chrono::nanoseconds mDuration;
-	float4 mColor;
+	Vector4f mColor;
 	inline ~ProfilerSample() { for (ProfilerSample* c : mChildren) delete c; }
 };
 

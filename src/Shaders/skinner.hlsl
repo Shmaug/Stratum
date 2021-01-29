@@ -1,5 +1,5 @@
-#pragma compile kernel skin
-#pragma compile kernel blend
+#pragma compile compute skin_vertices
+#pragma compile compute blend_vertices
 
 #include <stratum.hlsli>
 
@@ -25,7 +25,7 @@ RWStructuredBuffer<float4x4> Pose;
 } gPushConstants;
 
 [numthreads(64, 1, 1)]
-void skin(uint3 index : SV_DispatchThreadID) {
+void skin_vertices(uint3 index : SV_DispatchThreadID) {
 	if (index.x >= gPushConstants.VertexCount) return;
 	
 	VertexWeight w = Weights[index.x];
@@ -51,7 +51,7 @@ void skin(uint3 index : SV_DispatchThreadID) {
 }
 
 [numthreads(64, 1, 1)]
-void blend(uint3 index : SV_DispatchThreadID) {
+void blend_vertices(uint3 index : SV_DispatchThreadID) {
 	if (index.x >= gPushConstants.VertexCount) return;
 	
 	uint address = index.x * gPushConstants.VertexStride;

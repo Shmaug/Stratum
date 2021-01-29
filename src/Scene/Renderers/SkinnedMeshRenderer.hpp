@@ -1,16 +1,21 @@
 #pragma once
 
 #include "../../Core/Asset/Mesh.hpp"
-#include "../Bone.hpp"
 #include "Renderer.hpp"
 
 namespace stm {
 
+class Bone : public SceneNode::Component {
+public:
+	uint32_t mBoneIndex;
+	Matrix4f mInverseBind;
+	inline Bone(SceneNode& node, const string& name, uint32_t index) : SceneNode::Component(node, name), mBoneIndex(index), mInverseBind(Matrix4f::Identity()) {}
+};
 using AnimationRig = vector<Bone*>;
 
 class SkinnedMeshRenderer : public Renderer {
 public:
-	inline SkinnedMeshRenderer(const string& name, stm::Scene& scene) : Object(name, scene) {};
+	inline SkinnedMeshRenderer(const string& name, stm::Scene& scene) : SceneNode::Component(name, scene) {};
 
 	STRATUM_API virtual AnimationRig& Rig() { return mRig; };
 	STRATUM_API virtual void Rig(const AnimationRig& rig);
@@ -26,17 +31,18 @@ public:
 	
 protected:
 	STRATUM_API virtual void OnLateUpdate(CommandBuffer& commandBuffer) override;
-	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override;
+	inline virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override {
+		mMaterial->Bind(commandBuffer, mSkinnedMesh);
+		mSkinnedMesh->Draw(commandBuffer);
+	}
 	
-	STRATUM_API void OnGui(CommandBuffer& commandBuffer, GuiContext& gui);
-
 private:
 	shared_ptr<stm::Material> mMaterial;
 	shared_ptr<stm::Mesh> mMesh;
-	fAABB mAABB;
+	AlignedBox3f mAABB;
 	stm::Mesh* mSkinnedMesh;
 
-	map<string, Bone*> mBoneMap;
+	unordered_map<string, Bone*> mBoneMap;
 	AnimationRig mRig;
 };
 

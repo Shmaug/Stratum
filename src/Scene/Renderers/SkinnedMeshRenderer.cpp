@@ -18,14 +18,14 @@ inline void SkinnedMeshRenderer::Mesh(shared_ptr<stm::Mesh> m) {
 }
 
 void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
-	auto skinner = commandBuffer.Device().LoadAsset<Shader>("Assets/Shaders/skinner.stmb");
+	auto skinner = commandBuffer.mDevice.LoadAsset<Shader>("Assets/Shaders/skinner.stmb");
 	
 	// TODO: fix this to work with new Mesh system
 
 	// Shape Keys
 	/*
 	if (mShapeKeys.size()) {
-		float4 weights = 0;
+		Vector4f weights = 0;
 		Buffer* targets[4] {
 			mVertexBuffer, mVertexBuffer, mVertexBuffer, mVertexBuffer
 		};
@@ -71,8 +71,8 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
 	// Skeleton
 	if (mRig.size()) {
 		// bind space -> object space
-		Buffer* poseBuffer = commandBuffer->GetBuffer(mName + " Pose", mRig.size() * sizeof(float4x4), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
-		float4x4* skin = (float4x4*)poseBuffer->Mapped();
+		Buffer* poseBuffer = commandBuffer->GetBuffer(mName + " Pose", mRig.size() * sizeof(Matrix4f), vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible);
+		Matrix4f* skin = (Matrix4f*)poseBuffer->Mapped();
 		for (uint32_t i = 0; i < mRig.size(); i++)
 			skin[i] = (InverseTransform() * mRig[i]->Transform()) * mRig[i]->mInverseBind; // * vertex;
 
@@ -97,23 +97,4 @@ void SkinnedMeshRenderer::OnLateUpdate(CommandBuffer& commandBuffer) {
 	barrier.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead;
 	commandBuffer->Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eVertexInput, barrier);
 	*/
-}
-
-void SkinnedMeshRenderer::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
-	mMaterial->Bind(commandBuffer, mSkinnedMesh);
-	commandBuffer.DrawMesh(*mSkinnedMesh);
-}
-
-void SkinnedMeshRenderer::OnGui(CommandBuffer& commandBuffer, GuiContext& gui) {
-	if (mRig.size()){
-		for (auto b : mRig) {
-			gui.WireSphere(b->Position(), .01f, fquat(1), float4(0.25f, 1.f, 0.25f, 1.f));
-			if (Bone* parent = dynamic_cast<Bone*>(b->Parent())) {
-				float3 pts[2];
-				pts[0] = b->Position();
-				pts[1] = parent->Position();
-				gui.PolyLine({ {}, {}, float4x4(1) }, pts, 2, 1.5f);
-			}
-		}
-	}
 }

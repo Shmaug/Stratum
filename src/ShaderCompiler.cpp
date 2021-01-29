@@ -14,10 +14,11 @@ using namespace shaderc;
 class Includer : public CompileOptions::IncluderInterface {
 private:
 	set<fs::path> mIncludePaths;
-	map<string, string> mSources;
+	unordered_map<string, string> mSources;
 
 public:
-	Includer(const set<fs::path>& paths) : mIncludePaths(paths) {}
+	template<ranges::range R> requires(convertible_to<ranges::range_value_t<R>, fs::path>)
+	Includer(const R& includePaths) : mIncludePaths(set<fs::path>(includePaths.begin(), includePaths.end())) {}
 
 	shaderc_include_result* GetInclude(const char* requested_source, shaderc_include_type type, const char* requesting_source, size_t include_depth) override {
 		fs::path fullpath;
@@ -120,19 +121,21 @@ size_t SizeOf(const spirv_cross::SPIRType& type, const spirv_cross::Compiler& co
 }
 
 void ShaderCompiler::DirectiveCompile(SpirvModuleGroup& modules, word_iterator arg, const word_iterator& argEnd) {
-	static const map<string, vk::ShaderStageFlagBits> stageMap {
+	static const unordered_map<string, vk::ShaderStageFlagBits> stageMap {
     { "vertex", vk::ShaderStageFlagBits::eVertex },
-    { "tess_control", vk::ShaderStageFlagBits::eTessellationControl },
-    { "tess_evaluation", vk::ShaderStageFlagBits::eTessellationEvaluation },
+    { "tess_control", vk::ShaderStageFlagBits::eTessellationControl }, { "hull", vk::ShaderStageFlagBits::eTessellationControl }, // TODO: idk if 'tess_control' == 'hull'
+    { "tess_evaluation", vk::ShaderStageFlagBits::eTessellationEvaluation }, { "domain", vk::ShaderStageFlagBits::eTessellationEvaluation }, // TODO: idk if 'tess_evaluation' == 'domain'
     { "geometry", vk::ShaderStageFlagBits::eGeometry },
     { "fragment", vk::ShaderStageFlagBits::eFragment }, { "pixel", vk::ShaderStageFlagBits::eFragment },
     { "compute", vk::ShaderStageFlagBits::eCompute }, { "kernel", vk::ShaderStageFlagBits::eCompute },
-    { "raygen_khr", vk::ShaderStageFlagBits::eRaygenKHR },
-    { "any_hit_khr", vk::ShaderStageFlagBits::eAnyHitKHR },
-    { "closest_hit_khr", vk::ShaderStageFlagBits::eClosestHitKHR },
-    { "miss_khr", vk::ShaderStageFlagBits::eMissKHR },
-    { "intersection_khr", vk::ShaderStageFlagBits::eIntersectionKHR },
-    { "callable_khr", vk::ShaderStageFlagBits::eCallableKHR },
+
+    { "raygen_khr", vk::ShaderStageFlagBits::eRaygenKHR }, { "raygeneration", vk::ShaderStageFlagBits::eRaygenKHR },
+    { "any_hit_khr", vk::ShaderStageFlagBits::eAnyHitKHR }, { "anyhit", vk::ShaderStageFlagBits::eAnyHitKHR },
+    { "closest_hit_khr", vk::ShaderStageFlagBits::eClosestHitKHR }, { "closesthit", vk::ShaderStageFlagBits::eClosestHitKHR },
+    { "miss_khr", vk::ShaderStageFlagBits::eMissKHR }, { "miss", vk::ShaderStageFlagBits::eMissKHR },
+    { "intersection_khr", vk::ShaderStageFlagBits::eIntersectionKHR }, { "intersection", vk::ShaderStageFlagBits::eIntersectionKHR },
+    { "callable_khr", vk::ShaderStageFlagBits::eCallableKHR }, { "callable", vk::ShaderStageFlagBits::eCallableKHR },
+
     { "task_nv", vk::ShaderStageFlagBits::eTaskNV },
     { "mesh_nv", vk::ShaderStageFlagBits::eMeshNV },
     { "any_hit_nv", vk::ShaderStageFlagBits::eAnyHitNV },
@@ -148,7 +151,7 @@ void ShaderCompiler::DirectiveCompile(SpirvModuleGroup& modules, word_iterator a
 		m.mStage = stageMap.at(*arg);
 		if (++arg == argEnd) throw logic_error("expected an entry point");
 		m.mEntryPoint = *arg;
-		modules.mModules.push_back(m);
+		modules.emplace(m.mEntryPoint, m);
 	}
 }
 
@@ -192,7 +195,7 @@ SpirvModuleGroup ShaderCompiler::ParseCompilerDirectives(const fs::path& filenam
 
 	return modules;
 }
-vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const string& entryPoint, vk::ShaderStageFlagBits stage, const set<string>& defines) {
+vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const string& entryPoint, vk::ShaderStageFlagBits stage, const unordered_set<string>& defines) {
 	bool hlsl = filename.extension() == ".hlsl";
 	#if WITH_DXC
 	if (hlsl) {
@@ -315,7 +318,32 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		binding.mBinding.descriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
 		binding.mBinding.descriptorType = type;
 	};
-	
+	auto ParseSemantic = [&](const auto& vars, auto& var, string semantic) {
+		size_t l = semantic.find_first_of("0123456789");
+		if (l != string::npos)
+			var.mTypeIndex = atoi(semantic.c_str() + l);
+		else {
+			var.mTypeIndex = 0;
+			l = semantic.length();
+		}
+		if (l > 0 && semantic[l-1] == '_') l--;
+		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
+		if (gAttributeMap.count(semantic))
+			var.mType = gAttributeMap.at(semantic);
+		else
+			var.mType = VertexAttributeType::eTexcoord;
+
+		// ensure unique typeindex
+		uint32_t m = var.mTypeIndex;
+		bool c = false;
+		for (const auto& [name, v] : vars)
+			if (v.mType == var.mType) {
+				m = max(m, v.mTypeIndex);
+				if (v.mTypeIndex == var.mTypeIndex) c = true;
+			}
+		if (c) var.mTypeIndex = m + 1;
+	};
+
 	for (const auto& r : resources.separate_images) 	RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
 	for (const auto& r : resources.storage_images) 		RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
 	for (const auto& r : resources.sampled_images) 		RegisterDescriptorResource(r, vk::DescriptorType::eCombinedImageSampler);
@@ -332,21 +360,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-
-		string semantic = compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
-		size_t l = semantic.find_first_of("0123456789");
-		if (l != string::npos)
-			var.mTypeIndex = atoi(semantic.c_str() + l);
-		else {
-			var.mTypeIndex = 0;
-			l = semantic.length();
-		}
-		if (l > 0 && semantic[l-1] == '_') l--;
-		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
-		if (gAttributeMap.count(semantic))
-			var.mType = gAttributeMap.at(semantic);
-		else
-			var.mType = VertexAttributeType::eOther;
+		ParseSemantic(shaderModule.mStageInputs, var, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
 	}
 	for (const auto& r : resources.stage_outputs) {
 		auto& var = shaderModule.mStageOutputs[r.name];
@@ -354,21 +368,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-
-		string semantic = compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE);
-		size_t l = semantic.find_first_of("0123456789");
-		if (l != string::npos)
-			var.mTypeIndex = atoi(semantic.c_str() + l);
-		else {
-			var.mTypeIndex = 0;
-			l = semantic.length();
-		}
-		if (l > 0 && semantic[l-1] == '_') l--;
-		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
-		if (gAttributeMap.count(semantic))
-			var.mType = gAttributeMap.at(semantic);
-		else
-			var.mType = VertexAttributeType::eOther;
+		ParseSemantic(shaderModule.mStageOutputs, var, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
 	}
 	for (const auto& e : compiler.get_entry_points_and_stages()) {
 		auto& ep = compiler.get_entry_point(e.name, e.execution_model);
@@ -396,20 +396,38 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	const char* inputFile = argv[1];
-	const char* outputFile = argv[2];
-	set<fs::path> globalIncludes;
-	for (int i = 3; i < argc; i++) globalIncludes.emplace(argv[i]);
+	vector<fs::path> inputs;
+	fs::path output = "";
+	set<fs::path> includes;
 
-	//try {
-		ShaderCompiler compiler(globalIncludes);
-		SpirvModuleGroup result = compiler(inputFile);
-		binary_stream stream(outputFile);
-		stream << result;
-	//} catch (logic_error e) {
-	//	fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), inputFile);
-	//	throw;
-	//}
+	for (int i = 1; i < argc; i++) {
+		if (argv[i][0] == '-' || argv[i][0] == '/') {
+			switch (argv[i][1]) {
+				case 'o':
+					if (++i < argc) output = argv[i];
+					continue;
+				case 'I':
+					if (++i < argc) includes.emplace(argv[i]);
+					continue;
+			}
+		} else
+			inputs.push_back(argv[i]);
+	}
+
+	SpirvModuleGroup results;
+	ShaderCompiler compiler(includes);
+	for (const auto& i : inputs)
+		try {
+			results.merge(compiler(i));
+		} catch (logic_error e) {
+			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), i.string().c_str());
+			throw;
+		}
+
+	if (!output.empty()) {
+		binary_stream stream(output, ios_base::binary|ios_base::out);
+		stream << results;
+	}
 
 	return EXIT_SUCCESS;
 }

@@ -1,12 +1,11 @@
 #pragma once
 
-#include "Object.hpp"
+#include "Scene.hpp"
 
 namespace stm {
-#ifndef uint
-typedef uint32_t uint;
-#endif
-#include "..\Shaders\include\lighting.hlsli"
+namespace shader_interop {
+	#include "..\Shaders\include\lighting.hlsli"
+}
 
 enum class LightType : uint32_t {
 	eDirectional = LIGHT_DISTANT,
@@ -14,12 +13,12 @@ enum class LightType : uint32_t {
 	eSpot = LIGHT_CONE,
 };
 
-class Light : public Object {
+class Light : public SceneNode::Component {
 public:
-	inline Light(const string& name, stm::Scene& scene) : Object(name, scene) {}
+	inline Light(SceneNode& node, const string& name) : Component(node, name) {}
 
-	inline void Color(const float3& c) { mColor = c; }
-	inline float3 Color() const { return mColor; }
+	inline void Color(const Vector3f& c) { mColor = c; }
+	inline Vector3f Color() const { return mColor; }
 
 	inline void Intensity(float i) { mIntensity = i; }
 	inline float Intensity() const { return mIntensity; }
@@ -52,23 +51,23 @@ public:
 	inline void CascadeCount(uint32_t c) { mCascadeCount = c; }
 	inline uint32_t CascadeCount() { return mCascadeCount; }
 	
-	inline optional<fAABB> Bounds() override {
-		float3 c, e;
+	inline AlignedBox3f Bounds() {
+		Vector3f c, e;
 		switch (mType) {
 		case LightType::ePoint:
-			return fAABB(Position() - mRange, Position() + mRange);
+			return AlignedBox3f(mNode.Translation() - Vector3f::Constant(mRange), mNode.Translation() + Vector3f::Constant(mRange));
 		case LightType::eSpot:
-			e = float3(0, 0, mRange * .5f);
-			c = float3(mRange * float2(sinf(mOuterSpotAngle * .5f)), mRange * .5f);
-			return fAABB(c - e, c + e) * Transform();
+			e = Vector3f(0, 0, mRange * .5f);
+			c = Vector3f(mRange * Vector2f(sinf(mOuterSpotAngle * .5f)), mRange * .5f);
+			return AlignedBox3f(c - e, c + e) * Transform();
 		case LightType::eDirectional:
-			return fAABB(float3(-1e10f), float3(1e10f));
+			return AlignedBox3f(Vector3f::Constant(-1e24f), Vector3f::Constant(1e124));
 		}
-		return {};
+		return mNode.Bounds();
 	}
 
 private:
-	float3 mColor = 1;
+	Vector3f mColor = Vector3f::Ones();
 	float mIntensity = 1;
 	LightType mType = LightType::ePoint;
 	float mRange = 1;

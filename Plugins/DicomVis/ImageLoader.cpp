@@ -59,7 +59,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 	}
 }
 
-shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device& device, float3* scale, bool reverse, uint32_t channelCount, bool unorm) {
+shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device& device, Vector3f* scale, bool reverse, uint32_t channelCount, bool unorm) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -139,14 +139,14 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, sliceSize*extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
 
-	if (scale) *scale = float3(.05f, .05f, .05f);
+	if (scale) *scale = Vector3f(.05f, .05f, .05f);
 
 	return volume;
 }
 
 struct DcmSlice {
 	DicomImage* image;
-	double3 spacing;
+	Vector3d spacing;
 	double location;
 };
 DcmSlice ReadDicomSlice(const string& file) {
@@ -154,7 +154,7 @@ DcmSlice ReadDicomSlice(const string& file) {
 	fileFormat.loadFile(file.c_str());
 	DcmDataset* dataset = fileFormat.getDataset();
 
-	double3 s = 0;
+	Vector3d s = 0;
 	dataset->findAndGetFloat64(DCM_PixelSpacing, s.x, 0);
 	dataset->findAndGetFloat64(DCM_PixelSpacing, s.y, 1);
 	dataset->findAndGetFloat64(DCM_SliceThickness, s.z, 0);
@@ -164,10 +164,10 @@ DcmSlice ReadDicomSlice(const string& file) {
 
 	return { new DicomImage(file.c_str()), s, x };
 }
-shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& device, float3* size) {
+shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& device, Vector3f* size) {
 	if (!fs::exists(folder)) return nullptr;
 
-	double3 maxSpacing = 0;
+	Vector3d maxSpacing = 0;
 	vector<DcmSlice> images = {};
 	for (const auto& p : fs::directory_iterator(folder))
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eDicom) {
@@ -187,13 +187,13 @@ shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& 
 
 	// volume size in meters
 	if (size) {
-		float2 b = (float)images[0].location;
+		Vector2f b = (float)images[0].location;
 		for (auto i : images) {
 			b.x = (float)fmin(i.location - i.spacing.z * .5, b.x);
 			b.y = (float)fmax(i.location + i.spacing.z * .5, b.y);
 		}
 
-		*size = float3(.001 * double3(maxSpacing.xy * double2(extent.width, extent.height), b.y - b.x));
+		*size = Vector3f(.001 * Vector3d(maxSpacing.xy * Vector2d(extent.width, extent.height), b.y - b.x));
 		printf("%fm x %fm x %fm\n", size->x, size->y, size->z);
 	}
 
@@ -213,7 +213,7 @@ shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& 
 	return tex;
 }
 
-shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& device, float3* scale) {
+shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& device, Vector3f* scale) {
 	if (!fs::exists(folder)) return nullptr;
 
 	vector<fs::path> images;
@@ -264,7 +264,7 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& de
 	auto volume = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR8G8B8A8Unorm, pixels, sliceSize * extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
 
-	if (scale) *scale = float3(.00033f * extent.width, .00033f * extent.height, .001f * extent.depth);
+	if (scale) *scale = Vector3f(.00033f * extent.width, .00033f * extent.height, .001f * extent.depth);
 
 	return volume;
 }

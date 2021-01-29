@@ -6,28 +6,28 @@ namespace stm {
 
 class PointerRenderer : public Renderer {
 public:
-	inline PointerRenderer(const string& name, stm::Scene& scene) : Object(name, scene) {}
+	inline PointerRenderer(SceneNode& node, const string& name) : SceneNode::Component(node, name) {}
 	
-	inline virtual optional<fAABB> Bounds() override { ValidateTransform(); return mAABB; }
+	inline virtual bool Visible() override { return mAABB; }
 	inline virtual uint32_t RenderQueue(const string& pass) override { return 5000; }
 
 	inline void RayDistance(float d) { mRayDistance = d; }
-	inline void Color(const float4& c) { mColor = c; }
+	inline void Color(const Vector4f& c) { mColor = c; }
 	inline void Width(float w) { mWidth = w; }
 
 	inline float RayDistance() const { return mRayDistance; }
-	inline float4 Color() const { return mColor; }
+	inline Vector4f Color() const { return mColor; }
 	inline float Width() const { return mWidth; }
 
 protected:
 	float mRayDistance = 0;
 	float mWidth = 0.01f;
-	float4 mColor = 1;
+	Vector4f mColor = Vector4f::Ones();
 
-	fAABB mAABB;
+	AlignedBox3f mAABB;
 	
 	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override;
-	STRATUM_API virtual bool ValidateTransform() override;
+	STRATUM_API virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) override;
 };
 
 }

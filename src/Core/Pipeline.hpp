@@ -1,7 +1,7 @@
 #pragma once
 
 #include "RenderPass.hpp"
-#include "SpirvModule.hpp"
+#include "Asset/SpirvModuleGroup.hpp"
 
 namespace stm {
 
@@ -20,7 +20,7 @@ protected:
 	multimap<string, DescriptorBinding> mDescriptorBindings;
 	// multimap handles push constants with the same name and different ranges between stages
 	multimap<string, vk::PushConstantRange> mPushConstants;
-	map<string, vk::SamplerCreateInfo> mImmutableSamplers;
+	unordered_map<string, vk::SamplerCreateInfo> mImmutableSamplers;
 
 	size_t mHash = 0;
 
@@ -40,30 +40,13 @@ public:
 	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
 	inline const multimap<string, vk::PushConstantRange>& PushConstants() { return mPushConstants; };
 	inline const vector<vk::PushConstantRange>& PushConstantRanges() const { return mPushConstantRanges; };
-
-	inline friend binary_stream& operator<<(binary_stream& stream, const Pipeline& pipeline) {
-		stream << pipeline.mSpirvModules;
-		stream << pipeline.mPushConstantRanges;
-		stream << pipeline.mDescriptorBindings;
-		stream << pipeline.mPushConstants;
-		stream << pipeline.mImmutableSamplers;
-		return stream;
-	}
-	inline friend binary_stream& operator>>(binary_stream& stream, Pipeline& pipeline) {
-		stream >> pipeline.mSpirvModules;
-		stream >> pipeline.mPushConstantRanges;
-		stream >> pipeline.mDescriptorBindings;
-		stream >> pipeline.mPushConstants;
-		stream >> pipeline.mImmutableSamplers;
-		return stream;
-	}
 };
 
 class ComputePipeline : public Pipeline {
 public:
 	inline ComputePipeline(const string& name, Device& device, const SpirvModule& spirv) {
-		mSpirvModules = { spirv };
-		mHash = basic_hash(spirv);
+		mSpirvModules = SpirvModuleGroup(device, { spirv });
+		mHash = hash<SpirvModule>()(spirv);
 
 		unordered_map<uint32_t, vector<vk::DescriptorSetLayoutBinding>> descriptorSetBindings;
 		for (const auto&[name, binding] : spirv.mDescriptorBindings) {
@@ -87,10 +70,7 @@ public:
 	}
 
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eCompute; }
-	inline uint3 WorkgroupSize() const { return mSpirvModules[0].mWorkgroupSize; }
-	
-	inline friend binary_stream& operator<<(binary_stream& stream, const ComputePipeline& pipeline) { return operator<<(stream, *(Pipeline*)&pipeline); }
-	inline friend binary_stream& operator>>(binary_stream& stream, ComputePipeline& pipeline) { return operator>>(stream, *(Pipeline*)&pipeline); }
+	inline Vector3u WorkgroupSize() const { return mSpirvModules[0].mWorkgroupSize; }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -115,16 +95,16 @@ public:
 		
 		mSpirvModules = spirv;
 
-		mHash = basic_hash(renderPass, subpassIndex, topology, vertexInput, cullMode, polygonMode, sampleShading);
-		for (auto state : mBlendStates) mHash = basic_hash(mHash, state);
-		for (auto state : dynamicStates) mHash = basic_hash(mHash, state);
+		mHash = hash_combine(renderPass, subpassIndex, topology, vertexInput, cullMode, polygonMode, sampleShading);
+		for (auto state : mBlendStates) mHash = hash_combine(mHash, state);
+		for (auto state : dynamicStates) mHash = hash_combine(mHash, state);
 		for (const SpirvModule& spirv : mSpirvModules) {
-			mHash = basic_hash(mHash, spirv);
+			mHash = hash_combine(mHash, spirv);
 			for (const auto& [name, binding] : spirv.mDescriptorBindings) mDescriptorBindings.insert({ name, binding });
 			for (const auto& [name, range] : spirv.mPushConstants) mPushConstantRanges.push_back(range);
 		}
 		
-		Device& device = renderPass.Device();
+		Device& device = renderPass.mDevice;
 		mLayout = device->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, mDescriptorSetLayouts, mPushConstantRanges));
 		
 		mBlendStates = blendStates;
@@ -136,14 +116,14 @@ public:
 		mMultisampleState = { {}, vk::SampleCountFlagBits::e1, sampleShading };
 		vk::PipelineColorBlendStateCreateInfo blendState = { {}, false, vk::LogicOp::eCopy, mBlendStates };
 		vk::PipelineDynamicStateCreateInfo dynamicState = { {}, dynamicStates };
-		for (auto& [id, attachment] : renderPass.Subpass(subpassIndex).mAttachments)
-			if (attachment.mType == AttachmentType::eColor || attachment.mType == AttachmentType::eDepthStencil) {
-				mMultisampleState.rasterizationSamples = attachment.mSamples;
+		for (auto& [id, desc] : renderPass.SubpassDescriptions()[subpassIndex].mAttachmentDescriptions)
+			if (get<RenderPass::AttachmentType>(desc) & (RenderPass::AttachmentType::eColor | RenderPass::AttachmentType::eDepthStencil)) {
+				mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
 				break;
 			}
-		vector<vk::PipelineShaderStageCreateInfo> stages;
+		vector<vk::PipelineShaderStageCreateInfo> stages(mSpirvModules.size());
 		for (size_t i = 0; i < mSpirvModules.size(); i++)
-			stages.push_back(vk::PipelineShaderStageCreateInfo({}, mSpirvModules[i].mStage, mSpirvModules[i].mShaderModule, mSpirvModules[i].mEntryPoint.c_str(), specializationInfos[i] ));
+			stages[i] = vk::PipelineShaderStageCreateInfo({}, mSpirvModules[i].mStage, mSpirvModules[i].mShaderModule, mSpirvModules[i].mEntryPoint.c_str(), specializationInfos[i] );
 
 		vk::GraphicsPipelineCreateInfo info({}, stages, &vertexInput, &mInputAssemblyState, nullptr, &mViewportState, &mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex);
 		mPipeline = device->createGraphicsPipeline(device.PipelineCache(), info).value;
@@ -151,33 +131,11 @@ public:
 	}
 	
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eGraphics; }
-
-	inline friend binary_stream& operator<<(binary_stream& stream, const GraphicsPipeline& pipeline) {
-		stream << pipeline.mBlendStates;
-		stream << pipeline.mDepthStencilState;
-		stream << pipeline.mDynamicStates;
-		stream << pipeline.mInputAssemblyState;
-		stream << pipeline.mMultisampleState;
-		stream << pipeline.mRasterizationState;
-		stream << pipeline.mViewportState;
-		stream << pipeline.mRenderQueue;
-		return operator<<(stream, *(Pipeline*)&pipeline);
-	}
-	inline friend binary_stream& operator>>(binary_stream& stream, GraphicsPipeline& pipeline) {
-		stream >> pipeline.mBlendStates;
-		stream >> pipeline.mDepthStencilState;
-		stream >> pipeline.mDynamicStates;
-		stream >> pipeline.mInputAssemblyState;
-		stream >> pipeline.mMultisampleState;
-		stream >> pipeline.mRasterizationState;
-		stream >> pipeline.mViewportState;
-		stream >> pipeline.mRenderQueue;
-		return operator>>(stream, *(Pipeline*)&pipeline);
-	}
 };
 
-template<> inline size_t basic_hash(const stm::Pipeline& pipeline) { return pipeline.Hash(); }
-template<> inline size_t basic_hash(const stm::ComputePipeline& pipeline) { return pipeline.Hash(); }
-template<> inline size_t basic_hash(const stm::GraphicsPipeline& pipeline) { return pipeline.Hash(); }
+}
 
+namespace std {
+template<class T> requires(is_base_of_v<stm::Pipeline,T>)
+struct hash<T> { inline size_t operator()(const T& pipeline) { return pipeline.Hash(); } };
 }

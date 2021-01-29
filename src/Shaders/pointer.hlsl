@@ -1,5 +1,5 @@
-#pragma compile vertex vsmain
-#pragma compile fragment fsmain
+#pragma compile vertex vs_pointer
+#pragma compile fragment fs_pointer
 
 #include <stratum.hlsli>
 
@@ -19,7 +19,7 @@ struct v2f {
 	float fade : TEXCOORD0;
 };
 
-v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
+v2f vs_pointer(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	static const float2 positions[6] = {
 		float2(-1, 0),
 		float2( 1, 0),
@@ -43,8 +43,9 @@ v2f vsmain(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	return o;
 }
 
-float4 fsmain(v2f i) : SV_Target0 {
+float4 fs_pointer(float fade : TEXCOORD0) : SV_Target0 {
 	float4 color = gColor;
-	color.a *= (1 - abs(i.fade)) * (1 - abs(i.fade));
+	float s = 1 - abs(fade);
+	color.a *= s*s;
 	return color;
 }

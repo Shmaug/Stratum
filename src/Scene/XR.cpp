@@ -104,7 +104,7 @@ void XR::Cleanup() {
 	mHmdCamera = nullptr;
 }
 
-set<string> XR::InstanceExtensionsRequired() {
+unordered_set<string> XR::InstanceExtensionsRequired() {
 	PFN_xrVoidFunction func;
 	if (FailMsg(xrGetInstanceProcAddr(mInstance, "xrGetVulkanInstanceExtensionsKHR", &func), "Failed to get address of xrGetVulkanInstanceExtensionsKHR")) return {};
 	PFN_xrGetVulkanInstanceExtensionsKHR xrGetVulkanInstanceExtensions = (PFN_xrGetVulkanInstanceExtensionsKHR)func;
@@ -114,13 +114,13 @@ set<string> XR::InstanceExtensionsRequired() {
 	string extensions(bufSize, '\0');
 	xrGetVulkanInstanceExtensions(mInstance, mSystem, bufSize, &len, extensions.data());
 
-	set<string> result;
+	unordered_set<string> result;
 	stringstream t(extensions);
 	string e;
 	while (t >> e) result.insert(e);
 	return result;
 }
-set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
+unordered_set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	PFN_xrVoidFunction func;
 	if (FailMsg(xrGetInstanceProcAddr(mInstance, "xrGetVulkanDeviceExtensionsKHR", &func), "Failed to get address of xrGetVulkanDeviceExtensionsKHR")) return {};
 	PFN_xrGetVulkanDeviceExtensionsKHR xrGetVulkanDeviceExtensions = (PFN_xrGetVulkanDeviceExtensionsKHR)func;
@@ -130,7 +130,7 @@ set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	string extensions(bufSize, '\0');
 	xrGetVulkanDeviceExtensions(mInstance, mSystem, bufSize, &len, extensions.data());
 
-	set<string> result;
+	unordered_set<string> result;
 	stringstream t(extensions);
 	string e;
 	while (t >> e) result.insert(e);
@@ -365,7 +365,7 @@ bool XR::OnSceneInit(Scene* scene) {
 	}
 	#pragma endregion
 
-	mHmdCamera = mScene->CreateObject<Camera>(mSystemProperties.systemName, set<RenderTargetIdentifier> { "OpenXR HMD" });
+	mHmdCamera = mScene->CreateObject<Camera>(mSystemProperties.systemName, unordered_set<RenderAttachmentId> { "OpenXR HMD" });
 	mHmdCamera->StereoMode(StereoMode::eHorizontal);
 
 	return true;
@@ -374,10 +374,10 @@ bool XR::OnSceneInit(Scene* scene) {
 void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = *mScene->Instance();
-	binding.physicalDevice = mScene->Instance().Device().PhysicalDevice();
-	binding.device = *mScene->Instance().Device();
-	binding.queueFamilyIndex = mScene->Instance().Window().PresentQueueFamily()->mFamilyIndex;
+	binding.instance = *mScene->mInstance;
+	binding.physicalDevice = mScene->mInstance.Device().PhysicalDevice();
+	binding.device = *mScene->mInstance.Device();
+	binding.queueFamilyIndex = mScene->mInstance.Window().PresentQueueFamily()->mFamilyIndex;
 	binding.queueIndex = 0;
 
 	XrSessionCreateInfo sessioninfo = {};
@@ -557,7 +557,7 @@ void XR::PostRender(CommandBuffer& commandBuffer) {
 	}
 	#pragma endregion
 
-	vector<float3> positions(mViewCount);
+	vector<Vector3f> positions(mViewCount);
 	vector<fquat> rotations(mViewCount);
 
 	StereoEye eyes[2] { StereoEye::eLeft, StereoEye::eRight };
@@ -569,21 +569,21 @@ void XR::PostRender(CommandBuffer& commandBuffer) {
 		mProjectionViews[i].pose = views[i].pose;
 		mProjectionViews[i].fov = views[i].fov;
 
-		mHmdCamera->Projection(float4x4::Perspective(
+		mHmdCamera->Projection(Matrix4f::Perspective(
 			n * tanf(views[i].fov.angleLeft), n * tanf(views[i].fov.angleRight), n * tanf(views[i].fov.angleDown), n * tanf(views[i].fov.angleUp),
 			n, mHmdCamera->Far()), eyes[i]);
 			
-		positions[i] = float3(views[i].pose.position.x, views[i].pose.position.y, -views[i].pose.position.z);
+		positions[i] = Vector3f(views[i].pose.position.x, views[i].pose.position.y, -views[i].pose.position.z);
 		rotations[i] = fquat(-views[i].pose.orientation.x, -views[i].pose.orientation.y, views[i].pose.orientation.z, views[i].pose.orientation.w);
 	}
 
-	float3 center = (positions[0] + positions[1]) * .5f;
+	Vector3f center = (positions[0] + positions[1]) * .5f;
 	fquat iq = inverse(rotations[0]);
 
 	mHmdCamera->LocalPosition(center);
 	mHmdCamera->LocalRotation(rotations[0]);
 
-	mHmdCamera->EyeOffset(iq * (positions[0] - center), fquat(0,0,0,1), eyes[0]);
+	mHmdCamera->EyeOffset(iq * (positions[0] - center), fquat::Identity(), eyes[0]);
 	mHmdCamera->EyeOffset(iq * (positions[1] - center), iq * rotations[1], eyes[1]);
 
 

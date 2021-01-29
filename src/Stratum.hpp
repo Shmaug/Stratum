@@ -1,8 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.hpp>
-
-#ifdef WINDOWS
+#ifdef WIN32
 
 #ifdef _DEBUG
 #include <stdlib.h>
@@ -38,20 +36,34 @@
 #define PLUGIN_EXPORT
 #endif
 
-#include "Types.hpp"
+#include <vulkan/vulkan.hpp>
+#include "Util/Types.hpp"
 
 namespace stm {
 
 template<typename T> inline void safe_delete(T*& x)       { if (x) { delete   x; x = nullptr; } }
 template<typename T> inline void safe_delete_array(T*& x) { if (x) { delete[] x; x = nullptr; } }
 
-template<typename T> inline T degrees(const T& r) { return r * (T)180/(T)M_PI; }
-template<typename T> inline T radians(const T& d) { return d * (T)M_PI/(T)180; }
 
-template <typename T> inline T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
-template <typename T> inline T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
-template <typename T> inline T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
-template <typename T> inline T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
+#pragma region misc math expressions
+
+template<typename T> inline constexpr T degrees(const T& r) { return r * (T)180/(T)M_PI; }
+template<typename T> inline constexpr T radians(const T& d) { return d * (T)M_PI/(T)180; }
+
+template<typename T> inline constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
+template<typename T> inline constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
+template<typename T> inline constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
+template<typename T> inline constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
+
+template<typename T>
+inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
+	Vector3f normal = plane.normal();
+	Hyperplane<float,3> dilatatedPlane(normal, plane.offset() - abs(box.sizes().dot(normal)));
+	Vector3f n = lerp(box.max(), box.min(), max<Array3f>(normal.array().sign(), Array3f::Zero()));
+	return dilatatedPlane.signedDistance(n);
+}
+
+#pragma endregion
 
 enum class ConsoleColorBits {
 	eBlack	= 0,
@@ -67,20 +79,16 @@ enum class ConsoleColorBits {
 using ConsoleColor = vk::Flags<ConsoleColorBits>;
 
 template<typename... Args>
-#ifdef WINDOWS
 inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Args&&... a) {
-#else
-inline void fprintf_color(ConsoleColor color, _IO_FILE* str, const char* format, Args&&... a) {
-#endif
-	#ifdef WINDOWS
+	#ifdef WIN32
 	int c = 0;
 	if (color & ConsoleColorBits::eRed) 	c |= FOREGROUND_RED;
 	if (color & ConsoleColorBits::eGreen) c |= FOREGROUND_GREEN;
 	if (color & ConsoleColorBits::eBlue) 	c |= FOREGROUND_BLUE;
 	if (color & ConsoleColorBits::eBold) 	c |= FOREGROUND_INTENSITY;
-	if      (str == stdin)  SetConsoleTextAttribute(GetStdHandle(STD_INPUT_HANDLE), c);
+	if      (str == stdin)  SetConsoleTextAttribute(GetStdHandle(STD_INPUT_HANDLE) , c);
 	else if (str == stdout) SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), c);
-	else if (str == stderr) SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE), c);
+	else if (str == stderr) SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE) , c);
 	#else
 	static const unordered_map<ConsoleColorBits, const char*> colorMap {
 		{ ConsoleColorBits::eBlack,   	"\x1B[0;30m" }
@@ -97,10 +105,10 @@ inline void fprintf_color(ConsoleColor color, _IO_FILE* str, const char* format,
 
 	fprintf(str, format, forward<Args>(a)...);
 
-	#ifdef WINDOWS
-	if      (str == stdin)  SetConsoleTextAttribute(GetStdHandle(STD_INPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+	#ifdef WIN32
+	if      (str == stdin)  SetConsoleTextAttribute(GetStdHandle(STD_INPUT_HANDLE) , FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 	else if (str == stdout) SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
-	else if (str == stderr) SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+	else if (str == stderr) SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE) , FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 	#else
 	fprintf(str, "\x1B[0m");
 	#endif
@@ -113,7 +121,7 @@ constexpr inline vk::DeviceSize operator"" _gB(vk::DeviceSize x) { return x*1024
 
 wstring s2ws(const string &str) {
     if (str.empty()) return wstring();
-		#ifdef WINDOWS
+		#ifdef WIN32
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
     wstring wstrTo(size_needed, 0);
     MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
@@ -123,7 +131,7 @@ wstring s2ws(const string &str) {
 }
 string ws2s(const wstring &wstr) {
     if (wstr.empty()) return string();
-		#ifdef WINDOWS
+		#ifdef WIN32
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
     string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
@@ -457,6 +465,71 @@ inline bool HasStencilComponent(vk::Format format) {
 		format == vk::Format::eD16UnormS8Uint ||
 		format == vk::Format::eD24UnormS8Uint ||
 		format == vk::Format::eD32SfloatS8Uint;
+}
+
+inline vk::AccessFlags GuessAccessMask(vk::ImageLayout layout) {
+	switch (layout) {
+    case vk::ImageLayout::eUndefined:
+    case vk::ImageLayout::ePresentSrcKHR:
+    case vk::ImageLayout::eColorAttachmentOptimal:
+			return {};
+
+    case vk::ImageLayout::eGeneral:
+			return vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
+
+    case vk::ImageLayout::eDepthAttachmentOptimal:
+    case vk::ImageLayout::eStencilAttachmentOptimal:
+    case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
+    case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilAttachmentOptimal:
+			return vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+
+    case vk::ImageLayout::eDepthReadOnlyOptimal:
+    case vk::ImageLayout::eStencilReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
+			return vk::AccessFlagBits::eDepthStencilAttachmentRead;
+		
+    case vk::ImageLayout::eShaderReadOnlyOptimal:
+			return vk::AccessFlagBits::eShaderRead;
+    case vk::ImageLayout::eTransferSrcOptimal:
+			return vk::AccessFlagBits::eTransferRead;
+    case vk::ImageLayout::eTransferDstOptimal:
+			return vk::AccessFlagBits::eTransferWrite;
+	}
+	return vk::AccessFlagBits::eShaderRead;
+}
+inline vk::PipelineStageFlags GuessStage(vk::ImageLayout layout) {
+	switch (layout) {
+		case vk::ImageLayout::eGeneral:
+			return vk::PipelineStageFlagBits::eComputeShader;
+
+		case vk::ImageLayout::eColorAttachmentOptimal:
+			return vk::PipelineStageFlagBits::eColorAttachmentOutput;
+		
+		case vk::ImageLayout::eShaderReadOnlyOptimal:
+		case vk::ImageLayout::eDepthReadOnlyOptimal:
+		case vk::ImageLayout::eStencilReadOnlyOptimal:
+		case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
+			return vk::PipelineStageFlagBits::eFragmentShader;
+
+		case vk::ImageLayout::eTransferSrcOptimal:
+		case vk::ImageLayout::eTransferDstOptimal:
+			return vk::PipelineStageFlagBits::eTransfer;
+
+		case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
+		case vk::ImageLayout::eDepthStencilAttachmentOptimal:
+		case vk::ImageLayout::eStencilAttachmentOptimal:
+		case vk::ImageLayout::eDepthAttachmentOptimal:
+		case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
+			return vk::PipelineStageFlagBits::eLateFragmentTests;
+
+		case vk::ImageLayout::ePresentSrcKHR:
+		case vk::ImageLayout::eSharedPresentKHR:
+			return vk::PipelineStageFlagBits::eBottomOfPipe;
+
+		default:
+			return vk::PipelineStageFlagBits::eTopOfPipe;
+	}
 }
 
 }

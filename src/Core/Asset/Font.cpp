@@ -56,40 +56,7 @@ void ReadGlyphCache(const fs::path& filename, unordered_map<uint32_t, msdfgen::B
 	printf("Loaded %s\n", filename.string().c_str());
 }
 
-inline float2 barycentrics(const float2& p, const float2& a, const float2& b, const float2& c) {
-	float2 v0 = c - a;
-	float2 v1 = b - a;
-	float2 v2 = p - a;
-	float dot00 = dot(v0, v0);
-	float dot01 = dot(v0, v1);
-	float dot02 = dot(v0, v2);
-	float dot11 = dot(v1, v1);
-	float dot12 = dot(v1, v2);
-	return float2(dot11 * dot02 - dot01 * dot12, dot00 * dot12 - dot01 * dot02) / (dot00 * dot11 - dot01 * dot01);
-}
-inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1) {
-	uint2 mx = (uint2)ceil(max(p0, p1));
-	float2 uv;
-	for (uint32_t y = 0; y < mx.y; y++) 
-		for (uint32_t x = 0; x < mx.x; x++) {
-			uv = barycentrics(float2((float)x, (float)y) + .5f, p0, p1, 0);
-			if (uv.x < 0 || uv.y < 0 || uv.x + uv.y > 1) continue;
-			data[x + y * width] = !data[x + y * width];
-		}
-}
-inline void rasterize(bool* data, uint32_t width, const float2& p0, const float2& p1, const float2& c) {
-	uint2 mx = (uint2)ceil(max(max(p0, p1), c));
-	float2 uv;
-	for (uint32_t y = 0; y < mx.y; y++) 
-		for (uint32_t x = 0; x < mx.x; x++) {
-			uv = barycentrics(float2((float)x, (float)y) + .5f, p0, p1, c);
-			float g = uv.x/2 + uv.y;
-			if (g*g < uv.y && uv.x >= 0.0 && uv.y >= 0.0 && uv.x + uv.y <= 1.0)
-				data[x + y * width] = !data[x + y * width];
-		}
-}
-
-Font::Font(Device& device, const fs::path& filename) : Asset(device, filename) {
+Font::Font(Device& device, const fs::path& filename) {
 	msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
 	msdfgen::FontHandle* font = msdfgen::loadFont(ft, filename.string().c_str());
 	if (!font) throw invalid_argument("failed to load font " + filename.string());
@@ -125,30 +92,30 @@ Font::Font(Device& device, const fs::path& filename) : Asset(device, filename) {
 		for (char c1 : gCharacters)
 			if (msdfgen::getKerning(kerning, font, (uint32_t)c1, (uint32_t)c))
 				glyph.mKerning.emplace(c1, (float)kerning);
-		glyph.mOffset = float2((float)bounds.l, (float)bounds.b);
-		glyph.mExtent = float2((float)(bounds.r - bounds.l), (float)(bounds.t - bounds.b));
-		glyph.mTextureExtent = { (uint32_t)fabs(glyph.mExtent.x*gBitmapScale), (uint32_t)fabs(glyph.mExtent.y*gBitmapScale) };
-		glyph.mTextureOffset = 0;
+		glyph.mBounds = AlignedBox2f(Vector2f(bounds.l, bounds.b), Vector2f(bounds.r, bounds.t));
+		glyph.mTextureBounds = AlignedBox2u(Vector2u::Zero(), (glyph.mBounds.sizes().cwiseAbs()*gBitmapScale).cast<uint32_t>());
 
 		if (bitmaps.count(c)) {
 			area += bitmaps.at(c).width() * bitmaps.at(c).height();
 			continue;
 		}
-		if (glyph.mTextureExtent.x == 0 || glyph.mTextureExtent.y == 0) continue;
-		bitmaps.emplace(c, msdfgen::Bitmap<float, 4>(glyph.mTextureExtent.x + 2*gBitmapPadding, glyph.mTextureExtent.y + 2*gBitmapPadding));
-		msdfgen::Bitmap<float, 4>& bitmap = bitmaps.at(c);
-		area += bitmap.width() * bitmap.height();
+		if (glyph.mTextureBounds.isEmpty()) continue;
+
+		// render bitmap
+
+		Vector2u bitmapSize = glyph.mTextureBounds.sizes() + Vector2u::Constant(2*gBitmapPadding);
+		auto& bitmap = bitmaps.emplace(c, msdfgen::Bitmap<float, 4>((uint32_t)bitmapSize.x(), (uint32_t)bitmapSize.y())).first->second;
+		area += bitmapSize.prod();
 
 		shape.normalize();
 		msdfgen::edgeColoringSimple(shape, 3.0);
-		msdfgen::generateMTSDF(bitmap, shape, length(glyph.mExtent), gBitmapScale, -msdfgen::Vector2(bounds.l, bounds.b) + gBitmapPadding/gBitmapScale);
+		msdfgen::generateMTSDF(bitmap, shape, glyph.mTextureBounds.sizes().norm(), gBitmapScale, -msdfgen::Vector2(bounds.l, bounds.b) + gBitmapPadding/gBitmapScale);
 		msdfgen::distanceSignCorrection(bitmap, shape, gBitmapScale, -msdfgen::Vector2(bounds.l, bounds.b) + gBitmapPadding/gBitmapScale);
 		writeCache = true;
 	}
 	
 	WriteGlyphCache(cacheFile, bitmaps);
 
-	// Place bitmaps
 	
 	vk::Extent2D extent = { 0, 32 };
 	extent.width = (uint32_t)sqrt((double)area);
@@ -161,105 +128,36 @@ Font::Font(Device& device, const fs::path& filename) : Asset(device, filename) {
 	extent.width |= extent.width >> 16;
 	extent.width++;
 
-	uint2 cur = 0;
+	// Place bitmaps row-by-row
+	Vector2u cur = Vector2u::Zero();
 	uint32_t lineHeight = 0;
-
-	for (auto& kp : bitmaps) {
-		mGlyphs[kp.first].mTextureOffset = cur + gBitmapPadding;
-		cur.x += kp.second.width();
-		lineHeight = max(lineHeight, (uint32_t)kp.second.height());
-		if (cur.x >= extent.width) {
-			cur.x = 0;
-			cur.y += lineHeight;
-			lineHeight = (uint32_t)kp.second.height();
-			mGlyphs[kp.first].mTextureOffset = cur + gBitmapPadding;
-			cur.x += kp.second.width();
-		}
-		if (cur.y + kp.second.height() >= extent.height) extent.height *= 2;
+	for (auto& [codepoint, glyphImg] : bitmaps) {
+		Vector2u dst = cur;
+		cur.x() += glyphImg.width();
+		if (cur.x() >= extent.width) {
+			// next row
+			cur.x() = 0;
+			cur.y() += lineHeight;
+			lineHeight = (uint32_t)glyphImg.height();
+			dst = cur;
+			cur.x() += glyphImg.width();
+		} else
+			lineHeight = max(lineHeight, (uint32_t)glyphImg.height());
+		while (cur.y() + glyphImg.height() >= extent.height) extent.height *= 2;
+		mGlyphs[codepoint].mTextureBounds.translate(dst + Vector2u::Constant(gBitmapPadding));
 	}
 
 	// Copy bitmap data
 
-	int8_t* data = new int8_t[4*extent.width*extent.height];
-	memset(data, 127, 4*extent.width*extent.height);
-	for (auto& kp : bitmaps)
-		for (uint32_t y = 0; y < (uint32_t)kp.second.height(); y++) {
-			int8_t* dst = data + 4*(mGlyphs[kp.first].mTextureOffset.x-gBitmapPadding + (mGlyphs[kp.first].mTextureOffset.y+y-gBitmapPadding)*extent.width);
-			for (uint32_t x = 0; x < 4*(uint32_t)kp.second.width(); x++)
-				dst[x] = (uint8_t)(fminf(fmaxf(kp.second.operator()(0, y)[x], -1), 1)*127);
+	vector<int8_t> data(4*extent.width*extent.height, 0xFF/2);
+	for (auto& [idx,img] : bitmaps)
+		for (uint32_t y = 0; y < (uint32_t)img.height(); y++) {
+			int8_t* dst = data.data() + 4*(mGlyphs[idx].mTextureBounds.min().x()-gBitmapPadding + (mGlyphs[idx].mTextureBounds.min().y()+y-gBitmapPadding)*extent.width);
+			for (uint32_t x = 0; x < 4*(uint32_t)img.width(); x++)
+				dst[x] = (uint8_t)(fminf(fmaxf(img.operator()(0, y)[x], -1), 1)*127);
 		}
-	mSDF = make_shared<Texture>(filename.string()+"/SDF", device, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, byte_blob(4*extent.width*extent.height, data), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
-	delete[] data;
+	mSDF = make_shared<Texture>(filename.string()+"_msdf", device, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, byte_blob(data), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
 	
 	msdfgen::destroyFont(font);
 	msdfgen::deinitializeFreetype(ft);
-}
-
-void Font::GenerateGlyphs(vector<GlyphRect>& result, fAABB& bounds, const string& str, float pixelHeight, const float2& offset, TextAnchor horizontalAnchor) const {	
-	if (str.empty()) return;
-
-	const Glyph* prev = nullptr;
-
-	float scale = pixelHeight / mEmSize;
-
-	float baseline = offset.y;
-	float currentPoint = offset.x;
-	size_t lineStart = result.size();
-
-	bounds.mMax = numeric_limits<float>::lowest();
-	bounds.mMin = numeric_limits<float>::max();
-
-	for (uint32_t i = 0; i < str.length(); i++) {
-		uint32_t codepoint = (uint32_t)str[i];
-		
-		if (codepoint == '\n') {
-			if (horizontalAnchor == TextAnchor::eMid)
-				for (size_t j = lineStart; j < result.size(); j++)
-					result[j].Offset.x -= (currentPoint - offset.x) * .5f;
-			else if (horizontalAnchor == TextAnchor::eMax)
-				for (size_t j = lineStart; j < result.size(); j++)
-					result[j].Offset.x -= (currentPoint - offset.x);
-			currentPoint = offset.x;
-			baseline -= mLineSpace*scale;
-			prev = nullptr;
-			lineStart = result.size();
-			continue;
-		}
-		if (codepoint == '\t') {
-			prev = nullptr;
-			currentPoint = ceilf(currentPoint/(mTabAdvance*scale))*mTabAdvance*scale;
-			continue;
-		}
-		if (codepoint == ' ' || mGlyphs.count(codepoint) == 0) {
-			prev = nullptr;
-			currentPoint += mSpaceAdvance*scale;
-			continue;
-		}
-		
-		const Glyph& glyph = mGlyphs.at(codepoint);
-
-		if (prev && prev->mKerning.count(codepoint))
-			currentPoint += prev->mKerning.at(codepoint)*scale;
-	
-		GlyphRect g = {};
-		g.Offset = float2(currentPoint, baseline) + glyph.mOffset*scale;
-		g.Extent = glyph.mExtent*scale;
-		g.TextureST = float4((float2)glyph.mTextureExtent, (float2)glyph.mTextureOffset) / (float4)uint4(mSDF->Extent().width, mSDF->Extent().height, mSDF->Extent().width, mSDF->Extent().height);
-		result.push_back(g);
-
-		bounds.mMin = float3(min((float2)bounds.mMin, g.Offset), 0);
-		bounds.mMax = float3(max((float2)bounds.mMax, g.Offset), 0);
-		bounds.mMin = float3(min((float2)bounds.mMin, g.Offset + g.Extent), 0);
-		bounds.mMax = float3(max((float2)bounds.mMax, g.Offset + g.Extent), 0);
-
-		currentPoint += glyph.mAdvance*scale;
-		prev = &glyph;
-	}
-
-	if (horizontalAnchor == TextAnchor::eMid)
-		for (uint32_t i = (uint32_t)lineStart; i < result.size(); i++)
-			result[i].Offset.x -= (currentPoint - offset.x) * .5f;
-	else if (horizontalAnchor == TextAnchor::eMax)
-		for (uint32_t i = (uint32_t)lineStart; i < result.size(); i++)
-			result[i].Offset.x -= (currentPoint - offset.x);
 }

@@ -1,5 +1,5 @@
-#pragma compile vertex vsmain
-#pragma compile fragment fsmain
+#pragma compile vertex vs_ui
+#pragma compile fragment fs_ui
 
 #define gTextureCount 64
 
@@ -46,7 +46,7 @@ static const float2 gUnitQuad[6] = {
 	float2(1,1)
 };
 
-v2f vsmain(uint instance : SV_InstanceID, uint index : SV_VertexID) {
+v2f vs_ui(uint instance : SV_InstanceID, uint index : SV_VertexID) {
 	GuiElement elem = gElements[instance];
 
 	float3 p;
@@ -70,7 +70,7 @@ v2f vsmain(uint instance : SV_InstanceID, uint index : SV_VertexID) {
 	return o;
 }
 
-float4 fsmain(uint instance : SV_InstanceID, v2f i) : SV_Target0 {
+float4 fs_ui(uint instance : SV_InstanceID, v2f i) : SV_Target0 {
 	GuiElement elem = gElements[instance];
 	float4 color = elem.Color;
 	if (gTextureCount && elem.TextureIndex < gTextureCount)

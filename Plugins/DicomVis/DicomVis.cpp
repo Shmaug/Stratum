@@ -46,12 +46,12 @@ private:
 	float mZoom = 0;
 	bool mShowPerformance = false;
 
-	set<fs::path> mStackFolders;
+	unordered_set<fs::path> mStackFolders;
 
 	void ScanFolders() {
 		fs::path dataPath;
 		string tmp;
-		if (mScene->Instance()->GetOption("dataPath", tmp))
+		if (mScene->mInstance->GetOption("dataPath", tmp))
 				dataPath = tmp;
 		else {
 			vector<fs::path> defaultLocations { "/Data", "/data", "~/Data", "~/data", "C:/Data", "D:/Data", "E:/Data", "F:/Data" "G:/Data", };
@@ -69,7 +69,7 @@ private:
 	void LoadScene() {
 		fs::path filename;
 		string tmp;
-		if (mScene->Instance()->GetOption("environment", tmp))
+		if (mScene->mInstance->GetOption("environment", tmp))
 			filename = tmp;
 
 		tinygltf::Model model;
@@ -84,12 +84,12 @@ private:
 		}
 		if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 		
-		Device& device = mScene->Instance()->Device();
+		Device& device = mScene->mInstance->mDevice;
 		vector<shared_ptr<Texture>> images;
 		vector<shared_ptr<Material>> materials;
 		vector<vector<shared_ptr<Mesh>>> meshes;  // meshes from glTF primitives
 		unordered_map<uint32_t, Mesh::VertexAttribute> accessorMap;
-		static const map<string, VertexAttributeType> semanticMap {
+		static const unordered_map<string, VertexAttributeType> semanticMap {
 			{ "position", VertexAttributeType::ePosition },
 			{ "normal", VertexAttributeType::eNormal },
 			{ "tangent", VertexAttributeType::eTangent },
@@ -104,7 +104,7 @@ private:
 		for (const auto& i : model.images)
 			images.push_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
 		for (const auto& m : model.materials) {
-			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/Shaders/pbr.stmb", "pbr"));
+			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/coreshaders.stmb", "pbr"));
 			// TODO: read materials
 			materials.push_back(mat);
 		}
@@ -149,7 +149,7 @@ private:
 					VertexAttributeType type = semanticMap.count(typeName) ? semanticMap.at(typeName) : VertexAttributeType::eOther;
 					
 
-					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(ArrayBufferView(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
+					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(Buffer::ArrayView<>(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
 					elementOffset += elementStride;
 				}
 			}
@@ -180,13 +180,13 @@ private:
 				}
 
 				if (!mesh->GetAttribute(VertexAttributeType::eTexcoord, 0)) {
-					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/VertexData", device, (sizeof(float4)+sizeof(float2))*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-					mesh->SetVertexAttribute(VertexAttributeType::eTangent , 0, ArrayBufferView(b, 0, sizeof(float4)), 0);
-					mesh->SetVertexAttribute(VertexAttributeType::eTexcoord, 0, ArrayBufferView(b, vertexCount*sizeof(float4), sizeof(float2)), 0);
+					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/VertexData", device, (sizeof(Vector4f)+sizeof(Vector2f))*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent , 0, Buffer::ArrayView(b, 0, sizeof(Vector4f)), 0);
+					mesh->SetVertexAttribute(VertexAttributeType::eTexcoord, 0, Buffer::ArrayView(b, vertexCount*sizeof(Vector4f), sizeof(Vector2f)), 0);
 				} else if (!mesh->GetAttribute(VertexAttributeType::eTangent, 0)) {
 					// TODO: generate tangents
-					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/Tangents", device, sizeof(float4)*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-					mesh->SetVertexAttribute(VertexAttributeType::eTangent, 0, ArrayBufferView(b, 0, sizeof(float4)), 0);
+					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/Tangents", device, sizeof(Vector4f)*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent, 0, Buffer::ArrayView(b, 0, sizeof(Vector4f)), 0);
 				}
 
 				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)model.accessors[prim.indices].count, 0, nullptr));
@@ -220,11 +220,11 @@ private:
 protected:
 	PLUGIN_EXPORT bool OnSceneInit(Scene* scene) override {
 		mScene = scene;
-		mKeyboardInput = mScene->Instance()->InputManager().GetFirst<MouseKeyboardInput>();
+		mKeyboardInput = mScene->mInstance->InputManager().GetFirst<MouseKeyboardInput>();
 
 		mZoom = 3.f;
 		
-		mMainCamera = unique_ptr<Camera>(mScene->CreateObject<Camera>("Camera", set<RenderTargetIdentifier> { "stm_main_render", "stm_main_resolve" "stm_main_depth" }));
+		mMainCamera = unique_ptr<Camera>(mScene->CreateObject<Camera>("Camera", unordered_set<RenderAttachmentId> { "stm_main_render", "stm_main_resolve" "stm_main_depth" }));
 		mMainCamera->Near(.00625f);
 		mMainCamera->Far(1024.f);
 		mMainCamera->FieldOfView(radians(65.f));
@@ -249,7 +249,7 @@ protected:
 				mMainCamera->LocalPosition(0, 1.6f, -mZoom);
 			}
 			if (mVolume && mKeyboardInput->KeyDown(MOUSE_LEFT)) {
-				float3 axis = mMainCamera->WorldRotation() * float3(0, 1, 0) * mKeyboardInput->CursorDelta().x - mMainCamera->WorldRotation() * float3(1, 0, 0) * mKeyboardInput->CursorDelta().y;
+				Vector3f axis = mMainCamera->WorldRotation() * Vector3f(0, 1, 0) * mKeyboardInput->CursorDelta().x - mMainCamera->WorldRotation() * Vector3f(1, 0, 0) * mKeyboardInput->CursorDelta().y;
 				if (dot(axis, axis) > .001f) {
 					mVolume->LocalRotation(fquat::AxisAngle(-normalize(axis), length(axis) * .003f) * mVolume->LocalRotation());
 				}
@@ -266,9 +266,9 @@ protected:
 			Profiler::DrawGui(gui, (uint32_t)mScene->FPS());
 
 		if (worldSpace)
-			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, float4x4::TRS(float3(-.85f, 1, 0), fquat(0, 0, 0, 1), .001f), Rect2D(0, 0, 300, 850));
+			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, Matrix4f::TRS(Vector3f(-.85f, 1, 0), fquat::Identity(), .001f), Rect2D(0, 0, 300, 850));
 		else
-			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, Rect2D(10, (float)mScene->Instance()->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
+			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, Rect2D(10, (float)mScene->mInstance->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
 
 
 		gui.LayoutTitle("Load Dataset");
@@ -279,9 +279,9 @@ protected:
 		
 		for (const auto& folder : mStackFolders)
 			if (gui.LayoutTextButton(folder.stem().string(), TextAnchor::eMin)) {
-				commandBuffer.Device().Flush();
-				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.Device(), folder));
-				mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * float3(0,0,0.5f));
+				commandBuffer.mDevice.Flush();
+				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.mDevice, folder));
+				mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * Vector3f(0,0,0.5f));
 			}
 
 		gui.mLayoutStyle.mControlSize = prev;
@@ -292,7 +292,7 @@ protected:
 		gui.EndLayout();
 	}
 
-	PLUGIN_EXPORT void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const set<Camera*>& cameras) override {
+	PLUGIN_EXPORT void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const unordered_set<Camera*>& cameras) override {
 		if (!mVolume) return;
 		for (Camera* camera : cameras)
 			mVolume->Draw(commandBuffer, framebuffer, *camera);

@@ -4,25 +4,36 @@
 
 namespace stm {
 
-struct QueueFamily {
-	uint32_t mFamilyIndex = 0;
-	vector<vk::Queue> mQueues;
-	string mName;
-	vk::QueueFamilyProperties mProperties;
-	bool mSurfaceSupport;
-	// CommandBuffers may be in-flight or idle and are managed by stm::Device
-	unordered_map<thread::id, pair<vk::CommandPool, list<CommandBuffer*>>> mCommandBuffers;
+class Buffer;
+class CommandBuffer;
+class DescriptorSet;
+class Fence;
+class Texture;
+
+class Asset {
+public:
+  inline virtual ~Asset() {};
 };
 
 class Device {
 public:
-	const vk::DeviceSize mMemoryBlockSize = 256_mB;
+	stm::Instance& mInstance;
+	const vk::DeviceSize mMemoryBlockSize = 256_kB;
 
+	struct QueueFamily {
+		uint32_t mFamilyIndex = 0;
+		vector<vk::Queue> mQueues;
+		string mName;
+		vk::QueueFamilyProperties mProperties;
+		bool mSurfaceSupport;
+		// CommandBuffers may be in-flight or idle and are managed by Device
+		unordered_map<thread::id, pair<vk::CommandPool, list<unique_ptr<CommandBuffer>>>> mCommandBuffers;
+	};
 	class Memory {
 	private:
 		friend class Device;
 		vk::DeviceMemory mDeviceMemory;
-		map<vk::DeviceSize /*begin*/, vk::DeviceSize/*end*/> mBlocks;
+		unordered_map<vk::DeviceSize/*begin*/, vk::DeviceSize/*end*/> mBlocks;
 
 	public:
 		struct Block {
@@ -61,25 +72,18 @@ public:
 		inline bool empty() const { return mBlocks.empty(); }
 	};
 
-	Device() = delete;
-	Device(const Device&) = delete;
-	Device(Device&&) = delete;
-	Device& operator=(const Device&) = delete;
-	Device& operator=(Device&&) = delete;
+	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers);
 	STRATUM_API ~Device();
 	inline vk::Device operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
 	
 	inline vk::PhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
-	inline uint32_t PhysicalDeviceIndex() const { return mPhysicalDeviceIndex; }
 	inline const vk::PhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
 	inline const vk::PhysicalDeviceLimits& Limits() const { return mLimits; }
 	inline vk::PipelineCache PipelineCache() const { return mPipelineCache; }
 	inline const vector<uint32_t> QueueFamilies(uint32_t index) const { return mQueueFamilyIndices; }
 	STRATUM_API QueueFamily* FindQueueFamily(vk::SurfaceKHR surface);
 	STRATUM_API vk::SampleCountFlagBits GetMaxUsableSampleCount();
-
-	inline Instance& Instance() const { return mInstance; }
 
 	// Allocate device memory. Will attempt to sub-allocate from larger allocations. Host-visible memory is automatically mapped.
 	STRATUM_API Memory::Block AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag = "");
@@ -95,17 +99,9 @@ public:
 		}
 	}
 	
-	template<typename T> inline shared_ptr<T> LoadAsset(const fs::path& filename) {
-		static_assert(is_base_of<Asset, T>::value);
-		uint64_t key = basic_hash(filename.string());
-		lock_guard lock(mAssetMutex);
-		if (mLoadedAssets.count(key) == 0)
-			mLoadedAssets.emplace(key, shared_ptr<T>(new T(*this, filename)));
-		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
-	}
-	template<typename T> inline shared_ptr<T> FindLoadedAsset(const fs::path& filename) const {
-		static_assert(is_base_of<Asset, T>::value);
-		uint64_t key = basic_hash(filename.string());
+	template<class T> requires(derived_from<T,Asset>)
+	inline shared_ptr<T> FindOrLoadAsset(const fs::path& filename) const {
+		uint64_t key = hash_combine(filename.string());
 		if (mLoadedAssets.count(key) == 0) return nullptr;
 		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
 	}
@@ -114,18 +110,15 @@ public:
 	STRATUM_API shared_ptr<Buffer> GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	STRATUM_API shared_ptr<DescriptorSet> GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout);
 	STRATUM_API shared_ptr<Texture> GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	// Place a resource back in the resource pool
 	STRATUM_API void PoolResource(shared_ptr<Buffer> resource);
-	// Place a resource back in the resource pool
 	STRATUM_API void PoolResource(shared_ptr<DescriptorSet> resource);
-	// Place a resource back in the resource pool
 	STRATUM_API void PoolResource(shared_ptr<Texture> resource);
 
 	STRATUM_API void PurgeResourcePools(uint32_t maxAge);
 
-	STRATUM_API CommandBuffer* GetCommandBuffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API unique_ptr<CommandBuffer> GetCommandBuffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	// The CommandBuffer will be managed by the device after being passed in
-	STRATUM_API void Execute(CommandBuffer* commandBuffer, bool wait = false);
+	STRATUM_API Fence& Execute(unique_ptr<CommandBuffer>&& commandBuffer);
 	// Finish all work being done on this device
 	STRATUM_API void Flush();
 
@@ -146,20 +139,17 @@ private:
 		inline void EraseOld(uint64_t currentFrame, uint64_t maxAge) {
 			lock_guard lock(mMutex);
 			for (auto& [key,pool] : mResources)
-				ranges:::remove_if(pool, [=](const auto& i){ i.mLastFrameUsed + maxAge > currentFrame });
+				erase_if(pool, [=](const auto& i){ return i.mLastFrameUsed + maxAge > currentFrame; });
 		}
 	};
 
 	friend class Instance;
 	friend class DescriptorSet;
-	STRATUM_API Device(vk::PhysicalDevice physicalDevice, uint32_t physicalDeviceIndex, stm::Instance& instance, const set<string>& deviceExtensions, vector<const char*> validationLayers);
 	STRATUM_API void PrintAllocations();
 
 	vk::Device mDevice;
  	vk::PhysicalDevice mPhysicalDevice;
 	vk::PipelineCache mPipelineCache;
-	stm::Instance& mInstance;
-	uint32_t mPhysicalDeviceIndex;
 	size_t mFrameCount = 0;
 	vk::PhysicalDeviceMemoryProperties mMemoryProperties;
 	vk::PhysicalDeviceLimits mLimits;
@@ -167,14 +157,12 @@ private:
 	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
 	vector<uint32_t> mQueueFamilyIndices;
 
-
 	ResourcePool<DescriptorSet, vk::DescriptorSetLayout> mDescriptorSetPool;
 	ResourcePool<Buffer, size_t> mBufferPool;
 	ResourcePool<Texture, size_t> mTexturePool;
 	
-	
 	mutable mutex mQueueMutex;
-	unordered_map<uint32_t, stm::QueueFamily> mQueueFamilies;
+	unordered_map<uint32_t, QueueFamily> mQueueFamilies;
 
 	mutable mutex mMemoryMutex;
 	unordered_map<uint32_t /*memoryTypeIndex*/, list<unique_ptr<Memory>>> mMemoryPool;
@@ -187,44 +175,52 @@ private:
 };
 
 class Fence {
-private:
-	vk::Fence mFence;
-	string mName;
-	Device& mDevice;
 public:
-	inline Fence(const string& name, Device& device) : mName(name), mDevice(device) {
+	Device& mDevice;
+
+	inline Fence(Device& device, const string& name) : mName(name), mDevice(device) {
 		mFence = mDevice->createFence({});
 		mDevice.SetObjectName(mFence, mName);
 	}
 	inline ~Fence() { mDevice->destroyFence(mFence); }
 	inline vk::Fence& operator*() { return mFence; }
 	inline const vk::Fence* operator->() { return &mFence; }
-};
-class Semaphore {
+
+	inline vk::Result wait(uint64_t timeout = numeric_limits<uint64_t>::max()) {
+		return mDevice->waitForFences({ mFence }, true, timeout);
+	}
+
 private:
-	vk::Semaphore mSemaphore;
+	vk::Fence mFence;
 	string mName;
-	Device& mDevice;
+};
+
+class Semaphore {
 public:
-	inline Semaphore(const string& name, Device& device) : mName(name), mDevice(device) {
+	Device& mDevice;
+
+	inline Semaphore(Device& device, const string& name) : mName(name), mDevice(device) {
 		mSemaphore = mDevice->createSemaphore({});
 		mDevice.SetObjectName(mSemaphore, mName);
 	}
 	inline ~Semaphore() { mDevice->destroySemaphore(mSemaphore); }
 	inline vk::Semaphore& operator*() { return mSemaphore; }
 	inline const vk::Semaphore* operator->() { return &mSemaphore; }
-};
-class Sampler {
+
 private:
-	vk::Sampler mSampler;
+	vk::Semaphore mSemaphore;
 	string mName;
-	Device& mDevice;
+};
+
+class Sampler {
 public:
-	inline Sampler(const string& name, Device& device, const vk::SamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
+	Device& mDevice;
+
+	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : mName(name), mDevice(device) {
 		mSampler = mDevice->createSampler(samplerInfo);
 		mDevice.SetObjectName(mSampler, mName);
 	}
-	inline Sampler(const string& name, Device& device, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : mName(name), mDevice(device) {
+	inline Sampler(Device& device, const string& name, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : mName(name), mDevice(device) {
 		vk::SamplerCreateInfo samplerInfo = {};
 		samplerInfo.magFilter = filter;
 		samplerInfo.minFilter = filter;
@@ -250,6 +246,10 @@ public:
 	}
 	inline vk::Sampler operator*() const { return mSampler; }
 	inline const vk::Sampler* operator->() const { return &mSampler; }
+
+private:
+	vk::Sampler mSampler;
+	string mName;
 };
 
 }

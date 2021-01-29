@@ -1,16 +1,16 @@
-#pragma kernel Render
+#pragma compile compute Render
 
-#pragma multi_compile COLORIZE BAKED
-#pragma multi_compile SHADING_LOCAL
+[[vl::constant_id(3)]] const bool gColorize = false;
+[[vl::constant_id(4)]] const bool gBaked = false;
+[[vl::constant_id(5)]] const bool gLocalShading = false;
 
 #include "common.hlsli"
 #include <sampling.hlsli>
 
-[[vk::binding(4, 0)]] RWTexture2D<float4> RenderTarget : register(u0);
-[[vk::binding(5, 0)]] Texture2DMS<float> DepthBuffer : register(t0);
-
-[[vk::binding(6, 0)]] Texture2D<float4> gEnvironmentTexture	: register(t2);
-[[vk::binding(7, 0)]] SamplerState Sampler : register(s0);
+RWTexture2D<float4> RenderTarget : register(u0);
+Texture2DMS<float> DepthBuffer : register(t0);
+Texture2D<float4> gEnvironmentTexture	: register(t2);
+SamplerState Sampler : register(s0);
 
 [[vk::push_constant]] cbuffer PushConstants : register(b0) {
 	float4x4 InvViewProj;
@@ -18,6 +18,7 @@
 	uint2 WriteOffset;
 	float3 gCameraPosition;
 	float SampleRate;
+	uint gStereoEye;
 }
 
 float2 RayBox(float3 rayOrigin, float3 inverseRayDirection, float3 mn, float3 mx) {

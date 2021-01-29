@@ -9,27 +9,37 @@ namespace stm {
 // The scene will attempt to batch MeshRenderers that share the same mesh and material that have an 'Instances' parameter, and use instancing to render them all at once
 class MeshRenderer : public Renderer {
 public:
-	inline virtual void Mesh(shared_ptr<stm::Mesh> m) { mMesh = m; InvalidateTransform(); }
+	inline static const uint32_t gInstanceBatchSize = 1024;
+
+	inline MeshRenderer(SceneNode& node, const string& name) : SceneNode::Component(node, name) {};
+	
+	inline virtual void Mesh(shared_ptr<stm::Mesh> m) { mMesh = m; }
 	inline virtual shared_ptr<stm::Mesh> Mesh() const { return mMesh; }
+	inline virtual shared_ptr<stm::Material> Material() { return mMaterial; }
+	inline virtual void Material(shared_ptr<stm::Material> m) { mMaterial = m; }
 
-	inline virtual optional<fAABB> Bounds() override { ValidateTransform(); return mAABB; }
-	STRATUM_API virtual bool Intersect(const fRay& ray, float* t, bool any) override;
-
-	inline virtual bool Visible(const string& pass) override { return mMesh && mMaterial && Renderer::Visible(pass); }
+	inline virtual bool Visible(Camera& camera) override {
+		Vector3f sz = mAABB.sizes();
+		return mMesh && Material() && ranges::all_of(camera.LocalFrustum(), [&](const auto& plane) { return signedDistance(plane, mAABB) > 0; });
+	}
 
 private:
+	shared_ptr<stm::Material> mMaterial;
 	shared_ptr<stm::Mesh> mMesh;
-	optional<fAABB> mAABB;
+	AlignedBox3f mAABB;
 
 protected:
 	friend class Scene;
-	inline MeshRenderer(const string& name, stm::Scene& scene) : Object(name, scene) {};
 
-	STRATUM_API virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override;
-	STRATUM_API virtual void OnDrawInstanced(CommandBuffer& commandBuffer, Camera& camera, const shared_ptr<Buffer>& instanceBuffer, uint32_t instanceCount) override;
-	STRATUM_API virtual bool TryCombineInstances(CommandBuffer& commandBuffer, Renderer* renderer, shared_ptr<Buffer>& instanceBuffer, uint32_t& instanceCount) override;
-
-	STRATUM_API bool ValidateTransform() override;
+	inline virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) override {
+		mAABB = globalTransform;
+		if (mMesh && mMesh->AABB())
+			mAABB = globalTransform * mMesh->AABB();
+	}
+	inline virtual void OnDraw(CommandBuffer& commandBuffer, Camera& camera) override {
+		mMaterial->Bind(commandBuffer, mMesh.get());
+		mMesh->Draw(commandBuffer);
+	}
 };
 
 }

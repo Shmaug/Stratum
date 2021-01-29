@@ -5,10 +5,15 @@
 
 #include "ImageLoader.hpp"
 
+namespace stm {
+namespace shader_interop {
+#include "Shaders/common.hlsli"
+}
+}
+
 namespace dcmvs {
 
 using namespace stm;
-#include "Shaders/common.hlsli"
 
 enum class OrganMaskBits : uint32_t {
 	eBladder = 1,
@@ -47,8 +52,8 @@ public:
 	float mSampleRate = 1.f;
 	bool mColorize = false;
 	float mDensityScale = 1.f;
-	float2 mHueRange = float2(.01f, .5f);
-	float2 mRemapRange = float2(.125f, 1.f);
+	Vector2f mHueRange = Vector2f(.01f, .5f);
+	Vector2f mRemapRange = Vector2f(.125f, 1.f);
 	ShadingMode mShadingMode = {};
 	OrganMask mOrganMask = {};
 

@@ -1,15 +1,65 @@
 #pragma once
 
-#include "Object.hpp"
+#include "Scene.hpp"
 
 namespace stm {
+
+template<typename T> inline Transform<T,3,Projective> Perspective(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear/width;
+	r(1,1) = 2*zNear/height;
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Perspective(T left, T right, T top, T bottom, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear / (right - left);
+	r(1,1) = 2*zNear / (top - bottom);
+	r(2,0) = (left + right) / (left - right);
+	r(1,2) = (top + bottom) / (bottom - top);
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
+	T sy = 1 / tan(fovy / 2);
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = sy/aspect;
+	r(1,1) = sy;
+	r(2,2) = zFar / (zFar - zNear);
+	r(3,2) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2/width;
+	r(1,1) = 2/height;
+	r(2,2) = 1/(zFar - zNear);
+	r(3,2) = -zNear * r(2,2);
+	r(3,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2 / (right - left);
+	r(1,1) = 2 / (top - bottom);
+	r(2,2) = 1 / (zFar - zNear);
+	r(3,0) = (left + right) / (left - right);
+	r(3,1) = (top + bottom) / (bottom - top);
+	r(3,2) = zNear / (zNear - zFar);
+	r(3,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
 
 enum class StereoEye : uint32_t {
 	eNone = 0,
 	eLeft = 0,
 	eRight = 1
 };
-
 enum class StereoMode : uint32_t {
 	eNone = 0,
 	eVertical = 1,
@@ -17,90 +67,47 @@ enum class StereoMode : uint32_t {
 };
 
 // A scene object that the scene will use to render renderers
-class Camera : public Object {
+class Camera : public SceneNode::Component {
 public:
-	STRATUM_API Camera(const string& name, stm::Scene& scene, const set<RenderTargetIdentifier>& renderTargets);
-	STRATUM_API virtual ~Camera();
+	inline Camera(SceneNode& node, const string& name, const unordered_set<RenderAttachmentId>& renderTargets) : SceneNode::Component(node, name), mRenderTargets(renderTargets) {}
 
 	// Write the CameraData buffer to a location in memory
 	STRATUM_API virtual void WriteUniformBuffer(void* bufferData);
 	// Calls vkCmdSetViewport and vkCmdSetScissor
-	STRATUM_API virtual void SetViewportScissor(CommandBuffer& commandBuffer, StereoEye eye = StereoEye::eNone);
+	STRATUM_API virtual void SetViewportScissor(CommandBuffer& commandBuffer);
 
-	STRATUM_API virtual float4 WorldToClip(const float3& worldPos, StereoEye eye = StereoEye::eNone);
-	STRATUM_API virtual float3 ClipToWorld(const float3& clipPos, StereoEye eye = StereoEye::eNone);
-	STRATUM_API virtual fRay ScreenToWorldRay(const float2& uv, StereoEye eye = StereoEye::eNone);
-	
-	STRATUM_API virtual bool RendersToSubpass(RenderPass& renderPass, uint32_t subpassIndex);
-
-	// Setters
+	STRATUM_API virtual bool RendersToSubpass(const RenderPass::SubpassDescription& subpass);
 
 	inline virtual void RenderPriority(uint32_t x) { mRenderPriority = x; }
 	inline virtual void DrawSkybox(bool v) { mDrawSkybox = v; }
-	inline virtual void StereoMode(stm::StereoMode s) { mStereoMode = s; InvalidateTransform(); }
-	inline virtual void Orthographic(bool o) { mOrthographic = o; InvalidateTransform(); }
-	inline virtual void OrthographicSize(float s) { mOrthographicSize = s; InvalidateTransform(); }
-	inline virtual void AspectRatio(float r) { mAspectRatio = r; InvalidateTransform(); }
-	inline virtual void Near(float n) { mNear = n; InvalidateTransform(); }
-	inline virtual void Far(float f) { mFar = f;  InvalidateTransform(); }
-	inline virtual void FieldOfView(float f) { mFieldOfView = f; InvalidateTransform(); }
-	inline virtual void EyeOffset(const float3& translate, const fquat& rotate, StereoEye eye = StereoEye::eNone) { mEyeOffsetTranslate[(uint32_t)eye] = translate; mEyeOffsetRotate[(uint32_t)eye] = rotate;  InvalidateTransform(); }
-	inline virtual void Projection(const float4x4& projection, StereoEye eye = StereoEye::eNone) { mFieldOfView = 0; mOrthographic = false; mProjection[(uint32_t)eye] = projection; InvalidateTransform(); }
-
-	// Getters
-
 	inline virtual uint32_t RenderPriority() const { return mRenderPriority; }
 	inline virtual bool DrawSkybox() const { return mDrawSkybox; }
-	inline virtual stm::StereoMode StereoMode() { return mStereoMode; }
-	inline virtual bool Orthographic() const { return mOrthographic; }
-	inline virtual float OrthographicSize() const { return mOrthographicSize; }
+
+	inline virtual void AspectRatio(float r) { mAspectRatio = r; mNode.InvalidateTransform(); }
 	inline virtual float AspectRatio() const { return mAspectRatio; }
+	inline virtual void Near(float n) { mNear = n; mNode.InvalidateTransform(); }
 	inline virtual float Near() const { return mNear; }
+	inline virtual void Far(float f) { mFar = f;  mNode.InvalidateTransform(); }
 	inline virtual float Far() const { return mFar; }
-	inline virtual float FieldOfView() const { return mFieldOfView; }
-	inline virtual float3 EyeOffsetTranslate(StereoEye eye = StereoEye::eNone) const { return mEyeOffsetTranslate[(uint32_t)eye]; }
-	inline virtual fquat EyeOffsetRotate(StereoEye eye = StereoEye::eNone) const { return mEyeOffsetRotate[(uint32_t)eye]; }
-	// The view matrix is calculated without translation. To transform from world->view, one must apply: view * (worldPos - cameraPos)
-	inline virtual float4x4 View(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mView[(uint32_t)eye]; }
-	inline virtual float4x4 InverseView(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mInvView[(uint32_t)eye]; }
-	inline virtual float4x4 Projection(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mProjection[(uint32_t)eye]; }
-	inline virtual float4x4 InverseProjection(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mInvProjection[(uint32_t)eye]; }
-	inline virtual float4x4 ViewProjection(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mViewProjection[(uint32_t)eye]; }
-	inline virtual float4x4 InverseViewProjection(StereoEye eye = StereoEye::eNone) { ValidateTransform(); return mInvViewProjection[(uint32_t)eye]; }
-	inline virtual const float4* Frustum() { ValidateTransform(); return mFrustum; }
+
+	inline virtual const std::array<Hyperplane<float,3>,6>& LocalFrustum() { mNode.ValidateTransform(); return mLocalFrustum; }
 
 private:
 	uint32_t mRenderPriority = 100;
-	set<RenderTargetIdentifier> mRenderTargets;
+	unordered_set<RenderAttachmentId> mRenderTargets;
 
-	stm::StereoMode mStereoMode = stm::StereoMode::eNone;
 	bool mDrawSkybox = true;
 
-	bool mOrthographic = false;
-	union {
-		float mOrthographicSize;
-		float mFieldOfView;
-	};
 	float mNear = 0.01f;
 	float mFar = 1024;
-	float mAspectRatio = 1.f;
-	
-	float4 mFrustum[6];
+	float mAspectRatio = 1;
+	float mFieldOfView = 1;
 
-	// Per-eye data
-
-	float4x4 mView[2];
-	float4x4 mProjection[2];
-	float4x4 mViewProjection[2];
-	float4x4 mInvProjection[2];
-	float4x4 mInvView[2];
-	float4x4 mInvViewProjection[2];
-	float3 mEyeOffsetTranslate[2];
-	fquat mEyeOffsetRotate[2];
+	Projective3f mLocalProjection;
+	std::array<Hyperplane<float,3>,6> mLocalFrustum;
 
 protected:
-	STRATUM_API virtual void OnGui(CommandBuffer& commandBuffer, GuiContext& gui) override;
-	STRATUM_API virtual bool ValidateTransform() override;
+	STRATUM_API virtual void OnValidateTransform(Matrix4f& transform, TransformTraits& traits) override;
 };
 
 }

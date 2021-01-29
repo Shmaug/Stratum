@@ -1,36 +1,29 @@
-#ifdef __cplusplus
-#define uint uint32_t
-struct VolumeUniformBuffer {
+#ifndef COMMON_H
+#define COMMON_H
 
-#else
-#define fquat float4
-//#pragma inline_uniform_block VolumeUniforms
-
-[[vk::binding(3, 0)]] cbuffer VolumeUniforms : register(b0) {
-#endif
-	fquat VolumeRotation;
-	fquat InvVolumeRotation;
-	float3 VolumeScale;
+struct VolumeData {
+	float4 Rotation;
+	float4 InvRotation;
+	float3 Scale;
 	float Density;
-	float3 InvVolumeScale;
-	uint MaskValue;
-	float3 VolumePosition;
+	float3 InvScale;
+	uint Mask;
+	float3 Position;
 	uint FrameIndex;
 	float2 RemapRange;
 	float2 HueRange;
-	uint3 VolumeResolution;
+	uint3 Resolution;
 	uint pad;
-}
-#ifdef __cplusplus
-;
-#undef uint
-#else
-#undef fquat
+};
 
-// Is the mask colored?
-#pragma multi_compile MASK
-#pragma multi_compile SINGLE_CHANNEL
-#pragma multi_compile GRADIENT_TEXTURE
+#ifndef __cplusplus
+
+[[vk::constant_id(0)]] gMaskColored = false; // Is the mask colored?
+[[vk::constant_id(1)]] gSingleChannel = true;
+[[vk::constant_id(2)]] gBakedGradient = false;
+
+//#pragma inline_uniform_block Volume
+[[vk::binding(3, 0)]] ConstantBuffer<VolumeData> gVolume : register(b0);
 
 #ifndef M_PI
 #define M_PI (3.1415926535897932)
@@ -40,12 +33,12 @@ struct VolumeUniformBuffer {
 #endif
 
 #ifdef SINGLE_CHANNEL
-[[vk::binding(0, 0)]] RWTexture3D<float> Volume : register(t0);
+RWTexture3D<float> RWVolume : register(t0);
 #else
-[[vk::binding(0, 0)]] RWTexture3D<float4> Volume : register(t0);
+RWTexture3D<float4> RWVolume : register(t0);
 #endif
-[[vk::binding(1, 0)]] RWTexture3D<float4> Gradient : register(u2);
-[[vk::binding(2, 0)]] RWTexture3D<uint> RawMask : register(t1);
+RWTexture3D<float4> Gradient : register(u2);
+RWTexture3D<uint> RawMask : register(t1);
 
 float3 HuetoRGB(float hue) {
 	return saturate(float3(abs(hue * 6 - 3) - 1, 2 - abs(hue * 6 - 2), 2 - abs(hue * 6 - 4)));
@@ -72,7 +65,7 @@ float ChromaKey(float3 hsv, float3 key) {
 }
 
 float4 SampleColor(uint3 index){
-	float4 c = Volume[index];
+	float4 c = RWVolume[index];
 
 	#ifndef BAKED
 	// non-baked volume, do processing
@@ -89,34 +82,34 @@ float4 SampleColor(uint3 index){
 	c.a *= saturate((c.a - RemapRange.x) / (RemapRange.y - RemapRange.x));
 	#endif
 
-	#ifdef MASK
-	static const float3 maskColors[8] = {
-		float3(1.0, 0.1, 0.1),
-		float3(0.1, 1.0, 0.1),
-		float3(0.1, 0.1, 1.0),
+	if (gMaskColored) {
+		static const float3 maskColors[8] = {
+			float3(1.0, 0.1, 0.1),
+			float3(0.1, 1.0, 0.1),
+			float3(0.1, 0.1, 1.0),
 
-		float3(1.0, 1.0, 0.0),
-		float3(1.0, 0.1, 1.0),
-		float3(0.1, 1.0, 1.0),
+			float3(1.0, 1.0, 0.0),
+			float3(1.0, 0.1, 1.0),
+			float3(0.1, 1.0, 1.0),
 
-		float3(1.0, 0.5, 0.1),
-		float3(1.0, 0.1, 0.5),
-	};
-
-	uint value = RawMask[index] & MaskValue;
-	if (value) c.rgb = maskColors[firstbitlow(value)];
-	#endif
+			float3(1.0, 0.5, 0.1),
+			float3(1.0, 0.1, 0.5),
+		};
+		uint value = RawMask[index] & MaskValue;
+		if (value) c.rgb = maskColors[firstbitlow(value)];
+	}
 
 	return c;
 }
 float3 SampleGradient(uint3 index) {
-	#ifdef GRADIENT_TEXTURE
-	return Gradient[index].xyz;
-	#else
-	return float3(
-		SampleColor(index + int3(1, 0, 0)).a - SampleColor(index + int3(-1, 0, 0)).a,
-		SampleColor(index + int3(0, 1, 0)).a - SampleColor(index + int3(0, -1, 0)).a,
-		SampleColor(index + int3(0, 0, 1)).a - SampleColor(index + int3(0, 0, -1)).a);
-	#endif
+	if (gBakedGradient)
+		return Gradient[index].xyz;
+	else
+		return float3(
+			SampleColor(index + int3(1, 0, 0)).a - SampleColor(index + int3(-1, 0, 0)).a,
+			SampleColor(index + int3(0, 1, 0)).a - SampleColor(index + int3(0, -1, 0)).a,
+			SampleColor(index + int3(0, 0, 1)).a - SampleColor(index + int3(0, 0, -1)).a);
 }
+
+#endif
 #endif

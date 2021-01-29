@@ -6,21 +6,19 @@
 
 namespace stm {
 
-class GuiElement {
+class GuiElement : public SceneNode::Component {
 private:
 	vector<GuiElement*> mChildren;
 public:
-	fRect2D mRect;
-	fRect2D mClipRect = fRect2D(-1e10f, -1e10f, 1e20f, 1e20f);
-	float4 mTint;
+	AlignedBox2f mRect;
+	AlignedBox2f mClipRect = AlignedBox2f(Vector2f::Constant(-1e10f), Vector2f::Constant(1e20f));
+	Vector4f mColor;
 	shared_ptr<Texture> mTexture;
-	float4 mTextureST = float4(0, 0, 1, 1);
+	Vector4f mTextureST = Vector4f(0, 0, 1, 1);
 
-	inline fRect2D Embed(const fRect2D& r, float pad = 0) const { return fRect2D(mRect.mOffset + r.mOffset + pad, r.mSize - 2*pad); }
-	inline fRect2D EmbedRelative(const fRect2D& r, float pad = 0) const { return Embed(fRect2D(mRect.mOffset + r.mOffset*mRect.mSize, r.mSize*mRect.mSize), pad); }
-	
-	inline virtual GuiElement* AddChild(GuiElement* elem) { mChildren.push_back(elem); return elem; }
-	inline virtual void RemoveChild(GuiElement* elem) { mChildren.erase(ranges::find(mChildren, elem)); }
+	inline AlignedBox2f EmbedRelative(const Vector2f& scale const Vector2f& offset) const {
+		return AlignedBox2f(mRect.min() * mRect.sizes() + offset*min(), r.mSize*mRect.mSize);
+	}
 
 	inline virtual void OnInteract(const InputState* state) {}
 	inline virtual void OnPreRender(CommandBuffer& commandBuffer, Camera& camera) {
@@ -47,7 +45,7 @@ class GuiSlider : public GuiElement {
 	float mMax;
 };
 class GuiRangeSlider : public GuiElement {
-	float2 mValues;
+	Vector2f mValues;
 	float mMin;
 	float mMax;
 };
@@ -62,24 +60,24 @@ class GuiStack : public GuiElement {
 	inline GuiElement* AddChild(GuiElement* elem) override {
 		switch (axis) {
 		case GrowAxis::TopDown:
-			elem->mRect.mSize.x = mRect.x;
-			elem->mRect.mOffset.y = mRect.mSize.y - elem->mRect.mSize.y - mStackOffset;
-			mStackOffset += elem->mRect.mSize.y;
+			elem->mRect.mSize.x() = mRect.mSize.x();
+			elem->mRect.mOffset.y() = mRect.mSize.y() - elem->mRect.mSize.y() - mStackOffset;
+			mStackOffset += elem->mRect.mSize.y();
 			break;
 		case GrowAxis::BottomUp:
-			elem->mRect.mSize.x = mRect.x;
-			elem->mRect.mOffset.y = mStackOffset;
-			mStackOffset += elem->mRect.mSize.y;
+			elem->mRect.mSize.x() = mRect.mSize.x();
+			elem->mRect.mOffset.y() = mStackOffset;
+			mStackOffset += elem->mRect.mSize.y();
 			break;
 		case GrowAxis::LeftRight:
-			elem->mRect.mSize.y = mRect.mSize.y;
-			elem->mRect.mOffset.x = mStackOffset;
-			mStackOffset += elem->mRect.mSize.x;
+			elem->mRect.mSize.y() = mRect.mSize.y();
+			elem->mRect.mOffset.x() = mStackOffset;
+			mStackOffset += elem->mRect.mSize.x();
 			break;
 		case GrowAxis::RightLeft:
-			elem->mRect.mSize.y = mRect.mSize.y;
-			elem->mRect.mOffset.x = mRect.mSize.x - elem->mRect.mSize.x - mStackOffset;
-			mStackOffset += elem->mRect.mSize.x;
+			elem->mRect.mSize.y() = mRect.mSize.y();
+			elem->mRect.mOffset.x() = mRect.mSize.x() - elem->mRect.mSize.x() - mStackOffset;
+			mStackOffset += elem->mRect.mSize.x();
 			break;
 		}
 		return GuiElement::AddChild(elem);
@@ -94,23 +92,24 @@ private:
 	unordered_map<string, shared_ptr<Material>> mMaterials;
 	shared_ptr<Texture> mIconsTexture;
 
-	map<string, uint32_t> mHotControl;
+	unordered_map<string, uint32_t> mHotControl;
 	uint32_t mNextControlId;
 	
-	friend class Scene;
-	STRATUM_API GuiContext(Scene& scene);
+	friend class stm::Scene;
+	STRATUM_API GuiContext(stm::Scene& scene);
 
-	STRATUM_API void OnPreRender(CommandBuffer& commandBuffer);
 	STRATUM_API void OnDraw(CommandBuffer& commandBuffer, Camera& camera);
 
-public:	
-	// Draw a circle facing in the z direction
-	STRATUM_API void WireCircle(const float3& center, float radius, const fquat& rotation, const float4& color);
-	STRATUM_API void WireSphere(const float3& center, float radius, const fquat& rotation, const float4& color);
-	STRATUM_API void WireCube  (const float3& center, const float3& extents, const fquat& rotation, const float4& color);
+public:
+	inline stm::Scene& Scene() const { return mScene; }
 
-	STRATUM_API bool PositionHandle(const fquat& plane, float3& position, float radius = .1f, const float4& color = float4(1));
-	STRATUM_API bool RotationHandle(const float3& center, fquat& rotation, float radius = .125f, float sensitivity = .3f);
+	// Draw a circle facing in the z direction
+	STRATUM_API void WireCircle(const Vector3f& center, float radius, const fquat& rotation, const Vector4f& color);
+	STRATUM_API void WireSphere(const Vector3f& center, float radius, const fquat& rotation, const Vector4f& color);
+	STRATUM_API void WireCube  (const Vector3f& center, const Vector3f& extents, const fquat& rotation, const Vector4f& color);
+
+	STRATUM_API bool PositionHandle(const fquat& plane, Vector3f& position, float radius = .1f, const Vector4f& color = Vector4f(1));
+	STRATUM_API bool RotationHandle(const Vector3f& center, fquat& rotation, float radius = .125f, float sensitivity = .3f);
 };
 
 }

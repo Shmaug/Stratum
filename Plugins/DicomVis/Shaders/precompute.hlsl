@@ -1,9 +1,9 @@
-#pragma kernel BakeVolume
-#pragma kernel BakeGradient
+#pragma compile compute BakeVolume
+#pragma compile compute BakeGradient
 
 #include "common.hlsli"
 
-[[vk::binding(4, 0)]] RWTexture3D<float4> Output : register(t0);
+RWTexture3D<float4> Output : register(t0);
 
 [numthreads(4, 4, 4)]
 void BakeVolume(uint3 index : SV_DispatchThreadID) {
