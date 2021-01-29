@@ -41,8 +41,10 @@ namespace stm {
   #endif
 }
 
-#include "Math/basic_hash.hpp"
+#include "Math/hash.hpp"
 #include "Math/geometry.hpp"
+#include "binary_stream.hpp"
+#include "byte_blob.hpp"
 
 namespace stm {
 
@@ -98,14 +100,4 @@ class Renderer;
 class GuiContext;
 class Light;
 
-template<typename Test, template<typename...> class Ref>
-struct is_specialization : false_type {};
-template<template<typename...> class Ref, typename... Args>
-struct is_specialization<Ref<Args...>, Ref> : true_type {};
-template<template<typename...> class Ref, typename... Args>
-using is_specialization_v = is_specialization<Ref<Args...>, Ref>::value;
-
 }
-
-#include "binary_stream.hpp"
-#include "byte_blob.hpp"

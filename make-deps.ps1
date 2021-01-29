@@ -8,6 +8,7 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nlohmann/json/develop/
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"                        -OutFile "$STRATUM_DIR/extern/include/stb_image.h"
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h"                  -OutFile "$STRATUM_DIR/extern/include/stb_image_write.h"
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h"                      -OutFile "$STRATUM_DIR/extern/include/tiny_gltf.h"
+(Invoke-WebRequest -Uri "https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.zip").Content | Expand-Archive -Path "$STRATUM_DIR/extern/include/eigen"
 
 python "$STRATUM_DIR/extern/src/shaderc/utils/git-sync-deps"
 

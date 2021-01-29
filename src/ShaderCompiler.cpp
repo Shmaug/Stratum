@@ -342,7 +342,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			l = semantic.length();
 		}
 		if (l > 0 && semantic[l-1] == '_') l--;
-		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), tolower);
+		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
 		if (gAttributeMap.count(semantic))
 			var.mType = gAttributeMap.at(semantic);
 		else
@@ -364,7 +364,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			l = semantic.length();
 		}
 		if (l > 0 && semantic[l-1] == '_') l--;
-		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), tolower);
+		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
 		if (gAttributeMap.count(semantic))
 			var.mType = gAttributeMap.at(semantic);
 		else

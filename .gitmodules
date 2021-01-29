@@ -19,3 +19,6 @@
 [submodule "extern/src/DirectXShaderCompiler"]
 	path = extern/src/DirectXShaderCompiler
 	url = https://github.com/microsoft/DirectXShaderCompiler
+[submodule "extern/src/eigen"]
+	path = extern/src/eigen
+	url = https://gitlab.com/libeigen/eigen.git

@@ -6,7 +6,7 @@ namespace stm {
 
 template<typename T> concept has_inner_product = requires(T a, T b) { inner_product(ranges::begin(a), ranges::end(a), ranges::begin(b), ranges::range_value_t<T>()); };
 template<has_inner_product T> inline auto dot(const T& a, const T& b) { return inner_product(a.begin(), a.end(), b.begin(), {}); }
-template<has_inner_product T> inline auto length(const T& v) { return sqrt(dot(v, v)); }
+template<has_inner_product T> inline auto length(const T& v) { return std::sqrt(dot(v, v)); }
 template<has_inner_product T> inline T normalize(const T& v) { return v/length(v); }
 
 template<typename T, typename Tt> inline T lerp(const T& x, const T& y, const Tt& t) { return x*(1-t) + y*t; }
@@ -50,7 +50,7 @@ public:
 		return m1*m2 - m3*m4;
 	}
 };
-template<typename T> class vec4_t : public valrange<array<T,3>> {
+template<typename T> class vec4_t : public valrange<array<T,4>> {
 public:
 	inline T& x() { return array<T,4>::at(0); }
 	inline T& y() { return array<T,4>::at(1); }
@@ -72,7 +72,8 @@ public:
 	inline const vec3_t<T>& yzw() const { return *(vec3_t<T>*)&array<T,4>::at(1); }
 };
 
-template<typename T> class quaternion : public array<T,4> {
+template<typename T>
+class quaternion : public array<T,4> {
 public:
 	inline T& i() { return array<T,4>::at(0); }
 	inline T& j() { return array<T,4>::at(1); }
@@ -98,12 +99,12 @@ public:
 	inline quaternion& operator-=(const quaternion& rhs) { ranges::transform(*this, rhs, ranges::begin(*this), minus<T>()); return *this; }
 	inline quaternion& operator*=(const quaternion& rhs) { return *this = operator*(rhs); }
 
-	inline quaternion conjugate() const { return quaternion(-i(), -j(), -k(), a()); }
-	inline quaternion inverse() const { return normalize(conjugate()); }
-
 	inline vec3_t<T> operator*(const vec3_t<T>& v) const {
 		return 2*dot(ijk(), v)*ijk() + (a()*a() - dot(ijk(), ijk()))*v + 2*a()*cross(ijk(), v);
 	}
+
+	inline quaternion conj() const { return quaternion(-i(), -j(), -k(), a()); }
+	inline quaternion inv() const { return normalize(conj()); }
 
 	inline vec3_t<T> euler() const {
 		return vec3_t<T>(
@@ -111,154 +112,157 @@ public:
 			std::atan2(2*(j()*a() - i()*k()) ,  i()*i() - j()*j() - k()*k() + a()*a()),
 			std::asin (2*(k()*a() + i()*j()) / (i()*i() + j()*j() + k()*k() + a()*a())) );
 	}
-	
-	// Expects normalized vectors
-	inline static quaternion FromTo(const vec3_t<T>& from, const vec3_t<T>& to) {
-		T d = dot(from, to);
-		if (d <= -1) return quaternion(0,0,0,-1);
-		else if (d >= 1) return quaternion(0,0,0,1);
-		else {
-			quaternion r(cross(from, to), 1+d);
-			r /= length(r.xyzw);
-			return r;
-		}
-	}
-	inline static quaternion Look(const vec3_t<T>& fwd, const vec3_t<T>& up) {
-		vec3_t<T> right = normalize(cross(up, fwd));
-		vec3_t<T> up_cross = cross(fwd, right);
-		T m00 = right[0];
-		T m01 = right[1];
-		T m02 = right[2];
-		T m10 = up_cross[0];
-		T m11 = up_cross[1];
-		T m12 = up_cross[2];
-		T m20 = fwd[0];
-		T m21 = fwd[1];
-		T m22 = fwd[2];
+};
 
-		T num8 = (m00 + m11) + m22;
-		quaternion q;
-		if (num8 > 0) {
-			T num = sqrtf(num8 + 1);
-			q.w = num / 2;
-			num = 1 / (num / 2);
-			q.x = (m12 - m21) * num;
-			q.y = (m20 - m02) * num;
-			q.z = (m01 - m10) * num;
-			return q;
-		}
-		if ((m00 >= m11) && (m00 >= m22)) {
-			T num7 = sqrtf(((1 + m00) - m11) - m22);
-			T num4 = 1 / (num7 / 2);
-			q.x = num7 / 2;
-			q.y = (m01 + m10) * num4;
-			q.z = (m02 + m20) * num4;
-			q.w = (m12 - m21) * num4;
-			return q;
-		}
-		if (m11 > m22) {
-			T num6 = sqrtf(((1 + m11) - m00) - m22);
-			T num3 = 1 / (num6 / 2);
-			q.x = (m10 + m01) * num3;
-			q.y = num6 / 2;
-			q.z = (m21 + m12) * num3;
-			q.w = (m20 - m02) * num3;
-			return q;
-		}
-		T num5 = sqrtf(((1 + m22) - m00) - m11);
-		T num2 = 1 / (num5 / 2);
-		q.x = (m20 + m02) * num2;
-		q.y = (m21 + m12) * num2;
-		q.z = num5 / 2;
-		q.w = (m01 - m10) * num2;
+template<typename T> inline quaternion<T> FromTo(const vec3_t<T>& from, const vec3_t<T>& to) {
+	return normalize(quaternion(cross(from, to), 1 + dot(from, to)/std::sqrt(dot(to,to)*dot(from,from))));
+}
+template<typename T> inline quaternion<T> Look(const vec3_t<T>& fwd, const vec3_t<T>& up) {
+	vec3_t<T> right = normalize(cross(up, fwd));
+	vec3_t<T> up_cross = cross(fwd, right);
+	T m00 = right[0];
+	T m01 = right[1];
+	T m02 = right[2];
+	T m10 = up_cross[0];
+	T m11 = up_cross[1];
+	T m12 = up_cross[2];
+	T m20 = fwd[0];
+	T m21 = fwd[1];
+	T m22 = fwd[2];
+
+	T num8 = (m00 + m11) + m22;
+	quaternion q;
+	if (num8 > 0) {
+		T num = std::sqrt(num8 + 1);
+		q.a() = num / 2;
+		num = 1 / (num / 2);
+		q.i() = (m12 - m21) * num;
+		q.j() = (m20 - m02) * num;
+		q.k() = (m01 - m10) * num;
 		return q;
 	}
-	inline static quaternion Euler(vec3_t<T> euler) {
-		euler /= 2;
-		vec3_t<T> c = cos(euler);
-		vec3_t<T> s = sin(euler);
-		vec4_t<T> m0( s.x(), c.x(),  c.x(), c.x());
-		vec4_t<T> m1( c.y(), s.y(),  c.y(), c.y());
-		vec4_t<T> m2( c.z(), c.z(),  s.z(), c.z());
-		vec4_t<T> m3(-c.x(), s.x(), -s.x(), s.x());
-		vec4_t<T> m4( s.y(), c.y(),  s.y(), s.y());
-		vec4_t<T> m5( s.z(), s.z(),  c.z(), s.z());
-		return m0*m1*m2 + m3*m4*m5;
+	if ((m00 >= m11) && (m00 >= m22)) {
+		T num7 = std::sqrt(((1 + m00) - m11) - m22);
+		T num4 = 1 / (num7 / 2);
+		q.i() = num7 / 2;
+		q.j() = (m01 + m10) * num4;
+		q.k() = (m02 + m20) * num4;
+		q.a() = (m12 - m21) * num4;
+		return q;
 	}
-	inline static quaternion AxisAngle(const vec3_t<T>& axis, T angle) {
-		angle /= 2;
-		return quaternion(axis * std::sin(angle), std::cos(angle));
+	if (m11 > m22) {
+		T num6 = std::sqrt(((1 + m11) - m00) - m22);
+		T num3 = 1 / (num6 / 2);
+		q.i() = (m10 + m01) * num3;
+		q.j() = num6 / 2;
+		q.k() = (m21 + m12) * num3;
+		q.a() = (m20 - m02) * num3;
+		return q;
 	}
-};
-
-
-// M rows x N columns
-template<typename T, size_t M, size_t N> requires(M >= 1 && N >= 1)
-class matrix : public valrange< valrange<array< valrange<array<T,N>>, M> > > {
-public:
-	using column = valrange<array<T,M>>;
-
-	template<typename T> inline matrix<T,N,M> T(const matrix<T>& m) {
-		return matrix<T,M,N>(
-			(at(0).T(), ...)
-		);
-	}
-
-	template<typename Ty, size_t C>
-	inline matrix operator*(const matrix<Ty,N,C>& m) const {
-
-	}
-};
-
-template<typename T> inline matrix<T,4,4> inverse(const matrix<T,4,4>& m) {
-	T c00 = m[2][2] * m[3][3] - m[3][2] * m[2][3];
-	T c02 = m[1][2] * m[3][3] - m[3][2] * m[1][3];
-	T c03 = m[1][2] * m[2][3] - m[2][2] * m[1][3];
-
-	T c04 = m[2][1] * m[3][3] - m[3][1] * m[2][3];
-	T c06 = m[1][1] * m[3][3] - m[3][1] * m[1][3];
-	T c07 = m[1][1] * m[2][3] - m[2][1] * m[1][3];
-
-	T c08 = m[2][1] * m[3][2] - m[3][1] * m[2][2];
-	T c10 = m[1][1] * m[3][2] - m[3][1] * m[1][2];
-	T c11 = m[1][1] * m[2][2] - m[2][1] * m[1][2];
-
-	T c12 = m[2][0] * m[3][3] - m[3][0] * m[2][3];
-	T c14 = m[1][0] * m[3][3] - m[3][0] * m[1][3];
-	T c15 = m[1][0] * m[2][3] - m[2][0] * m[1][3];
-
-	T c16 = m[2][0] * m[3][2] - m[3][0] * m[2][2];
-	T c18 = m[1][0] * m[3][2] - m[3][0] * m[1][2];
-	T c19 = m[1][0] * m[2][2] - m[2][0] * m[1][2];
-
-	T c20 = m[2][0] * m[3][1] - m[3][0] * m[2][1];
-	T c22 = m[1][0] * m[3][1] - m[3][0] * m[1][1];
-	T c23 = m[1][0] * m[2][1] - m[2][0] * m[1][1];
-
-	vec4_t<T> f0(c00, c00, c02, c03);
-	vec4_t<T> f1(c04, c04, c06, c07);
-	vec4_t<T> f2(c08, c08, c10, c11);
-	vec4_t<T> f3(c12, c12, c14, c15);
-	vec4_t<T> f4(c16, c16, c18, c19);
-	vec4_t<T> f5(c20, c20, c22, c23);
-
-	vec4_t<T> v0(m[1][0], m[0][0], m[0][0], m[0][0]);
-	vec4_t<T> v1(m[1][1], m[0][1], m[0][1], m[0][1]);
-	vec4_t<T> v2(m[1][2], m[0][2], m[0][2], m[0][2]);
-	vec4_t<T> v3(m[1][3], m[0][3], m[0][3], m[0][3]);
-
-	vec4_t<T> i0(v1 * f0 - v2 * f1 + v3 * f2);
-	vec4_t<T> i1(v0 * f0 - v2 * f3 + v3 * f4);
-	vec4_t<T> i2(v0 * f1 - v1 * f3 + v3 * f5);
-	vec4_t<T> i3(v0 * f2 - v1 * f4 + v2 * f5);
-
-	vec4_t<T> sa(+1, -1, +1, -1);
-	vec4_t<T> sb(-1, +1, -1, +1);
-	matrix<T,4,4> inv(i0 * sa, i1 * sb, i2 * sa, i3 * sb);
-	vec4_t<T> r0(inv[0][0], inv[1][0], inv[2][0], inv[3][0]);
-	vec4_t<T> d0(m[0] * r0);
-	return inv / ((d0.x() + d0.y()) + (d0.z() + d0.w()));
+	T num5 = std::sqrt(((1 + m22) - m00) - m11);
+	T num2 = 1 / (num5 / 2);
+	q.i() = (m20 + m02) * num2;
+	q.j() = (m21 + m12) * num2;
+	q.k() = num5 / 2;
+	q.a() = (m01 - m10) * num2;
+	return q;
 }
+template<typename T> inline quaternion<T> Euler(vec3_t<T> euler) {
+	euler /= 2;
+	vec3_t<T> c = cos(euler);
+	vec3_t<T> s = sin(euler);
+	vec4_t<T> m0( s.x(), c.x(),  c.x(), c.x());
+	vec4_t<T> m1( c.y(), s.y(),  c.y(), c.y());
+	vec4_t<T> m2( c.z(), c.z(),  s.z(), c.z());
+	vec4_t<T> m3(-c.x(), s.x(), -s.x(), s.x());
+	vec4_t<T> m4( s.y(), c.y(),  s.y(), s.y());
+	vec4_t<T> m5( s.z(), s.z(),  c.z(), s.z());
+	return m0*m1*m2 + m3*m4*m5;
+}
+template<typename T> inline quaternion<T> AxisAngle(const vec3_t<T>& axis, T angle) {
+	angle /= 2;
+	return quaternion(axis * sin(angle), cos(angle));
+}
+
+// row-major MxN matrix (M rows x N columns)
+template<typename T, size_t M, size_t N> requires(M >= 1 && N >= 1)
+class matrix : public valrange<array< valrange<array<T,N>>, M>> {
+public:
+	using row_t = valrange<array<T,N>>;
+
+	inline matrix<T,N,M> T(const matrix& m) const {
+		matrix<T,N,M> m;
+		for (size_t i = 0; i < M; i++)
+			for (size_t j = 0; j < N; j++)
+				m[i][j] = array<row_t,M>::at(j)[i];
+		return m;
+	}
+
+	template<typename T, size_t Nc>
+	inline matrix<T,M,Nc> operator*(const matrix<T,N,Nc>& m) {
+
+	}
+	
+	template<typename T> requires(M == N) inline matrix inv() const {
+		if constexpr (N == 2) {
+			return matrix(
+				 (*this)[1][1], -(*this)[0][1],
+				-(*this)[1][0],  (*this)[0][0] );
+		} else if constexpr (N == 3) {
+		} else if constexpr (N == 4) {
+			T c00 = (*this)[2][2]*(*this)[3][3] - (*this)[3][2]*(*this)[2][3];
+			T c02 = (*this)[1][2]*(*this)[3][3] - (*this)[3][2]*(*this)[1][3];
+			T c03 = (*this)[1][2]*(*this)[2][3] - (*this)[2][2]*(*this)[1][3];
+
+			T c04 = (*this)[2][1]*(*this)[3][3] - (*this)[3][1]*(*this)[2][3];
+			T c06 = (*this)[1][1]*(*this)[3][3] - (*this)[3][1]*(*this)[1][3];
+			T c07 = (*this)[1][1]*(*this)[2][3] - (*this)[2][1]*(*this)[1][3];
+
+			T c08 = (*this)[2][1]*(*this)[3][2] - (*this)[3][1]*(*this)[2][2];
+			T c10 = (*this)[1][1]*(*this)[3][2] - (*this)[3][1]*(*this)[1][2];
+			T c11 = (*this)[1][1]*(*this)[2][2] - (*this)[2][1]*(*this)[1][2];
+
+			T c12 = (*this)[2][0]*(*this)[3][3] - (*this)[3][0]*(*this)[2][3];
+			T c14 = (*this)[1][0]*(*this)[3][3] - (*this)[3][0]*(*this)[1][3];
+			T c15 = (*this)[1][0]*(*this)[2][3] - (*this)[2][0]*(*this)[1][3];
+
+			T c16 = (*this)[2][0]*(*this)[3][2] - (*this)[3][0]*(*this)[2][2];
+			T c18 = (*this)[1][0]*(*this)[3][2] - (*this)[3][0]*(*this)[1][2];
+			T c19 = (*this)[1][0]*(*this)[2][2] - (*this)[2][0]*(*this)[1][2];
+
+			T c20 = (*this)[2][0]*(*this)[3][1] - (*this)[3][0]*(*this)[2][1];
+			T c22 = (*this)[1][0]*(*this)[3][1] - (*this)[3][0]*(*this)[1][1];
+			T c23 = (*this)[1][0]*(*this)[2][1] - (*this)[2][0]*(*this)[1][1];
+
+			vec4_t<T> f0(c00, c00, c02, c03);
+			vec4_t<T> f1(c04, c04, c06, c07);
+			vec4_t<T> f2(c08, c08, c10, c11);
+			vec4_t<T> f3(c12, c12, c14, c15);
+			vec4_t<T> f4(c16, c16, c18, c19);
+			vec4_t<T> f5(c20, c20, c22, c23);
+
+			vec4_t<T> v0((*this)[1][0], (*this)[0][0], (*this)[0][0], (*this)[0][0]);
+			vec4_t<T> v1((*this)[1][1], (*this)[0][1], (*this)[0][1], (*this)[0][1]);
+			vec4_t<T> v2((*this)[1][2], (*this)[0][2], (*this)[0][2], (*this)[0][2]);
+			vec4_t<T> v3((*this)[1][3], (*this)[0][3], (*this)[0][3], (*this)[0][3]);
+
+			vec4_t<T> i0(v1*f0 - v2*f1 + v3*f2);
+			vec4_t<T> i1(v0*f0 - v2*f3 + v3*f4);
+			vec4_t<T> i2(v0*f1 - v1*f3 + v3*f5);
+			vec4_t<T> i3(v0*f2 - v1*f4 + v2*f5);
+
+			vec4_t<T> sa(+1, -1, +1, -1);
+			vec4_t<T> sb(-1, +1, -1, +1);
+			matrix<T,4,4> inv(i0 * sa, i1 * sb, i2 * sa, i3 * sb);
+			vec4_t<T> r0(inv[0][0], inv[1][0], inv[2][0], inv[3][0]);
+			vec4_t<T> d0((*this)[0] * r0);
+			return inv / ((d0.x() + d0.y()) + (d0.z() + d0.w()));
+		} else {
+			throw logic_error("matrix inverse for >4x4 unimplemented");
+		}
+	}
+};
+
 
 template<typename T> inline tuple<vec3_t<T>, quaternion<T>, vec3_t<T>> decompose(const matrix<T,4,4>& m) {
 	matrix<T,4,4> tmp = m;
@@ -318,7 +322,7 @@ template<typename T> inline tuple<vec3_t<T>, quaternion<T>, vec3_t<T>> decompose
 
 	T root, trace = rows[0].x() + rows[1].y() + rows[2].z();
 	if (trace > 0) {
-		root = sqrt(trace + 1);
+		root = std::sqrt(trace + 1);
 		quat.a() = root/2;
 		root = 1 / (2*root);
 		quat.i() = root * (rows[1].z() - rows[2].y());
@@ -333,7 +337,7 @@ template<typename T> inline tuple<vec3_t<T>, quaternion<T>, vec3_t<T>> decompose
 		size_t j = next[i];
 		size_t k = next[j];
 
-		root = sqrt(rows[i][i] - rows[j][j] - rows[k][k] + 1);
+		root = std::sqrt(rows[i][i] - rows[j][j] - rows[k][k] + 1);
 
 		quat[i] = root/2;
 		root = 1 / (2*root);
@@ -344,16 +348,17 @@ template<typename T> inline tuple<vec3_t<T>, quaternion<T>, vec3_t<T>> decompose
 
 	return { position, quat, scale };
 }
+
 template<typename T> inline matrix<T,4,4> Look(const vec3_t<T>& p, const vec3_t<T>& fwd, const vec3_t<T>& up) {
 	vec3_t<T> f[3];
 	f[0] = normalize(cross(up, fwd));
 	f[1] = cross(fwd, f[0]);
 	f[2] = fwd;
 	matrix<T,4,4> r(1);
-	rpt(i,3) r[i][0] = f[0][i];
-	rpt(i,3) r[i][1] = f[1][i];
-	rpt(i,3) r[i][2] = f[2][i];
-	rpt(i,3) r[3][i] = -dot(f[i], p);
+	for (size_t i=0; i<4; i++) r[i][0] = f[0][i];
+	for (size_t i=0; i<4; i++) r[i][1] = f[1][i];
+	for (size_t i=0; i<4; i++) r[i][2] = f[2][i];
+	for (size_t i=0; i<4; i++) r[3][i] = -dot(f[i], p);
 	return r;
 }
 template<typename T> inline matrix<T,4,4> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
@@ -399,13 +404,13 @@ template<typename T> inline matrix<T,4,4> Orthographic(T width, T height, T zNea
 	return r;
 }
 template<typename T> inline matrix<T,4,4> Translate(const vec3_t<T>& t) {
-	matrix m(1);
-	m[3].xyz = t;
+	matrix m = matrix<T,4,4>::identity();
+	m[3] = vec4_t<T>(t, 1);
 	return m;
 }
 template<typename T> inline matrix<T,4,4> Scale(const vec3_t<T>& t) {
 	matrix m(1);
-	rpt(i,3) m[i] *= t[i];
+	for (size_t i=0; i<3; i++) m[i] *= t[i];
 	return m;
 }
 template<typename T> inline matrix<T,4,4> RotateX(T r) {
@@ -440,7 +445,7 @@ template<typename T> inline matrix<T,4,4> Rotate(const quaternion<T>& quat) {
 	vec3_t qw = quat.xyz * quat.w;
 	vec3_t c = vec3_t(quat.x, quat.x, quat.y) * vec3_t(quat.z, quat.y, quat.z);
 	
-	matrix;
+	matrix<T,4,4> v;
 	v[0][0] = 1 - 2 * (q2.y + q2.z);
 	v[0][1] = 2 * (c.y + qw.z);
 	v[0][2] = 2 * (c.x - qw.y);
@@ -453,8 +458,8 @@ template<typename T> inline matrix<T,4,4> Rotate(const quaternion<T>& quat) {
 }
 template<typename T> inline matrix<T,4,4> TRS(const vec3_t<T>& translation, const quaternion<T>& quat, const vec3_t<T>& scale) {
 	matrix rm = Rotate(quat);
-	rpt(i,3) rm[i] *= scale[i];
-	(float3)rm[3] = translation; // TODO: is this right?
+	for (size_t i=0; i<3; i++) rm[i] *= scale[i];
+	rm[3] = vec4_t<T>(translation);
 	return rm;
 }
 

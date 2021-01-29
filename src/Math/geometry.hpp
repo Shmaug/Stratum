@@ -246,7 +246,7 @@ private:
 	vector<Primitive> mPrimitives;
 
 	template<typename AABBContainer> inline void build(const AABBContainer& aabbs, uint32_t leafSize) {
-		stack<uint3> todo;
+		stack<vec3_t<uint32_t>> todo;
 		vector<uint8_t> touchCount;
 
 		todo.push(uint3(0, (uint32_t)mPrimitives.size(), 0));

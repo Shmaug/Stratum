@@ -126,17 +126,21 @@ struct SpirvModuleGroup {
 	inline friend binary_stream& operator>>(binary_stream& stream, SpirvModuleGroup& m) { stream >> m.mModules; return stream; }
 };
 
-template<> inline size_t basic_hash(const stm::SpirvModule& m) {
-	return basic_hash(
-		m.mSpirv, // TODO: optimize hashing entire spirv
-		m.mStage,
-		m.mEntryPoint,
-		m.mSpecializationMap,
-		m.mStageInputs,
-		m.mStageOutputs,
-		m.mDescriptorBindings,
-		m.mPushConstants,
-		m.mWorkgroupSize);
-};
+}
 
+namespace std {
+	template<> struct hash<stm::SpirvModule> {
+		inline size_t operator()(const stm::SpirvModule& m) {
+			return stm::hash_objects(
+				m.mSpirv, // TODO: optimize hashing entire spirv
+				m.mStage,
+				m.mEntryPoint,
+				m.mSpecializationMap,
+				m.mStageInputs,
+				m.mStageOutputs,
+				m.mDescriptorBindings,
+				m.mPushConstants,
+				m.mWorkgroupSize);
+		}
+	};
 }
