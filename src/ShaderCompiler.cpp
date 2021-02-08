@@ -318,7 +318,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		binding.mBinding.descriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
 		binding.mBinding.descriptorType = type;
 	};
-	auto ParseSemantic = [&](const auto& vars, auto& var, string semantic) {
+	auto ParseSemantic = [&](const auto& vars, VertexAttributeId& var, string semantic) {
 		size_t l = semantic.find_first_of("0123456789");
 		if (l != string::npos)
 			var.mTypeIndex = atoi(semantic.c_str() + l);
@@ -337,9 +337,9 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		uint32_t m = var.mTypeIndex;
 		bool c = false;
 		for (const auto& [name, v] : vars)
-			if (v.mType == var.mType) {
-				m = max(m, v.mTypeIndex);
-				if (v.mTypeIndex == var.mTypeIndex) c = true;
+			if (v.mAttributeId.mType == var.mType) {
+				m = max(m, v.mAttributeId.mTypeIndex);
+				if (v.mAttributeId.mTypeIndex == var.mTypeIndex) c = true;
 			}
 		if (c) var.mTypeIndex = m + 1;
 	};
@@ -360,7 +360,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(shaderModule.mStageInputs, var, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		ParseSemantic(shaderModule.mStageInputs, var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
 	}
 	for (const auto& r : resources.stage_outputs) {
 		auto& var = shaderModule.mStageOutputs[r.name];
@@ -368,7 +368,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(shaderModule.mStageOutputs, var, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		ParseSemantic(shaderModule.mStageOutputs, var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
 	}
 	for (const auto& e : compiler.get_entry_points_and_stages()) {
 		auto& ep = compiler.get_entry_point(e.name, e.execution_model);

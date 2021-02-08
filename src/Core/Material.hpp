@@ -1,6 +1,8 @@
 #pragma once
 
-#include "Asset/Mesh.hpp"
+#include "GeometryData.hpp"
+#include "CommandBuffer.hpp"
+#include "Pipeline.hpp"
 
 namespace stm {
 
@@ -27,7 +29,7 @@ private:
 public:
 	inline Material(const string& name, const SpirvModuleGroup& modules) : mName(name), mModules(modules) {}
 
-	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, Mesh* mesh = nullptr);
+	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, optional<GeometryData> g = {});
 
 	inline void SetSpecialization(const string& name, const byte_blob& v) {
 		if (mSpecializationConstants.count(name) == 0) return;
@@ -53,10 +55,12 @@ class MaterialDerivative : public Material {
 private:
 	shared_ptr<Material> mBaseMaterial;
 
+	// TODO: implement MaterialDerivative as VkPipeline with derivative flag, ideally support linking assigned inputs when a MaterialDerivative shares most of the same descriptor inputs as its base
+
 public:
 	inline MaterialDerivative(const string& name, const shared_ptr<Material>& baseMaterial) : Material(*baseMaterial) { mBaseMaterial = baseMaterial; }
 
-	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, Mesh* mesh = nullptr);
+	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, optional<GeometryData> g = {});
 };
 
 }

@@ -58,7 +58,7 @@ void CommandBuffer::Clear() {
 
 	mSignalSemaphores.clear();
 	mWaitSemaphores.clear();
-	mTriangleCount = 0;
+	mPrimitiveCount = 0;
 
 	mCurrentFramebuffer.reset();
 	mCurrentRenderPass.reset();

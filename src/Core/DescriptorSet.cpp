@@ -21,7 +21,7 @@ DescriptorSetEntry::operator bool() const {
 	case vk::DescriptorType::eStorageBuffer:
 	case vk::DescriptorType::eUniformBufferDynamic:
 	case vk::DescriptorType::eStorageBufferDynamic:
-		return mBufferView.mBuffer.get();
+		return mBufferView.get().get();
 	case vk::DescriptorType::eInlineUniformBlockEXT:
 		return mInlineUniformData.size();
 	}
@@ -103,11 +103,11 @@ void DescriptorSet::CreateDescriptor(uint32_t binding, const DescriptorSetEntry&
     case vk::DescriptorType::eStorageBuffer:
     case vk::DescriptorType::eUniformBufferDynamic:
     case vk::DescriptorType::eStorageBufferDynamic:
-			if (entry.mBufferView.mBuffer == nullptr) throw invalid_argument("buffer entry was nullptr\n");
+			if (entry.mBufferView.get() == nullptr) throw invalid_argument("buffer entry was nullptr\n");
 			break;
     case vk::DescriptorType::eUniformTexelBuffer:
     case vk::DescriptorType::eStorageTexelBuffer:
-			if (!entry.mTexelBufferView.Buffer().get()) throw invalid_argument("buffer entry was nullptr\n");
+			if (!((const Buffer::ArrayView<>&)entry.mTexelBufferView).get()) throw invalid_argument("buffer entry was nullptr\n");
 			break;
 
     case vk::DescriptorType::eInlineUniformBlockEXT:
@@ -130,14 +130,14 @@ void DescriptorSet::CreateInlineUniformBlock(uint32_t binding, const byte_blob& 
 	CreateDescriptor(binding, e);
 }
 
-void DescriptorSet::CreateUniformBufferDescriptor(const Buffer::ArrayView<><byte>& buffer, uint32_t binding, uint32_t arrayIndex) {
+void DescriptorSet::CreateUniformBufferDescriptor(const Buffer::ArrayView<>& buffer, uint32_t binding, uint32_t arrayIndex) {
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eUniformBuffer;
 	e.mArrayIndex = arrayIndex;
 	e.mBufferView = buffer;
 	CreateDescriptor(binding, e);
 }
-void DescriptorSet::CreateStorageBufferDescriptor(const Buffer::ArrayView<><byte>& buffer, uint32_t binding, uint32_t arrayIndex) {
+void DescriptorSet::CreateStorageBufferDescriptor(const Buffer::ArrayView<>& buffer, uint32_t binding, uint32_t arrayIndex) {
 	DescriptorSetEntry e = {};
 	e.mType = vk::DescriptorType::eStorageBuffer;
 	e.mArrayIndex = arrayIndex;
@@ -209,7 +209,7 @@ void DescriptorSet::CreateTexelBufferDescriptor(const string& bindingName, const
 			case vk::DescriptorType::eStorageTexelBuffer: 	CreateStorageTexelBufferDescriptor(buffer, it->second.mBinding.binding, arrayIndex); continue;
 		}
 }
-void DescriptorSet::CreateBufferDescriptor(const string& bindingName, const Buffer::ArrayView<><byte>& buffer, Pipeline& pipeline, uint32_t arrayIndex) {
+void DescriptorSet::CreateBufferDescriptor(const string& bindingName, const Buffer::ArrayView<>& buffer, Pipeline& pipeline, uint32_t arrayIndex) {
 	for (auto it = pipeline.DescriptorBindings().find(bindingName); it != pipeline.DescriptorBindings().end(); it++)
 		switch (it->second.mBinding.descriptorType) {
 			case vk::DescriptorType::eUniformBuffer: 				CreateUniformBufferDescriptor(buffer, it->second.mBinding.binding, arrayIndex); continue;

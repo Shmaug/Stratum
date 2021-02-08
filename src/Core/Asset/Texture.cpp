@@ -11,12 +11,12 @@
 
 using namespace stm;
 
-Buffer::ArrayView<> LoadPixels(const fs::path& filename, TextureLoadFlags loadFlags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
-	vector<uint8_t> pixels;
+uint8_t* LoadPixels(const fs::path& filename, TextureLoadFlags loadFlags, uint32_t& pixelSize, int32_t& x, int32_t& y, int32_t& channels, vk::Format& format) {
 	pixelSize = 0;
 	x, y, channels;
 	stbi_info(filename.string().c_str(), &x, &y, &channels);
 
+	uint8_t* pixels = nullptr;
 	int desiredChannels = 4;
 	if (stbi_is_16_bit(filename.string().c_str())) {
 		pixels = (uint8_t*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
@@ -28,7 +28,7 @@ Buffer::ArrayView<> LoadPixels(const fs::path& filename, TextureLoadFlags loadFl
 		pixels = (uint8_t*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		pixelSize = sizeof(uint8_t);
 	}
-	if (!pixels) throw invalid_argument("could not LoadPixels " + filename.string());
+	if (!pixels) throw invalid_argument("could not load image: " + filename.string());
 	if (desiredChannels > 0) channels = desiredChannels;
 
 	vk::Format formatMap[4][4] {
@@ -85,7 +85,7 @@ Texture::Texture(Device& device, const vector<fs::path>& files, TextureLoadFlags
 	auto commandBuffer = mDevice.GetCommandBuffer(mName + "/BufferImageCopy", vk::QueueFlagBits::eGraphics);
 	auto stagingBuffer = commandBuffer->GetBuffer(mName + "/Staging", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	for (uint32_t j = 0; j < layers.size(); j++)
-		memcpy(stagingBuffer->Mapped() + j * dataSize, layers[j], dataSize);
+		memcpy(stagingBuffer->data() + j*dataSize, layers[j], dataSize);
 
 	TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	vk::BufferImageCopy copyRegion(0, 0, 0, { mAspectFlags, 0, 0, mArrayLayers }, { 0,0,0 }, { mExtent.width, mExtent.height, 1 });

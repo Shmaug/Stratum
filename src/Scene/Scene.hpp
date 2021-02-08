@@ -9,7 +9,36 @@ class Scene;
 
 class SceneNode {
 public:
-	class Component;
+	class Component {
+	private:
+		string mName;
+		bool mEnabled = true;
+
+	public:
+		SceneNode& mNode;
+
+		inline Component(SceneNode& node, const string& name) : mNode(node), mName(name) {}
+
+		inline const string& Name() const { return mName; }
+		inline string FullName() const { return mNode.FullName()+"/"+mName; }
+
+		inline bool Enabled() const { return mEnabled; }
+		inline void Enabled(bool e) { mEnabled = e; }
+
+	protected:
+		friend class Scene;
+		friend class SceneNode;
+
+		inline virtual void OnAddChild(SceneNode& n) {}
+		inline virtual void OnRemoveChild(SceneNode& n) {}
+		
+		inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
+		inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
+
+		inline virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) {}
+		template<typename T, int Mode> inline void OnValidateTransform(Transform<T,3,Mode>& p) { OnValidateTransform(p.matrix(), Mode); }
+	};
+
 	
 private:
 	deque<unique_ptr<Component>> mComponents;
@@ -219,36 +248,6 @@ public:
 		R dst;
 		return get_components<T>(dst);
 	}
-
-	class Component {
-	private:
-		string mName;
-		bool mEnabled = true;
-
-	public:
-		SceneNode& mNode;
-
-		inline Component(SceneNode& node, const string& name) : mNode(node), mName(name) {}
-
-		inline const string& Name() const { return mName; }
-		inline string FullName() const { return mNode.FullName()+"/"+mName; }
-
-		inline bool Enabled() const { return mEnabled; }
-		inline void Enabled(bool e) { mEnabled = e; }
-
-	protected:
-		friend class Scene;
-		friend class SceneNode;
-
-		inline virtual void OnAddChild(SceneNode& n) {}
-		inline virtual void OnRemoveChild(SceneNode& n) {}
-		
-		inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
-		inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
-
-		inline virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) {}
-		template<typename T, int Mode> inline void OnValidateTransform(Transform<T,3,Mode>& p) { OnValidateTransform(p.matrix(), Mode); }
-	};
 };
 
 class Scene {

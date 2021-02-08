@@ -45,7 +45,7 @@ public:
 class ComputePipeline : public Pipeline {
 public:
 	inline ComputePipeline(const string& name, Device& device, const SpirvModule& spirv) {
-		mSpirvModules = SpirvModuleGroup(device, { spirv });
+		mSpirvModules = SpirvModuleGroup(device, { { spirv.mEntryPoint, spirv } });
 		mHash = hash<SpirvModule>()(spirv);
 
 		unordered_map<uint32_t, vector<vk::DescriptorSetLayoutBinding>> descriptorSetBindings;
@@ -70,7 +70,7 @@ public:
 	}
 
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eCompute; }
-	inline Vector3u WorkgroupSize() const { return mSpirvModules[0].mWorkgroupSize; }
+	inline Vector3u WorkgroupSize() const { return mSpirvModules.begin()->second.mWorkgroupSize; }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -87,7 +87,7 @@ private:
 
 public:
 	inline GraphicsPipeline(const string& name, const RenderPass& renderPass, uint32_t subpassIndex,
-		const SpirvModuleGroup& spirv, const vector<vk::SpecializationInfo*>& specializationInfos = {},
+		const SpirvModuleGroup& spirv, const unordered_map<string, vk::SpecializationInfo*>& specializationInfos = {},
 		const vk::PipelineVertexInputStateCreateInfo& vertexInput = {}, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill,
 		bool sampleShading = false, const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = { vk::PipelineColorBlendAttachmentState() },
@@ -98,7 +98,7 @@ public:
 		mHash = hash_combine(renderPass, subpassIndex, topology, vertexInput, cullMode, polygonMode, sampleShading);
 		for (auto state : mBlendStates) mHash = hash_combine(mHash, state);
 		for (auto state : dynamicStates) mHash = hash_combine(mHash, state);
-		for (const SpirvModule& spirv : mSpirvModules) {
+		for (const auto& [entryp,spirv] : mSpirvModules) {
 			mHash = hash_combine(mHash, spirv);
 			for (const auto& [name, binding] : spirv.mDescriptorBindings) mDescriptorBindings.insert({ name, binding });
 			for (const auto& [name, range] : spirv.mPushConstants) mPushConstantRanges.push_back(range);
@@ -122,8 +122,9 @@ public:
 				break;
 			}
 		vector<vk::PipelineShaderStageCreateInfo> stages(mSpirvModules.size());
-		for (size_t i = 0; i < mSpirvModules.size(); i++)
-			stages[i] = vk::PipelineShaderStageCreateInfo({}, mSpirvModules[i].mStage, mSpirvModules[i].mShaderModule, mSpirvModules[i].mEntryPoint.c_str(), specializationInfos[i] );
+		uint32_t i = 0;
+		for (const auto& [entryp,spirv] : mSpirvModules)
+			stages[i++] = vk::PipelineShaderStageCreateInfo({}, spirv.mStage, spirv.mShaderModule, entryp.c_str(), specializationInfos.count(entryp) ? specializationInfos.at(entryp) : nullptr );
 
 		vk::GraphicsPipelineCreateInfo info({}, stages, &vertexInput, &mInputAssemblyState, nullptr, &mViewportState, &mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex);
 		mPipeline = device->createGraphicsPipeline(device.PipelineCache(), info).value;

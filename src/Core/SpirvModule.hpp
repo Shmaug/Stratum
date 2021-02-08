@@ -32,7 +32,6 @@ inline binary_stream& operator>>(binary_stream& lhs, DescriptorBinding& rhs) {
 	return lhs;
 }
 
-
 enum class VertexAttributeType {
 	ePosition,
 	eNormal,
@@ -44,7 +43,6 @@ enum class VertexAttributeType {
 	ePointSize,
 	eTexcoord
 };
-
 struct VertexAttributeId {
 	VertexAttributeType mType : 4;
 	unsigned int mTypeIndex : 28;
@@ -53,16 +51,11 @@ struct VertexAttributeId {
 	VertexAttributeId(VertexAttributeType type, uint8_t typeIndex=0) : mType(type), mTypeIndex(typeIndex) {}
 	inline bool operator==(const VertexAttributeId& rhs) const = default;
 };
-
 struct VertexStageVariable {
 	uint32_t mLocation;
 	vk::Format mFormat;
-	struct {
-		VertexAttributeType mType : 24;
-		unsigned int mTypeIndex : 8;
-	};
+	VertexAttributeId mAttributeId;
 };
-
 
 struct SpirvModule {
 	vk::ShaderModule mShaderModule;
@@ -113,18 +106,14 @@ inline binary_stream& operator>>(binary_stream& stream, SpirvModule& m) {
 }
 
 namespace std {
-	template<> struct hash<stm::SpirvModule> {
-		inline size_t operator()(const stm::SpirvModule& m) {
-			return stm::hash_combine(
-				m.mSpirv, // TODO: optimize hashing entire spirv
-				m.mStage,
-				m.mEntryPoint,
-				m.mSpecializationMap);
-		}
-	};
-	template<> struct hash<stm::VertexAttributeId> {
-		inline size_t operator()(const stm::VertexAttributeId& id) {
-			return *(const uint32_t*)&id;
-		}
-	};
+template<> struct hash<stm::SpirvModule> {
+	inline size_t operator()(const stm::SpirvModule& m) {
+		return stm::hash_combine(
+			m.mSpirv, // TODO: optimize hashing entire spirv
+			m.mStage,
+			m.mEntryPoint,
+			m.mSpecializationMap);
+	}
+};
+template<> struct hash<stm::VertexAttributeId> { inline size_t operator()(const stm::VertexAttributeId& id) { return *(const uint32_t*)&id; } };
 }

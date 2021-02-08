@@ -66,7 +66,7 @@ void Material::SetSampler(const string& name, shared_ptr<Sampler> sampler, uint3
 	mCacheValid = false;
 }
 
-shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, Mesh* mesh) {
+shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, optional<GeometryData> g) {
 	ProfilerRegion ps("Material::Bind");
 
 	const auto& attachmentDescriptions = commandBuffer.CurrentRenderPass()->SubpassDescriptions()[commandBuffer.CurrentSubpassIndex()].mAttachmentDescriptions;
@@ -78,44 +78,56 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, Mesh* 
 	vector<vector<vk::SpecializationMapEntry>> specializationEntries(mModules.size());
 	vector<vk::SpecializationInfo> specializationInfos(mModules.size());
 	vector<vk::SpecializationInfo*> specializationInfoPtrs(mModules.size());
-	for (uint32_t i = 0; i < mModules.size(); i++) {
+	uint32_t i = 0;
+	for (auto&[entryp, spirv] : mModules) {
 		auto& mapData = specializationData[i];
 		auto& mapEntries = specializationEntries[i];
 		for (auto&[id, data] : mSpecializationConstants) {
-			if (mModules[i].mSpecializationMap.count(id) == 0) continue;
-			auto& entry = mapEntries.emplace_back(mModules[i].mSpecializationMap.at(id));
+			if (spirv.mSpecializationMap.count(id) == 0) continue;
+			vk::SpecializationMapEntry& entry = mapEntries.emplace_back(spirv.mSpecializationMap.at(id));
 			entry.offset = (uint32_t)mapData.size();
 			mapData.resize(entry.offset + data.size());
 			memcpy(mapData.data() + entry.offset, data.data(), data.size());
 		}
-		auto& s = specializationInfos[i];
+		vk::SpecializationInfo& s = specializationInfos[i];
+		specializationInfoPtrs[i] = &s;
 		s.pData = mapData.data();
 		s.dataSize = mapData.size();
 		s.setMapEntries(mapEntries);
-		specializationInfoPtrs[i] = &s;
+		i++;
 	}
 
-	auto[meshAttributes,meshBindings] = mesh->CreateInput(mModules[0]);
-	vector<vk::VertexInputBindingDescription> bindings(meshBindings.size());
-	for (uint32_t i = 0; i < bindings.size(); i++) {
-		bindings[i].binding = i;
-		bindings[i].stride = (uint32_t)meshBindings[i].mBufferView.mStride;
-		bindings[i].inputRate = meshBindings[i].mInputRate;
+
+	vector<vk::VertexInputAttributeDescription> attributes;
+	vector<vk::VertexInputBindingDescription> bindings(g->mBindings.size());
+	vk::PipelineVertexInputStateCreateInfo vertexInfo = {};
+	if (g) {
+		for (auto& [id, attrib] : g->mAttributes)
+			if (mModules.at("vsmain").mStageInputs.count(id))
+				attributes.push_back(attrib);
+		for (uint32_t i = 0; i < bindings.size(); i++) {
+			bindings[i].binding = i;
+			bindings[i].stride = (uint32_t)g->mBindings[i].mBuffer.stride();
+			bindings[i].inputRate = g->mBindings[i].mInputRate;
+		}
+		vertexInfo.setVertexAttributeDescriptions(attributes);
+		vertexInfo.setVertexBindingDescriptions(bindings);
 	}
-	vk::PipelineVertexInputStateCreateInfo vertexInfo;
-	vertexInfo.setVertexAttributeDescriptions(meshAttributes);
-	vertexInfo.setVertexBindingDescriptions(bindings);
 
 	// TODO: cache pipeline
 
 	shared_ptr<GraphicsPipeline> pipeline = make_shared<GraphicsPipeline>(mName, **commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(),
 		mModules, specializationInfos,
-		vertexInfo, mesh->Topology(), mCullMode, mPolygonMode,
+		vertexInfo, g->mPrimitiveTopology, mCullMode, mPolygonMode,
 		mSampleShading, vk::PipelineDepthStencilStateCreateInfo({}, mDepthTest, mDepthWrite, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1),
 		blendStates);
 
 
+	commandBuffer.BindPipeline(pipeline);
+	
+
 	if (!mCacheValid) {
+		// Create a descriptorset with the currently bound inputs
 		for (auto& [name, entries] : mDescriptorParameters) {
 			auto it = pipeline->DescriptorBindings().find(name);
 			if (it == pipeline->DescriptorBindings().end()) continue;
@@ -144,11 +156,11 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, Mesh* 
 }
 
 
-shared_ptr<GraphicsPipeline> MaterialDerivative::Bind(CommandBuffer& commandBuffer, Mesh* mesh) {
+shared_ptr<GraphicsPipeline> MaterialDerivative::Bind(CommandBuffer& commandBuffer, optional<GeometryData> g) {
 	ProfilerRegion ps("MaterialDerivative::Bind");
 
 	shared_ptr<GraphicsPipeline> pipeline; // TODO: create ot fetch pipeline for mesh
 
-	Material::Bind(commandBuffer, mesh);
+	Material::Bind(commandBuffer, g);
 	return pipeline;
 }
