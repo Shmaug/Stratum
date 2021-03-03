@@ -57,7 +57,7 @@ public:
 	}
 };
 
-static const unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>> gFormatMap {
+static const unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>, hash<size_t>> gFormatMap {
 	{ spirv_cross::SPIRType::SByte, 	{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
 	{ spirv_cross::SPIRType::UByte, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
 	{ spirv_cross::SPIRType::Short, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
@@ -70,7 +70,7 @@ static const unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>> 
 	{ spirv_cross::SPIRType::Float, 	{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
 	{ spirv_cross::SPIRType::Double, 	{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
 };
-static const unordered_map<vk::ShaderStageFlagBits, shaderc_shader_kind> gShaderStageMap {
+static const unordered_map<vk::ShaderStageFlagBits, shaderc_shader_kind, hash<vk::ShaderStageFlags>> gShaderStageMap {
 	{ vk::ShaderStageFlagBits::eVertex, shaderc_vertex_shader },
 	{ vk::ShaderStageFlagBits::eFragment, shaderc_fragment_shader },
 	{ vk::ShaderStageFlagBits::eGeometry, shaderc_geometry_shader },
@@ -120,7 +120,7 @@ size_t SizeOf(const spirv_cross::SPIRType& type, const spirv_cross::Compiler& co
 	return sz;
 }
 
-void ShaderCompiler::DirectiveCompile(SpirvModuleGroup& modules, word_iterator arg, const word_iterator& argEnd) {
+void ShaderCompiler::DirectiveCompile(unordered_map<string, SpirvModule>& modules, word_iterator arg, const word_iterator& argEnd) {
 	static const unordered_map<string, vk::ShaderStageFlagBits> stageMap {
     { "vertex", vk::ShaderStageFlagBits::eVertex },
     { "tess_control", vk::ShaderStageFlagBits::eTessellationControl }, { "hull", vk::ShaderStageFlagBits::eTessellationControl }, // TODO: idk if 'tess_control' == 'hull'
@@ -155,10 +155,10 @@ void ShaderCompiler::DirectiveCompile(SpirvModuleGroup& modules, word_iterator a
 	}
 }
 
-SpirvModuleGroup ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
+unordered_map<string, SpirvModule> ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
 	uint32_t lineNumber = 0;
 
-	SpirvModuleGroup modules;
+	unordered_map<string, SpirvModule> modules;
 
 	string line;
 	istringstream srcstream(source);
@@ -327,7 +327,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			l = semantic.length();
 		}
 		if (l > 0 && semantic[l-1] == '_') l--;
-		ranges::transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
+		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
 		if (gAttributeMap.count(semantic))
 			var.mType = gAttributeMap.at(semantic);
 		else
@@ -372,7 +372,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 	}
 	for (const auto& e : compiler.get_entry_points_and_stages()) {
 		auto& ep = compiler.get_entry_point(e.name, e.execution_model);
-		shaderModule.mWorkgroupSize = { ep.workgroup_size.x, ep.workgroup_size.y, ep.workgroup_size.z };
+		shaderModule.mWorkgroupSize = vk::Extent3D(ep.workgroup_size.x, ep.workgroup_size.y, ep.workgroup_size.z);
 	}
 	for (const auto& r : resources.push_constant_buffers) {
 		spirv_cross::SPIRType type = compiler.get_type(r.base_type_id);
@@ -414,19 +414,25 @@ int main(int argc, char* argv[]) {
 			inputs.push_back(argv[i]);
 	}
 
-	SpirvModuleGroup results;
+	unordered_map<string, SpirvModule> results;
 	ShaderCompiler compiler(includes);
 	for (const auto& i : inputs)
 		try {
 			results.merge(compiler(i));
-		} catch (logic_error e) {
+		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), i.string().c_str());
 			throw;
 		}
 
 	if (!output.empty()) {
-		binary_stream stream(output, ios_base::binary|ios_base::out);
-		stream << results;
+		try {
+			byte_stream<ofstream> stream(output, ios_base::binary);
+			stream << results;
+			printf(output.string().c_str());
+		} catch (exception e) {
+			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile writing %s\n", e.what(), output.string().c_str());
+			throw;
+		}
 	}
 
 	return EXIT_SUCCESS;

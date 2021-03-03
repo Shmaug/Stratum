@@ -1,7 +1,7 @@
 #pragma once
 
 #include "RenderPass.hpp"
-#include "Asset/Texture.hpp"
+#include "Texture.hpp"
 
 namespace stm {
 

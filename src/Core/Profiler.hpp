@@ -19,7 +19,6 @@ public:
 	STRATUM_API static void BeginSample(const string& label);
 	STRATUM_API static void EndSample();
 
-	STRATUM_API static void DrawGui(GuiContext& gui, uint32_t framerate);
 	STRATUM_API static void ClearAll();
 
 private:

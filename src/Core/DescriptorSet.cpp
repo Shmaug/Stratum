@@ -3,8 +3,8 @@
 
 using namespace stm;
 
-constexpr inline uint64_t HashFromBinding(uint64_t binding, uint64_t arrayIndex) { return (binding << 32) | arrayIndex; }
-constexpr inline uint32_t BindingFromHash(uint64_t index) { return (uint32_t)(index >> 32); }
+constexpr uint64_t HashFromBinding(uint64_t binding, uint64_t arrayIndex) { return (binding << 32) | arrayIndex; }
+constexpr uint32_t BindingFromHash(uint64_t index) { return (uint32_t)(index >> 32); }
 
 DescriptorSetEntry::operator bool() const {
 	switch (mType) {
@@ -270,9 +270,9 @@ void DescriptorSet::FlushWrites() {
     case vk::DescriptorType::eStorageBuffer:
     case vk::DescriptorType::eUniformBufferDynamic:
     case vk::DescriptorType::eStorageBufferDynamic:
-			infos[i].mBufferInfo.buffer = **entry.mBufferView.mBuffer;
-			infos[i].mBufferInfo.offset = entry.mBufferView.mBufferOffset;
-			infos[i].mBufferInfo.range = entry.mBufferView.mRange;
+			infos[i].mBufferInfo.buffer = **entry.mBufferView;
+			infos[i].mBufferInfo.offset = entry.mBufferView.offset();
+			infos[i].mBufferInfo.range = entry.mBufferView.size_bytes();
 			writes[i].pBufferInfo = &infos[i].mBufferInfo;
 			break;
     case vk::DescriptorType::eInlineUniformBlockEXT:

@@ -1,7 +1,5 @@
 #include "Profiler.hpp"
 #include "Window.hpp"
-#include "../Scene/GuiContext.hpp"
-
 
 using namespace stm;
 
@@ -76,6 +74,7 @@ void Profiler::EndFrame() {
 	}
 }
 
+/*
 void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
 	Device& device = gui.Scene().mInstance.Device();
 	auto font = device.FindOrLoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf");
@@ -149,3 +148,4 @@ void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
 	
 	gui.EndLayout(); // window
 }
+*/

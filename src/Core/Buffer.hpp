@@ -12,11 +12,25 @@ public:
 
 	inline Buffer(const string& name, Device& device, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
 		: mName(name), mDevice(device), mSize(size), mUsageFlags(usage), mMemoryProperties(memoryFlags), mSharingMode(sharingMode) {
+		
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
 		mDevice.SetObjectName(mBuffer, mName);
+		
 		vk::MemoryRequirements memRequirements = mDevice->getBufferMemoryRequirements(mBuffer);
 		mMemoryBlock = mDevice.AllocateMemory(memRequirements, mMemoryProperties, mName);
 		mDevice->bindBufferMemory(mBuffer, **mMemoryBlock.mMemory, mMemoryBlock.mOffset);
+	}
+	inline Buffer(const string& name, Device& device, const byte_blob& blob, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
+		: mName(name), mDevice(device), mSize(blob.size()), mUsageFlags(usage), mMemoryProperties(memoryFlags), mSharingMode(sharingMode) {
+		
+		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
+		mDevice.SetObjectName(mBuffer, mName);
+		
+		vk::MemoryRequirements memRequirements = mDevice->getBufferMemoryRequirements(mBuffer);
+		mMemoryBlock = mDevice.AllocateMemory(memRequirements, mMemoryProperties, mName);
+		mDevice->bindBufferMemory(mBuffer, **mMemoryBlock.mMemory, mMemoryBlock.mOffset);
+		
+		memcpy(mMemoryBlock.Mapped(), blob.data(), blob.size());
 	}
 	inline ~Buffer() {
 		for (auto&[k,v] : mViews) mDevice->destroyBufferView(v);
@@ -35,7 +49,7 @@ public:
 	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
 	inline const Device::Memory::Block& MemoryBlock() const { return mMemoryBlock; }
 
-	template<typename T = nullptr_t>
+	template<typename T = byte>
 	struct ArrayView {
     using element_type     = T;
     using value_type       = remove_cv_t<element_type>;
@@ -62,11 +76,11 @@ public:
 		inline shared_ptr<Buffer> get() const { return mBuffer; }
 		
     inline size_t offset() const { return mBufferOffset; }
-    inline size_t stride() const { return is_same_v<value_type,nullptr_t> ? mElementStride : sizeof(value_type); }
+    inline size_t stride() const { return mElementStride; }
     inline size_t size() const { return mElementCount; }
     inline size_t size_bytes() const { return mElementCount*stride(); }
     inline bool empty() const { return !mBuffer || mElementCount == 0; }
-		template<typename Ty = T> inline pointer data() const noexcept { return reinterpret_cast<Ty*>(mBuffer->data() + mBufferOffset); }
+		template<typename Ty = T> inline pointer data() const { return reinterpret_cast<Ty*>(mBuffer->data() + mBufferOffset); }
 
     inline iterator begin() const { return iterator(data()); }
     inline iterator end() const { return iterator(data() + mElementCount); }

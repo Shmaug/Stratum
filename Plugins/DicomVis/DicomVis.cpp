@@ -1,5 +1,5 @@
 #include <Core/EnginePlugin.hpp>
-#include <Scene/Scene.hpp>
+#include <Scene/SceneNode.hpp>
 #include <Scene/Renderers/MeshRenderer.hpp>
 
 #define TINYGLTF_IMPLEMENTATION

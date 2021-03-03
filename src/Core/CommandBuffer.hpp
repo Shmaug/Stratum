@@ -13,7 +13,12 @@ public:
 	
 	// assumes a CommandPool has been created for this_thread in queueFamily
 	STRATUM_API CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API ~CommandBuffer();
+	inline ~CommandBuffer() {
+		if (mState == CommandBufferState::eInFlight)
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying CommandBuffer %s that is in-flight\n", mName.c_str());
+		Clear();
+		mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
+	}
 	inline vk::CommandBuffer operator*() const { return mCommandBuffer; }
 	inline const vk::CommandBuffer* operator->() const { return &mCommandBuffer; }
 
@@ -110,16 +115,22 @@ public:
 	STRATUM_API bool PushConstant(const string& name, const byte_blob& data);
 	template<typename T> inline bool PushConstantRef(const string& name, const T& value) { return PushConstant(name, byte_blob(sizeof(T), &value)); }
 
-	inline void Dispatch(const Vector2u& dim) { mCommandBuffer.dispatch(dim.x(), dim.y(), 1); }
-	inline void Dispatch(const Vector3u& dim) { mCommandBuffer.dispatch(dim.x(), dim.y(), dim.z()); }
+	inline void Dispatch(const vk::Extent2D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, 1); }
+	inline void Dispatch(const vk::Extent3D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, dim.depth); }
 	inline void Dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
 	// Call Dispatch() on ceil(size / workgroupSize)
-	inline void DispatchAligned(const Vector3u& dim) {
+	inline void DispatchTiled(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
-		Dispatch(Vector3u(((dim + cp->WorkgroupSize()).array() - 1) / cp->WorkgroupSize().array()));
+		DispatchTiled(vk::Extent3D(
+			(dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width,
+			(dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 
+			(dim.depth + cp->WorkgroupSize().depth - 1) / cp->WorkgroupSize().depth));
 	}
-	inline void DispatchAligned(const Vector2u& dim) { DispatchAligned(Vector3u(dim.x(), dim.y(), 1)); }
-	inline void DispatchAligned(uint32_t x, uint32_t y = 1, uint32_t z = 1) { DispatchAligned(Vector3u(x, y, z)); }
+	inline void DispatchTiled(const vk::Extent2D& dim) {
+		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
+		DispatchTiled(vk::Extent3D((dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width, (dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 1));
+	}
+	inline void DispatchTiled(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return DispatchTiled(vk::Extent3D(x,y,z)); }
 
 	inline void BindVertexBuffer(uint32_t index, const Buffer::ArrayView<>& view) {
 		if (mBoundVertexBuffers[index] != view) {

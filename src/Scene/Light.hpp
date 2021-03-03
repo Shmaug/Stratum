@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Scene.hpp"
+#include "SceneNode.hpp"
 
 namespace stm {
 namespace shader_interop {
@@ -54,16 +54,18 @@ public:
 	inline AlignedBox3f Bounds() {
 		Vector3f c, e;
 		switch (mType) {
+		default:
 		case LightType::ePoint:
-			return AlignedBox3f(mNode.Translation() - Vector3f::Constant(mRange), mNode.Translation() + Vector3f::Constant(mRange));
+			e = Vector3f::Constant(mRange);
+			return AlignedBox3f(mNode.Translation() - e, mNode.Translation() + e);
 		case LightType::eSpot:
 			e = Vector3f(0, 0, mRange * .5f);
 			c = Vector3f(mRange * Vector2f(sinf(mOuterSpotAngle * .5f)), mRange * .5f);
-			return AlignedBox3f(c - e, c + e) * Transform();
+			AlignedBox3f box(c - e, c + e);
+			return mNode.LocalToGlobal();
 		case LightType::eDirectional:
-			return AlignedBox3f(Vector3f::Constant(-1e24f), Vector3f::Constant(1e124));
+			return AlignedBox3f(Vector3f::Constant(-numeric_limits<float>::infinity()), Vector3f::Constant(numeric_limits<float>::infinity()));
 		}
-		return mNode.Bounds();
 	}
 
 private:

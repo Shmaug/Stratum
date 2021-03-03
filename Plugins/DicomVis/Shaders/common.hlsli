@@ -18,9 +18,9 @@ struct VolumeData {
 
 #ifndef __cplusplus
 
-[[vk::constant_id(0)]] gMaskColored = false; // Is the mask colored?
-[[vk::constant_id(1)]] gSingleChannel = true;
-[[vk::constant_id(2)]] gBakedGradient = false;
+[[vk::constant_id(0)]] const bool gMaskColored = false; // Is the mask colored?
+[[vk::constant_id(1)]] const bool gSingleChannel = true;
+[[vk::constant_id(2)]] const bool gBakedGradient = false;
 
 //#pragma inline_uniform_block Volume
 [[vk::binding(3, 0)]] ConstantBuffer<VolumeData> gVolume : register(b0);
@@ -33,12 +33,12 @@ struct VolumeData {
 #endif
 
 #ifdef SINGLE_CHANNEL
-RWTexture3D<float> RWVolume : register(t0);
+RWTexture3D<float> RWVolume : register(u0);
 #else
-RWTexture3D<float4> RWVolume : register(t0);
+RWTexture3D<float4> RWVolume : register(u0);
 #endif
-RWTexture3D<float4> Gradient : register(u2);
-RWTexture3D<uint> RawMask : register(t1);
+RWTexture3D<float4> Gradient : register(u1);
+RWTexture3D<uint> RawMask : register(u2);
 
 float3 HuetoRGB(float hue) {
 	return saturate(float3(abs(hue * 6 - 3) - 1, 2 - abs(hue * 6 - 2), 2 - abs(hue * 6 - 4)));

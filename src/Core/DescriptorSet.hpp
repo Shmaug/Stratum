@@ -2,7 +2,7 @@
 
 #include "Buffer.hpp"
 #include "Pipeline.hpp"
-#include "Asset/Texture.hpp"
+#include "Texture.hpp"
 
 namespace stm {
 
@@ -35,8 +35,9 @@ public:
   Device& mDevice;
 
 	inline DescriptorSet(const string& name, Device& device, vk::DescriptorSetLayout layout) : mName(name), mDevice(device), mLayout(layout) {
+		auto[descriptorPool,l] = mDevice.mDescriptorPool.lock();
 		vk::DescriptorSetAllocateInfo allocInfo = {};
-		allocInfo.descriptorPool = mDevice.mDescriptorPool;
+		allocInfo.descriptorPool = descriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &layout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
@@ -45,8 +46,8 @@ public:
 	inline ~DescriptorSet() {
 		mBoundDescriptors.clear();
 		mPendingWrites.clear();
-		lock_guard lock(mDevice.mDescriptorPoolMutex);
-		mDevice->freeDescriptorSets(mDevice.mDescriptorPool, { mDescriptorSet });
+		auto[descriptorPool,l] = mDevice.mDescriptorPool.lock();
+		mDevice->freeDescriptorSets(descriptorPool, { mDescriptorSet });
 	}
 
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }

@@ -2,8 +2,6 @@
 #include "Buffer.hpp"
 #include "Framebuffer.hpp"
 #include "RenderPass.hpp"
-#include "../Scene/Scene.hpp"
-
 
 using namespace stm;
 
@@ -26,12 +24,7 @@ CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFa
 	mCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 	mState = CommandBufferState::eRecording;
 }
-CommandBuffer::~CommandBuffer() {
-	if (mState == CommandBufferState::eInFlight)
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying CommandBuffer %s that is in-flight\n", mName.c_str());
-	Clear();
-	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
-}
+
 
 void CommandBuffer::BeginLabel(const string& text, const Vector4f& color) {
 	if (vkCmdBeginDebugUtilsLabelEXT) {

@@ -10,11 +10,6 @@ class DescriptorSet;
 class Fence;
 class Texture;
 
-class Asset {
-public:
-  inline virtual ~Asset() {};
-};
-
 class Device {
 public:
 	stm::Instance& mInstance;
@@ -29,6 +24,7 @@ public:
 		// CommandBuffers may be in-flight or idle and are managed by Device
 		unordered_map<thread::id, pair<vk::CommandPool, list<unique_ptr<CommandBuffer>>>> mCommandBuffers;
 	};
+	
 	class Memory {
 	private:
 		friend class Device;
@@ -99,23 +95,6 @@ public:
 		}
 	}
 	
-	template<class T> requires(derived_from<T,Asset>)
-	inline shared_ptr<T> FindOrLoadAsset(const fs::path& filename) const {
-		uint64_t key = hash_combine(filename.string());
-		if (mLoadedAssets.count(key) == 0) return nullptr;
-		return dynamic_pointer_cast<T>(mLoadedAssets.at(key));
-	}
-	inline void UnloadAssets() { lock_guard lock(mAssetMutex); mLoadedAssets.clear(); }
-
-	STRATUM_API shared_ptr<Buffer> GetPooledBuffer(const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API shared_ptr<DescriptorSet> GetPooledDescriptorSet(const string& name, vk::DescriptorSetLayout layout);
-	STRATUM_API shared_ptr<Texture> GetPooledTexture(const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t mipLevels = 1, vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlags properties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	STRATUM_API void PoolResource(shared_ptr<Buffer> resource);
-	STRATUM_API void PoolResource(shared_ptr<DescriptorSet> resource);
-	STRATUM_API void PoolResource(shared_ptr<Texture> resource);
-
-	STRATUM_API void PurgeResourcePools(uint32_t maxAge);
-
 	STRATUM_API unique_ptr<CommandBuffer> GetCommandBuffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	// The CommandBuffer will be managed by the device after being passed in
 	STRATUM_API Fence& Execute(unique_ptr<CommandBuffer>&& commandBuffer);
@@ -125,24 +104,6 @@ public:
 	inline uint64_t FrameCount() const { return mFrameCount; }
 
 private:
-	template<typename T, typename Tk> class ResourcePool {
-	public:
-		struct PooledResource {
-		public:
-			shared_ptr<T> mResource;
-			uint64_t mLastFrameUsed;
-		};
-
-		mutable mutex mMutex;
-		unordered_map<Tk, list<PooledResource>> mResources;
-
-		inline void EraseOld(uint64_t currentFrame, uint64_t maxAge) {
-			lock_guard lock(mMutex);
-			for (auto& [key,pool] : mResources)
-				erase_if(pool, [=](const auto& i){ return i.mLastFrameUsed + maxAge > currentFrame; });
-		}
-	};
-
 	friend class Instance;
 	friend class DescriptorSet;
 	STRATUM_API void PrintAllocations();
@@ -155,23 +116,12 @@ private:
 	vk::PhysicalDeviceLimits mLimits;
 	vk::SampleCountFlagBits mMaxMSAASamples;
 	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
+
 	vector<uint32_t> mQueueFamilyIndices;
-
-	ResourcePool<DescriptorSet, vk::DescriptorSetLayout> mDescriptorSetPool;
-	ResourcePool<Buffer, size_t> mBufferPool;
-	ResourcePool<Texture, size_t> mTexturePool;
-	
-	mutable mutex mQueueMutex;
-	unordered_map<uint32_t, QueueFamily> mQueueFamilies;
-
-	mutable mutex mMemoryMutex;
-	unordered_map<uint32_t /*memoryTypeIndex*/, list<unique_ptr<Memory>>> mMemoryPool;
-
-	mutable mutex mDescriptorPoolMutex;
-	vk::DescriptorPool mDescriptorPool;
-
-	mutable mutex mAssetMutex;
-	unordered_map<size_t, shared_ptr<Asset>> mLoadedAssets;
+	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
+	locked_object<unordered_map<uint32_t, list<unique_ptr<Memory>>>> mMemoryPool;
+	locked_object<unordered_map<thread::id, vk::CommandPool>> mCommandPools;
+	locked_object<vk::DescriptorPool> mDescriptorPool;
 };
 
 class Fence {

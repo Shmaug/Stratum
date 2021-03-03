@@ -1,306 +1,197 @@
 #pragma once
 
-#include "../Core/InputState.hpp"
-#include "../Core/Material.hpp"
+#include "Material.hpp"
 
 namespace stm {
 
-class Scene;
-
-class SceneNode {
+class Scene {
 public:
-	class Component {
+
+	class Node {
 	private:
 		string mName;
 		bool mEnabled = true;
-
+		uint32_t mLayerMask = 1;
+		
 	public:
-		SceneNode& mNode;
+		Scene& mScene;
 
-		inline Component(SceneNode& node, const string& name) : mNode(node), mName(name) {}
+		inline Node(const string& name, Scene& scene) : mName(name), mScene(scene) {}
+		virtual ~Node() = default;
 
 		inline const string& Name() const { return mName; }
-		inline string FullName() const { return mNode.FullName()+"/"+mName; }
 
 		inline bool Enabled() const { return mEnabled; }
 		inline void Enabled(bool e) { mEnabled = e; }
 
-	protected:
-		friend class Scene;
-		friend class SceneNode;
-
-		inline virtual void OnAddChild(SceneNode& n) {}
-		inline virtual void OnRemoveChild(SceneNode& n) {}
-		
-		inline virtual void OnFixedUpdate(CommandBuffer& commandBuffer) {}
-		inline virtual void OnUpdate(CommandBuffer& commandBuffer) {}
-
-		inline virtual void OnValidateTransform(Matrix4f& globalTransform, TransformTraits& globalTransformTraits) {}
-		template<typename T, int Mode> inline void OnValidateTransform(Transform<T,3,Mode>& p) { OnValidateTransform(p.matrix(), Mode); }
+		inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
+		inline virtual uint32_t LayerMask() { return mLayerMask; };
 	};
-
 	
 private:
-	deque<unique_ptr<Component>> mComponents;
-	deque<unique_ptr<SceneNode>> mChildren;
-	SceneNode* mParent = nullptr;
+	vector<unique_ptr<Node>> mTopologicalNodes;
+	unordered_multimap<type_index, Node*> mNodesByType;
+	unordered_map<Node*, Node*> mParentEdges; // node* -> node.parent
+	unordered_multimap<Node*, Node*> mChildrenEdges; // node* -> node.children
 
-	string mName;
-	bool mEnabled = true;
-	uint32_t mLayerMask = 1;
-	
-	Matrix4f mLocalTransform;
-	Matrix4f mGlobalTransform;
-	TransformTraits mLocalTransformType = TransformTraits::Isometry;
-	TransformTraits mGlobalTransformType = TransformTraits::Isometry;
-	bool mTransformValid = false;
-	
 public:
-	stm::Scene& mScene;
 
-	inline SceneNode(stm::Scene& scene, const string& name) : mScene(scene), mName(name) {}
-	inline ~SceneNode() {
-		mComponents.clear();
-		mChildren.clear();
-		if (mParent) mParent->RemoveChild(*this);
+	class parent_iterator {
+	private:
+		Node* mNode;
+
+	public:
+    using iterator_category = input_iterator_tag;
+    using value_type        = Node;
+    using pointer           = value_type*;
+    using reference         = value_type&;
+
+		inline parent_iterator() : mNode(nullptr) {}
+		inline parent_iterator(Node* node) : mNode(node) {}
+		parent_iterator(const parent_iterator&) = default;
+		
+    inline reference operator*() const { return *mNode; }
+    inline pointer operator->() { return mNode; }
+
+    inline parent_iterator& operator++() {
+			if (mNode->mScene.mParentEdges.count(mNode))
+				mNode = mNode->mScene.mParentEdges.at(mNode);
+			else
+				mNode = nullptr;
+			return *this;
+		}
+    inline parent_iterator operator++(int) {
+			parent_iterator tmp(*this);
+			operator++();
+			return tmp;
+		}
+
+		inline operator bool() const { return mNode != nullptr; }
+
+    bool operator==(const parent_iterator& rhs) const = default;
+    bool operator!=(const parent_iterator& rhs) const = default;
+    inline bool operator>(const parent_iterator& rhs) const {
+			if (mNode == rhs.mNode) return false;
+			return find_if(*this, parent_iterator(), rhs);
+		};
+		inline bool operator<(const parent_iterator& rhs) const {
+			return rhs.operator>(*this);
+		};
+	};
+	static_assert(input_iterator<parent_iterator>);
+
+	class child_iterator {
+	private:
+		unordered_multimap<Node*, Node*>::iterator mIterator;
+
+	public:
+    using iterator_category = input_iterator_tag;
+    using value_type        = Node;
+    using pointer           = value_type*;
+    using reference         = value_type&;
+
+		inline child_iterator() : mIterator({}) {}
+		inline child_iterator(Node* node) : mIterator(node->mScene.mChildrenEdges.find(node)) {}
+		child_iterator(const child_iterator&) = default;
+		
+    inline reference operator*() const { return mIterator.operator*(); }
+    inline pointer operator->() { return mIterator.operator->(); }
+
+    inline child_iterator& operator++() {
+			return *this;
+		}
+    inline child_iterator operator++(int) {
+			ancestor_iterator tmp(*this);
+			operator++();
+			return tmp;
+		}
+
+		inline operator bool() const { return mNode != nullptr; }
+
+    bool operator==(const child_iterator& rhs) const = default;
+    bool operator!=(const child_iterator& rhs) const = default;
+    inline bool operator>(const child_iterator& rhs) const {
+			if (mNode == rhs.mNode) return false;
+			return find_if(*this, child_iterator(), rhs);
+		};
+		inline bool operator<(const child_iterator& rhs) const {
+			return rhs.operator>(*this);
+		};
+	};
+	static_assert(input_iterator<child_iterator>);
+
+
+	template<typename F> requires(invocable<F,Node&>)
+	inline void for_each_descendant(Node& n, F&& fn) const {
+		queue<Node*> nodes(mChildrenEdges.at(n));
+		while (!nodes.empty()) {
+			Node* n = nodes.front();
+			nodes.pop();
+			fn(forward<Node&>(*n));
+			if (mChildrenEdges.count(n)) {
+				nodes.resize(nodes.size() + n->mChildren.size());
+				ranges::copy_backward(views::transform(n->mChildren, &get<unique_ptr<Node>>), nodes.end());
+			}
+		}
 	}
 
-	inline const string& Name() const { return mName; }
-	inline string FullName() const { return mParent ? mParent->FullName()+"/"+mName : mName; }
-
-	inline bool Enabled() const { return mEnabled; }
-	inline void Enabled(bool e) { mEnabled = e; }
-
-	// If LayerMask != 0 then the object will be included in the scene's BVH and moving the object will trigger BVH builds
-	// Note Renderers should OR this with their PassMask()
-	inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
-	inline virtual uint32_t LayerMask() { return mLayerMask; };
-
-	
-	inline SceneNode* Parent() const { return mParent; }
-	inline const deque<unique_ptr<SceneNode>>& Children() const { return mChildren; }
-
-	inline SceneNode& AddChild(unique_ptr<SceneNode>&& n) {
+	template<class T, typename... Args> requires(derived_from<T,Node> && constructible_from<T,Args...>)
+	inline T& emplace(Args&&... args) {
+		return *static_cast<T*>(mNodes[type_index(typeid(T))].emplace_back(make_unique<T>(forward<Args>(args)...)).get());
+	}
+	inline Node& emplace(unique_ptr<Node>&& n) {
 		if (n->mParent == this) return *n;
 		if (n->mParent) n = move(n->mParent->RemoveChild(*n));
-		auto& ptr = mChildren.emplace_back(move(n));
+		auto& ptr = mNodes.emplace_back(move(n));
 		ptr->mParent = this;
-		ptr->InvalidateTransform();
-		ranges::for_each(mComponents, [&ptr](auto& c){ c->OnAddChild(*ptr); });
 		return *ptr;
 	}
-	inline unique_ptr<SceneNode> RemoveChild(SceneNode& n) {
-		auto it = ranges::find_if(mChildren, [&](const auto& c){ return c.get() == &n; });
-		if (it != mChildren.end()) {
-			unique_ptr<SceneNode> ptr = move(*it);
-			ptr->mParent = nullptr;
-			ptr->InvalidateTransform();
-			erase(mChildren, nullptr);
-			ranges::for_each(mComponents, [&ptr](auto& c){ c->OnRemoveChild(*ptr); });
-			return ptr;
-		}
-		return nullptr;
+	template<class T> requires(derived_from<T,Node>)
+	inline unique_ptr<T> erase(T* n) {
+		auto p = mNodes.find(type_index(typeid(T)));
+		if (p == mNodes.end()) return nullptr;
+		p->second.erase(n);
+	}
+	inline bool erase(Node* n) {
+		for (auto&[t,l] : mNodes)
+			if (l.erase(n))
+				return true;
+		return false;
 	}
 
-	template<typename Callable>
-	inline void for_each_ancestor(Callable&& fn) {
-		SceneNode* n = mParent;
-		while (n) {
-			fn(*n);
-			n = n->mParent;
-		}
-	}
-	template<typename Callable>
-	inline void for_each_descendant(Callable&& fn) {
-		if (mChildren.empty()) return;
-		deque<SceneNode*> nodes(mChildren.size());
-		ranges::transform(mChildren, nodes.begin(), [](const auto& c){return c.get();});
-		while (!nodes.empty()) {
-			auto n = nodes.front();
-			nodes.pop_front();
-			fn(*n);
-			if (n->mChildren.empty()) continue;
-			nodes.resize(nodes.size() + n->mChildren.size());
-			ranges::copy_backward(views::transform(n->mChildren, [](auto& n){return n.get();}), nodes.end());
-		}
-	}
-
-	#pragma region Transform
-	inline const Vector3f Translation() const {
-		switch (mLocalTransformType) {
-			default:
-			case TransformTraits::Projective: return Projective3f(mLocalTransform).translation();
-			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform).translation();
-			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform).translation();
-		}
-	}
-	inline const Matrix3f Rotation() const {
-		switch (mLocalTransformType) {
-			default:
-			case TransformTraits::Projective: return Projective3f(mLocalTransform).rotation();
-			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform).rotation();
-			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform).rotation();
-		}
-	}
-
-	inline const Matrix4f& LocalToParent() const { return mLocalTransform; }
-	inline const Matrix4f& LocalToGlobal() { ValidateTransform(); return mGlobalTransform; }
-
-	template<int Cols>
-	inline const Matrix<float,4,Cols> LocalToParent(const Matrix<float,4,Cols>& v) const {
-		switch (mLocalTransformType) {
-			default:
-			case TransformTraits::Projective: return Projective3f(mLocalTransform) * v;
-			case TransformTraits::Affine: 	  return Affine3f(mLocalTransform) * v;
-			case TransformTraits::Isometry:   return Isometry3f(mLocalTransform) * v;
-		}
-	}
-	template<int Mode>
-	inline const Matrix4f LocalToParent(const Eigen::Transform<float,3,Mode>& v) const {
-		switch (mLocalTransformType) {
-			default:
-			case TransformTraits::Projective: return (Projective3f(mLocalTransform) * v).matrix();
-			case TransformTraits::Affine: 	  return (Affine3f(mLocalTransform) * v).matrix();
-			case TransformTraits::Isometry:   return (Isometry3f(mLocalTransform) * v).matrix();
-		}
-	}
-	
-	template<int Cols>
-	inline const Matrix<float,4,Cols> LocalToGlobal(const Matrix<float,4,Cols>& v) {
-		ValidateTransform();
-		switch (mGlobalTransformType) {
-			default:
-			case TransformTraits::Projective: return Projective3f(mGlobalTransform) * v;
-			case TransformTraits::Affine: 		return Affine3f(mGlobalTransform) * v;
-			case TransformTraits::Isometry: 	return Isometry3f(mGlobalTransform) * v;
-		}
-	}
-	template<int Mode>
-	inline const Matrix4f LocalToGlobal(const Eigen::Transform<float,3,Mode>& v) {
-		ValidateTransform();
-		switch (mGlobalTransformType) {
-			default:
-			case TransformTraits::Projective: return (Projective3f(mGlobalTransform) * v).matrix();
-			case TransformTraits::Affine: 		return (Affine3f(mGlobalTransform) * v).matrix();
-			case TransformTraits::Isometry: 	return (Isometry3f(mGlobalTransform) * v).matrix();
-		}
-	}
-
-	inline void InvalidateTransform() { mTransformValid = false; }
-	inline void ValidateTransform() {
-		if (mTransformValid) return;
-		if (mParent) {
-			switch (mLocalTransformType) {
-				default:
-				case TransformTraits::Projective: mGlobalTransform = mParent->LocalToGlobal(Projective3f(mLocalTransform)); break;
-				case TransformTraits::Affine: 		mGlobalTransform = mParent->LocalToGlobal(Affine3f(mLocalTransform)); break;
-				case TransformTraits::Isometry: 	mGlobalTransform = mParent->LocalToGlobal(Isometry3f(mLocalTransform)); break;
-			}
-			mGlobalTransformType = max(mParent->mGlobalTransformType, mLocalTransformType);
-		} else {
-			mGlobalTransform = mLocalTransform;
-			mGlobalTransformType = mLocalTransformType;
-		}
-		mTransformValid = true;
-		ranges::for_each(mComponents, [&](auto& c) { c->OnValidateTransform(mGlobalTransform, mGlobalTransformType); });
-	}
-	#pragma endregion
-
-	inline const deque<unique_ptr<Component>>& Components() const { return mComponents; }
-
-	template<class C, typename... Args> requires(is_base_of_v<Component,C> && constructible_from<C,SceneNode&,Args...>)
-	inline C& CreateComponent(Args&&... args) {
-		return **mComponents.emplace_back(make_unique<C>(*this, forward<Args>(args)...));
-	}
-	template<class C> requires(is_base_of_v<Component,C>)
-	inline unique_ptr<C> RemoveComponent(C& c) {
-		auto it = ranges::find(mComponents, &c);
-		if (it != mComponents.end()) {
-			unique_ptr<C> r = move(*it);
-			erase(mComponents, nullptr);
-			return r;
-		} else
-			return nullptr;
-	}
-
-	template<class T, typename Callable> requires(is_base_of_v<Component,T>)
-	inline void for_each_component(Callable&& fn) const {
-		for (auto& c : mComponents)
-			if (T* t = dynamic_cast<T*>(c.get()))
-				fn(t);
-	}
-
-	template<class T> requires(is_base_of_v<Component,T>)
-	inline T* get_component() const {
-		for (auto& c : mComponents)
-			if (T* t = dynamic_cast<T*>(c.get()))
-				return t;
-		return nullptr;
-	}
-	
-	template<class T, ranges::range R> requires(is_base_of_v<Component,T>)
-	inline R& get_components(R& dst) const {
-		for_each_component([&](auto& c) { dst.push_back(c); });
-		return dst;
-	}
-	template<class T, ranges::range R = vector<T>> requires(is_base_of_v<Component,T>)
-	inline R get_components() const {
-		R dst;
-		return get_components<T>(dst);
-	}
 };
 
-class Scene {
+template<typename transform_t>
+class TransformNode : public Scene::Node {
+protected:
+	transform_t mLocal;
+	transform_t mGlobal;
+	bool mGlobalValid = false;
+
 public:
-	stm::Instance& mInstance;
+	inline TransformNode(Scene& scene, const string& name) : Scene::Node(scene,name) {}
 
-	STRATUM_API Scene(stm::Instance& instance);
-	STRATUM_API ~Scene();
+	inline void Local(const transform_t& m) { mLocal = m; mGlobalValid = false; }
+	inline const transform_t& Local() const { return mLocal; }
+	inline const transform_t& Global() { ValidateGlobal(); return mGlobal; }
 
-	inline SceneNode& Root() { return mRoot; }
-	inline const SceneNode& Root() const { return mRoot; }
-
-	STRATUM_API void Update(CommandBuffer& commandBuffer);
-
-	inline void FixedTimeStep(float step) { mFixedTimeStep = step; }
-	inline void PhysicsTimeLimitPerFrame(float t) { mPhysicsTimeLimitPerFrame = t; }
-	
-	inline float FixedTimeStep() const { return mFixedTimeStep; }
-	inline float PhysicsTimeLimitPerFrame() const { return mPhysicsTimeLimitPerFrame; }
-	inline float FPS() const { return mFps; }
-	inline float TotalTime() const { return mTotalTime; }
-	inline float DeltaTime() const { return mDeltaTime; }
-
-	template<class T, ranges::range R> requires(is_base_of_v<SceneNode::Component,T>)
-	inline R& get_components(R& dst) const {
-		mRoot.for_each_descendant([&](auto& n){ n.get_all<T>(dst); });
-		return dst;
+	inline virtual void ValidateGlobal() {
+		if (mGlobalValid) return;
+		mGlobal = mLocal;
+		auto* n = this;
+		while (n->Parent()) {
+			if (auto* t = n->Parent()->get_component<TransformNode<transform_t>>()) {
+				if (t->mGlobalValid) {
+					mGlobal = t->mGlobal * mGlobal;
+					break;
+				} else {
+					mGlobal = t->mLocal * mGlobal;
+				}
+			}
+			n = n->Parent();
+		}
+		mGlobalValid = true;
 	}
-	template<class T, ranges::range R = vector<T>> requires(is_base_of_v<SceneNode::Component,T>)
-	inline R get_components() const {
-		R dst;
-		return get_components<T>(dst);
-	}
-
-private:
-	SceneNode mRoot;
-	
-	unordered_map<string, InputState> mInputStates;
-	unordered_map<string, InputState> mInputStatesPrevious;
-	
-	float mPhysicsTimeLimitPerFrame = 0.1f;
-	float mFixedAccumulator = 0;
-	float mFixedTimeStep = 1.f/60.f;
-
-	float mTotalTime = 0;
-	float mDeltaTime = 0;
-
-	chrono::high_resolution_clock mClock;
-	chrono::high_resolution_clock::time_point mStartTime;
-	chrono::high_resolution_clock::time_point mLastFrame;
-	float mFrameTimeAccum = 0;
-	uint32_t mFpsAccum = 0;
-	float mFps = 0;
 };
 
 }

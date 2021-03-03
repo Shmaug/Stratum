@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Scene/Scene.hpp>
+#include <Scene/SceneNode.hpp>
 #include <Scene/Camera.hpp>
 
 #include "ImageLoader.hpp"
