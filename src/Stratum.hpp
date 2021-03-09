@@ -84,7 +84,7 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 }
 template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { fprintf_color(color, stdout, format, forward<Args>(a)...); }
 
-wstring s2ws(const string &str) {
+inline wstring s2ws(const string &str) {
     if (str.empty()) return wstring();
 		#ifdef WIN32
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
@@ -94,7 +94,7 @@ wstring s2ws(const string &str) {
 		// TODO: linux
 		return wstrTo;
 }
-string ws2s(const wstring &wstr) {
+inline string ws2s(const wstring &wstr) {
     if (wstr.empty()) return string();
 		#ifdef WIN32
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
@@ -117,7 +117,7 @@ inline string ReadFile(const fs::path& filename) {
 }
 
 // Size of an element of format, in bytes
-inline const vk::DeviceSize ElementSize(vk::Format format) {
+inline constexpr vk::DeviceSize ElementSize(vk::Format format) {
 	switch (format) {
 	case vk::Format::eR4G4UnormPack8:
 	case vk::Format::eR8Unorm:
@@ -271,7 +271,7 @@ inline const vk::DeviceSize ElementSize(vk::Format format) {
 	}
 	return 0;
 }
-inline uint32_t ChannelCount(vk::Format format) {
+inline constexpr uint32_t ChannelCount(vk::Format format) {
 	switch (format) {
 		case vk::Format::eR8Unorm:
 		case vk::Format::eR8Snorm:
@@ -415,7 +415,7 @@ inline uint32_t ChannelCount(vk::Format format) {
 	}
 	return 0;
 }
-inline bool HasDepthComponent(vk::Format format) {
+inline constexpr bool HasDepthComponent(vk::Format format) {
 	return
 		format == vk::Format::eD16Unorm ||
 		format == vk::Format::eX8D24UnormPack32 ||
@@ -424,12 +424,32 @@ inline bool HasDepthComponent(vk::Format format) {
 		format == vk::Format::eD24UnormS8Uint ||
 		format == vk::Format::eD32SfloatS8Uint;
 }
-inline bool HasStencilComponent(vk::Format format) {
+inline constexpr bool HasStencilComponent(vk::Format format) {
 	return
 		format == vk::Format::eS8Uint ||
 		format == vk::Format::eD16UnormS8Uint ||
 		format == vk::Format::eD24UnormS8Uint ||
 		format == vk::Format::eD32SfloatS8Uint;
+}
+
+inline constexpr uint32_t PrimitiveDegree(vk::PrimitiveTopology topo) {
+	switch (topo) {
+		default:
+		case vk::PrimitiveTopology::ePatchList:
+		case vk::PrimitiveTopology::ePointList:
+			return 1;
+		case vk::PrimitiveTopology::eLineList:
+		case vk::PrimitiveTopology::eLineStrip:
+		case vk::PrimitiveTopology::eLineListWithAdjacency:
+		case vk::PrimitiveTopology::eLineStripWithAdjacency:
+			return 2;
+		case vk::PrimitiveTopology::eTriangleList:
+		case vk::PrimitiveTopology::eTriangleStrip:
+		case vk::PrimitiveTopology::eTriangleFan:
+		case vk::PrimitiveTopology::eTriangleListWithAdjacency:
+		case vk::PrimitiveTopology::eTriangleStripWithAdjacency:
+			return 3;
+	}
 }
 
 inline vk::AccessFlags GuessAccessMask(vk::ImageLayout layout) {

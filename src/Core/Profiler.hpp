@@ -5,38 +5,44 @@
 namespace stm {
 
 struct ProfilerSample {
-	string mLabel;
 	ProfilerSample* mParent;
-	list<ProfilerSample*> mChildren;
+	list<unique_ptr<ProfilerSample>> mChildren;
 	chrono::high_resolution_clock::time_point mStartTime;
 	chrono::nanoseconds mDuration;
 	Vector4f mColor;
-	inline ~ProfilerSample() { for (ProfilerSample* c : mChildren) delete c; }
+	string mLabel;
 };
 
 class Profiler {
-public:
-	STRATUM_API static void BeginSample(const string& label);
-	STRATUM_API static void EndSample();
-
-	STRATUM_API static void ClearAll();
-
 private:
-	friend class Instance;
-	STRATUM_API static void BeginFrame(uint64_t frameIndex);
-	STRATUM_API static void EndFrame();
-
-	STRATUM_API static bool mEnabled;
-	STRATUM_API static list<ProfilerSample*> mFrames;
+	STRATUM_API static list<ProfilerSample> mFrameHistory;
 	STRATUM_API static ProfilerSample* mCurrentSample;
-	STRATUM_API static uint32_t mHistoryCount;
-	STRATUM_API static const chrono::high_resolution_clock mTimer;
+	STRATUM_API static size_t mHistoryCount;
 
-	// Drawing settings
-	
-	STRATUM_API static ProfilerSample* mSelectedFrame;
-	STRATUM_API static float mGraphHeight;
-	STRATUM_API static float mSampleHeight;
+public:
+	inline static void BeginSample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
+		ProfilerSample s;
+		s.mParent = mCurrentSample;
+		s.mStartTime = chrono::high_resolution_clock::now();
+		s.mDuration = chrono::nanoseconds::zero();
+		s.mLabel = label;
+		s.mColor = color;
+		if (mCurrentSample)
+			mCurrentSample = mCurrentSample->mChildren.emplace_back(make_unique<ProfilerSample>(move(s))).get();
+		else {
+			mCurrentSample = &mFrameHistory.emplace_front(move(s));
+			while (mFrameHistory.size() > mHistoryCount)
+				mFrameHistory.pop_back();
+		}
+	}
+	inline static void EndSample() {
+		if (!mCurrentSample) throw logic_error("attempt to end nonexistant profiler sample!");
+		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
+		mCurrentSample = mCurrentSample->mParent;
+	}
+
+	inline static const list<ProfilerSample>& FrameHistory() { return mFrameHistory; }
+	inline static void ClearHistory() { mFrameHistory.clear(); }
 };
 
 }

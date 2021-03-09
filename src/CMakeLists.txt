@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 
+# TODO: why does freetype require png??
+find_package(PNG REQUIRED)
 
 # ShaderCompiler
 
@@ -19,12 +21,12 @@ endif()
 
 # Stratum
 
-file(GLOB_RECURSE STRATUM_HPP "Core/**.hpp" "Input/**.hpp" "Scene/**.hpp" "Util/**.hpp")
-file(GLOB_RECURSE STRATUM_CPP "Core/**.cpp" "Input/**.cpp" "Scene/**.cpp" "Util/**.cpp")
+file(GLOB_RECURSE STRATUM_HPP "Core/*.hpp")
+file(GLOB_RECURSE STRATUM_CPP "Core/*.cpp")
 
 add_executable(Stratum main.cpp ${STRATUM_CPP} stratum.rc)
 target_compile_definitions(Stratum PUBLIC ${STM_COMPILE_DEFINITIONS} STRATUM_CORE)
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp msdfgen::msdfgen msdfgen::msdfgen-ext)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp msdfgen::msdfgen-ext PNG::PNG zlibstatic)
 
 set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
 

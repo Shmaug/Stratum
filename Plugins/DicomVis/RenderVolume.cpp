@@ -53,7 +53,7 @@ void RenderVolume::DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiCont
 void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   if (!mRawVolume || (!mBakeDirty && !mGradientDirty)) return;
 
-  VolumeUniformBuffer* uniforms = reinterpret_cast<VolumeUniformBuffer*)mUniformBuffer->Mapped();
+  VolumeUniformBuffer* uniforms = reinterpret_cast<VolumeUniformBuffer*)mUniformBuffer->data();
   uniforms->VolumeRotation = WorldRotation();
   uniforms->InvVolumeRotation = inverse(uniforms->VolumeRotation);
   uniforms->VolumeScale = WorldScale();
@@ -118,7 +118,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
 void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera) {
   if (!mRawVolume && !mBakedVolume) return;
 
-  VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->Mapped();
+  VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->data();
   uniforms->VolumeRotation = WorldRotation();
   uniforms->InvVolumeRotation = inverse(uniforms->VolumeRotation);
   uniforms->VolumeScale = WorldScale();

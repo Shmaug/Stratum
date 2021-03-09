@@ -29,9 +29,7 @@ public:
 	inline stm::Device& Device() const { return *mDevice; }
 	inline stm::Window& Window() const { return *mWindow; }
 	
-	// advance swapchain & poll events. return false if the program should exit
-	STRATUM_API bool AdvanceFrame();
-	STRATUM_API void PresentFrame(const unordered_set<vk::Semaphore>& waitSemaphores = {});
+	STRATUM_API bool PollEvents();
 
 	#ifdef WIN32
 	inline HINSTANCE HInstance() const { return mHInstance; }
@@ -41,8 +39,6 @@ public:
 	#endif
 
 private:
-	STRATUM_API bool PollEvents();
-
 	vk::Instance mInstance;
 	unique_ptr<stm::Device> mDevice;
 	unique_ptr<stm::Window> mWindow;

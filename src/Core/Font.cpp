@@ -156,7 +156,7 @@ Font::Font(Device& device, const fs::path& filename) {
 			for (uint32_t x = 0; x < 4*(uint32_t)img.width(); x++)
 				dst[x] = (uint8_t)(fminf(fmaxf(img.operator()(0, y)[x], -1), 1)*127);
 		}
-	mSDF = make_shared<Texture>(filename.string()+"_msdf", device, vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, byte_blob(data), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
+	mSDF = make_shared<Texture>(device, filename.string()+"_msdf", vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, byte_blob(data), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
 	
 	msdfgen::destroyFont(font);
 	msdfgen::deinitializeFreetype(ft);

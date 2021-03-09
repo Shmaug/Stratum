@@ -30,14 +30,12 @@ public:
 	STRATUM_API operator bool() const;
 };
 
-class DescriptorSet {
+class DescriptorSet : public DeviceResource {
 public:
-  Device& mDevice;
-
-	inline DescriptorSet(const string& name, Device& device, vk::DescriptorSetLayout layout) : mName(name), mDevice(device), mLayout(layout) {
-		auto[descriptorPool,l] = mDevice.mDescriptorPool.lock();
+	inline DescriptorSet(Device& device, const string& name, vk::DescriptorSetLayout layout) : DeviceResource(device, name), mLayout(layout) {
+		auto descriptorPool = mDevice.mDescriptorPool.lock();
 		vk::DescriptorSetAllocateInfo allocInfo = {};
-		allocInfo.descriptorPool = descriptorPool;
+		allocInfo.descriptorPool = *descriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &layout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
@@ -46,8 +44,8 @@ public:
 	inline ~DescriptorSet() {
 		mBoundDescriptors.clear();
 		mPendingWrites.clear();
-		auto[descriptorPool,l] = mDevice.mDescriptorPool.lock();
-		mDevice->freeDescriptorSets(descriptorPool, { mDescriptorSet });
+		auto descriptorPool = mDevice.mDescriptorPool.lock();
+		mDevice->freeDescriptorSets(*descriptorPool, { mDescriptorSet });
 	}
 
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }
@@ -88,8 +86,6 @@ private:
 	
 	unordered_map<uint64_t/*{binding,arrayIndex}*/, DescriptorSetEntry> mBoundDescriptors;
 	unordered_map<uint64_t/*{binding,arrayIndex}*/, DescriptorSetEntry> mPendingWrites;
-	
-  string mName;
 };
 
 }

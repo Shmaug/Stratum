@@ -10,16 +10,16 @@ enum class TextureLoadFlagBits {
 };
 using TextureLoadFlags = vk::Flags<TextureLoadFlagBits>;
 
-class Texture {
+class Texture : public DeviceResource {
 public:
 	// Construct image or image array from (optional) pixel/metadata. If mipLevels = 0, will auto-determine according to extent 
-	STRATUM_API Texture(const string& name, Device& device, const vk::Extent3D& extent, vk::Format format, const byte_blob& data = {},
+	STRATUM_API Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, const byte_blob& data = {},
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, uint32_t mipLevels = 1, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	// Construct image from image file(s)
-	STRATUM_API Texture(Device& device, const vector<fs::path>& files, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {});
-	inline Texture(Device& device, const fs::path& filename, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {})
-		: Texture(device, vector<fs::path> { filename }, loadFlags, createFlags) {}
+	STRATUM_API Texture(Device& device, const string& name, const vector<fs::path>& files, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {});
+	inline Texture(Device& device, const string& name, const fs::path& filename, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {})
+		: Texture(device, name, vector<fs::path> { filename }, loadFlags, createFlags) {}
 
 	STRATUM_API ~Texture();
 
@@ -56,8 +56,6 @@ private:
 	
 	vk::Image mImage;
 	Device::Memory::Block mMemoryBlock;
-	Device& mDevice;
-	string mName;
 	
 	vk::Extent3D mExtent;
 	uint32_t mArrayLayers = 0;

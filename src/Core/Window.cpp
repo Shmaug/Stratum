@@ -104,22 +104,21 @@ Window::~Window() {
 void Window::AcquireNextImage() {
 	if (!mSwapchain && mSwapchainDevice) CreateSwapchain(*mSwapchainDevice);
 	if (!mSwapchain) return;
+	
+	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
 
-	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
-	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
+	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
 		CreateSwapchain(*mSwapchainDevice);
 		if (!mSwapchain) return; // swapchain failed to create (happens when window is minimized, etc)
-		result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], nullptr);
+		result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	}
 	mBackBufferIndex = result.value;
 }
-void Window::Present(const unordered_set<vk::Semaphore>& waitSemaphores) {
-	if (!mSwapchain || mPresentQueueFamily) return;
-	vector<vk::Semaphore> semaphores(waitSemaphores.begin(), waitSemaphores.end());
+void Window::Present(const vector<vk::Semaphore>& waitSemaphores) {
 	vector<vk::SwapchainKHR> swapchains { mSwapchain };
 	vector<uint32_t> imageIndices { mBackBufferIndex };
-	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(semaphores, swapchains, imageIndices));
+	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, swapchains, imageIndices));
 }
 
 #ifdef __linux
@@ -233,7 +232,7 @@ void Window::CreateSwapchain(Device& device) {
 	if (mAllowTearing) preferredPresentModes = { vk::PresentModeKHR::eMailbox, vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eFifoRelaxed };
 	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
 	for (auto mode : preferredPresentModes)
-		if (find(presentModes.begin(), presentModes.end(), mode) != presentModes.end())
+		if (ranges::find(presentModes, mode) != presentModes.end())
 			presentMode = mode;
 
 	vk::SwapchainCreateInfoKHR createInfo = {};
@@ -255,6 +254,7 @@ void Window::CreateSwapchain(Device& device) {
 	// get the back buffers
 	vector<vk::Image> images = (*mSwapchainDevice)->getSwapchainImagesKHR(mSwapchain);
 	mSwapchainImages.resize(images.size());
+	mImageAvailableSemaphores.clear();
 	mImageAvailableSemaphores.resize(images.size());
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
@@ -265,7 +265,7 @@ void Window::CreateSwapchain(Device& device) {
 	uint32_t i = 0;
 	for (auto& [img, view] : mSwapchainImages) {
 		img = images[i];
-		mSwapchainDevice->SetObjectName(img, "SwapchainImage" + to_string(i));
+		mSwapchainDevice->SetObjectName(img, "Swapchain/Image" + to_string(i));
 
 		commandBuffer->TransitionBarrier(img, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
 
@@ -279,13 +279,14 @@ void Window::CreateSwapchain(Device& device) {
 		createInfo.components.a = vk::ComponentSwizzle::eIdentity;
 		createInfo.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
 		view = (*mSwapchainDevice)->createImageView(createInfo);
-		mSwapchainDevice->SetObjectName(view, "Swapchain/View" + to_string(i));
+		mSwapchainDevice->SetObjectName(view, "Swapchain/ImageView" + to_string(i));
 		
-		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiable");
+		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
 		i++;
 	}
 	
-	vk::createResultValue(mSwapchainDevice->Execute(move(commandBuffer)).wait(), "Window::CreateSwapchain");
+	mSwapchainDevice->Execute(commandBuffer);
+	vk::createResultValue(commandBuffer->CompletionFence().wait(), "Window::CreateSwapchain");
 }
 void Window::DestroySwapchain() {
 	mSwapchainDevice->Flush();

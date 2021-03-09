@@ -3,76 +3,9 @@
 
 using namespace stm;
 
-const chrono::high_resolution_clock Profiler::mTimer;
-list<ProfilerSample*> Profiler::mFrames;
+list<ProfilerSample> Profiler::mFrameHistory;
 ProfilerSample* Profiler::mCurrentSample = nullptr;
-ProfilerSample* Profiler::mSelectedFrame = nullptr;
-uint32_t Profiler::mHistoryCount = 256;
-bool Profiler::mEnabled = true;
-float Profiler::mGraphHeight = 128;
-float Profiler::mSampleHeight = 20;
-
-void Profiler::ClearAll() {
-	safe_delete(mCurrentSample);
-	for (ProfilerSample* frame : Profiler::mFrames) delete frame;
-	Profiler::mFrames.clear();
-}
-
-void Profiler::BeginSample(const string& label) {
-	if (!mCurrentSample) return;
-
-	ProfilerSample* s = new ProfilerSample();
-	s->mLabel = label;
-	s->mParent = mCurrentSample;
-	s->mStartTime = mTimer.now();
-	s->mDuration = chrono::nanoseconds::zero();
-	s->mColor = Vector4f(.3f, .9f, .3f, 1);
-	s->mChildren = {};
-	mCurrentSample->mChildren.push_back(s);
-	mCurrentSample =  s;
-}
-void Profiler::EndSample() {
-	if (!mCurrentSample) return;
-
-	if (!mCurrentSample->mParent) throw logic_error("attempt to end nonexistant profiler sample!");
-	mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
-	mCurrentSample = mCurrentSample->mParent;
-}
-
-void Profiler::BeginFrame(uint64_t frameIndex) {
-	if (!mEnabled) return;
-	mCurrentSample = new ProfilerSample();
-	mCurrentSample->mLabel, "Frame";
-	mCurrentSample->mParent = nullptr;
-	mCurrentSample->mStartTime = mTimer.now();
-	mCurrentSample->mDuration = chrono::nanoseconds::zero();
-	mCurrentSample->mChildren = {};
-	mCurrentSample->mColor = Vector4f(.15f, .6f, .15f, 1);
-}
-void Profiler::EndFrame() {
-	if (!mCurrentSample) return;
-
-	while (mCurrentSample->mParent) {
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s\n", "Warning: Profiler ProfilerSample %s was never ended!", mCurrentSample->mLabel.c_str());
-		mCurrentSample->mDuration += mTimer.now() - mCurrentSample->mStartTime;
-		mCurrentSample = mCurrentSample->mParent;
-	}
-
-	mCurrentSample->mDuration = mTimer.now() - mCurrentSample->mStartTime;
-	mFrames.push_front(mCurrentSample);
-	mCurrentSample = nullptr;
-
-	uint32_t i = 0;
-	for (auto it = mFrames.begin(); it != mFrames.end();) {
-		if (i >= mHistoryCount) {
-			if (mSelectedFrame == *it) mSelectedFrame = nullptr;
-			delete *it;
-			it = mFrames.erase(it);
-		} else
-			it++;
-		i++;
-	}
-}
+size_t Profiler::mHistoryCount = 256;
 
 /*
 void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {

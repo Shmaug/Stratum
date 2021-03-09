@@ -270,7 +270,7 @@ void DescriptorSet::FlushWrites() {
     case vk::DescriptorType::eStorageBuffer:
     case vk::DescriptorType::eUniformBufferDynamic:
     case vk::DescriptorType::eStorageBufferDynamic:
-			infos[i].mBufferInfo.buffer = **entry.mBufferView;
+			infos[i].mBufferInfo.buffer = *entry.mBufferView.buffer();
 			infos[i].mBufferInfo.offset = entry.mBufferView.offset();
 			infos[i].mBufferInfo.range = entry.mBufferView.size_bytes();
 			writes[i].pBufferInfo = &infos[i].mBufferInfo;

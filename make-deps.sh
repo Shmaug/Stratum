@@ -2,6 +2,8 @@
 
 STRATUM_DIR="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
+echo STRATUM_DIR = $STRATUM_DIR
+
 c_compiler=
 cxx_compiler=
 rc_compiler=
@@ -85,6 +87,6 @@ build_target assimp "Release" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_BUILD_ZL
 build_target freetype2 "Debug"
 build_target freetype2 "Release"
 
-build_target msdfgen $cfg "-DFREETYPE_INCLUDE_DIRS='$STRATUM_DIR/extern/include' -DFREETYPE_LIBRARY='$STRATUM_DIR/extern/lib/freetype.lib' -DMSDFGEN_BUILD_MSDFGEN_STANDALONE=OFF"
+build_target msdfgen $cfg "-DFREETYPE_INCLUDE_DIR_freetype2='$STRATUM_DIR/extern/include' -DFREETYPE_INCLUDE_DIR_ft2build='$STRATUM_DIR/extern/include/freetype2' -DFREETYPE_LIBRARY_DEBUG='$STRATUM_DIR/extern/lib/freetyped.lib' -DFREETYPE_LIBRARY_RELEASE='$STRATUM_DIR/extern/lib/freetype.lib' -DFREETYPE_WITH_PNG=ON -DMSDFGEN_BUILD_MSDFGEN_STANDALONE=OFF"
 
 build_target OpenXR-SDK $cfg

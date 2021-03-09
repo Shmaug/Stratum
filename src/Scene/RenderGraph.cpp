@@ -54,7 +54,7 @@ void RenderGraph::RenderCamera(CommandBuffer& commandBuffer, Camera& camera) {
 	camera.AspectRatio((float)commandBuffer.CurrentFramebuffer()->Extent().width / (float)commandBuffer.CurrentFramebuffer()->Extent().height);
 
 	auto cameraBuffer = commandBuffer.GetBuffer("Camera Buffer", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	camera.WriteUniformBuffer(cameraBuffer->Mapped());
+	camera.WriteUniformBuffer(cameraBuffer->data());
 	camera.SetViewportScissor(commandBuffer);
 
 	ranges::for_each(mPlugins, [&](Plugin* p){ p->OnRenderCamera(commandBuffer, camera); });

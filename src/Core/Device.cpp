@@ -88,35 +88,41 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(1024u, mLimits.maxDescriptorSetStorageBuffers)),
     vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	min(1024u, mLimits.maxDescriptorSetStorageBuffersDynamic))
 	};
-	mDescriptorPool.lock().first = mDevice.createDescriptorPool(vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 8192, poolSizes));
-	SetObjectName(mDescriptorPool, name);
+	{
+		auto descriptorPool = mDescriptorPool.lock();
+		*descriptorPool = mDevice.createDescriptorPool(vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 8192, poolSizes));
+		SetObjectName(*descriptorPool, name);
+	}
 	#pragma endregion
 
 	for (const vk::DeviceQueueCreateInfo& info : queueCreateInfos) {
 		QueueFamily q = {};
-		q.mName = name + "/QueueFamily" + to_string(info.queueFamilyIndex);
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
 		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.Window().Surface());
 		// TODO: create more queues to utilize more parallelization (if necessary?)
 		for (uint32_t i = 0; i < 1; i++) {
 			q.mQueues.push_back(mDevice.getQueue(info.queueFamilyIndex, i));
-			SetObjectName(q.mQueues[i], q.mName+"/Queue"+to_string(i));
+			SetObjectName(q.mQueues[i], "DeviceQueue"+to_string(i));
 		}
-		mQueueFamilies.lock().first.emplace(q.mFamilyIndex, q);
+		mQueueFamilies.lock()->emplace(q.mFamilyIndex, q);
 		mQueueFamilyIndices.push_back(q.mFamilyIndex);
 	}
 }
 Device::~Device() {
 	Flush();
 
-	auto[commandPools,l] = mCommandPools.lock();
-	for (auto& [tid, commandPool] : commandPools)
-			mDevice.destroyCommandPool(commandPool);
-	mQueueFamilies.lock().first.clear();
+	auto queueFamilies = mQueueFamilies.lock();
+	for (auto& [idx, queueFamily] : *queueFamilies) {
+		for (auto&[tid, p] : queueFamily.mCommandBuffers) {
+			p.second.clear();
+			mDevice.destroyCommandPool(p.first);
+		}
+	}
+	queueFamilies->clear();
 	
-	mDevice.destroyDescriptorPool(mDescriptorPool.lock().first);
-	mMemoryPool.lock().first.clear();
+	mDevice.destroyDescriptorPool(*mDescriptorPool.lock());
+	mMemoryPool.lock()->clear();
 
 	string tmp;
 	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
@@ -143,7 +149,7 @@ Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& req
 	mBlocks.emplace(allocBegin, allocBegin + requirements.size);
 	return Block(*this, allocBegin);
 }
-void Device::Memory::ReturnBlock(const Device::Memory::Block& block) { mBlocks.erase(block.mOffset); }
+void Device::Memory::ReleaseBlock(const Device::Memory::Block& block) { mBlocks.erase(block.mOffset); }
 
 Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
 	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
@@ -162,35 +168,35 @@ Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requi
 	if (memoryTypeIndex == mMemoryProperties.memoryTypeCount)
 		throw invalid_argument("could not find compatible memory type");
 	
-	auto[memoryPool, l] = mMemoryPool.lock();
-	for (auto& memory : memoryPool[memoryTypeIndex]) {
+	auto memoryPool = mMemoryPool.lock();
+	for (auto& memory : (*memoryPool)[memoryTypeIndex]) {
 		Memory::Block block = memory->GetBlock(requirements);
 		if (block.mMemory) return block;
 	}
 	// Failed to sub-allocate a block, allocate new memory
-	return memoryPool[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
+	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
 }
 void Device::FreeMemory(const Memory::Block& block) {
-	auto[memoryPool, l] = mMemoryPool.lock();
-	block.mMemory->ReturnBlock(block);
-	auto& allocs = memoryPool[block.mMemory->mMemoryTypeIndex];
+	auto memoryPool = mMemoryPool.lock();
+	block.mMemory->ReleaseBlock(block);
+	auto& allocs = (*memoryPool)[block.mMemory->mMemoryTypeIndex];
 	// free allocations without any blocks in use
 	erase_if(allocs, [](const auto& x){ return x->empty(); });
 }
 
 inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
-	auto[queueFamilies, l] = mQueueFamilies.lock();
-	for (auto& [queueFamilyIndex, queueFamily] : queueFamilies)
+	auto queueFamilies = mQueueFamilies.lock();
+	for (auto& [queueFamilyIndex, queueFamily] : *queueFamilies)
 		if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
 			return &queueFamily;
 	return nullptr;
 }
 
-unique_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
 	// find most specific queue family
 	QueueFamily* queueFamily = nullptr;
-	auto[queueFamilies, l] = mQueueFamilies.lock();
-	for (auto& [queueFamilyIndex, family] : queueFamilies)
+	auto queueFamilies = mQueueFamilies.lock();
+	for (auto& [queueFamilyIndex, family] : *queueFamilies)
 		if (family.mProperties.queueFlags & queueFlags)
 			queueFamily = &family;
 
@@ -199,20 +205,20 @@ unique_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::Queue
 	auto& [commandPool,commandBuffers] = queueFamily->mCommandBuffers[this_thread::get_id()];
 	if (!commandPool) {
 		commandPool = mDevice.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamily->mFamilyIndex));
-		SetObjectName(commandPool, name + "/CommandPool");
+		SetObjectName(commandPool, "CommandPool");
 	}
 
 	if (level == vk::CommandBufferLevel::ePrimary)
 		for (auto it = commandBuffers.begin(); it != commandBuffers.end(); it++)
 			if ((*it)->CheckDone()) {
-				unique_ptr<CommandBuffer> commandBuffer = move(*it);
-				erase(commandBuffers, nullptr);
+				shared_ptr<CommandBuffer> commandBuffer = *it;
+				commandBuffers.erase(it);
 				commandBuffer->Reset(name);
 				return commandBuffer;
 			}
-	return make_unique<CommandBuffer>(*this, name, queueFamily, level);
+	return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
-Fence& Device::Execute(unique_ptr<CommandBuffer>&& commandBuffer) {
+void Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool pool) {
 	ProfilerRegion ps("CommandBuffer::Execute");
 
 	vector<vk::PipelineStageFlags> waitStages;	
@@ -221,20 +227,22 @@ Fence& Device::Execute(unique_ptr<CommandBuffer>&& commandBuffer) {
 	vector<vk::CommandBuffer> commandBuffers { **commandBuffer };
 	for (auto& [stage, semaphore] : commandBuffer->mWaitSemaphores) {
 		waitStages.push_back(stage);
-		waitSemaphores.push_back(**semaphore);
+		waitSemaphores.push_back(*semaphore);
 	}
 	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.push_back(**semaphore);
 	(*commandBuffer)->end();
 	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 
-	auto[queueFamilies, l] = mQueueFamilies.lock();
-	return *commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(move(commandBuffer))->mCompletionFence;
+	if (pool) {
+		scoped_lock l(mQueueFamilies.m());
+		commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_front(commandBuffer);
+	}
 }
 void Device::Flush() {
 	mDevice.waitIdle();
-	auto[queueFamilies, l] = mQueueFamilies.lock();
-	for (auto& [idx,queueFamily] : queueFamilies)
+	auto queueFamilies = mQueueFamilies.lock();
+	for (auto& [idx,queueFamily] : *queueFamilies)
 		for (auto& [tid,p] : queueFamily.mCommandBuffers)
 			for (auto& commandBuffer : p.second)
 				commandBuffer->CheckDone();

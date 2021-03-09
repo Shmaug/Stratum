@@ -141,7 +141,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 			uint32_t setIndex = it->second.mSet;
 
 			if (mDescriptorSetCache.count(setIndex) && mDescriptorSetCache.at(setIndex)->Layout() != pipeline->DescriptorSetLayouts()[setIndex]) {
-				commandBuffer.TrackResource(mDescriptorSetCache.at(setIndex));
+				commandBuffer.HoldResource(mDescriptorSetCache.at(setIndex));
 				mDescriptorSetCache.erase(setIndex);
 			}
 			if (mDescriptorSetCache.count(setIndex) == 0) 

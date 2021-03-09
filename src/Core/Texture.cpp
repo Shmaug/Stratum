@@ -59,8 +59,8 @@ uint8_t* LoadPixels(const fs::path& filename, TextureLoadFlags loadFlags, uint32
 	return pixels;
 }
 
-Texture::Texture(Device& device, const vector<fs::path>& files, TextureLoadFlags loadFlags, vk::ImageCreateFlags createFlags)
-	: mDevice(device), mCreateFlags(createFlags), mArrayLayers((uint32_t)files.size()), mTiling(vk::ImageTiling::eOptimal) {
+Texture::Texture(Device& device, const string& name, const vector<fs::path>& files, TextureLoadFlags loadFlags, vk::ImageCreateFlags createFlags)
+	: DeviceResource(device, name), mCreateFlags(createFlags), mArrayLayers((uint32_t)files.size()), mTiling(vk::ImageTiling::eOptimal) {
 	int32_t x, y, channels;
 	vk::Format format;
 	uint32_t size;
@@ -82,37 +82,39 @@ Texture::Texture(Device& device, const vector<fs::path>& files, TextureLoadFlags
 
 	vk::DeviceSize dataSize = mExtent.width * mExtent.height * size * channels;
 
-	auto commandBuffer = mDevice.GetCommandBuffer(mName + "/BufferImageCopy", vk::QueueFlagBits::eGraphics);
-	auto stagingBuffer = commandBuffer->GetBuffer(mName + "/Staging", dataSize * mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	auto commandBuffer = mDevice.GetCommandBuffer(mName+"/BufferImageCopy", vk::QueueFlagBits::eGraphics);
+	auto stagingBuffer = commandBuffer->HoldResource(make_shared<Buffer>(mDevice, mName+"/Staging", dataSize*mArrayLayers, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent));
 	for (uint32_t j = 0; j < layers.size(); j++)
-		memcpy(stagingBuffer->data() + j*dataSize, layers[j], dataSize);
+		memcpy(stagingBuffer.data() + j*dataSize, layers[j], dataSize);
 
 	TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	vk::BufferImageCopy copyRegion(0, 0, 0, { mAspectFlags, 0, 0, mArrayLayers }, { 0,0,0 }, { mExtent.width, mExtent.height, 1 });
-	(*commandBuffer)->copyBufferToImage(**stagingBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, { copyRegion });
+	(*commandBuffer)->copyBufferToImage(*stagingBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, { copyRegion });
 
 	GenerateMipMaps(*commandBuffer);
-	vk::createResultValue(mDevice.Execute(move(commandBuffer)).wait(), "Buffer::Copy");
+	mDevice.Execute(commandBuffer);
+	vk::createResultValue(commandBuffer->CompletionFence().wait(), "Buffer::Copy");
 
 	for (uint32_t i = 0; i < layers.size(); i++)
 		stbi_image_free(layers[i]);
 }
-Texture::Texture(const string& name, Device& device, const vk::Extent3D& extent, vk::Format format, const byte_blob& data, vk::ImageUsageFlags usage, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::MemoryPropertyFlags properties)
-		: mName(name), mDevice(device), mExtent(extent), mFormat(format), mMipLevels(mipLevels), mUsage(usage), mSampleCount(numSamples), mMemoryProperties(properties), mArrayLayers(1), mTiling(vk::ImageTiling::eOptimal) {
+Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, const byte_blob& data, vk::ImageUsageFlags usage, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::MemoryPropertyFlags properties)
+		: DeviceResource(device, name), mExtent(extent), mFormat(format), mMipLevels(mipLevels), mUsage(usage), mSampleCount(numSamples), mMemoryProperties(properties), mArrayLayers(1), mTiling(vk::ImageTiling::eOptimal) {
 	
 	if (mipLevels == 0) mMipLevels = (uint32_t)floor(log2(max(mExtent.width, mExtent.height))) + 1;
 
 	if (data.data()) {
 		Create();
 
-		auto stagingBuffer = make_shared<Buffer>(mName + "/Staging", mDevice, data, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		auto stagingBuffer = make_shared<Buffer>(mDevice, mName + "/Staging", data, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 
 		auto commandBuffer = mDevice.GetCommandBuffer(mName + "BufferImageCopy", vk::QueueFlagBits::eTransfer);
-		commandBuffer->TrackResource(stagingBuffer);
+		commandBuffer->HoldResource(stagingBuffer);
 		TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 		vk::BufferImageCopy copyRegion(0, 0, 0, { mAspectFlags, 0, 0, mArrayLayers }, { 0,0,0 }, { mExtent.width, mExtent.height, 1 });
 		(*commandBuffer)->copyBufferToImage(**stagingBuffer, mImage, vk::ImageLayout::eTransferDstOptimal, { copyRegion });
-		vk::createResultValue(mDevice.Execute(move(commandBuffer)).wait(), "Buffer::Copy");
+		mDevice.Execute(commandBuffer);
+		vk::createResultValue(commandBuffer->CompletionFence().wait(), "Buffer::Copy");
 	} else
 		Create();
 }

@@ -15,8 +15,17 @@ private:
 		unordered_map<uint32_t, float> mKerning;
 	};
 
-public:
+	shared_ptr<Texture> mSDF;
+	unordered_map<uint32_t, Glyph> mGlyphs;
+	string mName;
+	float mEmSize;
+	float mAscent;
+	float mDescent;
+	float mLineSpace;
+	float mSpaceAdvance;
+	float mTabAdvance;
 
+public:
 	STRATUM_API Font(Device& device, const fs::path& filename);
 
 	inline float Ascent(float pixelHeight) const { return mAscent*pixelHeight/mEmSize; }
@@ -78,17 +87,6 @@ public:
 			ranges::for_each(result | views::drop(lineStart), [](auto& g){ g.translate(cur); });
 		}
 	}
-
-private:
-	shared_ptr<Texture> mSDF;
-	unordered_map<uint32_t, Glyph> mGlyphs;
-	string mName;
-	float mEmSize;
-	float mAscent;
-	float mDescent;
-	float mLineSpace;
-	float mSpaceAdvance;
-	float mTabAdvance;
 };
 
 }

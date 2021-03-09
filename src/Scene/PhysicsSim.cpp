@@ -57,7 +57,7 @@ void PhysicsSim::Update(CommandBuffer& commandBuffer) {
 			float shadowExtentMax = fmaxf(fmaxf(sceneExtent.x, sceneExtent.y), sceneExtent.z) * 1.73205080757f; // sqrt(3)*x
 
 			mLighting.mLightCount = 0;
-			LightData* lights = (LightData*)mLighting.mLightBuffer->Mapped();
+			LightData* lights = (LightData*)mLighting.mLightBuffer->data();
 
 			for (Light* l : mLights) {
 				if (!l->Enabled()) continue;

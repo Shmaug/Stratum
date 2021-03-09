@@ -29,7 +29,6 @@
 
 #include <bitset>
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <numeric>
 
@@ -54,25 +53,32 @@ using dRay = ParametrizedLine<double,3>;
 template<class _Type, template<class...> class _Template> constexpr bool is_specialization_v = false;
 template<template<class...> class _Template, class... _Types> constexpr bool is_specialization_v<_Template<_Types...>, _Template> = true;
 
-template<typename T> struct remove_const_tuple {
+
+template<typename T>
+struct remove_const_tuple {
 	using type = remove_const_t<T>;
 };
-template<typename Tx, typename Ty> struct remove_const_tuple<pair<Tx, Ty>> {
+template<typename Tx, typename Ty>
+struct remove_const_tuple<pair<Tx, Ty>> {
 	using type = pair<remove_const_t<Tx>, remove_const_t<Ty>>;
 };
-template<typename... Types> struct remove_const_tuple<tuple<Types...>> {
+template<typename... Types>
+struct remove_const_tuple<tuple<Types...>> {
 	using type = tuple<remove_const_t<Types>...>;
 };
 template<typename T> using remove_const_tuple_t = typename remove_const_tuple<T>::type;
 
 
-template<typename T> struct add_const_tuple {
+template<typename T>
+struct add_const_tuple {
 	using type = const T;
 };
-template<typename Tx, typename Ty> struct add_const_tuple<pair<Tx, Ty>> {
+template<typename Tx, typename Ty>
+struct add_const_tuple<pair<Tx, Ty>> {
 	using type = pair<const Tx, const Ty>;
 };
-template<typename... Types> struct add_const_tuple<tuple<Types...>> {
+template<typename... Types>
+struct add_const_tuple<tuple<Types...>> {
 	using type = tuple<const Types...>;
 };
 template<typename T> using add_const_tuple_t = typename add_const_tuple<T>::type;
@@ -88,10 +94,31 @@ template <typename T>
 class locked_object {
 private:
 	T mObject;
-	mutable mutex m;
+	mutable mutex mMutex;
 public:
-	inline auto lock()       { return make_pair<      T&, scoped_lock<mutex>>(forward<      T&>(mObject), scoped_lock(m)); }
-	inline auto lock() const { return make_pair<const T&, scoped_lock<mutex>>(forward<const T&>(mObject), scoped_lock(m)); }
+
+	class ptr_t {
+	private:
+		T* mObject;
+		scoped_lock<mutex> mLock;
+	public:
+		inline ptr_t(T* object, mutex& m) : mObject(object), mLock(scoped_lock<mutex>(m)) {};
+		inline T& operator*() { return *mObject; }
+		inline T* operator->() { return mObject; }
+	};
+	class cptr_t {
+	private:
+		const T* mObject;
+		scoped_lock<mutex> mLock;
+	public:
+		inline cptr_t(const T* object, mutex& m) : mObject(object), mLock(scoped_lock<mutex>(m)) {};
+		inline const T& operator*() { return *mObject; }
+		inline const T* operator->() { return mObject; }
+	};
+
+	inline ptr_t lock() { return ptr_t(&mObject, mMutex); }
+	inline cptr_t lock() const { return cptr_t(&mObject, mMutex); }
+	inline mutex& m() const { return mMutex; }
 };
 
 namespace shader_interop {

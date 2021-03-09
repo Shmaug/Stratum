@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Material.hpp"
+#include "..\Stratum.hpp"
 
 namespace stm {
 
@@ -10,29 +10,18 @@ public:
 	class Node {
 	private:
 		string mName;
-		bool mEnabled = true;
-		uint32_t mLayerMask = 1;
-		
 	public:
 		Scene& mScene;
-
 		inline Node(const string& name, Scene& scene) : mName(name), mScene(scene) {}
 		virtual ~Node() = default;
-
 		inline const string& Name() const { return mName; }
-
-		inline bool Enabled() const { return mEnabled; }
-		inline void Enabled(bool e) { mEnabled = e; }
-
-		inline virtual void LayerMask(uint32_t m) { mLayerMask = m; };
-		inline virtual uint32_t LayerMask() { return mLayerMask; };
 	};
 	
 private:
 	vector<unique_ptr<Node>> mTopologicalNodes;
 	unordered_multimap<type_index, Node*> mNodesByType;
-	unordered_map<Node*, Node*> mParentEdges; // node* -> node.parent
-	unordered_multimap<Node*, Node*> mChildrenEdges; // node* -> node.children
+	unordered_map<Node*, Node*> mParentEdges; // node -> node.parent
+	unordered_multimap<Node*, Node*> mChildrenEdges; // node -> node.child
 
 public:
 
@@ -94,19 +83,19 @@ public:
 		inline child_iterator(Node* node) : mIterator(node->mScene.mChildrenEdges.find(node)) {}
 		child_iterator(const child_iterator&) = default;
 		
-    inline reference operator*() const { return mIterator.operator*(); }
-    inline pointer operator->() { return mIterator.operator->(); }
+    inline reference operator*() const { return *mIterator->second; }
+    inline pointer operator->() { return mIterator->second; }
 
     inline child_iterator& operator++() {
 			return *this;
 		}
     inline child_iterator operator++(int) {
-			ancestor_iterator tmp(*this);
+			child_iterator tmp(*this);
 			operator++();
 			return tmp;
 		}
 
-		inline operator bool() const { return mNode != nullptr; }
+		inline operator bool() const { return mIterator->second != nullptr; }
 
     bool operator==(const child_iterator& rhs) const = default;
     bool operator!=(const child_iterator& rhs) const = default;
