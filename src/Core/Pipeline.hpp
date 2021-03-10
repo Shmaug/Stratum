@@ -1,7 +1,7 @@
 #pragma once
 
 #include "RenderPass.hpp"
-#include "Asset/SpirvModuleGroup.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
@@ -14,12 +14,12 @@ protected:
 	vk::PipelineLayout mLayout;
 	vector<vk::DescriptorSetLayout> mDescriptorSetLayouts;
 
-	SpirvModuleGroup mSpirvModules;
+	unordered_map<vk::ShaderStageFlagBits, SpirvModule> mSpirvModules;
 	vector<vk::PushConstantRange> mPushConstantRanges;
 	// multimap handles descriptors with the same name and different bindings between stages
-	multimap<string, DescriptorBinding> mDescriptorBindings;
+	unordered_multimap<string, DescriptorBinding> mDescriptorBindings;
 	// multimap handles push constants with the same name and different ranges between stages
-	multimap<string, vk::PushConstantRange> mPushConstants;
+	unordered_multimap<string, vk::PushConstantRange> mPushConstants;
 	unordered_map<string, vk::SamplerCreateInfo> mImmutableSamplers;
 
 	size_t mHash = 0;
@@ -33,19 +33,19 @@ public:
 	virtual vk::PipelineBindPoint BindPoint() const = 0;
 
 	inline vk::PipelineLayout Layout() const { return mLayout; }
-	inline const SpirvModuleGroup& SpirvModules() const { return mSpirvModules; };
+	inline const unordered_map<vk::ShaderStageFlagBits, SpirvModule>& SpirvModules() const { return mSpirvModules; };
 	inline const vector<vk::DescriptorSetLayout>& DescriptorSetLayouts() const { return mDescriptorSetLayouts; };
 	// most of the time, a pipeline wont have named descriptors with different bindings, so there is usually only one item in this range
-	inline const multimap<string, DescriptorBinding>& DescriptorBindings() { return mDescriptorBindings; };
+	inline const unordered_multimap<string, DescriptorBinding>& DescriptorBindings() { return mDescriptorBindings; };
 	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
-	inline const multimap<string, vk::PushConstantRange>& PushConstants() { return mPushConstants; };
+	inline const unordered_multimap<string, vk::PushConstantRange>& PushConstants() { return mPushConstants; };
 	inline const vector<vk::PushConstantRange>& PushConstantRanges() const { return mPushConstantRanges; };
 };
 
 class ComputePipeline : public Pipeline {
 public:
 	inline ComputePipeline(const string& name, Device& device, const SpirvModule& spirv) {
-		mSpirvModules = SpirvModuleGroup(device, { { spirv.mEntryPoint, spirv } });
+		mSpirvModules.emplace(spirv.mStage, spirv);
 		mHash = hash<SpirvModule>()(spirv);
 
 		unordered_map<uint32_t, vector<vk::DescriptorSetLayoutBinding>> descriptorSetBindings;
@@ -70,7 +70,7 @@ public:
 	}
 
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eCompute; }
-	inline Vector3u WorkgroupSize() const { return mSpirvModules.begin()->second.mWorkgroupSize; }
+	inline vk::Extent3D WorkgroupSize() const { return mSpirvModules.begin()->second.mWorkgroupSize; }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -87,7 +87,7 @@ private:
 
 public:
 	inline GraphicsPipeline(const string& name, const RenderPass& renderPass, uint32_t subpassIndex,
-		const SpirvModuleGroup& spirv, const unordered_map<string, vk::SpecializationInfo*>& specializationInfos = {},
+		const unordered_map<vk::ShaderStageFlagBits, SpirvModule>& spirv, const unordered_map<string, vk::SpecializationInfo*>& specializationInfos = {},
 		const vk::PipelineVertexInputStateCreateInfo& vertexInput = {}, vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList, vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill,
 		bool sampleShading = false, const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = { vk::PipelineColorBlendAttachmentState() },
@@ -123,8 +123,8 @@ public:
 			}
 		vector<vk::PipelineShaderStageCreateInfo> stages(mSpirvModules.size());
 		uint32_t i = 0;
-		for (const auto& [entryp,spirv] : mSpirvModules)
-			stages[i++] = vk::PipelineShaderStageCreateInfo({}, spirv.mStage, spirv.mShaderModule, entryp.c_str(), specializationInfos.count(entryp) ? specializationInfos.at(entryp) : nullptr );
+		for (const auto& [stage,spirv] : mSpirvModules)
+			stages[i++] = vk::PipelineShaderStageCreateInfo({}, spirv.mStage, spirv.mShaderModule, spirv.mEntryPoint.c_str(), specializationInfos.count(spirv.mEntryPoint) ? specializationInfos.at(spirv.mEntryPoint) : nullptr );
 
 		vk::GraphicsPipelineCreateInfo info({}, stages, &vertexInput, &mInputAssemblyState, nullptr, &mViewportState, &mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex);
 		mPipeline = device->createGraphicsPipeline(device.PipelineCache(), info).value;
@@ -138,5 +138,7 @@ public:
 
 namespace std {
 template<class T> requires(is_base_of_v<stm::Pipeline,T>)
-struct hash<T> { inline size_t operator()(const T& pipeline) { return pipeline.Hash(); } };
+struct hash<T> {
+	inline size_t operator()(const T& pipeline) { return pipeline.Hash(); }
+};
 }

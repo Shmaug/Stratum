@@ -292,7 +292,7 @@ public:
 
 	STRATUM_API void AcquireNextImage();
 	// Waits on all semaphores in waitSemaphores
-	STRATUM_API void Present(const unordered_set<vk::Semaphore>& waitSemaphores);
+	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
 
 
 	STRATUM_API void LockMouse(bool l);

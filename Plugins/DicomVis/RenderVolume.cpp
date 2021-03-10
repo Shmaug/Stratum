@@ -53,7 +53,7 @@ void RenderVolume::DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiCont
 void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   if (!mRawVolume || (!mBakeDirty && !mGradientDirty)) return;
 
-  VolumeUniformBuffer* uniforms = reinterpret_cast<VolumeUniformBuffer*)mUniformBuffer->Mapped();
+  VolumeUniformBuffer* uniforms = reinterpret_cast<VolumeUniformBuffer*)mUniformBuffer->data();
   uniforms->VolumeRotation = WorldRotation();
   uniforms->InvVolumeRotation = inverse(uniforms->VolumeRotation);
   uniforms->VolumeScale = WorldScale();
@@ -86,7 +86,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
-    commandBuffer.DispatchAligned(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
+    commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
 
     commandBuffer.Barrier(*mBakedVolume);
     mBakeDirty = false;
@@ -108,7 +108,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
-    commandBuffer.DispatchAligned(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
+    commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
 
     commandBuffer.Barrier(*mBakedVolume);
     mGradientDirty = false;
@@ -118,7 +118,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
 void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera) {
   if (!mRawVolume && !mBakedVolume) return;
 
-  VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->Mapped();
+  VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->data();
   uniforms->VolumeRotation = WorldRotation();
   uniforms->InvVolumeRotation = inverse(uniforms->VolumeRotation);
   uniforms->VolumeScale = WorldScale();
@@ -166,36 +166,36 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
 
   commandBuffer.PushConstantRef("CameraPosition", camPos[0]);
   commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eLeft));
-  commandBuffer.PushConstantRef("WriteOffset", Vector2u(0, 0));
+  commandBuffer.PushConstantRef("WriteOffset", Vector2i(0, 0));
   commandBuffer.PushConstantRef("SampleRate", mSampleRate);
 
-  Vector2u res(renderTarget->Extent().width, renderTarget->Extent().height);
+  Vector2i res(renderTarget->Extent().width, renderTarget->Extent().height);
   switch (camera.StereoMode()) {
   case StereoMode::eNone:
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchAligned(res);
+    commandBuffer.DispatchTiled(res);
     break;
   case StereoMode::eHorizontal:
     res.x /= 2;
     // left eye
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchAligned(res);
+    commandBuffer.DispatchTiled(res);
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
-    commandBuffer.PushConstantRef("WriteOffset", Vector2u(res.x, 0));
-    commandBuffer.DispatchAligned(res);
+    commandBuffer.PushConstantRef("WriteOffset", Vector2i(res.x, 0));
+    commandBuffer.DispatchTiled(res);
     break;
   case StereoMode::eVertical:
     res.y /= 2;
     // left eye
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchAligned(res);
+    commandBuffer.DispatchTiled(res);
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
-    commandBuffer.PushConstantRef("WriteOffset", Vector2u(0, res.y));
-    commandBuffer.DispatchAligned(res);
+    commandBuffer.PushConstantRef("WriteOffset", Vector2i(0, res.y));
+    commandBuffer.DispatchTiled(res);
     break;
   }
 }

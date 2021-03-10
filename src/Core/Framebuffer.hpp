@@ -1,21 +1,20 @@
 #pragma once
 
 #include "RenderPass.hpp"
-#include "Asset/Texture.hpp"
+#include "Texture.hpp"
 
 namespace stm {
 
-class Framebuffer {
+class Framebuffer : public DeviceResource {
 private:
 	vk::Framebuffer mFramebuffer;
 	vk::Extent2D mExtent = { 0, 0 };
 	stm::RenderPass& mRenderPass;
 	vector<shared_ptr<Texture>> mAttachments;
-	string mName;
 
 public:
 	inline Framebuffer(const string& name, stm::RenderPass& renderPass, const vector<shared_ptr<Texture>>& attachments)
-		: mName(name), mRenderPass(renderPass), mAttachments(attachments), mExtent({0, 0}) {
+		: DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass), mAttachments(attachments), mExtent({0, 0}) {
 
 		vector<vk::ImageView> views(mAttachments.size());
 		for (uint32_t i = 0; i < mAttachments.size(); i++) {
@@ -27,7 +26,7 @@ public:
 		mFramebuffer = renderPass.mDevice->createFramebuffer(info);
 		renderPass.mDevice.SetObjectName(mFramebuffer, mName);
 	}
-	inline ~Framebuffer() { mRenderPass.mDevice->destroyFramebuffer(mFramebuffer); }
+	inline ~Framebuffer() { mDevice->destroyFramebuffer(mFramebuffer); }
 	
 	inline vk::Framebuffer operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };

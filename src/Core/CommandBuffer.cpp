@@ -2,13 +2,11 @@
 #include "Buffer.hpp"
 #include "Framebuffer.hpp"
 #include "RenderPass.hpp"
-#include "../Scene/Scene.hpp"
-
 
 using namespace stm;
 
 CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level)
-	: mDevice(device), mName(name), mQueueFamily(queueFamily) {
+	: DeviceResource(device, name), mQueueFamily(queueFamily) {
 	vkCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)mDevice.mInstance->getProcAddr("vkCmdBeginDebugUtilsLabelEXT");
 	vkCmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)mDevice.mInstance->getProcAddr("vkCmdEndDebugUtilsLabelEXT");
 	
@@ -26,12 +24,7 @@ CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFa
 	mCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 	mState = CommandBufferState::eRecording;
 }
-CommandBuffer::~CommandBuffer() {
-	if (mState == CommandBufferState::eInFlight)
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying CommandBuffer %s that is in-flight\n", mName.c_str());
-	Clear();
-	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
-}
+
 
 void CommandBuffer::BeginLabel(const string& text, const Vector4f& color) {
 	if (vkCmdBeginDebugUtilsLabelEXT) {
@@ -47,19 +40,10 @@ void CommandBuffer::EndLabel() {
 }
 
 void CommandBuffer::Clear() {
-	for (const auto& b : mBuffers) mDevice.PoolResource(b);
-	for (const auto& t : mTextures) mDevice.PoolResource(t);
-	for (const auto& ds : mDescriptorSets) mDevice.PoolResource(ds);
-	mBuffers.clear();
-	mTextures.clear();
-	mDescriptorSets.clear();
-	mRenderPasses.clear();
-	mFramebuffers.clear();
-
+	mHeldResources.clear();
 	mSignalSemaphores.clear();
 	mWaitSemaphores.clear();
 	mPrimitiveCount = 0;
-
 	mCurrentFramebuffer.reset();
 	mCurrentRenderPass.reset();
 	mCurrentSubpassIndex = 0;
@@ -89,12 +73,6 @@ bool CommandBuffer::CheckDone() {
 	}
 	return mState == CommandBufferState::eDone;
 }
-
-void CommandBuffer::TrackResource(shared_ptr<Buffer> resource) { mBuffers.push_back(resource); }
-void CommandBuffer::TrackResource(shared_ptr<Texture> resource) { mTextures.push_back(resource); }
-void CommandBuffer::TrackResource(shared_ptr<DescriptorSet> resource) { mDescriptorSets.push_back(resource); }
-void CommandBuffer::TrackResource(shared_ptr<Framebuffer> resource) { mFramebuffers.push_back(resource); }
-void CommandBuffer::TrackResource(shared_ptr<RenderPass> resource) { mRenderPasses.push_back(resource); }
 
 void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
@@ -144,15 +122,6 @@ void CommandBuffer::ClearAttachments(const vector<vk::ClearAttachment>& values) 
 	mCommandBuffer.clearAttachments((uint32_t)values.size(), values.data(), 1, &rect);
 }
 
-void CommandBuffer::BindPipeline(shared_ptr<Pipeline> pipeline) {
-	if (mBoundPipeline == pipeline) return;
-	mCommandBuffer.bindPipeline(pipeline->BindPoint(), **pipeline);
-	mBoundPipeline = pipeline;
-	mBoundVertexBuffers.clear();
-	mBoundIndexBuffer = {};
-	mBoundDescriptorSets.clear();
-}
-
 bool CommandBuffer::PushConstant(const string& name, const byte_blob& data) {
 	if (!mBoundPipeline) return false;
 	auto it = mBoundPipeline->PushConstants().find(name);
@@ -160,6 +129,15 @@ bool CommandBuffer::PushConstant(const string& name, const byte_blob& data) {
 	vk::PushConstantRange range = it->second;
 	mCommandBuffer.pushConstants(mBoundPipeline->Layout(), range.stageFlags, range.offset, min<uint32_t>((uint32_t)data.size(), range.size), data.data());
 	return true;
+}
+
+void CommandBuffer::BindPipeline(shared_ptr<Pipeline> pipeline) {
+	if (mBoundPipeline == pipeline) return;
+	mCommandBuffer.bindPipeline(pipeline->BindPoint(), **pipeline);
+	mBoundPipeline = pipeline;
+	mBoundDescriptorSets.clear();
+	mBoundVertexBuffers.clear();
+	mBoundIndexBuffer = {};
 }
 
 void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t set) {
@@ -171,17 +149,6 @@ void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, u
 	if (!mCurrentRenderPass)
 		for (auto&[idx, entry] : descriptorSet->mBoundDescriptors) {
 			switch (entry.mType) {
-				case vk::DescriptorType::eSampler:
-				case vk::DescriptorType::eUniformTexelBuffer:
-				case vk::DescriptorType::eStorageTexelBuffer:
-				case vk::DescriptorType::eUniformBuffer:
-				case vk::DescriptorType::eStorageBuffer:
-				case vk::DescriptorType::eUniformBufferDynamic:
-				case vk::DescriptorType::eStorageBufferDynamic:
-				case vk::DescriptorType::eInlineUniformBlockEXT:
-				case vk::DescriptorType::eAccelerationStructureKHR:
-					break;
-
 				case vk::DescriptorType::eCombinedImageSampler:
 				case vk::DescriptorType::eInputAttachment:
 				case vk::DescriptorType::eSampledImage:

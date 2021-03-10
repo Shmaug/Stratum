@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Asset/Texture.hpp>
+#include <Core/Texture.hpp>
 
 namespace dcmvs {
 

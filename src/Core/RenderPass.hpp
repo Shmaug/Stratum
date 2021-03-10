@@ -6,7 +6,7 @@ namespace stm {
 
 typedef string RenderAttachmentId;
 
-class RenderPass {
+class RenderPass : public DeviceResource {
 public:
 	enum AttachmentType {
 		eInput,
@@ -23,11 +23,9 @@ public:
 		unordered_set<string> mSubpassDependencies;
 	};
 
-	Device& mDevice;
-
-	template<ranges::range R> requires(convertible_to<ranges::range_value_t<R>, RenderPass::SubpassDescription>)
-	inline RenderPass(const string& name, Device& device, const R& subpassDescriptions)
-		: mName(name), mDevice(device), mHash(hash_combine(name, subpassDescriptions)) {
+	template<ranges::range R> requires(convertible_to<ranges::range_reference_t<R>, SubpassDescription&>)
+	inline RenderPass(Device& device, const string& name, const R& subpassDescriptions)
+		: DeviceResource(device, name), mHash(hash_combine(name, subpassDescriptions)) {
 		
 		// Resolve dependencies & sort subpasses
 		unordered_set<SubpassDescription*> remaining;
@@ -164,7 +162,6 @@ private:
 	friend struct std::hash<stm::RenderPass>;
 
 	vk::RenderPass mRenderPass;
-	string mName;
 
 	vector<SubpassDescription> mSubpassDescriptions;
 	vector<tuple<vk::AttachmentDescription, vk::ClearValue, RenderAttachmentId>> mAttachmentDescriptions;
@@ -172,6 +169,7 @@ private:
 
 	size_t mHash;
 };
+
 }
 
 namespace std {

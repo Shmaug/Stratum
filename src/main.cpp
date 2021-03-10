@@ -1,61 +1,90 @@
 ﻿#include "Core/Window.hpp"
-#include "Scene/RenderGraph.hpp"
+#include "Core/CommandBuffer.hpp"
+#include "Core/Mesh.hpp"
+#include "Core/Profiler.hpp"
 
 using namespace stm;
 
 int main(int argc, char** argv) {
-	#if defined(WIN32) && defined(_DEBUG)
-	_CrtMemState s0;
-	_CrtMemCheckpoint(&s0);
-	#endif
-
 	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
-	unique_ptr<Scene> scene = make_unique<Scene>(*instance);
 	Window& window = instance->Window();
-
-	RenderGraph& rg = scene->Root().CreateComponent<RenderGraph>("window_rendergraph");
-
-	auto frameSemaphore = make_shared<Semaphore>("Frame Semaphore", instance->Device());
 	
-	while (instance->AdvanceFrame()) {
-		auto commandBuffer = instance->Device().GetCommandBuffer("Frame CommandBuffer");
+	vector<shared_ptr<Semaphore>> frameSemaphores(window.BackBufferCount());
+	ranges::generate(frameSemaphores, [&](){ return make_shared<Semaphore>(instance->Device(), "FrameSemaphore"); });
+
+	shared_ptr<Mesh> testMesh = make_shared<Mesh>("test mesh");
+
+	shared_ptr<RenderPass> renderPass; // TODO
+	shared_ptr<GraphicsPipeline> pipeline; // TODO
+	shared_ptr<Framebuffer> framebuffer; // TODO
+
+	auto frameTimeAccum = chrono::nanoseconds::zero();
+	uint32_t fpsAccum = 0;
+	while (true) {
+		Profiler::BeginSample("Frame" + to_string(instance->Device().FrameCount()));
+
+		{
+			ProfilerRegion ps("PollEvents+AcquireNextImage");
+			if (!instance->PollEvents()) break; // Window was closed
+			window.AcquireNextImage();
+		}
 		
-		scene->Update(*commandBuffer);
+		auto commandBuffer = instance->Device().GetCommandBuffer("Render");
+		commandBuffer->WaitOn(vk::PipelineStageFlagBits::eTransfer, window.ImageAvailableSemaphore());
+		commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eColorAttachmentOutput, frameSemaphores[window.BackBufferIndex()]);
+
 		if (window.Swapchain()) {
+			
+			//commandBuffer->BeginRenderPass(renderPass, framebuffer);
+			//commandBuffer->BindPipeline(pipeline);
+			//testMesh->Draw(*commandBuffer);
+			//commandBuffer->EndRenderPass();
 
-			auto fb = rg.Render(*commandBuffer);
 
-			// copy to window
-			shared_ptr<Texture> srcImage = fb->GetAttachment("stm_main_resolve");
-			if (!srcImage) srcImage = fb->GetAttachment("stm_main_render");
-
+			shared_ptr<Texture> srcImage = make_shared<Texture>(instance->Device(), "src img", vk::Extent3D(window.SwapchainExtent(), 1), window.SurfaceFormat().format, byte_blob{}, vk::ImageUsageFlagBits::eTransferSrc);
+			commandBuffer->HoldResource(srcImage);
 			srcImage->TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
+
 			commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal);
+			
 			vk::ImageCopy rgn = {};
 			rgn.dstSubresource = rgn.srcSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 };
 			rgn.extent = vk::Extent3D(window.SwapchainExtent(), 1);
 			(*commandBuffer)->copyImage(**srcImage, vk::ImageLayout::eTransferSrcOptimal, window.BackBuffer(), vk::ImageLayout::eTransferDstOptimal, { rgn });
+
 			commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
-			commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eTransfer, frameSemaphore);
 		}
+
+		instance->Device().Execute(commandBuffer);
+
+		if (window.Swapchain()) {
+			ProfilerRegion ps("Present");
+			window.Present({ **frameSemaphores[window.BackBufferIndex()] });
+		}
+
+		Profiler::EndSample();
 		
-		instance->Device().Execute(move(commandBuffer));
-		instance->PresentFrame({ **frameSemaphore, *window.ImageAvailableSemaphore() });
+		// count fps
+		frameTimeAccum += Profiler::FrameHistory().front().mDuration;
+		fpsAccum++;
+		if (frameTimeAccum > 1s) {
+			float fps = (float)fpsAccum/chrono::duration<float>(frameTimeAccum).count();
+			frameTimeAccum -= 1s;
+			fpsAccum = 0;
+
+			auto sum = transform_reduce(Profiler::FrameHistory().begin(), Profiler::FrameHistory().end(), chrono::nanoseconds::zero(), plus<chrono::nanoseconds>(), [](const auto& s) { return s.mDuration; });
+			auto avgTime = chrono::duration<float>(sum).count()/Profiler::FrameHistory().size();
+			printf("\r%.2f fps (%.fms)     ", fps, avgTime);
+		}
 	}
-	instance->Device().Flush();
-	frameSemaphore.reset();
 	
-	instance->Device().UnloadAssets();
+	testMesh.reset();
 
-	scene.reset();
+	instance->Device().Flush();
+	frameSemaphores.clear();
 	instance.reset();
+	
+	Profiler::ClearHistory();
 
-	#if defined(WIN32) && defined(_DEBUG)
-	_CrtMemState s1;
-	_CrtMemCheckpoint(&s1);
-	_CrtMemState ds;
-	_CrtMemDifference(&ds, &s0, &s1);
-	if (ds.lTotalCount) _CrtMemDumpStatistics(&ds);
-	#endif
 	return EXIT_SUCCESS;
 }

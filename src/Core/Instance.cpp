@@ -235,8 +235,6 @@ Instance::~Instance() {
 
 	mInstance.destroy();
 
-	Profiler::ClearAll();
-
 	#ifdef __linux
 	xcb_key_symbols_free(mXCBKeySymbols);
 	xcb_disconnect(mXCBConnection);
@@ -377,7 +375,7 @@ bool Instance::PollEvents() {
 	#endif
 	#ifdef WIN32	
 	MSG msg = {};
-	while (true) {
+	while (true) { // go through all messages
 		if (mDestroyPending) return false;
 		if (!GetMessageA(&msg, NULL, 0, 0)) return false;
 		TranslateMessage(&msg);
@@ -433,24 +431,4 @@ bool Instance::PollEvents() {
 	mWindow->mMouseState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
 	#endif
 	return true;
-}
-
-bool Instance::AdvanceFrame() {
-	Profiler::BeginFrame(mDevice->FrameCount());
-	ProfilerRegion ps("Instance::AdvanceFrame");
-
-	if (!PollEvents()) return false; // Window was closed
-	mWindow->AcquireNextImage();
-	
-	// TODO: replace mScene->mCameras[0]
-	//mMouseKeyboard->mMousePointer.mWorldRay = scene->mCameras[0]->ScreenToWorldRay(mWindow->mMouseState.mCursorPos / Vector2f((float)mMouseKeyboard->mWindowWidth, (float)mMouseKeyboard->mWindowHeight));	
-	return true;
-}
-void Instance::PresentFrame(const unordered_set<vk::Semaphore>& presentWaitSemaphores) {
-	{
-		ProfilerRegion ps("Instance::PresentFrame");
-		mWindow->Present(presentWaitSemaphores);
-		mDevice->PurgeResourcePools(mWindow->BackBufferCount() + 1);
-	}
-	Profiler::EndFrame();
 }

@@ -1,59 +1,24 @@
 #pragma once
 
-#ifdef WIN32
-
-#ifdef _DEBUG
-#include <stdlib.h>
-#include <crtdbg.h>
-#endif
-
-#include <Windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <iphlpapi.h>
-#include <WS2tcpip.h>
-#include <filesystem>
-#undef near
-#undef far
-#undef free
-
-#ifdef STRATUM_CORE
-#define STRATUM_API __declspec(dllexport)
-#define PLUGIN_EXPORT
-#else
-#define STRATUM_API __declspec(dllimport)
-#define PLUGIN_EXPORT __declspec(dllexport)
-#endif
-
-#endif
-
-#ifdef __GNUC__
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <experimental/filesystem>
-#define STRATUM_API
-#define PLUGIN_EXPORT
-#endif
-
-#include <vulkan/vulkan.hpp>
-#include "Util/Types.hpp"
+#include "Util/byte_stream.hpp"
+#include "Util/byte_blob.hpp"
+#include "Util/hash_combine.hpp"
+#include "Util/Platform.hpp"
 
 namespace stm {
 
 template<typename T> inline void safe_delete(T*& x)       { if (x) { delete   x; x = nullptr; } }
 template<typename T> inline void safe_delete_array(T*& x) { if (x) { delete[] x; x = nullptr; } }
 
-
 #pragma region misc math expressions
 
-template<typename T> inline constexpr T degrees(const T& r) { return r * (T)180/(T)M_PI; }
-template<typename T> inline constexpr T radians(const T& d) { return d * (T)M_PI/(T)180; }
+template<typename T> constexpr T degrees(const T& r) { return r * (T)180/(T)M_PI; }
+template<typename T> constexpr T radians(const T& d) { return d * (T)M_PI/(T)180; }
 
-template<typename T> inline constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
-template<typename T> inline constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
-template<typename T> inline constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
-template<typename T> inline constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
+template<typename T> constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
+template<typename T> constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
+template<typename T> constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
+template<typename T> constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
 
 template<typename T>
 inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
@@ -64,6 +29,10 @@ inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box
 }
 
 #pragma endregion
+
+constexpr vk::DeviceSize operator"" _kB(vk::DeviceSize x) { return x*1024; }
+constexpr vk::DeviceSize operator"" _mB(vk::DeviceSize x) { return x*1024*1024; }
+constexpr vk::DeviceSize operator"" _gB(vk::DeviceSize x) { return x*1024*1024*1024; }
 
 enum class ConsoleColorBits {
 	eBlack	= 0,
@@ -115,11 +84,7 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 }
 template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { fprintf_color(color, stdout, format, forward<Args>(a)...); }
 
-constexpr inline vk::DeviceSize operator"" _kB(vk::DeviceSize x) { return x*1024; }
-constexpr inline vk::DeviceSize operator"" _mB(vk::DeviceSize x) { return x*1024*1024; }
-constexpr inline vk::DeviceSize operator"" _gB(vk::DeviceSize x) { return x*1024*1024*1024; }
-
-wstring s2ws(const string &str) {
+inline wstring s2ws(const string &str) {
     if (str.empty()) return wstring();
 		#ifdef WIN32
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
@@ -129,7 +94,7 @@ wstring s2ws(const string &str) {
 		// TODO: linux
 		return wstrTo;
 }
-string ws2s(const wstring &wstr) {
+inline string ws2s(const wstring &wstr) {
     if (wstr.empty()) return string();
 		#ifdef WIN32
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
@@ -152,7 +117,7 @@ inline string ReadFile(const fs::path& filename) {
 }
 
 // Size of an element of format, in bytes
-inline const vk::DeviceSize ElementSize(vk::Format format) {
+inline constexpr vk::DeviceSize ElementSize(vk::Format format) {
 	switch (format) {
 	case vk::Format::eR4G4UnormPack8:
 	case vk::Format::eR8Unorm:
@@ -306,7 +271,7 @@ inline const vk::DeviceSize ElementSize(vk::Format format) {
 	}
 	return 0;
 }
-inline uint32_t ChannelCount(vk::Format format) {
+inline constexpr uint32_t ChannelCount(vk::Format format) {
 	switch (format) {
 		case vk::Format::eR8Unorm:
 		case vk::Format::eR8Snorm:
@@ -450,7 +415,7 @@ inline uint32_t ChannelCount(vk::Format format) {
 	}
 	return 0;
 }
-inline bool HasDepthComponent(vk::Format format) {
+inline constexpr bool HasDepthComponent(vk::Format format) {
 	return
 		format == vk::Format::eD16Unorm ||
 		format == vk::Format::eX8D24UnormPack32 ||
@@ -459,12 +424,32 @@ inline bool HasDepthComponent(vk::Format format) {
 		format == vk::Format::eD24UnormS8Uint ||
 		format == vk::Format::eD32SfloatS8Uint;
 }
-inline bool HasStencilComponent(vk::Format format) {
+inline constexpr bool HasStencilComponent(vk::Format format) {
 	return
 		format == vk::Format::eS8Uint ||
 		format == vk::Format::eD16UnormS8Uint ||
 		format == vk::Format::eD24UnormS8Uint ||
 		format == vk::Format::eD32SfloatS8Uint;
+}
+
+inline constexpr uint32_t PrimitiveDegree(vk::PrimitiveTopology topo) {
+	switch (topo) {
+		default:
+		case vk::PrimitiveTopology::ePatchList:
+		case vk::PrimitiveTopology::ePointList:
+			return 1;
+		case vk::PrimitiveTopology::eLineList:
+		case vk::PrimitiveTopology::eLineStrip:
+		case vk::PrimitiveTopology::eLineListWithAdjacency:
+		case vk::PrimitiveTopology::eLineStripWithAdjacency:
+			return 2;
+		case vk::PrimitiveTopology::eTriangleList:
+		case vk::PrimitiveTopology::eTriangleStrip:
+		case vk::PrimitiveTopology::eTriangleFan:
+		case vk::PrimitiveTopology::eTriangleListWithAdjacency:
+		case vk::PrimitiveTopology::eTriangleStripWithAdjacency:
+			return 3;
+	}
 }
 
 inline vk::AccessFlags GuessAccessMask(vk::ImageLayout layout) {

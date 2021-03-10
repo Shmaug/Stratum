@@ -44,7 +44,7 @@ template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T he
 	return Transform<T,3,Projective>(r);
 }
 template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	Transform<T,3,Projective> r;
 	r(0,0) = 2 / (right - left);
 	r(1,1) = 2 / (top - bottom);
 	r(2,2) = 1 / (zFar - zNear);
@@ -52,7 +52,7 @@ template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T rig
 	r(3,1) = (top + bottom) / (bottom - top);
 	r(3,2) = zNear / (zNear - zFar);
 	r(3,3) = 1;
-	return Transform<T,3,Projective>(r);
+	return r;
 }
 
 enum class StereoEye : uint32_t {
@@ -67,7 +67,7 @@ enum class StereoMode : uint32_t {
 };
 
 // A scene object that the scene will use to render renderers
-class Camera : public SceneNode::Component {
+class Camera : public NodeTransform {
 public:
 	inline Camera(SceneNode& node, const string& name, const unordered_set<RenderAttachmentId>& renderTargets) : SceneNode::Component(node, name), mRenderTargets(renderTargets) {}
 
@@ -79,8 +79,8 @@ public:
 	STRATUM_API virtual bool RendersToSubpass(const RenderPass::SubpassDescription& subpass);
 
 	inline virtual void RenderPriority(uint32_t x) { mRenderPriority = x; }
-	inline virtual void DrawSkybox(bool v) { mDrawSkybox = v; }
 	inline virtual uint32_t RenderPriority() const { return mRenderPriority; }
+	inline virtual void DrawSkybox(bool v) { mDrawSkybox = v; }
 	inline virtual bool DrawSkybox() const { return mDrawSkybox; }
 
 	inline virtual void AspectRatio(float r) { mAspectRatio = r; mNode.InvalidateTransform(); }
@@ -107,7 +107,7 @@ private:
 	std::array<Hyperplane<float,3>,6> mLocalFrustum;
 
 protected:
-	STRATUM_API virtual void OnValidateTransform(Matrix4f& transform, TransformTraits& traits) override;
+	STRATUM_API virtual void OnValidateTransform() override;
 };
 
 }

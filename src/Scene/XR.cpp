@@ -137,7 +137,7 @@ unordered_set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	return result;
 }
 
-bool XR::OnSceneInit(Scene* scene) {
+bool XR::Init(Scene* scene) {
 	if (!mInitialized) return false;
 	
 	mScene = scene;

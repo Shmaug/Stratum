@@ -2,11 +2,13 @@
 
 STRATUM_DIR="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
+echo STRATUM_DIR = $STRATUM_DIR
+
 c_compiler=
 cxx_compiler=
 rc_compiler=
 linker=
-cmake_generator="Ninja"
+cmake_generator=
 build_debug=0
 cxx_flags=
 exe_linker_flags=
@@ -61,11 +63,7 @@ build_target() {
   
   prev=$PWD
   cd "$STRATUM_DIR/extern/build/$1"
-  if [[ $cmake_generator == "Visual Studio"* ]]; then
-    cmake --build . --config $2 --target install -- -maxCpuCount
-  else
-    cmake --build . --target install
-  fi
+  cmake --build . --config $2 --target install
   cd $prev
 }
 
@@ -89,6 +87,6 @@ build_target assimp "Release" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_BUILD_ZL
 build_target freetype2 "Debug"
 build_target freetype2 "Release"
 
-build_target msdfgen $cfg "-DFREETYPE_INCLUDE_DIRS='$STRATUM_DIR/extern/include' -DFREETYPE_LIBRARY='$STRATUM_DIR/extern/lib/freetype.lib'"
+build_target msdfgen $cfg "-DFREETYPE_INCLUDE_DIR_freetype2='$STRATUM_DIR/extern/include' -DFREETYPE_INCLUDE_DIR_ft2build='$STRATUM_DIR/extern/include/freetype2' -DFREETYPE_LIBRARY_DEBUG='$STRATUM_DIR/extern/lib/freetyped.lib' -DFREETYPE_LIBRARY_RELEASE='$STRATUM_DIR/extern/lib/freetype.lib' -DFREETYPE_WITH_PNG=ON -DMSDFGEN_BUILD_MSDFGEN_STANDALONE=OFF"
 
 build_target OpenXR-SDK $cfg

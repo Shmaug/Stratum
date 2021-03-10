@@ -4,34 +4,6 @@
 
 namespace stm {
 
-struct DescriptorBinding {
-	vk::DescriptorSetLayoutBinding mBinding;
-	uint32_t mSet;
-	vector<vk::Sampler> mImmutableSamplers;
-	vk::ShaderStageFlags mStageFlags;
-};
-
-inline binary_stream& operator<<(binary_stream& lhs, const DescriptorBinding& rhs) {
-	lhs << rhs.mBinding.binding;
-	lhs << rhs.mBinding.descriptorType;
-	lhs << rhs.mBinding.descriptorCount;
-	lhs << rhs.mBinding.stageFlags;
-	lhs << rhs.mSet;
-	lhs << rhs.mImmutableSamplers;
-	lhs << rhs.mStageFlags;
-	return lhs;
-}
-inline binary_stream& operator>>(binary_stream& lhs, DescriptorBinding& rhs) {
-	lhs >> rhs.mBinding.binding;
-	lhs >> rhs.mBinding.descriptorType;
-	lhs >> rhs.mBinding.descriptorCount;
-	lhs >> rhs.mBinding.stageFlags;
-	lhs >> rhs.mSet;
-	lhs >> rhs.mImmutableSamplers;
-	lhs >> rhs.mStageFlags;
-	return lhs;
-}
-
 enum class VertexAttributeType {
 	ePosition,
 	eNormal,
@@ -44,17 +16,21 @@ enum class VertexAttributeType {
 	eTexcoord
 };
 struct VertexAttributeId {
-	VertexAttributeType mType : 4;
-	unsigned int mTypeIndex : 28;
-	VertexAttributeId() = default;
-	VertexAttributeId(const VertexAttributeId&) = default;
-	VertexAttributeId(VertexAttributeType type, uint8_t typeIndex=0) : mType(type), mTypeIndex(typeIndex) {}
-	inline bool operator==(const VertexAttributeId& rhs) const = default;
+	VertexAttributeType mType;
+	uint32_t mTypeIndex;
+	bool operator==(const VertexAttributeId&) const = default;
 };
 struct VertexStageVariable {
 	uint32_t mLocation;
 	vk::Format mFormat;
 	VertexAttributeId mAttributeId;
+};
+
+struct DescriptorBinding {
+	vk::DescriptorSetLayoutBinding mBinding;
+	uint32_t mSet;
+	vector<vk::Sampler> mImmutableSamplers;
+	vk::ShaderStageFlags mStageFlags;
 };
 
 struct SpirvModule {
@@ -70,7 +46,7 @@ struct SpirvModule {
 	unordered_map<string, vk::PushConstantRange> mPushConstants;
 	unordered_map<string, VertexStageVariable> mStageInputs;
 	unordered_map<string, VertexStageVariable> mStageOutputs;
-	Vector3u mWorkgroupSize;
+	vk::Extent3D mWorkgroupSize;
 
 	inline ~SpirvModule() { if (mShaderModule) mDevice.destroyShaderModule(mShaderModule); }
 
@@ -78,42 +54,46 @@ struct SpirvModule {
 	inline uint32_t Location(const string& descriptor) const { return mDescriptorBindings.at(descriptor).mBinding.binding; }
 };
 
-inline binary_stream& operator<<(binary_stream& stream, const SpirvModule& m) {
-	stream << m.mSpirv;
-	stream << m.mStage;
-	stream << m.mEntryPoint;
-	stream << m.mSpecializationMap;
-	stream << m.mStageInputs;
-	stream << m.mStageOutputs;
-	stream << m.mDescriptorBindings;
-	stream << m.mPushConstants;
-	stream << m.mWorkgroupSize;
-	return stream;
-}
-inline binary_stream& operator>>(binary_stream& stream, SpirvModule& m) {
-	stream >> m.mSpirv;
-	stream >> m.mStage;
-	stream >> m.mEntryPoint;
-	stream >> m.mSpecializationMap;
-	stream >> m.mStageInputs;
-	stream >> m.mStageOutputs;
-	stream >> m.mDescriptorBindings;
-	stream >> m.mPushConstants;
-	stream >> m.mWorkgroupSize;
-	return stream;
-}
-
-}
-
-namespace std {
-template<> struct hash<stm::SpirvModule> {
-	inline size_t operator()(const stm::SpirvModule& m) {
-		return stm::hash_combine(
-			m.mSpirv, // TODO: optimize hashing entire spirv
-			m.mStage,
-			m.mEntryPoint,
-			m.mSpecializationMap);
+template<> struct tuplefier<DescriptorBinding> {
+	inline auto operator()(stm::DescriptorBinding&& m) {
+		return forward_as_tuple(
+			m.mBinding.binding,
+			m.mBinding.descriptorType,
+			m.mBinding.descriptorCount,
+			m.mBinding.stageFlags,
+			m.mSet,
+			m.mImmutableSamplers,
+			m.mStageFlags);
 	}
 };
-template<> struct hash<stm::VertexAttributeId> { inline size_t operator()(const stm::VertexAttributeId& id) { return *(const uint32_t*)&id; } };
+template<> struct tuplefier<SpirvModule> {
+	inline auto operator()(SpirvModule&& m) {
+		return forward_as_tuple(
+			m.mSpirv,
+			m.mStage,
+			m.mEntryPoint,
+			m.mSpecializationMap,
+			m.mStageInputs,
+			m.mStageOutputs,
+			m.mDescriptorBindings,
+			m.mPushConstants,
+			m.mWorkgroupSize);
+	}
+};
+template<> struct tuplefier<VertexAttributeId> {
+	inline auto operator()(VertexAttributeId&& m) {
+		return forward_as_tuple(m.mType, m.mTypeIndex);
+	}
+};
+template<> struct tuplefier<VertexStageVariable> {
+	inline auto operator()(VertexStageVariable&& m) {
+		return forward_as_tuple(m.mLocation, m.mFormat, m.mAttributeId);
+	}
+};
+
+static_assert(tuplefiable<DescriptorBinding>);
+static_assert(tuplefiable<SpirvModule>);
+static_assert(Hashable<SpirvModule>);
+static_assert(Hashable<unordered_map<string,VertexStageVariable>>);
+
 }

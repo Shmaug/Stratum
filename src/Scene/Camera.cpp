@@ -3,12 +3,12 @@
 using namespace stm;
 
 void Camera::WriteUniformBuffer(void* bufferData) {
-	mNode.ValidateTransform();
+	NodeTransform* transform = mNode.get_component<NodeTransform>();
 	shader_interop::CameraData& buf = *(shader_interop::CameraData*)bufferData;
-	buf.View = mNode.LocalToGlobal().inverse();
+	buf.View = transform->Global().inverse();
 	buf.Projection = mLocalProjection.matrix();
 	buf.ViewProjection = buf.View * buf.Projection;
-	buf.Position.head<3>() = mNode.Translation();
+	buf.Position.head<3>() = transform->Global().col(2).head<3>();
 	buf.Position.w() = mFar;
 }
 
@@ -30,7 +30,7 @@ bool Camera::RendersToSubpass(const RenderPass::SubpassDescription& subpass) {
 	return false;
 }
 
-void Camera::OnValidateTransform(Matrix4f& transform, TransformTraits& traits) {
+void Camera::OnValidateTransform() {
 	mLocalProjection = PerspectiveFov(mFieldOfView, mAspectRatio, mNear, mFar);
 	
 	Matrix<float,3,8> corners;

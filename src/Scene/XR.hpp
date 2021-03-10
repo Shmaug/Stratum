@@ -1,7 +1,6 @@
 #pragma once
 
-#include "../Core/Window.hpp"
-#include "Renderers/PointerRenderer.hpp"
+#include "Camera.hpp"
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -13,7 +12,7 @@ public:
     STRATUM_API XR();
     STRATUM_API ~XR();
     
-    STRATUM_API bool OnSceneInit(Scene* scene);
+    STRATUM_API bool Init(Scene* scene);
 
     STRATUM_API unordered_set<string> InstanceExtensionsRequired();
     STRATUM_API unordered_set<string> DeviceExtensionsRequired(vk::PhysicalDevice device);
