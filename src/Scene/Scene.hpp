@@ -209,15 +209,27 @@ public:
 		mChildrenEdges.insert(make_pair(parent, nodePtr));
 	}
 
+	inline void insert(Node* parent, Scene scene) {
+		Node* oldRoot = scene.root();
+		const auto moveView = views::transform(scene.mTopologicalNodes, [](unique_ptr<Node>& p) { return move(p); });
+		mTopologicalNodes.insert(end(mTopologicalNodes), begin(moveView), end(moveView));
+		mNodesByType.insert(begin(scene.mNodesByType), end(scene.mNodesByType));
+
+		mParentEdges.insert(make_pair(oldRoot, parent));
+		mChildrenEdges.insert(make_pair(parent, oldRoot));
+		mParentEdges.insert(begin(scene.mParentEdges), end(scene.mParentEdges));
+		mChildrenEdges.insert(begin(scene.mChildrenEdges), end(scene.mChildrenEdges));
+	}
+
 	inline void traversal_sort() {
 		// sketch, assumes all nodes can be accessed by a root descendent iterator (there are no free nodes and no extra roots)
-		Node* root = mTopologicalNodes.front().get();
+		Node* r = root();
 		const size_t numNodes = mTopologicalNodes.size();
 		for (unique_ptr<Node>& p : mTopologicalNodes) p.release();
 
 		mTopologicalNodes.clear();
 		mTopologicalNodes.reserve(numNodes);
-		ranges::copy(views::transform(descendents(root), [](Node& n) { return unique_ptr<Node>(&n); }), back_inserter(mTopologicalNodes));
+		ranges::copy(views::transform(descendents(r), [](Node& n) { return unique_ptr<Node>(&n); }), back_inserter(mTopologicalNodes));
 	}
 
 	template<typename F> requires(invocable<F,Node&>)
