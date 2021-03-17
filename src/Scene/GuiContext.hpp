@@ -11,14 +11,10 @@ private:
 	stm::Scene& mScene;
 
 	unordered_map<string, shared_ptr<Material>> mMaterials;
-	shared_ptr<Texture> mIconsTexture;
 	shared_ptr<Texture> mFontsTexture;
 	shared_ptr<Sampler> mFontsSampler;
 	TextureView mFontsTextureView;
 
-	unordered_map<string, uint32_t> mHotControl;
-	uint32_t mNextControlId;
-	
 	friend class stm::Scene;
 	STRATUM_API GuiContext(stm::Scene& scene);
 

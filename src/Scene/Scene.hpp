@@ -1,11 +1,15 @@
 #pragma once
 
+#include <functional>
+
 #include "..\Stratum.hpp"
 
 namespace stm {
 
 class Scene {
 public:
+
+	friend class WeakNodePtr; // or just make index getters/etc public
 
 	class Node {
 	private:
@@ -30,26 +34,26 @@ public:
 		Node* mNode;
 
 	public:
-    using iterator_category = input_iterator_tag;
-    using value_type        = Node;
-    using pointer           = value_type*;
-    using reference         = value_type&;
+		using iterator_category = input_iterator_tag;
+		using value_type        = Node;
+		using pointer           = value_type*;
+		using reference         = value_type&;
 
 		inline parent_iterator() : mNode(nullptr) {}
 		inline parent_iterator(Node* node) : mNode(node) {}
 		parent_iterator(const parent_iterator&) = default;
-		
-    inline reference operator*() const { return *mNode; }
-    inline pointer operator->() { return mNode; }
+			
+		inline reference operator*() const { return *mNode; }
+		inline pointer operator->() { return mNode; }
 
-    inline parent_iterator& operator++() {
+		inline parent_iterator& operator++() {
 			if (mNode->mScene.mParentEdges.count(mNode))
 				mNode = mNode->mScene.mParentEdges.at(mNode);
 			else
 				mNode = nullptr;
 			return *this;
 		}
-    inline parent_iterator operator++(int) {
+		inline parent_iterator operator++(int) {
 			parent_iterator tmp(*this);
 			operator++();
 			return tmp;
@@ -57,99 +61,172 @@ public:
 
 		inline operator bool() const { return mNode != nullptr; }
 
-    bool operator==(const parent_iterator& rhs) const = default;
-    bool operator!=(const parent_iterator& rhs) const = default;
-    inline bool operator>(const parent_iterator& rhs) const {
-			if (mNode == rhs.mNode) return false;
-			return find_if(*this, parent_iterator(), rhs);
-		};
-		inline bool operator<(const parent_iterator& rhs) const {
-			return rhs.operator>(*this);
-		};
+		bool operator==(const parent_iterator& rhs) const = default;
+		bool operator!=(const parent_iterator& rhs) const = default;
 	};
 	static_assert(input_iterator<parent_iterator>);
 
-	class child_iterator {
+	using child_iterator = unordered_multimap<Node*, Node*>::iterator;
+	static_assert(input_iterator<child_iterator>);
+
+	class descendent_iterator {
 	private:
-		unordered_multimap<Node*, Node*>::iterator mIterator;
-
+		using internal_itr_t = unordered_multimap<Node*, Node*>::iterator;
+		stack<pair<internal_itr_t, internal_itr_t>> mItrStack;
 	public:
-    using iterator_category = input_iterator_tag;
-    using value_type        = Node;
-    using pointer           = value_type*;
-    using reference         = value_type&;
+		using iterator_category = input_iterator_tag;
+		using value_type        = Node;
+		using pointer           = value_type*;
+		using reference         = value_type&;
 
-		inline child_iterator() : mIterator({}) {}
-		inline child_iterator(Node* node) : mIterator(node->mScene.mChildrenEdges.find(node)) {}
-		child_iterator(const child_iterator&) = default;
-		
-    inline reference operator*() const { return *mIterator->second; }
-    inline pointer operator->() { return mIterator->second; }
+		inline descendent_iterator() : mItrStack() {}
+		inline descendent_iterator(Node* node) {
+			Scene& scene = node->mScene;
+			while (scene.mChildrenEdges.contains(node)) {
+				mItrStack.push(scene.mChildrenEdges.equal_range(node));
+				node = mItrStack.top().first->second;
+			}
+		}
+		descendent_iterator(const descendent_iterator&) = default;
+			
+		inline reference operator*() const { return *mItrStack.top().first->second; }
+		inline pointer operator->() { return mItrStack.top().first->second; }
 
-    inline child_iterator& operator++() {
+		inline descendent_iterator& operator++() {
+			const auto cur = mItrStack.top().first;
+			const auto next = std::next(cur);
+			Scene& scene = cur->second->mScene;
+			if(scene.mChildrenEdges.contains(cur->second)) {
+				Node* node = cur->second;
+				while (scene.mChildrenEdges.contains(node)) {
+					mItrStack.push(scene.mChildrenEdges.equal_range(node));
+					node = mItrStack.top().first->second;
+				}
+			}
+			else if (next == mItrStack.top().second) {
+				mItrStack.pop();
+			}
+			else {
+				mItrStack.top().first++;
+			}
+			
 			return *this;
 		}
-    inline child_iterator operator++(int) {
-			child_iterator tmp(*this);
+		inline descendent_iterator operator++(int) {
+			descendent_iterator tmp(*this);
 			operator++();
 			return tmp;
 		}
 
-		inline operator bool() const { return mIterator->second != nullptr; }
+		inline operator bool() const { return !mItrStack.empty(); }
 
-    bool operator==(const child_iterator& rhs) const = default;
-    bool operator!=(const child_iterator& rhs) const = default;
-    inline bool operator>(const child_iterator& rhs) const {
-			if (mNode == rhs.mNode) return false;
-			return find_if(*this, child_iterator(), rhs);
-		};
-		inline bool operator<(const child_iterator& rhs) const {
-			return rhs.operator>(*this);
-		};
+		bool operator==(const descendent_iterator& rhs) const = default;
+		bool operator!=(const descendent_iterator& rhs) const = default;
 	};
-	static_assert(input_iterator<child_iterator>);
+	static_assert(input_iterator<descendent_iterator>);
 
+	inline parent_iterator parents_begin(Node* node) {
+		return parent_iterator(node);
+	}
+
+	inline parent_iterator parents_end(Node* node = nullptr) {
+		return parent_iterator();
+	}
+
+	using parents_subrange = ranges::subrange<parent_iterator>;
+	inline parents_subrange parents(Node* node) {
+		return ranges::subrange(parents_begin(node), parents_end(node));
+	}
+
+	inline child_iterator children_begin(Node* node) {
+		auto [begin, end] = mChildrenEdges.equal_range(node);
+		return begin;
+	}
+
+	inline child_iterator children_end(Node* node) {
+		auto [begin, end] = mChildrenEdges.equal_range(node);
+		return end;
+	}
+
+	using children_subrange = ranges::subrange<child_iterator>;
+	inline children_subrange children(Node* node) {
+		return ranges::subrange(children_begin(node), children_end(node));
+	}
+
+	inline descendent_iterator descendents_begin(Node* node) {
+		return descendent_iterator(node);
+	}
+
+	inline descendent_iterator descendents_end(Node* node = nullptr) {
+		return descendent_iterator();
+	}
+
+	using descendents_subrange = ranges::subrange<descendent_iterator>;
+	inline descendents_subrange descendents(Node* node) {
+		return ranges::subrange(descendents_begin(node), descendents_end(node));
+	}
+
+	using type_iterator = unordered_multimap<type_index, Node*>::iterator;
+	template<typename NodeType> requires(derived_from(NodeType, Node))
+	inline type_iterator types_begin() {
+		auto [begin, end] = mNodesByType.equal_range(typeid(NodeType));
+		return begin;
+	}
+
+	template<typename NodeType> requires(derived_from(NodeType, Node))
+	inline type_iterator types_end() {
+		auto [begin, end] = mNodesByType.equal_range(typeid(NodeType));
+		return end;
+	}
+
+	using type_subrange = ranges::subrange<type_iterator>;
+	template<typename NodeType> requires(derived_from(NodeType, Node))
+	inline void types()
+	{
+		return ranges::subrange(types_begin<NodeType>(), types_end<NodeType>());
+	}
+
+	inline Node* root() { return mTopologicalNodes.front().get(); }
+	inline const Node* root() const { return mTopologicalNodes.front().get(); }
+
+	template<typename NodeType> requires(derived_from(NodeType, Node))
+	inline void insert(Node* parent, NodeType&& n) {
+		unique_ptr<NodeType> tempPtr = make_unique<NodeType>(forward(n));
+		mTopologicalNodes.push_back(move(tempPtr));
+		Node* nodePtr = mTopologicalNodes.back().get();
+		mNodesByType.insert(make_pair(typeid(NodeType), nodePtr));
+		mParentEdges.insert(make_pair(nodePtr, parent));
+		mChildrenEdges.insert(make_pair(parent, nodePtr));
+	}
+
+	template<typename NodeType, typename... Params>
+	inline void emplace(Node* parent, Params&&... params) {
+		unique_ptr<NodeType> tempPtr = make_unique<NodeType>(forward(params...));
+		mTopologicalNodes.push_back(move(tempPtr));
+		Node* nodePtr = mTopologicalNodes.back().get();
+		mNodesByType.insert(make_pair(typeid(NodeType), nodePtr));
+		mParentEdges.insert(make_pair(nodePtr, parent));
+		mChildrenEdges.insert(make_pair(parent, nodePtr));
+	}
+
+	inline void traversal_sort() {
+		// sketch, assumes all nodes can be accessed by a root descendent iterator (there are no free nodes and no extra roots)
+		Node* root = mTopologicalNodes.front().get();
+		const size_t numNodes = mTopologicalNodes.size();
+		for (unique_ptr<Node>& p : mTopologicalNodes) p.release();
+
+		mTopologicalNodes.clear();
+		mTopologicalNodes.reserve(numNodes);
+		ranges::copy(views::transform(descendents(root), [](Node& n) { return unique_ptr<Node>(&n); }), back_inserter(mTopologicalNodes));
+	}
 
 	template<typename F> requires(invocable<F,Node&>)
-	inline void for_each_descendant(Node& n, F&& fn) const {
-		queue<Node*> nodes(mChildrenEdges.at(n));
-		while (!nodes.empty()) {
-			Node* n = nodes.front();
-			nodes.pop();
-			fn(forward<Node&>(*n));
-			if (mChildrenEdges.count(n)) {
-				nodes.resize(nodes.size() + n->mChildren.size());
-				ranges::copy_backward(views::transform(n->mChildren, &get<unique_ptr<Node>>), nodes.end());
-			}
-		}
+	inline void for_each(F&& fn) const {
+		ranges::for_each(descendents(root()), forward(fn));
 	}
-
-	template<class T, typename... Args> requires(derived_from<T,Node> && constructible_from<T,Args...>)
-	inline T& emplace(Args&&... args) {
-		return *static_cast<T*>(mNodes[type_index(typeid(T))].emplace_back(make_unique<T>(forward<Args>(args)...)).get());
-	}
-	inline Node& emplace(unique_ptr<Node>&& n) {
-		if (n->mParent == this) return *n;
-		if (n->mParent) n = move(n->mParent->RemoveChild(*n));
-		auto& ptr = mNodes.emplace_back(move(n));
-		ptr->mParent = this;
-		return *ptr;
-	}
-	template<class T> requires(derived_from<T,Node>)
-	inline unique_ptr<T> erase(T* n) {
-		auto p = mNodes.find(type_index(typeid(T)));
-		if (p == mNodes.end()) return nullptr;
-		p->second.erase(n);
-	}
-	inline bool erase(Node* n) {
-		for (auto&[t,l] : mNodes)
-			if (l.erase(n))
-				return true;
-		return false;
-	}
-
 };
 
+// assumes all parents can be casted to TransformNode, doesn't cache intermediate parent transforms
 template<typename transform_t>
 class TransformNode : public Scene::Node {
 protected:
@@ -166,21 +243,125 @@ public:
 
 	inline virtual void ValidateGlobal() {
 		if (mGlobalValid) return;
-		mGlobal = mLocal;
-		auto* n = this;
-		while (n->Parent()) {
-			if (auto* t = n->Parent()->get_component<TransformNode<transform_t>>()) {
-				if (t->mGlobalValid) {
-					mGlobal = t->mGlobal * mGlobal;
-					break;
-				} else {
-					mGlobal = t->mLocal * mGlobal;
-				}
+		for(Node& parent : mScene.parents(this)) {
+			TransformNode& t = static_cast<TransformNode&>(parent);
+			if(t->mGlobalValid) {
+				mGlobal = t->mGlobal * mGlobal;
+				break;
+			} else {
+				mGlobal = t-> mLocal * mGlobal;
 			}
-			n = n->Parent();
 		}
 		mGlobalValid = true;
 	}
+};
+
+// disgusting
+class WeakNodePtr
+{
+public:
+	WeakNodePtr(Scene::Node* ptr) : mPtr(ptr) {
+		if (!sIndexCache.contains(mPtr)) {
+			sIndexCache.insert(make_pair(mPtr, 0));
+		}
+	}
+
+	inline operator bool() const {
+		if (!sIndexCache.contains(mPtr)) return false;
+
+		const size_t nodeIndex = sIndexCache.at(mPtr);
+		const Scene& scene = mPtr->mScene;
+		if (scene.mTopologicalNodes[nodeIndex].get() != mPtr) {
+			const auto itr = find_if(begin(scene.mTopologicalNodes), end(scene.mTopologicalNodes), 
+				[this] (const auto& a) { return a.get() == mPtr; }
+			);
+
+			if (itr == end(scene.mTopologicalNodes)) {
+				sIndexCache.erase(mPtr);
+				return false;
+			}
+			
+			sIndexCache[mPtr] = distance(begin(scene.mTopologicalNodes), itr);
+		}
+		return true;
+	}
+
+private:
+	Scene::Node* mPtr;
+
+	static unordered_map<Scene::Node*, size_t> sIndexCache;
+};
+
+using DelegateHandle = size_t;
+
+template<typename FuncType>
+class Delegate;
+
+template<typename Ret, typename... Params>
+class Delegate<Ret(Params...)> {
+public:
+	inline Delegate(Scene::Node* owner) : mOwner(owner) {}
+
+	template<typename FuncType>
+	inline DelegateHandle Add(FuncType&& fn) { 
+		const DelegateHandle handle = mCallbacks.size();
+		mCallbacks.push_back(forward(fn)); 
+		return handle;
+	}
+	inline void Remove(const DelegateHandle handle) {
+		const auto removeItr = next(cbegin(mCallbacks), handle);
+		mCallbacks.remove(removeItr);
+	}
+
+	inline Ret Broadcast(Params&&... params) const {
+		mCallbacks.front()(forward(params...));
+	}
+	inline void BroadcastAll(Params&&... params) const {
+		for(const auto& fn : mCallbacks) {
+			fn(forward(params...));
+		}
+	}
+
+	inline Scene::Node* Owner() const { return mOwner; }
+
+private:
+	vector<function<Ret(Params...)>> mCallbacks;
+	Scene::Node* mOwner;
+};
+
+class DelegateSubscriber {
+public:
+	inline DelegateSubscriber() = default;
+
+	template<typename FuncType>
+	void Subscribe(Delegate<FuncType>& delegate, FuncType&& fn)
+	{
+		const DelegateHandle handle = delegate.Add(forward(fn));
+
+		DelegateRemover weakHandle = DelegateRemover{
+			.ptr = WeakNodePtr(delegate.Owner()),
+			.removeSelf = [handle, &delegate] () { delegate.Remove(handle); } 
+		};
+
+		mSubscriptions.push_back(std::move(weakHandle));
+	}
+
+	virtual ~DelegateSubscriber() {
+		for(const DelegateRemover& handle : mSubscriptions) {
+			if (handle.ptr) handle.removeSelf();
+		}
+	}
+
+private:
+	
+	struct DelegateRemover
+	{
+		WeakNodePtr ptr;
+		function<void()> removeSelf;
+	};
+
+	vector<DelegateRemover> mSubscriptions;
+	const Scene& mScene;
 };
 
 }
