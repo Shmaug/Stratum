@@ -1,30 +1,23 @@
 #pragma once
 
-#include "Device.hpp"
+#include "Buffer.hpp"
 
 namespace stm {
 
-enum class TextureLoadFlagBits {
-	eSrgb,
-	eSigned
-};
-using TextureLoadFlags = vk::Flags<TextureLoadFlagBits>;
-
 class Texture : public DeviceResource {
 public:
-	// Construct image or image array from (optional) pixel/metadata. If mipLevels = 0, will auto-determine according to extent 
-	STRATUM_API Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, const byte_blob& data = {},
-		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, uint32_t mipLevels = 1, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	STRATUM_API static tuple<byte_blob, vk::Extent3D, vk::Format> LoadPixels(const fs::path& filename);
 
-	// Construct image from image file(s)
-	STRATUM_API Texture(Device& device, const string& name, const vector<fs::path>& files, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {});
-	inline Texture(Device& device, const string& name, const fs::path& filename, TextureLoadFlags loadFlags = TextureLoadFlagBits::eSrgb, vk::ImageCreateFlags createFlags = {})
-		: Texture(device, name, vector<fs::path> { filename }, loadFlags, createFlags) {}
+	// If mipLevels = 0, will auto-determine according to extent 
+	STRATUM_API Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, uint32_t mipLevels = 0, uint32_t arrayLayers = 1, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal);
+	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, const vk::AttachmentDescription& description, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal)
+		: Texture(device, name, extent, description.format, description.samples, usage, 1, 1, createFlags, memoryProperties) {}
 
 	STRATUM_API ~Texture();
 
 	inline vk::Image operator*() const { return mImage; }
 	inline const vk::Image* operator->() const { return &mImage; }
+	inline operator bool() const { return mImage; }
 
 	inline vk::Extent3D Extent() const { return mExtent; }
 	inline vk::Format Format() const { return mFormat; }
@@ -89,6 +82,7 @@ class TextureView {
 public:
 	TextureView() = default;
 	TextureView(const TextureView&) = default;
+	TextureView(TextureView&&) = default;
 	inline TextureView(shared_ptr<Texture> texture, uint32_t baseMip=0, uint32_t mipCount=0, uint32_t baseLayer=0, uint32_t layerCount=0, vk::ImageAspectFlags aspectMask=(vk::ImageAspectFlags)0, vk::ComponentMapping components={})
 		: mTexture(texture), mBaseMip(baseMip), mMipCount(mipCount), mBaseLayer(baseLayer), mLayerCount(layerCount), mAspectMask(aspectMask) {
 		if (mMipCount == 0) mMipCount = texture->MipLevels();
@@ -96,7 +90,7 @@ public:
 		if (mAspectMask == (vk::ImageAspectFlags)0) mAspectMask = texture->AspectFlags();
 
 		size_t key = hash_combine(mBaseMip, mMipCount, mBaseLayer, mLayerCount, mAspectMask, components);
-		if (texture->mViews.count(key) == 0)
+		if (texture->mViews.count(key))
 			mView = texture->mViews.at(key);
 		else {
 			vk::ImageViewCreateInfo info = {};
@@ -126,10 +120,12 @@ public:
 	TextureView& operator=(const TextureView&) = default;
 	TextureView& operator=(TextureView&& v) = default;
 	inline bool operator==(const TextureView& rhs) const = default;
-		
+	inline operator bool() const { return mTexture && mView; }
+
 	inline vk::ImageView operator*() const { return mView; }
 	inline const vk::ImageView* operator->() const { return &mView; }
 	inline shared_ptr<Texture> get() const { return mTexture; }
+	inline Texture& texture() const { return *mTexture; }
 };
 
 }

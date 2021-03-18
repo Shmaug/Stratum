@@ -39,9 +39,27 @@ public:
 	STRATUM_API void EndLabel();
 
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
-	template<typename T> requires(derived_from<T, DeviceResource>)
-	inline T& HoldResource(shared_ptr<T> resource) {
+	template<derived_from<DeviceResource> T>
+	inline T& HoldResource(const shared_ptr<T>& resource) {
 		return *static_cast<T*>(mHeldResources.emplace(resource).first->get());
+	}
+
+	inline Buffer::ArrayView UploadData(const byte_blob& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
+		Buffer::ArrayView staging(
+			make_shared<Buffer>(mDevice, "staging", data.size(), usage, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+			1, 0, data.size());
+		HoldResource(staging.get());
+		memcpy(staging.data(), data.data(), staging.size_bytes());
+		return staging;
+	}
+	template<ranges::contiguous_range R>
+	inline Buffer::ArrayView UploadData(const R& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
+		Buffer::ArrayView staging(
+			make_shared<Buffer>(mDevice, "staging", data.size()*sizeof(ranges::range_value_t<R>), usage, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+			sizeof(ranges::range_value_t<R>), 0, data.size());
+		HoldResource(staging.get());
+		memcpy(staging.data(), data.data(), staging.size_bytes());
+		return staging;
 	}
 
 	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier) {
@@ -71,6 +89,23 @@ public:
 		Barrier(srcStage, dstStage, barrier);
 	}
 
+	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
+	inline void TransitionImageDescriptors(T&... sets) {
+		auto fn = [&](auto& entries) {
+			for (auto&[idx, entry] : entries) {
+				switch (entry.type()) {
+					case vk::DescriptorType::eCombinedImageSampler:
+					case vk::DescriptorType::eInputAttachment:
+					case vk::DescriptorType::eSampledImage:
+					case vk::DescriptorType::eStorageImage:
+						entry.get<TextureView>().texture().TransitionBarrier(*this, entry.get<vk::ImageLayout>());
+						break;
+				}
+			}
+		};
+		(fn(sets.mBoundDescriptors), ...);
+	}
+
 	STRATUM_API void ClearAttachments(const vector<vk::ClearAttachment>& value);
 
 	STRATUM_API void BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> frameBuffer, vk::SubpassContents contents = vk::SubpassContents::eInline);
@@ -83,21 +118,22 @@ public:
 
 	STRATUM_API void BindPipeline(shared_ptr<Pipeline> pipeline);
 	
-	STRATUM_API void BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t set);
+	STRATUM_API void BindDescriptorSets(const vector<shared_ptr<DescriptorSet>>& descriptorSet, uint32_t index);
+	STRATUM_API void BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t index);
 
-	inline void BindVertexBuffer(uint32_t index, const Buffer::ArrayView<>& view) {
+	inline void BindVertexBuffer(uint32_t index, const Buffer::ArrayView& view) {
 		if (mBoundVertexBuffers[index] != view) {
 			mBoundVertexBuffers[index] = view;
 			mCommandBuffer.bindVertexBuffers(index, { *view.buffer() }, { view.offset() });
 		}
 	}
-	template<ranges::input_range R> requires(convertible_to<ranges::range_value_t<R>, Buffer::ArrayView<>>)
+	template<ranges::input_range R> requires(convertible_to<ranges::range_value_t<R>, Buffer::ArrayView>)
 	inline void BindVertexBuffers(uint32_t index, const R& views) {
 		vector<vk::Buffer> bufs(views.size());
 		vector<vk::DeviceSize> offsets(views.size());
 		bool needBind = false;
 		uint32_t i = 0;
-		for (const Buffer::ArrayView<>& v : views) {
+		for (const Buffer::ArrayView& v : views) {
 			bufs[i] = *v.buffer();
 			offsets[i] = v.offset();
 			if (mBoundVertexBuffers[index + i] != v) {
@@ -108,16 +144,15 @@ public:
 		}
 		if (needBind) mCommandBuffer.bindVertexBuffers(index, bufs, offsets);
 	}
-	template<typename T>
-	inline void BindIndexBuffer(const Buffer::ArrayView<T>& view) {
-		static const unordered_map<size_t, vk::IndexType> sizeMap {
-			{ sizeof(uint16_t), vk::IndexType::eUint16 },
-			{ sizeof(uint32_t), vk::IndexType::eUint32 },
-			{ sizeof(uint8_t), vk::IndexType::eUint8EXT }
-		};
+	inline void BindIndexBuffer(const Buffer::ArrayView& view) {
 		if (mBoundIndexBuffer != view) {
 			mBoundIndexBuffer = view;
-			mCommandBuffer.bindIndexBuffer(*view.buffer(), view.offset(), sizeMap.at(view.stride()));
+			vk::IndexType type;
+			if      (view.stride() == sizeof(uint32_t)) type = vk::IndexType::eUint32;
+			else if (view.stride() == sizeof(uint16_t)) type = vk::IndexType::eUint16;
+			else if (view.stride() == sizeof(uint8_t))  type = vk::IndexType::eUint8EXT;
+			else throw invalid_argument("invalid stride for index buffer");
+			mCommandBuffer.bindIndexBuffer(*view.buffer(), view.offset(), type);
 		}
 	}
 
@@ -149,8 +184,15 @@ private:
 	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT = 0;
 	
 	STRATUM_API void Clear();
-	STRATUM_API bool CheckDone();
-
+	inline bool CheckDone() {
+		if (mState == CommandBufferState::eInFlight && mDevice->getFenceStatus(**mCompletionFence) == vk::Result::eSuccess) {
+			mState = CommandBufferState::eDone;
+			Clear();
+			return true;
+		}
+		return mState == CommandBufferState::eDone;
+	}
+	
 	vk::CommandBuffer mCommandBuffer;
 
 	Device::QueueFamily* mQueueFamily;
@@ -169,8 +211,8 @@ private:
 	shared_ptr<RenderPass> mCurrentRenderPass;
 	uint32_t mCurrentSubpassIndex = 0;
 	shared_ptr<Pipeline> mBoundPipeline = nullptr;
-	unordered_map<uint32_t, Buffer::ArrayView<>> mBoundVertexBuffers;
-	Buffer::ArrayView<> mBoundIndexBuffer;
+	unordered_map<uint32_t, Buffer::ArrayView> mBoundVertexBuffers;
+	Buffer::ArrayView mBoundIndexBuffer;
 	vector<shared_ptr<DescriptorSet>> mBoundDescriptorSets;
 };
 

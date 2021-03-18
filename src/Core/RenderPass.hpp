@@ -28,8 +28,8 @@ public:
 		: DeviceResource(device, name), mHash(hash_combine(name, subpassDescriptions)) {
 		
 		// Resolve dependencies & sort subpasses
-		unordered_set<SubpassDescription*> remaining;
-		for (SubpassDescription& s : subpassDescriptions) remaining.insert(&s);
+		unordered_set<const SubpassDescription*> remaining;
+		for (const SubpassDescription& s : subpassDescriptions) remaining.insert(&s);
 
 		struct SubpassData {
 			vector<vk::AttachmentReference> inputAttachments;
@@ -47,16 +47,23 @@ public:
 			auto& sp = subpasses[i];
 			auto& sd = subpassData[i];
 
-			// insert element with the fewest unsatisfied dependencies
-			auto r_min = ranges::min_element(remaining, [&](const auto& s) {
-				return ranges::count_if(s->mSubpassDependencies, [&](const auto& sdep) {
-					return ranges::find_if(remaining, [&](const auto& s2){ return s2->mName == sdep; }) != mSubpassDescriptions.end();
+			// find subpass with the fewest unsatisfied dependencies
+			const SubpassDescription* r_min = nullptr;
+			size_t tmp = -1;
+			for (const SubpassDescription* s : remaining) {
+				size_t c = ranges::count_if(s->mSubpassDependencies, [&](const string& sdep) {
+					return ranges::find_if(remaining, [&](const SubpassDescription* s2) { return s2->mName == sdep; }) != remaining.end();
 				});
-			});
+				if (c < tmp) {
+					tmp = c;
+					r_min = s;
+				}
+			}
 
 			for (const auto& [attachmentName,d] : r_min->mAttachmentDescriptions) {
 				const auto& attachmentDesc = get<vk::AttachmentDescription>(d);
 				if (mAttachmentMap.count(attachmentName)) {
+					// track layout of attachment through whole renderpass
 					auto&[desc,clear,id] = mAttachmentDescriptions[mAttachmentMap.at(attachmentName)];
 					desc.finalLayout = attachmentDesc.finalLayout;
 					desc.storeOp = attachmentDesc.storeOp;
@@ -64,7 +71,7 @@ public:
 				} else {
 					mAttachmentMap.emplace(attachmentName, mAttachmentDescriptions.size());
 					mAttachmentDescriptions.push_back(make_tuple(attachmentDesc, vk::ClearValue(), attachmentName));
-					attachments.push_back();
+					attachments.push_back(attachmentDesc);
 				}
 
 				vk::SubpassDependency dep = {};
@@ -102,7 +109,7 @@ public:
 				dep.srcSubpass = (uint32_t)ranges::distance(mSubpassDescriptions.begin(), srcSubpass);
 				
 				if (dep.srcSubpass < dep.dstSubpass) {
-					switch (srcSubpass->mAttachmentDescriptions().at(attachmentName).second) {
+					switch (get<AttachmentType>(srcSubpass->mAttachmentDescriptions.at(attachmentName))) {
 					case AttachmentType::eColor:
 						dep.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
@@ -138,11 +145,7 @@ public:
 			sp.setResolveAttachments(sd.resolveAttachments);
 		}
 
-		vk::RenderPassCreateInfo renderPassInfo = {};
-		renderPassInfo.setAttachments(attachments);
-		renderPassInfo.setSubpasses(subpasses);
-		renderPassInfo.setDependencies(dependencies);
-		mRenderPass = mDevice->createRenderPass(renderPassInfo);
+		mRenderPass = mDevice->createRenderPass(vk::RenderPassCreateInfo({}, attachments, subpasses, dependencies));
 		mDevice.SetObjectName(mRenderPass, mName);
 	}
 	inline ~RenderPass() {
@@ -153,9 +156,9 @@ public:
 	inline const vk::RenderPass* operator->() const { return &mRenderPass; }
 
 	inline const string& Name() const { return mName; }
-	inline const vector<SubpassDescription>& SubpassDescriptions() const { return mSubpassDescriptions; }
-	inline const vector<tuple<vk::AttachmentDescription, vk::ClearValue, RenderAttachmentId>>& AttachmentDescriptions() const { return mAttachmentDescriptions; }
-	inline const unordered_map<RenderAttachmentId, size_t>& AttachmentMap() const { return mAttachmentMap; }
+	inline const auto& SubpassDescriptions() const { return mSubpassDescriptions; }
+	inline const auto& AttachmentDescriptions() const { return mAttachmentDescriptions; }
+	inline const auto& AttachmentMap() const { return mAttachmentMap; }
 
 private:
  	friend class CommandBuffer;

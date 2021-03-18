@@ -20,6 +20,7 @@ struct VertexAttributeId {
 	uint32_t mTypeIndex;
 	bool operator==(const VertexAttributeId&) const = default;
 };
+
 struct VertexStageVariable {
 	uint32_t mLocation;
 	vk::Format mFormat;
@@ -27,10 +28,12 @@ struct VertexStageVariable {
 };
 
 struct DescriptorBinding {
-	vk::DescriptorSetLayoutBinding mBinding;
-	uint32_t mSet;
-	vector<vk::Sampler> mImmutableSamplers;
-	vk::ShaderStageFlags mStageFlags;
+	uint32_t mSet = 0;
+	uint32_t mBinding = 0;
+	uint32_t mDescriptorCount = 0;
+	vk::DescriptorType mDescriptorType = vk::DescriptorType::eSampler;
+	vk::ShaderStageFlags mStageFlags = {};
+	vector<vk::SamplerCreateInfo> mImmutableSamplers;
 };
 
 struct SpirvModule {
@@ -50,20 +53,18 @@ struct SpirvModule {
 
 	inline ~SpirvModule() { if (mShaderModule) mDevice.destroyShaderModule(mShaderModule); }
 
-	inline uint32_t SetIndex(const string& descriptor) const { return mDescriptorBindings.at(descriptor).mSet; }
-	inline uint32_t Location(const string& descriptor) const { return mDescriptorBindings.at(descriptor).mBinding.binding; }
+	inline const DescriptorBinding& Binding(const string& descriptor) const { return mDescriptorBindings.at(descriptor); }
 };
 
 template<> struct tuplefier<DescriptorBinding> {
 	inline auto operator()(stm::DescriptorBinding&& m) {
 		return forward_as_tuple(
-			m.mBinding.binding,
-			m.mBinding.descriptorType,
-			m.mBinding.descriptorCount,
-			m.mBinding.stageFlags,
 			m.mSet,
-			m.mImmutableSamplers,
-			m.mStageFlags);
+			m.mBinding,
+			m.mDescriptorCount,
+			m.mDescriptorType,
+			m.mStageFlags,
+			m.mImmutableSamplers);
 	}
 };
 template<> struct tuplefier<SpirvModule> {
@@ -96,4 +97,24 @@ static_assert(tuplefiable<SpirvModule>);
 static_assert(Hashable<SpirvModule>);
 static_assert(Hashable<unordered_map<string,VertexStageVariable>>);
 
+}
+
+namespace std {
+	inline string to_string(const stm::VertexAttributeType& value) {
+		switch (value) {
+			case stm::VertexAttributeType::ePosition: return "Position";
+			case stm::VertexAttributeType::eNormal: return "Normal";
+			case stm::VertexAttributeType::eTangent: return "Tangent";
+			case stm::VertexAttributeType::eBinormal: return "Binormal";
+			case stm::VertexAttributeType::eBlendIndices: return "BlendIndices";
+			case stm::VertexAttributeType::eBlendWeight: return "BlendWeight";
+			case stm::VertexAttributeType::eColor: return "Color";
+			case stm::VertexAttributeType::ePointSize: return "PointSize";
+			case stm::VertexAttributeType::eTexcoord: return "Texcoord";
+			default: return "invalid ( " + vk::toHexString( static_cast<uint32_t>( value ) ) + " )";
+		}
+	}
+	inline string to_string(const stm::VertexAttributeId& value) {
+		return to_string(value.mType) + "[" + to_string(value.mTypeIndex) + "]";
+	}
 }

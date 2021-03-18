@@ -149,7 +149,7 @@ private:
 					VertexAttributeType type = semanticMap.count(typeName) ? semanticMap.at(typeName) : VertexAttributeType::eOther;
 					
 
-					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(Buffer::ArrayView<>(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
+					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(Buffer::ArrayView(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
 					elementOffset += elementStride;
 				}
 			}

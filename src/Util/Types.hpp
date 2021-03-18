@@ -47,6 +47,57 @@ namespace fs = std::filesystem;
 using namespace std;
 using namespace Eigen;
 
+template<typename T> inline Transform<T,3,Projective> Perspective(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear/width;
+	r(1,1) = 2*zNear/height;
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Perspective(T left, T right, T top, T bottom, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear / (right - left);
+	r(1,1) = 2*zNear / (top - bottom);
+	r(2,0) = (left + right) / (left - right);
+	r(1,2) = (top + bottom) / (bottom - top);
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
+	T sy = 1 / tan(fovy / 2);
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = sy/aspect;
+	r(1,1) = sy;
+	r(2,2) = zFar / (zFar - zNear);
+	r(3,2) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2/width;
+	r(1,1) = 2/height;
+	r(2,2) = 1/(zFar - zNear);
+	r(3,2) = -zNear * r(2,2);
+	r(3,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
+	Transform<T,3,Projective> r;
+	r(0,0) = 2 / (right - left);
+	r(1,1) = 2 / (top - bottom);
+	r(2,2) = 1 / (zFar - zNear);
+	r(3,0) = (left + right) / (left - right);
+	r(3,1) = (top + bottom) / (bottom - top);
+	r(3,2) = zNear / (zNear - zFar);
+	r(3,3) = 1;
+	return r;
+}
+
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
 
@@ -124,24 +175,28 @@ public:
 namespace shader_interop {
 	using uint = uint32_t;
 
-	#define DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, SizeSuffix) \
-		using TypeName##SizeSuffix = Vector##SizeSuffix##TypeSuffix; \
-		using TypeName##SizeSuffix##x##SizeSuffix = Matrix##SizeSuffix##TypeSuffix;
-
-	#define DECLARE_FIXED_SIZE_TYPES(TypeName, TypeSuffix) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 2) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 3) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 4)
-	
-	DECLARE_FIXED_SIZE_TYPES(float,f)
-	DECLARE_FIXED_SIZE_TYPES(double,d)
-	DECLARE_FIXED_SIZE_TYPES(int,i)
-	DECLARE_FIXED_SIZE_TYPES(uint,i)
-	
+	#define DECLARE_FIXED_SIZE_TYPES(HLSLName, CppName) \
+		using HLSLName##2   = std::array<CppName, 2>; \
+		using HLSLName##3   = std::array<CppName, 3>; \
+		using HLSLName##4   = std::array<CppName, 4>; \
+		using HLSLName##2x2 = std::array<CppName, 4>; \
+		using HLSLName##2x3 = std::array<CppName, 6>; \
+		using HLSLName##3x2 = std::array<CppName, 6>; \
+		using HLSLName##3x3 = std::array<CppName, 9>; \
+		using HLSLName##4x3 = std::array<CppName, 12>; \
+		using HLSLName##3x4 = std::array<CppName, 12>; \
+		using HLSLName##4x4 = std::array<CppName, 16>;
+	DECLARE_FIXED_SIZE_TYPES(float,float)
+	DECLARE_FIXED_SIZE_TYPES(double,double)
+	DECLARE_FIXED_SIZE_TYPES(int,int32_t)
+	DECLARE_FIXED_SIZE_TYPES(uint,uint32_t)
 	#undef DECLARE_FIXED_SIZE_TYPES
-	#undef DECLARE_FIXED_SIZE_TYPE
 	
+	#pragma pack(push)
+	#pragma pack(1)
 	#include "../Shaders/include/stratum.hlsli"
+	#include "../Shaders/include/lighting.hlsli"
+	#pragma pack(pop)
 }
 
 }

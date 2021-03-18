@@ -37,13 +37,18 @@ public:
 		friend class Device;
 
 	public:
-		struct Block {
-			Memory* mMemory = nullptr;
-			vk::DeviceSize mOffset = 0;
+		class Block {
+		public:
+			Memory* const mMemory = nullptr;
+			const vk::DeviceSize mOffset = 0;
 			Block() = default;
 			Block(const Block& b) = default;
-			inline Block(Memory& memory, vk::DeviceSize offset) : mMemory(&memory), mOffset(offset) {}
+			inline operator bool() const { return mMemory; }
+			inline Block& operator=(const Block& b) { return *new (this) Block(b); }
 			inline byte* data() const { return mMemory->mMapped + mOffset; }
+		private:
+			friend class Memory;
+			inline Block(Memory& memory, vk::DeviceSize offset) : mMemory(&memory), mOffset(offset) {}
 		};
 
 		uint32_t mMemoryTypeIndex = 0;
@@ -68,8 +73,8 @@ public:
 
 		inline bool empty() const { return mBlocks.empty(); }
 
-		STRATUM_API Block GetBlock(const vk::MemoryRequirements& requirements);
-		STRATUM_API void ReleaseBlock(const Block& block);
+		STRATUM_API Block AllocateBlock(const vk::MemoryRequirements& requirements);
+		STRATUM_API void FreeBlock(Block& block);
 	};
 
 	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers);
@@ -88,7 +93,7 @@ public:
 
 	// Will attempt to sub-allocate from larger allocations, will create a new allocation if unsuccessful. HostVisible memory is automatically mapped.
 	STRATUM_API Memory::Block AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag = "");
-	STRATUM_API void FreeMemory(const Memory::Block& allocation);
+	STRATUM_API void FreeMemory(Memory::Block& allocation);
 
 	template<typename T> requires(convertible_to<decltype(T::objectType), vk::ObjectType>)
 	inline void SetObjectName(const T& object, const string& name) {
@@ -144,7 +149,6 @@ public:
 		return mDevice->waitForFences({ mFence }, true, timeout);
 	}
 };
-
 class Semaphore : public DeviceResource {
 private:
 	vk::Semaphore mSemaphore;
@@ -162,31 +166,30 @@ public:
 class Sampler : public DeviceResource {
 private:
 	vk::Sampler mSampler;
+	vk::SamplerCreateInfo mInfo;
 
 public:
-	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name) {
-		mSampler = mDevice->createSampler(samplerInfo);
+	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name), mInfo(samplerInfo) {
+		mSampler = mDevice->createSampler(mInfo);
 		mDevice.SetObjectName(mSampler, mName);
 	}
-	inline Sampler(Device& device, const string& name, float maxLod, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : DeviceResource(device, name) {
-		vk::SamplerCreateInfo samplerInfo = {};
-		samplerInfo.magFilter = filter;
-		samplerInfo.minFilter = filter;
-		samplerInfo.addressModeU = addressMode;
-		samplerInfo.addressModeV = addressMode;
-		samplerInfo.addressModeW = addressMode;
-		samplerInfo.anisotropyEnable = maxAnisotropy > 0 ? VK_TRUE : VK_FALSE;
-		samplerInfo.maxAnisotropy = maxAnisotropy;
-		samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
-		samplerInfo.unnormalizedCoordinates = VK_FALSE;
-		samplerInfo.compareEnable = VK_FALSE;
-		samplerInfo.compareOp = vk::CompareOp::eAlways;
-		samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-		samplerInfo.minLod = 0;
-		samplerInfo.maxLod = (float)maxLod;
-		samplerInfo.mipLodBias = 0;
-
-		mSampler = mDevice->createSampler(samplerInfo);
+	inline Sampler(Device& device, const string& name, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : DeviceResource(device, name) {
+		mInfo.magFilter = filter;
+		mInfo.minFilter = filter;
+		mInfo.addressModeU = addressMode;
+		mInfo.addressModeV = addressMode;
+		mInfo.addressModeW = addressMode;
+		mInfo.anisotropyEnable = maxAnisotropy > 0 ? VK_TRUE : VK_FALSE;
+		mInfo.maxAnisotropy = maxAnisotropy;
+		mInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+		mInfo.unnormalizedCoordinates = VK_FALSE;
+		mInfo.compareEnable = VK_FALSE;
+		mInfo.compareOp = vk::CompareOp::eAlways;
+		mInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+		mInfo.minLod = 0;
+		mInfo.maxLod = VK_LOD_CLAMP_NONE;
+		mInfo.mipLodBias = 0;
+		mSampler = mDevice->createSampler(mInfo);
 		mDevice.SetObjectName(mSampler, mName);
 	}
 	inline ~Sampler() {

@@ -310,15 +310,14 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 	auto RegisterDescriptorResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
 		auto& spirType = compiler.get_type(resource.type_id);
-
-		auto& binding = shaderModule.mDescriptorBindings[resource.name];
+		auto& binding = shaderModule.mDescriptorBindings[compiler.get_name(resource.id)];
 		binding.mSet = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		binding.mBinding.stageFlags |= shaderModule.mStage;
-		binding.mBinding.binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
-		binding.mBinding.descriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
-		binding.mBinding.descriptorType = type;
+		binding.mStageFlags |= shaderModule.mStage;
+		binding.mBinding = compiler.get_decoration(resource.id, spv::DecorationBinding);
+		binding.mDescriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
+		binding.mDescriptorType = type;
 	};
-	auto ParseSemantic = [&](const auto& vars, VertexAttributeId& var, string semantic) {
+	auto ParseSemantic = [&](VertexAttributeId& var, string semantic) {
 		size_t l = semantic.find_first_of("0123456789");
 		if (l != string::npos)
 			var.mTypeIndex = atoi(semantic.c_str() + l);
@@ -332,16 +331,6 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			var.mType = gAttributeMap.at(semantic);
 		else
 			var.mType = VertexAttributeType::eTexcoord;
-
-		// ensure unique typeindex
-		uint32_t m = var.mTypeIndex;
-		bool c = false;
-		for (const auto& [name, v] : vars)
-			if (v.mAttributeId.mType == var.mType) {
-				m = max(m, v.mAttributeId.mTypeIndex);
-				if (v.mAttributeId.mTypeIndex == var.mTypeIndex) c = true;
-			}
-		if (c) var.mTypeIndex = m + 1;
 	};
 
 	for (const auto& r : resources.separate_images) 	RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
@@ -360,7 +349,10 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(shaderModule.mStageInputs, var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		ParseSemantic(var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		// ensure unique typeindex
+		while (ranges::count(shaderModule.mStageInputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
+			var.mAttributeId.mTypeIndex++;
 	}
 	for (const auto& r : resources.stage_outputs) {
 		auto& var = shaderModule.mStageOutputs[r.name];
@@ -368,11 +360,14 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 
 		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
 		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(shaderModule.mStageOutputs, var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		ParseSemantic(var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		// ensure unique typeindex
+		while (ranges::count(shaderModule.mStageOutputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
+			var.mAttributeId.mTypeIndex++;
 	}
 	for (const auto& e : compiler.get_entry_points_and_stages()) {
-		auto& ep = compiler.get_entry_point(e.name, e.execution_model);
-		shaderModule.mWorkgroupSize = vk::Extent3D(ep.workgroup_size.x, ep.workgroup_size.y, ep.workgroup_size.z);
+		const auto& [x,y,z,constant] = compiler.get_entry_point(e.name, e.execution_model).workgroup_size;
+		shaderModule.mWorkgroupSize = vk::Extent3D(x, y, z);
 	}
 	for (const auto& r : resources.push_constant_buffers) {
 		spirv_cross::SPIRType type = compiler.get_type(r.base_type_id);
@@ -426,8 +421,7 @@ int main(int argc, char* argv[]) {
 
 	if (!output.empty()) {
 		try {
-			byte_stream<ofstream> stream(output, ios_base::binary);
-			stream << results;
+			byte_stream<ofstream>(output, ios::binary) << results;
 			printf(output.string().c_str());
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile writing %s\n", e.what(), output.string().c_str());

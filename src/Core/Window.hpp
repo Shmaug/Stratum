@@ -258,6 +258,8 @@ public:
 
 class Window {
 public:
+	Instance& mInstance;
+	
 	STRATUM_API Window(Instance& instance, const string& title, vk::Rect2D position);
 	STRATUM_API ~Window();
 
@@ -315,7 +317,6 @@ private:
 	STRATUM_API void DestroySwapchain();
 	
 	vk::SurfaceKHR mSurface;
-	Instance& mInstance;
 	Device* mSwapchainDevice = nullptr;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;

@@ -14,26 +14,24 @@ public:
 		uint32_t mFirstIndex;
 	};
 	
-	inline Mesh(const string& name) : mName(name) {}
-	inline const GeometryData& Geometry() { return mGeometry; }
-	inline const vector<Submesh>& Submeshes() const { return mSubmeshes; }
+	inline Mesh(const string& name, const GeometryData& geometry = { vk::PrimitiveTopology::eTriangleList }) : mName(name), mGeometry(geometry) {}
+	
+	inline Buffer::ArrayView& Indices() { return mIndices; }
+	inline GeometryData& Geometry() { return mGeometry; }
+	inline vector<Submesh>& Submeshes() { return mSubmeshes; }
 
 	inline uint32_t Index(uint32_t i, uint32_t baseIndex = 0, uint32_t baseVertex = 0) const {
 		if (mIndices) {
 			byte* addr = mIndices.data() + mIndices.stride()*(baseIndex + i);
 			switch (mIndices.stride()) {
 				default:
-				case sizeof(uint32_t): return *reinterpret_cast<uint32_t*>(addr);
-				case sizeof(uint16_t): return *reinterpret_cast<uint16_t*>(addr);
-				case sizeof(uint8_t):  return *reinterpret_cast<uint8_t*>(addr);
+				case sizeof(uint32_t): return baseVertex + *reinterpret_cast<uint32_t*>(addr);
+				case sizeof(uint16_t): return baseVertex + *reinterpret_cast<uint16_t*>(addr);
+				case sizeof(uint8_t):  return baseVertex + *reinterpret_cast<uint8_t*>(addr);
 			}
 		}
 		else
 			return baseVertex + i;
-	}
-
-	inline void AddSubmesh(uint32_t vertexCount, uint32_t baseIndex = 0, uint32_t baseVertex = 0) {
-		mSubmeshes.emplace_back(vertexCount, baseIndex, baseVertex);
 	}
 
 	inline void Draw(CommandBuffer& commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0) {
@@ -41,7 +39,7 @@ public:
 		if (!pipeline) throw logic_error("cannot draw a mesh without a bound graphics pipeline\n");
 
 		for (uint32_t i = 0; i < mGeometry.mBindings.size(); i++)
-			commandBuffer.BindVertexBuffer(i, mGeometry.mBindings[i].mBuffer);
+			commandBuffer.BindVertexBuffer(i, get<0>(mGeometry.mBindings[i]));
 		if (mIndices) commandBuffer.BindIndexBuffer(mIndices);
 
 		uint32_t primCount = 0;
@@ -57,7 +55,7 @@ public:
 
 private:
 	GeometryData mGeometry;
-	Buffer::ArrayView<> mIndices;
+	Buffer::ArrayView mIndices;
 	vector<Submesh> mSubmeshes;
 	string mName;
 };

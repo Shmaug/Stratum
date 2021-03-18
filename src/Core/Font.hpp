@@ -26,7 +26,7 @@ private:
 	float mTabAdvance;
 
 public:
-	STRATUM_API Font(Device& device, const fs::path& filename);
+	STRATUM_API Font(CommandBuffer& commandBuffer, const fs::path& filename);
 
 	inline float Ascent(float pixelHeight) const { return mAscent*pixelHeight/mEmSize; }
 	inline float Descent(float pixelHeight) const { return mDescent*pixelHeight/mEmSize; }

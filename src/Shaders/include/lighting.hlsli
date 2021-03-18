@@ -1,70 +1,84 @@
 #ifndef LIGHTING_H
 #define LIGHTING_H
 
-#define LIGHT_DISTANT 0
-#define LIGHT_SPHERE 1
-#define LIGHT_CONE 2
+#define LIGHT_DIRECTIONAL 0
+#define LIGHT_POINT 1
+#define LIGHT_SPOT 2
 
 struct LightData {
-	float4x4 ToLight;
 	float3 Emission;
-	uint Type_ShadowIndex; // { LightType (24 bits), ShadowIndex (8 bits) }
+	uint Type;
+	float3 Direction;
 	float SpotAngleScale;
+	float3 Position;
 	float SpotAngleOffset;
+	float3 Right;
+	float ShadowBias;
 	float2 ShadowCoordScale;
 	float2 ShadowCoordOffset;
-	float ShadowBias;
-	uint pad;
 };
 struct EnvironmentData {
 	float3 Ambient;
 	uint LightCount;
 };
 
+struct MaterialData {
+	float4 gTextureST;
+	float4 gBaseColor;
+	float3 gEmission;
+	float gMetallic;
+	float gRoughness;
+	float gBumpStrength;
+	float gAlphaCutoff;
+	uint pad;
+};
+
 #ifndef __cplusplus
 
-Texture2D<float4> gEnvironmentTexture : register(t0, space0);
-StructuredBuffer<LightData> gLights : register(t1, space0);
-Texture2D<float> gShadowAtlas : register(t2, space0);
-SamplerComparisonState gShadowSampler : register(s0, space0);
-ConstantBuffer<EnvironmentData> gEnvironment : register(b0, space0);
+ConstantBuffer<EnvironmentData> gEnvironment 	: register(b1, space0);
+StructuredBuffer<LightData> gLights						: register(t2, space0);
+Texture2D<float> gShadowAtlas 								: register(t3, space0);
+SamplerComparisonState gShadowSampler 				: register(s4, space0);
+Texture2D<float4> gEnvironmentTexture 				: register(t5, space0);
 
 #include "math.hlsli"
 
-class BSDF {
+class DisneyBSDF {
+	float3 diffuse;
+	float3 specular;
+	float3 emission;
+	float roughness;
+	float occlusion;
 	float3 Evaluate(float3 Li, float3 Lo, float3 position, float3 normal) {
-		return 0;
+		return diffuse*saturate(dot(Li, normal)) + pow(specular*dot(Li, reflect(Lo,normal)), 250*(1-roughness)) + emission;
 	}
 };
 
-float3 Shade(BSDF bsdf, float3 position, float3 normal, float3 Lo) {
+float3 Shade(DisneyBSDF bsdf, float3 position, float3 normal, float3 Lo) {
 	float3 sum = 0;
+	uint addr = 0;
+
 	for (uint i = 0; i < gEnvironment.LightCount; i++) {
 		LightData light = gLights[i];
-		uint type = light.Type_ShadowIndex & 0x000000FF;
-		uint shadowIndex = (light.Type_ShadowIndex & 0xFFFFFF00) >> 8;
 		
-		float4 lightCoord = mul(light.ToLight, float4(position, 1));
+		float atten = 1;
+		float3 Li = light.Direction;
 
-		float3 eval = 1;
-		float pdf = 1;
-
-		float3 Li = normalize(light.ToLight[2].xyz);
-		if (type == LIGHT_DISTANT)
-			eval = bsdf.Evaluate(Li, Lo, position, normal);
-		else if (type == LIGHT_SPHERE) {
-			Li = -light.ToLight[3].xyz - position;
-			float d2 = dot(Li, Li);
-			Li /= sqrt(d2);
-			eval /= d2;
-		} else if (type == LIGHT_CONE)
-			eval *= pow2(saturate(-dot(Li, normalize(lightCoord.xyz)) * light.SpotAngleScale + light.SpotAngleOffset)); // angular attenuation
-
-		lightCoord.xyz /= lightCoord.w;
-		float2 uv = saturate(lightCoord.xy*.5+.5)*light.ShadowCoordScale + light.ShadowCoordOffset;
-		eval *= gShadowAtlas.SampleCmpLevelZero(gShadowSampler, uv, lightCoord.z - light.ShadowBias);
+		if (any(light.ShadowCoordScale)) {
+			float3 lightCoord = position - light.Position;
+			lightCoord = float3(dot(light.Right, lightCoord), dot(cross(light.Direction, light.Right), lightCoord), dot(light.Direction, lightCoord));
+			atten *= gShadowAtlas.SampleCmpLevelZero(gShadowSampler, saturate(lightCoord.xy*.5+.5)*light.ShadowCoordScale + light.ShadowCoordOffset, lightCoord.z - light.ShadowBias);
+		}
 		
-		sum += light.Emission*eval/pdf;
+		if (light.Type > LIGHT_DIRECTIONAL) {
+			Li = light.Position - position;
+			float rcp_d = 1/length(Li);
+			Li *= rcp_d;
+			atten *= rcp_d*rcp_d; // distance attenuation
+			if (light.Type == LIGHT_SPOT)
+				atten *= pow2(saturate(dot(Li, light.Direction) * light.SpotAngleScale + light.SpotAngleOffset)); // angle attenuation
+		}
+		sum += atten * light.Emission * bsdf.Evaluate(Li, Lo, position, normal);
 	}
 	return sum;
 }

@@ -138,8 +138,8 @@ Device::~Device() {
 	mDevice.destroy();
 }
 
-Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& requirements) {
-	// find first chunk of free space that can fit the required size
+Device::Memory::Block Device::Memory::AllocateBlock(const vk::MemoryRequirements& requirements) {
+	// find first block of free space that can fit the required size
 	vk::DeviceSize allocBegin = 0;
 	for (auto[blockStart, blockEnd] : mBlocks) {
 		if (allocBegin + requirements.size <= blockStart) break;
@@ -149,7 +149,11 @@ Device::Memory::Block Device::Memory::GetBlock(const vk::MemoryRequirements& req
 	mBlocks.emplace(allocBegin, allocBegin + requirements.size);
 	return Block(*this, allocBegin);
 }
-void Device::Memory::ReleaseBlock(const Device::Memory::Block& block) { mBlocks.erase(block.mOffset); }
+void Device::Memory::FreeBlock(Device::Memory::Block& block) {
+	if (block.mMemory != this) throw invalid_argument("invalid block");
+	mBlocks.erase(block.mOffset);
+	block = {};
+}
 
 Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
 	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
@@ -157,7 +161,6 @@ Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requi
 	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++) {
 		// skip invalid memory types
 		if ((requirements.memoryTypeBits & (1 << i)) == 0 || (mMemoryProperties.memoryTypes[i].propertyFlags & properties) != properties) continue;
-
 		bitset<32> mask((uint32_t)(mMemoryProperties.memoryTypes[i].propertyFlags ^ properties));
 		if (mask.count() < best) {
 			best = (uint32_t)mask.count();
@@ -169,19 +172,18 @@ Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requi
 		throw invalid_argument("could not find compatible memory type");
 	
 	auto memoryPool = mMemoryPool.lock();
-	for (auto& memory : (*memoryPool)[memoryTypeIndex]) {
-		Memory::Block block = memory->GetBlock(requirements);
-		if (block.mMemory) return block;
-	}
+	for (auto& memory : (*memoryPool)[memoryTypeIndex])
+		if (Memory::Block block = memory->AllocateBlock(requirements))
+			return block;
 	// Failed to sub-allocate a block, allocate new memory
-	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->GetBlock(requirements);
+	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->AllocateBlock(requirements);
 }
-void Device::FreeMemory(const Memory::Block& block) {
+void Device::FreeMemory(Memory::Block& block) {
 	auto memoryPool = mMemoryPool.lock();
-	block.mMemory->ReleaseBlock(block);
-	auto& allocs = (*memoryPool)[block.mMemory->mMemoryTypeIndex];
+	auto& allocs = memoryPool->at(block.mMemory->mMemoryTypeIndex);
+	block.mMemory->FreeBlock(block);
 	// free allocations without any blocks in use
-	erase_if(allocs, [](const auto& x){ return x->empty(); });
+	erase_if(allocs, [](const auto& p){return p->empty();});
 }
 
 inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
@@ -208,14 +210,15 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::Queue
 		SetObjectName(commandPool, "CommandPool");
 	}
 
-	if (level == vk::CommandBufferLevel::ePrimary)
-		for (auto it = commandBuffers.begin(); it != commandBuffers.end(); it++)
-			if ((*it)->CheckDone()) {
+	if (level == vk::CommandBufferLevel::ePrimary) {
+		auto it = ranges::find_if(commandBuffers, &CommandBuffer::CheckDone);
+		if (it != commandBuffers.end()) {
 				shared_ptr<CommandBuffer> commandBuffer = *it;
 				commandBuffers.erase(it);
 				commandBuffer->Reset(name);
 				return commandBuffer;
-			}
+		}
+	}
 	return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
 void Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool pool) {
@@ -233,10 +236,9 @@ void Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool pool) {
 	(*commandBuffer)->end();
 	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
-
 	if (pool) {
 		scoped_lock l(mQueueFamilies.m());
-		commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_front(commandBuffer);
+		commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
 	}
 }
 void Device::Flush() {

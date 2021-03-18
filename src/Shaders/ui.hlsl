@@ -1,5 +1,4 @@
-#pragma compile vertex vs_ui
-#pragma compile fragment fs_ui
+#pragma compile vertex vs_ui fragment fs_ui
 
 #define gTextureCount 64
 
@@ -23,11 +22,10 @@ struct GuiElement {
 StructuredBuffer<GuiElement> gElements : register(t0, space2);
 ByteAddressBuffer gVertices : register(t1, space2);
 ByteAddressBuffer gTransforms : register(t2, space2); // column-major
-SamplerState gSampler : register(s0, space2);
+SamplerState gSampler : register(s4, space2);
 Texture2D<float4> gTextures[gTextureCount] : register(t3, space2);
 
 [[vk::push_constant]] struct {
-	uint gStereoEye;
 	float2 gScreenTexelSize;
 } gPushConstants;
 
@@ -64,7 +62,7 @@ v2f vs_ui(uint instance : SV_InstanceID, uint index : SV_VertexID) {
 	if (gTransformStride) {
 		uint4 addrs = instance*gTransformStride + uint4(0,16,32,48);
 		float4x4 transform = float4x4(gTransforms.Load4(addrs[0]), gTransforms.Load4(addrs[1]), gTransforms.Load4(addrs[2]), gTransforms.Load4(addrs[3])); 
-		o.position = mul(STRATUM_MATRIX_VP, mul(float4(p, 1.0), transform));
+		o.position = mul(gCamera.ViewProjection, mul(float4(p, 1.0), transform));
 	} else
 		o.position = float4(p.xy*gPushConstants.gScreenTexelSize*2 - 1, p.z, 1);
 	return o;
