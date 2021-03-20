@@ -2,8 +2,7 @@
 #include <wrl.h>
 #include <dxc/dxcapi.h>
 #endif
-
-#include <spirv_cross/spirv_cross.hpp>
+#include <spirv_cross/spirv_cross_c.h>
 #include <shaderc/shaderc.hpp>
 
 #include "ShaderCompiler.hpp"
@@ -57,19 +56,6 @@ public:
 	}
 };
 
-static const unordered_map<spirv_cross::SPIRType::BaseType, vector<vk::Format>, hash<size_t>> gFormatMap {
-	{ spirv_cross::SPIRType::SByte, 	{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
-	{ spirv_cross::SPIRType::UByte, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
-	{ spirv_cross::SPIRType::Short, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
-	{ spirv_cross::SPIRType::UShort, 	{ vk::Format::eR16Uint, 	vk::Format::eR16G16Uint, 	 vk::Format::eR16G16B16Uint, 		vk::Format::eR16G16B16A16Uint } },
-	{ spirv_cross::SPIRType::Int, 		{ vk::Format::eR32Sint, 	vk::Format::eR32G32Sint, 	 vk::Format::eR32G32B32Sint, 		vk::Format::eR32G32B32A32Sint } },
-	{ spirv_cross::SPIRType::UInt, 		{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
-	{ spirv_cross::SPIRType::Int64, 	{ vk::Format::eR64Sint, 	vk::Format::eR64G64Sint, 	 vk::Format::eR64G64B64Sint, 		vk::Format::eR64G64B64A64Sint } },
-	{ spirv_cross::SPIRType::UInt64, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
-	{ spirv_cross::SPIRType::Half, 		{ vk::Format::eR16Sfloat, vk::Format::eR16G16Sfloat, vk::Format::eR16G16B16Sfloat,  vk::Format::eR16G16B16A16Sfloat } },
-	{ spirv_cross::SPIRType::Float, 	{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
-	{ spirv_cross::SPIRType::Double, 	{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
-};
 static const unordered_map<vk::ShaderStageFlagBits, shaderc_shader_kind, hash<vk::ShaderStageFlags>> gShaderStageMap {
 	{ vk::ShaderStageFlagBits::eVertex, shaderc_vertex_shader },
 	{ vk::ShaderStageFlagBits::eFragment, shaderc_fragment_shader },
@@ -79,44 +65,50 @@ static const unordered_map<vk::ShaderStageFlagBits, shaderc_shader_kind, hash<vk
 	{ vk::ShaderStageFlagBits::eCompute, shaderc_compute_shader }
 };
 
-size_t SizeOf(const spirv_cross::SPIRType& type, const spirv_cross::Compiler& compiler) {
+static const unordered_map<spvc_basetype, vector<vk::Format>, hash<size_t>> gFormatMap {
+	{ spvc_basetype::SPVC_BASETYPE_INT8, 		{ vk::Format::eR8Snorm, 	vk::Format::eR8G8Snorm, 	 vk::Format::eR8G8B8Snorm, 			vk::Format::eR8G8B8A8Snorm } },
+	{ spvc_basetype::SPVC_BASETYPE_UINT8, 	{ vk::Format::eR8Unorm, 	vk::Format::eR8G8Unorm, 	 vk::Format::eR8G8B8Unorm, 			vk::Format::eR8G8B8A8Unorm } },
+	{ spvc_basetype::SPVC_BASETYPE_INT16, 	{ vk::Format::eR16Sint, 	vk::Format::eR16G16Sint, 	 vk::Format::eR16G16B16Sint, 		vk::Format::eR16G16B16A16Sint } },
+	{ spvc_basetype::SPVC_BASETYPE_UINT16, 	{ vk::Format::eR16Uint, 	vk::Format::eR16G16Uint, 	 vk::Format::eR16G16B16Uint, 		vk::Format::eR16G16B16A16Uint } },
+	{ spvc_basetype::SPVC_BASETYPE_INT32, 	{ vk::Format::eR32Sint, 	vk::Format::eR32G32Sint, 	 vk::Format::eR32G32B32Sint, 		vk::Format::eR32G32B32A32Sint } },
+	{ spvc_basetype::SPVC_BASETYPE_UINT32, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+	{ spvc_basetype::SPVC_BASETYPE_INT64, 	{ vk::Format::eR64Sint, 	vk::Format::eR64G64Sint, 	 vk::Format::eR64G64B64Sint, 		vk::Format::eR64G64B64A64Sint } },
+	{ spvc_basetype::SPVC_BASETYPE_UINT64, 	{ vk::Format::eR32Uint, 	vk::Format::eR32G32Uint, 	 vk::Format::eR32G32B32Uint, 		vk::Format::eR32G32B32A32Uint } },
+	{ spvc_basetype::SPVC_BASETYPE_FP16, 		{ vk::Format::eR16Sfloat, vk::Format::eR16G16Sfloat, vk::Format::eR16G16B16Sfloat,  vk::Format::eR16G16B16A16Sfloat } },
+	{ spvc_basetype::SPVC_BASETYPE_FP32, 		{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat,  vk::Format::eR32G32B32A32Sfloat } },
+	{ spvc_basetype::SPVC_BASETYPE_FP64, 		{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat,  vk::Format::eR64G64B64A64Sfloat } }
+};
+size_t SizeOf(spvc_type type, spvc_compiler compiler) {
 	size_t sz = 0;
-	switch (type.basetype) {
-	case spirv_cross::SPIRType::Boolean:
-	case spirv_cross::SPIRType::SByte:
-	case spirv_cross::SPIRType::UByte:
+	switch (spvc_type_get_basetype(type)) {
+	case spvc_basetype::SPVC_BASETYPE_BOOLEAN:
+	case spvc_basetype::SPVC_BASETYPE_INT8:
+	case spvc_basetype::SPVC_BASETYPE_UINT8:
 		sz = 1;
 		break;
-	case spirv_cross::SPIRType::Short:
-	case spirv_cross::SPIRType::UShort:
-	case spirv_cross::SPIRType::Half:
+	case spvc_basetype::SPVC_BASETYPE_INT16:
+	case spvc_basetype::SPVC_BASETYPE_UINT16:
+	case spvc_basetype::SPVC_BASETYPE_FP16:
 		sz = 2;
 		break;
-	case spirv_cross::SPIRType::Int:
-	case spirv_cross::SPIRType::UInt:
-	case spirv_cross::SPIRType::Float:
+	case spvc_basetype::SPVC_BASETYPE_INT32:
+	case spvc_basetype::SPVC_BASETYPE_UINT32:
+	case spvc_basetype::SPVC_BASETYPE_FP32:
 		sz = 4;
 		break;
-	case spirv_cross::SPIRType::Int64:
-	case spirv_cross::SPIRType::UInt64:
-	case spirv_cross::SPIRType::Double:
+	case spvc_basetype::SPVC_BASETYPE_INT64:
+	case spvc_basetype::SPVC_BASETYPE_UINT64:
+	case spvc_basetype::SPVC_BASETYPE_FP64:
 		sz = 8;
 		break;
-	case spirv_cross::SPIRType::Struct:
-		sz = (uint32_t)compiler.get_declared_struct_size(type);
+	case spvc_basetype::SPVC_BASETYPE_STRUCT:
+		spvc_compiler_get_declared_struct_size(compiler, type, &sz);
 		break;
-	case spirv_cross::SPIRType::Unknown:
-	case spirv_cross::SPIRType::Void:
-	case spirv_cross::SPIRType::AtomicCounter:
-	case spirv_cross::SPIRType::Image:
-	case spirv_cross::SPIRType::SampledImage:
-	case spirv_cross::SPIRType::Sampler:
-	case spirv_cross::SPIRType::AccelerationStructure:
-		throw logic_error("Unknown type id " + to_string((size_t)type.basetype));
+		throw logic_error("Unknown type id " + to_string((size_t)type));
 	}
-
-	sz *= type.columns * type.vecsize;
-	for (uint32_t dim : type.array) sz *= dim;
+	sz *= spvc_type_get_columns(type) * spvc_type_get_vector_size(type);
+	for (uint32_t i = 0; i < spvc_type_get_num_array_dimensions(type); i++)
+		sz *= spvc_type_get_array_dimension(type, i);
 	return sz;
 }
 
@@ -305,18 +297,44 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 	return spirv;
 }
 void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
-	spirv_cross::Compiler compiler(shaderModule.mSpirv.data(), shaderModule.mSpirv.size());
-	spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+	spvc_context context;
+	spvc_context_create(&context);
+	spvc_context_set_error_callback(context, [](void*, const char* msg) { fprintf_color(ConsoleColorBits::eRed, stderr, msg); }, nullptr);
 
-	auto RegisterDescriptorResource = [&](const spirv_cross::Resource& resource, vk::DescriptorType type) {
-		auto& spirType = compiler.get_type(resource.type_id);
-		auto& binding = shaderModule.mDescriptorBindings[compiler.get_name(resource.id)];
-		binding.mSet = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		binding.mStageFlags |= shaderModule.mStage;
-		binding.mBinding = compiler.get_decoration(resource.id, spv::DecorationBinding);
-		binding.mDescriptorCount = spirType.array.empty() ? 1 : spirType.array[0];
-		binding.mDescriptorType = type;
-	};
+	spvc_parsed_ir ir;
+	spvc_context_parse_spirv(context, shaderModule.mSpirv.data(), shaderModule.mSpirv.size(), &ir);
+
+	spvc_resources resources;
+	spvc_compiler compiler;
+	spvc_context_create_compiler(context, SPVC_BACKEND_GLSL, ir, SPVC_CAPTURE_MODE_TAKE_OWNERSHIP, &compiler);
+	spvc_variable_id sid;
+	spvc_compiler_build_dummy_sampler_for_combined_images(compiler, &sid);
+	spvc_compiler_create_shader_resources(compiler, &resources);
+	
+	size_t count;
+	const spvc_specialization_constant* constants;
+	spvc_compiler_get_specialization_constants(compiler, &constants, &count);
+	for (const auto& c : ranges::subrange(constants, constants+count)) {
+		auto specConstant = shaderModule.mSpecializationMap[spvc_compiler_get_name(compiler, c.id)];
+		specConstant.constantID = c.constant_id;
+		specConstant.size = SizeOf(spvc_compiler_get_type_handle(compiler, spvc_constant_get_type(spvc_compiler_get_constant_handle(compiler, c.id))), compiler);
+	}
+
+	const spvc_reflected_resource* list;
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_PUSH_CONSTANT, &list, &count);
+	for (const auto& c : ranges::subrange(list, list+count)) {
+		spvc_type spirType = spvc_compiler_get_type_handle(compiler, c.base_type_id);
+		for (uint32_t i = 0; i < spvc_type_get_num_member_types(spirType); i++) {
+			auto& pushConstant = shaderModule.mPushConstants[spvc_compiler_get_member_name(compiler, c.base_type_id, i)];
+			pushConstant.stageFlags = shaderModule.mStage;
+			spvc_compiler_type_struct_member_offset(compiler, spirType, i, &pushConstant.offset);
+			size_t c = 0;
+			spvc_compiler_get_declared_struct_member_size(compiler, spirType, i, &c);
+			if (!c) c = SizeOf(spvc_compiler_get_type_handle(compiler, spvc_type_get_member_type(spirType, i)), compiler);
+			pushConstant.size = (uint32_t)c;
+		}
+	}
+
 	auto ParseSemantic = [&](VertexAttributeId& var, string semantic) {
 		size_t l = semantic.find_first_of("0123456789");
 		if (l != string::npos)
@@ -333,56 +351,60 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			var.mType = VertexAttributeType::eTexcoord;
 	};
 
-	for (const auto& r : resources.separate_images) 	RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eUniformTexelBuffer : vk::DescriptorType::eSampledImage);
-	for (const auto& r : resources.storage_images) 		RegisterDescriptorResource(r, compiler.get_type(r.type_id).image.dim == spv::DimBuffer ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eStorageImage);
-	for (const auto& r : resources.sampled_images) 		RegisterDescriptorResource(r, vk::DescriptorType::eCombinedImageSampler);
-	for (const auto& r : resources.storage_buffers) 	RegisterDescriptorResource(r, vk::DescriptorType::eStorageBuffer);
-	for (const auto& r : resources.separate_samplers) RegisterDescriptorResource(r, vk::DescriptorType::eSampler);
-	for (const auto& r : resources.uniform_buffers) 	RegisterDescriptorResource(r, vk::DescriptorType::eUniformBuffer);
-	for (const auto& r : resources.subpass_inputs) 		RegisterDescriptorResource(r, vk::DescriptorType::eInputAttachment);
-	for (const auto& r : resources.acceleration_structures) 		RegisterDescriptorResource(r, vk::DescriptorType::eAccelerationStructureKHR);
+	static const unordered_map<spvc_resource_type, vk::DescriptorType> typeMap {
+		{ SPVC_RESOURCE_TYPE_SAMPLED_IMAGE, vk::DescriptorType::eSampledImage },
+		{ SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, vk::DescriptorType::eSampledImage },
+		{ SPVC_RESOURCE_TYPE_STORAGE_IMAGE, vk::DescriptorType::eStorageImage },
+		{ SPVC_RESOURCE_TYPE_SEPARATE_SAMPLERS, vk::DescriptorType::eSampler },
+		{ SPVC_RESOURCE_TYPE_SUBPASS_INPUT, vk::DescriptorType::eInputAttachment },
+		{ SPVC_RESOURCE_TYPE_STORAGE_BUFFER, vk::DescriptorType::eStorageBuffer },
+		{ SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, vk::DescriptorType::eUniformBuffer },
+		{ SPVC_RESOURCE_TYPE_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
+	};
+	for (const auto&[spvtype,descriptorType] : typeMap) {
+		spvc_resources_get_resource_list_for_type(resources, spvtype, &list, &count);
+		for (const auto& r : ranges::subrange(list, list+count)){
+			spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
+			DescriptorBinding& binding = shaderModule.mDescriptorBindings[r.name];
+			binding.mDescriptorType = descriptorType;
+			binding.mSet = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationDescriptorSet);
+			binding.mBinding = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationBinding);
+			binding.mStageFlags |= shaderModule.mStage;
+			binding.mDescriptorCount = 1;
+			uint32_t n = spvc_type_get_num_array_dimensions(spirType);
+			for (uint32_t i = 0; i < n; i++)
+				binding.mDescriptorCount *= spvc_type_get_array_dimension(spirType, i);
+		};
+	}
 	
-	uint32_t other_idx = 0;
-	for (const auto& r : resources.stage_inputs) {
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_INPUT, &list, &count);
+	for (const auto& r : ranges::subrange(list, list+count)) {
+		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
 		auto& var = shaderModule.mStageInputs[r.name];
-		auto& type = compiler.get_type(r.base_type_id);
-
-		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
-		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
+		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
+		ParseSemantic(var.mAttributeId, spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
 		// ensure unique typeindex
 		while (ranges::count(shaderModule.mStageInputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
 			var.mAttributeId.mTypeIndex++;
 	}
-	for (const auto& r : resources.stage_outputs) {
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_OUTPUT, &list, &count);
+	for (const auto& r : ranges::subrange(list, list+count)) {
+		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
 		auto& var = shaderModule.mStageOutputs[r.name];
-		auto& type = compiler.get_type(r.base_type_id);
-
-		var.mLocation = compiler.get_decoration(r.id, spv::DecorationLocation);
-		var.mFormat = gFormatMap.at(type.basetype)[type.vecsize-1];
-		ParseSemantic(var.mAttributeId, compiler.get_decoration_string(r.id, spv::DecorationHlslSemanticGOOGLE));
+		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
+		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
+		ParseSemantic(var.mAttributeId, spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
 		// ensure unique typeindex
 		while (ranges::count(shaderModule.mStageOutputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
 			var.mAttributeId.mTypeIndex++;
 	}
-	for (const auto& e : compiler.get_entry_points_and_stages()) {
-		const auto& [x,y,z,constant] = compiler.get_entry_point(e.name, e.execution_model).workgroup_size;
-		shaderModule.mWorkgroupSize = vk::Extent3D(x, y, z);
-	}
-	for (const auto& r : resources.push_constant_buffers) {
-		spirv_cross::SPIRType type = compiler.get_type(r.base_type_id);
-		for (uint32_t i = 0; i < type.member_types.size(); i++) {
-			auto& pushConstant = shaderModule.mPushConstants[compiler.get_member_name(r.base_type_id, i)];
-			pushConstant.stageFlags = shaderModule.mStage;
-			pushConstant.offset = compiler.type_struct_member_offset(type, i);
-			pushConstant.size = (uint32_t)SizeOf(compiler.get_type(type.member_types[i]), compiler);
-		}
-	}
-	for (const auto& c : compiler.get_specialization_constants()) {
-		auto specConstant = shaderModule.mSpecializationMap[compiler.get_name(c.id)];
-		specConstant.constantID = c.constant_id;
-		specConstant.size = SizeOf(compiler.get_type(compiler.get_constant(c.id).constant_type), compiler);
-	}
+	
+	shaderModule.mWorkgroupSize = vk::Extent3D(
+		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 0), 
+		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 1), 
+		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 2));
+	spvc_context_destroy(context);
 }
 
 int main(int argc, char* argv[]) {

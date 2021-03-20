@@ -1,24 +1,15 @@
 [submodule "extern/src/assimp"]
 	path = extern/src/assimp
 	url = https://github.com/assimp/assimp
+[submodule "extern/src/eigen"]
+	path = extern/src/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "extern/src/freetype2"]
+	path = extern/src/freetype2
+	url = git://git.sv.nongnu.org/freetype/freetype2.git
 [submodule "extern/src/msdfgen"]
 	path = extern/src/msdfgen
 	url = https://github.com/Chlumsky/msdfgen
 [submodule "extern/src/OpenXR-SDK"]
 	path = extern/src/OpenXR-SDK
 	url = https://github.com/KhronosGroup/OpenXR-SDK
-[submodule "extern/src/shaderc"]
-	path = extern/src/shaderc
-	url = https://github.com/google/shaderc
-[submodule "extern/src/SPIRV-Cross"]
-	path = extern/src/SPIRV-Cross
-	url = https://github.com/KhronosGroup/SPIRV-Cross
-[submodule "extern/src/freetype2"]
-	path = extern/src/freetype2
-	url = git://git.sv.nongnu.org/freetype/freetype2.git
-[submodule "extern/src/DirectXShaderCompiler"]
-	path = extern/src/DirectXShaderCompiler
-	url = https://github.com/microsoft/DirectXShaderCompiler
-[submodule "extern/src/eigen"]
-	path = extern/src/eigen
-	url = https://gitlab.com/libeigen/eigen.git

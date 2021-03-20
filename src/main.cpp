@@ -78,12 +78,9 @@ inline shared_ptr<Mesh> LoadScene(CommandBuffer& commandBuffer, const fs::path& 
 
 	shared_ptr<Buffer> vb = make_shared<Buffer>(device, "Vertices", vertices.size()*sizeof(vertex_t), vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
 	shared_ptr<Buffer> ib = make_shared<Buffer>(device, "Indices", indices.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-
-	Buffer& stagingBuffer = commandBuffer.HoldResource(make_shared<Buffer>(device, "GeometryUpload", ib->size() + vb->size(), vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent));
-	memcpy(stagingBuffer.data(), vertices.data(), vb->size());
-	memcpy(stagingBuffer.data() + vb->size(), indices.data(), ib->size());
-	commandBuffer->copyBuffer(*stagingBuffer, **vb, { vk::BufferCopy(0,0,vb->size()) });
-	commandBuffer->copyBuffer(*stagingBuffer, **ib, { vk::BufferCopy(vb->size(),0,ib->size()) });
+	
+	commandBuffer->copyBuffer(*commandBuffer.UploadData(vertices).buffer(), **vb, { vk::BufferCopy(0,0,vb->size()) });
+	commandBuffer->copyBuffer(*commandBuffer.UploadData(indices).buffer(), **ib, { vk::BufferCopy(0,0,ib->size()) });
 
 	mesh->Indices() = Buffer::ArrayView(ib, sizeof(uint32_t));
 	mesh->Geometry().mBindings.emplace_back(Buffer::ArrayView(vb, sizeof(vertex_t)), vk::VertexInputRate::eVertex);
