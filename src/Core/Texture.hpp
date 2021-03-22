@@ -12,10 +12,12 @@ public:
 	STRATUM_API Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, uint32_t mipLevels = 0, uint32_t arrayLayers = 1, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal);
 	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, const vk::AttachmentDescription& description, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal)
 		: Texture(device, name, extent, description.format, description.samples, usage, 1, 1, createFlags, memoryProperties) {}
+	inline ~Texture() {
+		for (auto&[k,v] : mViews) mDevice->destroyImageView(v);
+		mDevice->destroyImage(mImage);
+	}
 
-	STRATUM_API ~Texture();
-
-	inline vk::Image operator*() const { return mImage; }
+	inline const vk::Image& operator*() const { return mImage; }
 	inline const vk::Image* operator->() const { return &mImage; }
 	inline operator bool() const { return mImage; }
 
@@ -48,7 +50,7 @@ private:
 	friend class TextureView;
 	
 	vk::Image mImage;
-	Device::Memory::Block mMemoryBlock;
+	shared_ptr<Device::Memory::Block> mMemoryBlock;
 	
 	vk::Extent3D mExtent;
 	uint32_t mArrayLayers = 0;
@@ -84,9 +86,7 @@ public:
 	TextureView(const TextureView&) = default;
 	TextureView(TextureView&&) = default;
 	inline TextureView(shared_ptr<Texture> texture, uint32_t baseMip=0, uint32_t mipCount=0, uint32_t baseLayer=0, uint32_t layerCount=0, vk::ImageAspectFlags aspectMask=(vk::ImageAspectFlags)0, vk::ComponentMapping components={})
-		: mTexture(texture), mBaseMip(baseMip), mMipCount(mipCount), mBaseLayer(baseLayer), mLayerCount(layerCount), mAspectMask(aspectMask) {
-		if (mMipCount == 0) mMipCount = texture->MipLevels();
-		if (mLayerCount == 0) mLayerCount = texture->ArrayLayers();
+		: mTexture(texture), mBaseMip(baseMip), mMipCount(mipCount ? mipCount : mMipCount = texture->MipLevels()), mBaseLayer(baseLayer), mLayerCount(layerCount ? layerCount : texture->ArrayLayers()), mAspectMask(aspectMask) {
 		if (mAspectMask == (vk::ImageAspectFlags)0) mAspectMask = texture->AspectFlags();
 
 		size_t key = hash_combine(mBaseMip, mMipCount, mBaseLayer, mLayerCount, mAspectMask, components);
@@ -122,7 +122,7 @@ public:
 	inline bool operator==(const TextureView& rhs) const = default;
 	inline operator bool() const { return mTexture && mView; }
 
-	inline vk::ImageView operator*() const { return mView; }
+	inline const vk::ImageView& operator*() const { return mView; }
 	inline const vk::ImageView* operator->() const { return &mView; }
 	inline shared_ptr<Texture> get() const { return mTexture; }
 	inline Texture& texture() const { return *mTexture; }

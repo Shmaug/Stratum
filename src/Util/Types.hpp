@@ -6,7 +6,6 @@
 
 #include <typeindex>
 
-
 #include <mutex>
 #include <thread>
 #include <chrono>
@@ -28,6 +27,7 @@
 #include <span>
 
 #include <bitset>
+#include <locale>
 
 #include <math.h>
 #include <numeric>
@@ -175,22 +175,41 @@ public:
 namespace shader_interop {
 	using uint = uint32_t;
 
-	#define DECLARE_FIXED_SIZE_TYPES(HLSLName, CppName) \
-		using HLSLName##2   = std::array<CppName, 2>; \
-		using HLSLName##3   = std::array<CppName, 3>; \
-		using HLSLName##4   = std::array<CppName, 4>; \
-		using HLSLName##2x2 = std::array<CppName, 4>; \
-		using HLSLName##2x3 = std::array<CppName, 6>; \
-		using HLSLName##3x2 = std::array<CppName, 6>; \
-		using HLSLName##3x3 = std::array<CppName, 9>; \
-		using HLSLName##4x3 = std::array<CppName, 12>; \
-		using HLSLName##3x4 = std::array<CppName, 12>; \
-		using HLSLName##4x4 = std::array<CppName, 16>;
-	DECLARE_FIXED_SIZE_TYPES(float,float)
-	DECLARE_FIXED_SIZE_TYPES(double,double)
-	DECLARE_FIXED_SIZE_TYPES(int,int32_t)
-	DECLARE_FIXED_SIZE_TYPES(uint,uint32_t)
-	#undef DECLARE_FIXED_SIZE_TYPES
+	#define DECLARE_FIXED_SIZE_T_V(T, N)\
+		using T##N 	= std::array<T, N>;\
+		inline Eigen::Map<Eigen::Vector<T, N>> Map##N##(T##N & r) { return Eigen::Map<Eigen::Vector<T, N>>(r.data()); }
+
+	#define DECLARE_FIXED_SIZE_T_M(T, M, N)\
+		using T##M##x##N 	= std::array<T, M*N>;\
+		inline Eigen::Map<Matrix<T, M, N, Eigen::ColMajor>> Map##M##x##N##(T##M##x##N & r) { return Eigen::Map<Matrix<T, M, N, Eigen::ColMajor>>(r.data()); }\
+
+	#define DECLARE_FIXED_SIZE_V(N)\
+		DECLARE_FIXED_SIZE_T_V(float, N)\
+		DECLARE_FIXED_SIZE_T_V(double, N)\
+		DECLARE_FIXED_SIZE_T_V(uint, N)\
+		DECLARE_FIXED_SIZE_T_V(int, N)
+	#define DECLARE_FIXED_SIZE_M(M,N)\
+		DECLARE_FIXED_SIZE_T_M(float, M, N)\
+		DECLARE_FIXED_SIZE_T_M(double, M, N)\
+		DECLARE_FIXED_SIZE_T_M(uint, M, N)\
+		DECLARE_FIXED_SIZE_T_M(int, M, N)
+
+	DECLARE_FIXED_SIZE_V(2)
+	DECLARE_FIXED_SIZE_M(2,2)
+	DECLARE_FIXED_SIZE_M(2,3)
+	DECLARE_FIXED_SIZE_M(2,4)
+	DECLARE_FIXED_SIZE_V(3)
+	DECLARE_FIXED_SIZE_M(3,2)
+	DECLARE_FIXED_SIZE_M(3,3)
+	DECLARE_FIXED_SIZE_M(3,4)
+	DECLARE_FIXED_SIZE_V(4)
+	DECLARE_FIXED_SIZE_M(4,2)
+	DECLARE_FIXED_SIZE_M(4,3)
+	DECLARE_FIXED_SIZE_M(4,4)
+
+	#undef DECLARE_FIXED_SIZE_V
+	#undef DECLARE_FIXED_SIZE_M
+	
 	
 	#pragma pack(push)
 	#pragma pack(1)
@@ -198,5 +217,4 @@ namespace shader_interop {
 	#include "../Shaders/include/lighting.hlsli"
 	#pragma pack(pop)
 }
-
 }

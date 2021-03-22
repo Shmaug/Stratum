@@ -16,7 +16,7 @@ public:
 	
 	inline Mesh(const string& name, const GeometryData& geometry = { vk::PrimitiveTopology::eTriangleList }) : mName(name), mGeometry(geometry) {}
 	
-	inline Buffer::ArrayView& Indices() { return mIndices; }
+	inline Buffer::RangeView& Indices() { return mIndices; }
 	inline GeometryData& Geometry() { return mGeometry; }
 	inline vector<Submesh>& Submeshes() { return mSubmeshes; }
 
@@ -55,7 +55,7 @@ public:
 
 private:
 	GeometryData mGeometry;
-	Buffer::ArrayView mIndices;
+	Buffer::RangeView mIndices;
 	vector<Submesh> mSubmeshes;
 	string mName;
 };

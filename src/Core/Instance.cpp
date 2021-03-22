@@ -222,7 +222,6 @@ Instance::Instance(int argc, char** argv) {
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
 	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, validationLayers);
-	mWindow->CreateSwapchain(*mDevice);
 }
 Instance::~Instance() {
 	mWindow.reset();

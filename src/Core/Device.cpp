@@ -138,52 +138,94 @@ Device::~Device() {
 	mDevice.destroy();
 }
 
-Device::Memory::Block Device::Memory::AllocateBlock(const vk::MemoryRequirements& requirements) {
-	// find first block of free space that can fit the required size
-	vk::DeviceSize allocBegin = 0;
-	for (auto[blockStart, blockEnd] : mBlocks) {
-		if (allocBegin + requirements.size <= blockStart) break;
-		allocBegin = AlignUp(blockEnd, requirements.alignment);
+shared_ptr<Device::Memory::Block> Device::Memory::AllocateBlock(const vk::MemoryRequirements& requirements) {
+	if (mUnallocated.empty()) return nullptr;
+	
+	vk::DeviceSize blockSize = 0;
+	vk::DeviceSize memLocation = 0;
+	vk::DeviceSize memSize = 0;
+
+	// find smallest unallocated block that can fit the requirements
+	auto block = mUnallocated.end();
+	for (auto it = mUnallocated.begin(); it != mUnallocated.end(); it++) {
+		vk::DeviceSize offset = it->first ? AlignUp(it->first, requirements.alignment) : 0;
+		vk::DeviceSize blockEnd = AlignUp(offset + requirements.size, Device::mMemoryBlockSize);
+
+		if (blockEnd > it->first + it->second) continue;
+
+		if (block == mUnallocated.end() || it->second < block->second) {
+			memLocation = offset;
+			memSize = blockEnd - offset;
+			blockSize = blockEnd - it->first;
+			block = it;
+		}
 	}
-	if (allocBegin + requirements.size > mSize) return Block();
-	mBlocks.emplace(allocBegin, allocBegin + requirements.size);
-	return Block(*this, allocBegin);
+	if (block == mUnallocated.end()) return nullptr;
+
+	if (block->second > blockSize) {
+		// still room left after this allocation, shift this block over
+		block->first += blockSize;
+		block->second -= blockSize;
+	} else
+		mUnallocated.erase(block);
+
+	return shared_ptr<Block>(new Block(*this, memLocation, memSize));
 }
-void Device::Memory::FreeBlock(Device::Memory::Block& block) {
-	if (block.mMemory != this) throw invalid_argument("invalid block");
-	mBlocks.erase(block.mOffset);
-	block = {};
+Device::Memory::Block::~Block() {
+	auto memoryPool = mMemory.mDevice.mMemoryPool.lock();
+
+	vk::DeviceSize end = mOffset + mSize;
+
+	auto firstAfter = mMemory.mUnallocated.end();
+	auto startBlock = mMemory.mUnallocated.end();
+	auto endBlock = mMemory.mUnallocated.end();
+
+	for (auto it = mMemory.mUnallocated.begin(); it != mMemory.mUnallocated.end(); it++) {
+		if (it->first > mOffset && (firstAfter == mMemory.mUnallocated.end() || it->first < firstAfter->first)) firstAfter = it;
+
+		if (it->first == end)
+			endBlock = it;
+		if (it->first + it->second == mOffset)
+			startBlock = it;
+	}
+
+	//if (startBlock == endBlock && startBlock != mMemory.mUnallocated.end()) throw; // this should NOT happen
+
+	// merge blocks
+
+	if (startBlock == mMemory.mUnallocated.end() && endBlock == mMemory.mUnallocated.end())
+		// block isn't adjacent to any other blocks
+		mMemory.mUnallocated.insert(firstAfter, make_pair(mOffset, mSize));
+	else if (startBlock == mMemory.mUnallocated.end()) {
+		//  --------     |---- allocation ----|---- endBlock ----|
+		endBlock->first = mOffset;
+		endBlock->second += mSize;
+	} else if (endBlock == mMemory.mUnallocated.end()) {
+		//  |---- startBlock ----|---- allocation ----|     --------
+		startBlock->second += mSize;
+	} else {
+		//  |---- startBlock ----|---- allocation ----|---- endBlock ----|
+		startBlock->second += mSize + endBlock->second;
+		mMemory.mUnallocated.erase(endBlock);
+	}
 }
 
-Device::Memory::Block Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties, const string& tag) {
+shared_ptr<Device::Memory::Block> Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties) {
 	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
-	uint32_t best = numeric_limits<uint32_t>::max();
-	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++) {
-		// skip invalid memory types
-		if ((requirements.memoryTypeBits & (1 << i)) == 0 || (mMemoryProperties.memoryTypes[i].propertyFlags & properties) != properties) continue;
-		bitset<32> mask((uint32_t)(mMemoryProperties.memoryTypes[i].propertyFlags ^ properties));
-		if (mask.count() < best) {
-			best = (uint32_t)mask.count();
+	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++)
+		if ((requirements.memoryTypeBits & (1 << i)) && (mMemoryProperties.memoryTypes[i].propertyFlags & properties)) {
 			memoryTypeIndex = i;
-			if (best == 0) break;
-		}
+			break;
 	}
 	if (memoryTypeIndex == mMemoryProperties.memoryTypeCount)
 		throw invalid_argument("could not find compatible memory type");
 	
 	auto memoryPool = mMemoryPool.lock();
 	for (auto& memory : (*memoryPool)[memoryTypeIndex])
-		if (Memory::Block block = memory->AllocateBlock(requirements))
+		if (auto block = memory->AllocateBlock(requirements))
 			return block;
 	// Failed to sub-allocate a block, allocate new memory
-	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryBlockSize)))->AllocateBlock(requirements);
-}
-void Device::FreeMemory(Memory::Block& block) {
-	auto memoryPool = mMemoryPool.lock();
-	auto& allocs = memoryPool->at(block.mMemory->mMemoryTypeIndex);
-	block.mMemory->FreeBlock(block);
-	// free allocations without any blocks in use
-	erase_if(allocs, [](const auto& p){return p->empty();});
+	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryMinAlloc)))->AllocateBlock(requirements);
 }
 
 inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
@@ -210,18 +252,22 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::Queue
 		SetObjectName(commandPool, "CommandPool");
 	}
 
+	shared_ptr<CommandBuffer> commandBuffer;
 	if (level == vk::CommandBufferLevel::ePrimary) {
-		auto it = ranges::find_if(commandBuffers, &CommandBuffer::CheckDone);
-		if (it != commandBuffers.end()) {
-				shared_ptr<CommandBuffer> commandBuffer = *it;
-				commandBuffers.erase(it);
-				commandBuffer->Reset(name);
-				return commandBuffer;
+		auto ret = ranges::remove_if(commandBuffers, &CommandBuffer::CheckDone);
+		if (!ret.empty()) {
+				auto u = ranges::find(ret, 1, &shared_ptr<CommandBuffer>::use_count);
+				if (u != ret.end()) commandBuffer = *u;
+				commandBuffers.erase(ret.begin(), ret.end());
 		}
 	}
-	return make_shared<CommandBuffer>(*this, name, queueFamily, level);
+	if (commandBuffer) {
+		commandBuffer->Reset(name);
+		return commandBuffer;
+	} else
+		return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
-void Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool pool) {
+void Device::Execute(shared_ptr<CommandBuffer> commandBuffer) {
 	ProfilerRegion ps("CommandBuffer::Execute");
 
 	vector<vk::PipelineStageFlags> waitStages;	
@@ -236,10 +282,9 @@ void Device::Execute(shared_ptr<CommandBuffer> commandBuffer, bool pool) {
 	(*commandBuffer)->end();
 	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
-	if (pool) {
-		scoped_lock l(mQueueFamilies.m());
-		commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
-	}
+	
+	scoped_lock l(mQueueFamilies.m());
+	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
 }
 void Device::Flush() {
 	mDevice.waitIdle();

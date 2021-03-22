@@ -4,7 +4,7 @@
 
 using namespace stm;
 
-void Material::SetUniformBuffer(const string& name, const Buffer::ArrayView& buffer, uint32_t arrayIndex) {
+void Material::SetUniformBuffer(const string& name, const Buffer::RangeView& buffer, uint32_t arrayIndex) {
 	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSet::Entry p = vec[arrayIndex];
@@ -15,7 +15,7 @@ void Material::SetUniformBuffer(const string& name, const Buffer::ArrayView& buf
 	vec[arrayIndex] = p;
 	mCacheValid = false;
 }
-void Material::SetStorageBuffer(const string& name, const Buffer::ArrayView& buffer, uint32_t arrayIndex) {
+void Material::SetStorageBuffer(const string& name, const Buffer::RangeView& buffer, uint32_t arrayIndex) {
 	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
 	DescriptorSet::Entry p = {};
@@ -98,7 +98,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 
 	vk::PipelineVertexInputStateCreateInfo vertexInfo = {};
 	if (g) {
-		auto[attributes, bindings] = g->CreateInputBindings(mModules.at(vk::ShaderStageFlagBits::eVertex));
+		auto[attributes, bindings] = CreateInputBindings(*g, mModules.at(vk::ShaderStageFlagBits::eVertex));
 		vertexInfo.setVertexAttributeDescriptions(attributes);
 		vertexInfo.setVertexBindingDescriptions(bindings);
 	}

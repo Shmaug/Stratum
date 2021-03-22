@@ -28,7 +28,7 @@ public:
 	}
 	inline ~Framebuffer() { mDevice->destroyFramebuffer(mFramebuffer); }
 	
-	inline vk::Framebuffer operator*() const { return mFramebuffer; };
+	inline const vk::Framebuffer& operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };
 	
 	inline const string& Name() const { return mName; }

@@ -9,7 +9,7 @@ class CommandBuffer;
 class Buffer : public DeviceResource {
 private:
 	vk::Buffer mBuffer;
-	Device::Memory::Block mMemoryBlock;
+	shared_ptr<Device::Memory::Block> mMemoryBlock;
 	vk::DeviceSize mSize = 0;
 	vk::BufferUsageFlags mUsageFlags;
 	vk::MemoryPropertyFlags mMemoryProperties;
@@ -17,7 +17,7 @@ private:
 
 	unordered_map<size_t, vk::BufferView> mViews;
 
-	friend class BufferView;
+	friend class TexelBufferView;
 
 public:
 	inline Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
@@ -26,16 +26,15 @@ public:
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
 		mDevice.SetObjectName(mBuffer, mName);
 		
-		mMemoryBlock = mDevice.AllocateMemory(mDevice->getBufferMemoryRequirements(mBuffer), mMemoryProperties, mName);
-		mDevice->bindBufferMemory(mBuffer, **mMemoryBlock.mMemory, mMemoryBlock.mOffset);
+		mMemoryBlock = mDevice.AllocateMemory(mDevice->getBufferMemoryRequirements(mBuffer), mMemoryProperties);
+		mDevice->bindBufferMemory(mBuffer, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
 	}
 	inline ~Buffer() {
 		for (auto&[k,v] : mViews) mDevice->destroyBufferView(v);
 		mDevice->destroyBuffer(mBuffer);
-		mDevice.FreeMemory(mMemoryBlock);
 	}
 
-	inline vk::Buffer operator*() const { return mBuffer; }
+	inline const vk::Buffer& operator*() const { return mBuffer; }
 	inline const vk::Buffer* operator->() const { return &mBuffer; }
 	inline operator bool() const { return mBuffer; }
 
@@ -43,14 +42,13 @@ public:
 	inline vk::DeviceSize size() const { return mSize; }
 	inline byte* data() const {
 		if (!(mMemoryProperties & vk::MemoryPropertyFlagBits::eHostVisible)) throw runtime_error("Cannot call data() on buffer that is not host visible");
-		return mMemoryBlock.data();
+		return mMemoryBlock->data();
 	}
 
 	inline vk::BufferUsageFlags Usage() const { return mUsageFlags; }
 	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
-	inline const Device::Memory::Block& MemoryBlock() const { return mMemoryBlock; }
 
-	class ArrayView {
+	class RangeView {
 	protected:
 		shared_ptr<Buffer> mBuffer;
 		vk::DeviceSize mBufferOffset; // in bytes
@@ -58,15 +56,15 @@ public:
 		vk::DeviceSize mElementStride;
 
 	public:
-		ArrayView() = default;
-		ArrayView(const ArrayView&) = default;
-		ArrayView(ArrayView&&) = default;
-		inline ArrayView(shared_ptr<Buffer> buffer, vk::DeviceSize elementStride, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+		RangeView() = default;
+		RangeView(const RangeView&) = default;
+		RangeView(RangeView&&) = default;
+		inline RangeView(shared_ptr<Buffer> buffer, vk::DeviceSize elementStride, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
 			: mBuffer(buffer), mBufferOffset(byteOffset), mElementCount(elementCount == VK_WHOLE_SIZE ? (buffer->size() - mBufferOffset)/elementStride : elementCount), mElementStride(elementStride) {}
 
-		ArrayView& operator=(const ArrayView&) = default;
-		ArrayView& operator=(ArrayView&&) = default;
-		bool operator==(const ArrayView& rhs) const = default;
+		RangeView& operator=(const RangeView&) = default;
+		RangeView& operator=(RangeView&&) = default;
+		bool operator==(const RangeView& rhs) const = default;
 		inline operator bool() const { return mBuffer && mElementStride; }
 
 		inline shared_ptr<Buffer> get() const { return mBuffer; }
@@ -83,25 +81,25 @@ public:
 			if (sizeof(T) != mElementStride) throw runtime_error("sizeof(T) must equal buffer stride");
 			return ranges::subrange(reinterpret_cast<T*>(data()), mElementCount);
 		}
-    inline ArrayView subview(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
-			return ArrayView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
+    inline RangeView subview(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
+			return RangeView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
     }
 	};
 };
 
-class BufferView : public Buffer::ArrayView {
+class TexelBufferView : public Buffer::RangeView {
 private:
 	vk::BufferView mView;
 	vk::Format mFormat;
 
 public:
-	inline vk::BufferView operator*() const { return mView; }
+	inline const vk::BufferView& operator*() const { return mView; }
 	inline const vk::BufferView* operator->() const { return &mView; }
 
-	inline BufferView() = default;
-	inline BufferView(const BufferView&) = default;
-	inline BufferView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-		: ArrayView(buf, ElementSize(fmt), byteOffset, elementCount), mFormat(fmt) {
+	inline TexelBufferView() = default;
+	inline TexelBufferView(const TexelBufferView&) = default;
+	inline TexelBufferView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+		: RangeView(buf, ElementSize(fmt), byteOffset, elementCount), mFormat(fmt) {
 		size_t key = hash_combine(mBufferOffset, elementCount, mFormat);
 		if (mBuffer->mViews.count(key))
 			mView = mBuffer->mViews.at(key);
@@ -112,9 +110,9 @@ public:
 		}
 	}
 	
-	BufferView& operator=(const BufferView&) = default;
-	BufferView& operator=(BufferView&& v) = default;
-	inline bool operator==(const BufferView& rhs) const = default;
+	TexelBufferView& operator=(const TexelBufferView&) = default;
+	TexelBufferView& operator=(TexelBufferView&& v) = default;
+	inline bool operator==(const TexelBufferView& rhs) const = default;
 
 	inline vk::Format format() const { return mFormat; }
 };

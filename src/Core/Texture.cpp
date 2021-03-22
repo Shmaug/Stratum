@@ -80,8 +80,8 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 	mImage = mDevice->createImage(imageInfo);
 	mDevice.SetObjectName(mImage, mName);
 
-	mMemoryBlock = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), mMemoryProperties, mName);
-	mDevice->bindImageMemory(mImage, **mMemoryBlock.mMemory, mMemoryBlock.mOffset);
+	mMemoryBlock = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), mMemoryProperties);
+	mDevice->bindImageMemory(mImage, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
 	
 	mAspectFlags = vk::ImageAspectFlagBits::eColor;
 	switch (mFormat) {
@@ -101,17 +101,11 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 	mTrackedAccessFlags = {};
 }
 
-Texture::~Texture() {
-	for (auto&[k,v] : mViews) mDevice->destroyImageView(v);
-	mDevice->destroyImage(mImage);
-	mDevice.FreeMemory(mMemoryBlock);
-}
-
 void Texture::TransitionBarrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	if (oldLayout == newLayout) return;
 	if (newLayout == vk::ImageLayout::eUndefined) {
 		mTrackedLayout = newLayout;
-		mTrackedStageFlags = vk::PipelineStageFlagBits::eTopOfPipe;
+		mTrackedStageFlags = dstStage;
 		mTrackedAccessFlags = {};
 		return;
 	}

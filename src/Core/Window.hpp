@@ -249,8 +249,8 @@ enum KeyCode {
 
 class MouseState : public InputState {
 public:
-	Vector2f mCursorPos = Vector2f(0);
-	Vector2f mCursorDelta = Vector2f(0);
+	Vector2f mCursorPos = Vector2f::Zero();
+	Vector2f mCursorDelta = Vector2f::Zero();
 	float mScrollDelta = 0;
 	unordered_map<KeyCode, bool> mKeys;
 	inline MouseState() : InputState("Mouse") {};
@@ -292,7 +292,7 @@ public:
 	inline xcb_window_t XCBWindow() const { return mXCBWindow; }
 	#endif
 
-	STRATUM_API void AcquireNextImage();
+	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
 
@@ -313,7 +313,7 @@ public:
 private:
 	friend class Instance;
 
-	STRATUM_API void CreateSwapchain(Device& device);
+	STRATUM_API void CreateSwapchain(CommandBuffer& commandBUffer);
 	STRATUM_API void DestroySwapchain();
 	
 	vk::SurfaceKHR mSurface;

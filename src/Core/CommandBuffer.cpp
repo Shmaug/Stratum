@@ -63,14 +63,11 @@ void CommandBuffer::Reset(const string& name) {
 	mState = CommandBufferState::eRecording;
 }
 
-void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, vk::SubpassContents contents) {
+void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
-	vector<vk::ClearValue> clearValues(renderPass->AttachmentDescriptions().size());
-	for (uint32_t i = 0; i < renderPass->AttachmentDescriptions().size(); i++) {
+	for (uint32_t i = 0; i < renderPass->AttachmentDescriptions().size(); i++)
 		framebuffer->Attachments()[i].texture().TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->AttachmentDescriptions()[i]).initialLayout);
-		clearValues[i] = get<vk::ClearValue>(renderPass->AttachmentDescriptions()[i]);
-	}
 
 	vk::RenderPassBeginInfo info = {};
 	info.renderPass = **renderPass;
@@ -142,13 +139,15 @@ void CommandBuffer::BindDescriptorSets(const vector<shared_ptr<DescriptorSet>>& 
 		descriptorSet->FlushWrites();
 		if (!mCurrentRenderPass)
 			for (auto&[idx, entry] : descriptorSet->mBoundDescriptors) {
-				switch (entry.type()) {
+				switch (descriptorSet->layout_at(idx >> 32).mDescriptorType) {
 					case vk::DescriptorType::eCombinedImageSampler:
 					case vk::DescriptorType::eInputAttachment:
 					case vk::DescriptorType::eSampledImage:
-					case vk::DescriptorType::eStorageImage:
-						entry.get<TextureView>().texture().TransitionBarrier(*this, entry.get<vk::ImageLayout>());
+					case vk::DescriptorType::eStorageImage: {
+						const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
 						break;
+					}
 				}
 			}
 		mBoundDescriptorSets[index + sets.size()] = descriptorSet;
@@ -165,13 +164,15 @@ void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, u
 	descriptorSet->FlushWrites();
 	if (!mCurrentRenderPass)
 		for (auto&[idx, entry] : descriptorSet->mBoundDescriptors) {
-			switch (entry.type()) {
+			switch (descriptorSet->layout_at(idx >> 32).mDescriptorType) {
 				case vk::DescriptorType::eCombinedImageSampler:
 				case vk::DescriptorType::eInputAttachment:
 				case vk::DescriptorType::eSampledImage:
-				case vk::DescriptorType::eStorageImage:
-					entry.get<TextureView>().texture().TransitionBarrier(*this, entry.get<vk::ImageLayout>());
+				case vk::DescriptorType::eStorageImage: {
+					const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+					get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
 					break;
+				}
 			}
 		}
 	mBoundDescriptorSets[index] = descriptorSet;

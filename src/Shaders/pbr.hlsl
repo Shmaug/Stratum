@@ -12,7 +12,7 @@ Texture2D<float4> gNormalTexture 						: register(t2, space1);
 Texture2D<float2> gMetallicRoughnessTexture : register(t3, space1);
 SamplerState gSampler 											: register(s4, space1);
 
-StructuredBuffer<InstanceData> gInstances 	: register(t1, space2);
+StructuredBuffer<InstanceData> gInstances 	: register(t0, space2);
 
 struct v2f {
 	float4 position : SV_Position;
@@ -51,7 +51,9 @@ float4 fs_pbr(v2f i) : SV_Target0 {
 	float3 normal = normalize(i.normal);
 	float3 tangent = normalize(i.tangent);
 	normal = mul(bump.xyz*2-1, float3x3(tangent, normalize(cross(normal, tangent)), normal));
-	if (dot(normal, view) < 0) normal = -normal;
+	//if (dot(normal, view) < 0) normal = -normal;
+
+	return color * abs(dot(normal, view));
 
 	DisneyBSDF bsdf;
 	bsdf.diffuse = color.rgb;

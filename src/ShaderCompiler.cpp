@@ -335,22 +335,6 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		}
 	}
 
-	auto ParseSemantic = [&](VertexAttributeId& var, string semantic) {
-		size_t l = semantic.find_first_of("0123456789");
-		if (l != string::npos)
-			var.mTypeIndex = atoi(semantic.c_str() + l);
-		else {
-			var.mTypeIndex = 0;
-			l = semantic.length();
-		}
-		if (l > 0 && semantic[l-1] == '_') l--;
-		transform(semantic.begin(), semantic.begin() + l, semantic.begin(), [](char c) { return tolower(c); });
-		if (gAttributeMap.count(semantic))
-			var.mType = gAttributeMap.at(semantic);
-		else
-			var.mType = VertexAttributeType::eTexcoord;
-	};
-
 	static const unordered_map<spvc_resource_type, vk::DescriptorType> typeMap {
 		{ SPVC_RESOURCE_TYPE_SAMPLED_IMAGE, vk::DescriptorType::eSampledImage },
 		{ SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, vk::DescriptorType::eSampledImage },
@@ -376,29 +360,23 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 				binding.mDescriptorCount *= spvc_type_get_array_dimension(spirType, i);
 		};
 	}
+
+
+	auto ReflectStageVariables = [&](unordered_map<string, RasterStageVariable>& vars, const spvc_reflected_resource& r) {
+		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
+		auto& var = vars[r.name];
+		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
+		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
+		var.mAttributeId = stovertexattribute(spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
+		// ensure unique typeindex
+		while (ranges::count(vars | views::values, var.mAttributeId, &RasterStageVariable::mAttributeId) > 1)
+			var.mAttributeId.mTypeIndex++;
+	};
 	
 	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_INPUT, &list, &count);
-	for (const auto& r : ranges::subrange(list, list+count)) {
-		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
-		auto& var = shaderModule.mStageInputs[r.name];
-		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
-		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
-		ParseSemantic(var.mAttributeId, spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
-		// ensure unique typeindex
-		while (ranges::count(shaderModule.mStageInputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
-			var.mAttributeId.mTypeIndex++;
-	}
+	ranges::for_each_n(list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageInputs)));
 	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_OUTPUT, &list, &count);
-	for (const auto& r : ranges::subrange(list, list+count)) {
-		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
-		auto& var = shaderModule.mStageOutputs[r.name];
-		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
-		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
-		ParseSemantic(var.mAttributeId, spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
-		// ensure unique typeindex
-		while (ranges::count(shaderModule.mStageOutputs | views::values, var.mAttributeId, &VertexStageVariable::mAttributeId) > 1)
-			var.mAttributeId.mTypeIndex++;
-	}
+	ranges::for_each_n(list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageOutputs)));
 	
 	shaderModule.mWorkgroupSize = vk::Extent3D(
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 0), 

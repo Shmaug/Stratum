@@ -64,13 +64,13 @@ public:
 				const auto& attachmentDesc = get<vk::AttachmentDescription>(d);
 				if (mAttachmentMap.count(attachmentName)) {
 					// track layout of attachment through whole renderpass
-					auto&[desc,clear,id] = mAttachmentDescriptions[mAttachmentMap.at(attachmentName)];
+					auto&[desc,id] = mAttachmentDescriptions[mAttachmentMap.at(attachmentName)];
 					desc.finalLayout = attachmentDesc.finalLayout;
 					desc.storeOp = attachmentDesc.storeOp;
 					desc.stencilStoreOp = attachmentDesc.stencilStoreOp;
 				} else {
 					mAttachmentMap.emplace(attachmentName, mAttachmentDescriptions.size());
-					mAttachmentDescriptions.push_back(make_tuple(attachmentDesc, vk::ClearValue(), attachmentName));
+					mAttachmentDescriptions.push_back(make_tuple(attachmentDesc, attachmentName));
 					attachments.push_back(attachmentDesc);
 				}
 
@@ -152,7 +152,7 @@ public:
 		mDevice->destroyRenderPass(mRenderPass);
 	}
 
-	inline vk::RenderPass operator*() const { return mRenderPass; }
+	inline const vk::RenderPass& operator*() const { return mRenderPass; }
 	inline const vk::RenderPass* operator->() const { return &mRenderPass; }
 
 	inline const string& Name() const { return mName; }
@@ -167,7 +167,7 @@ private:
 	vk::RenderPass mRenderPass;
 
 	vector<SubpassDescription> mSubpassDescriptions;
-	vector<tuple<vk::AttachmentDescription, vk::ClearValue, RenderAttachmentId>> mAttachmentDescriptions;
+	vector<tuple<vk::AttachmentDescription, RenderAttachmentId>> mAttachmentDescriptions;
 	unordered_map<RenderAttachmentId, size_t> mAttachmentMap;
 
 	size_t mHash;

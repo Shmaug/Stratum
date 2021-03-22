@@ -158,7 +158,7 @@ Font::Font(CommandBuffer& commandBuffer, const fs::path& filename) {
 
 	mSDF = make_shared<Texture>(commandBuffer.mDevice, filename.string()+"_msdf", vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst, 1);
 	mSDF->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
-	commandBuffer->copyBufferToImage(*commandBuffer.UploadData(data).buffer(), **mSDF, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy() });
+	commandBuffer->copyBufferToImage(*commandBuffer.CreateStagingBuffer(data).buffer(), **mSDF, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy() });
 
 	msdfgen::destroyFont(font);
 	msdfgen::deinitializeFreetype(ft);

@@ -20,7 +20,6 @@ struct GlyphRect {
 	float4 TextureST;
 };
 
-
 #ifndef __cplusplus
 ConstantBuffer<CameraData> gCamera : register(b0, space0);
 

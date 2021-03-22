@@ -39,8 +39,8 @@ public:
 	inline void SetPushParameter(const string& name, const byte_blob& t) { mPushParameters[name] = t; }
 	inline const byte_blob& GetPushParameter(const string& name) const { if (mPushParameters.count(name)) return mPushParameters.at(name); return {}; }
 
-	STRATUM_API void SetUniformBuffer(const string& name, const Buffer::ArrayView& param, uint32_t arrayIndex = 0);
-	STRATUM_API void SetStorageBuffer(const string& name, const Buffer::ArrayView& param, uint32_t arrayIndex = 0);
+	STRATUM_API void SetUniformBuffer(const string& name, const Buffer::RangeView& param, uint32_t arrayIndex = 0);
+	STRATUM_API void SetStorageBuffer(const string& name, const Buffer::RangeView& param, uint32_t arrayIndex = 0);
 	STRATUM_API void SetStorageTexture(const string& name, const TextureView& param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eGeneral);
 	STRATUM_API void SetSampledTexture(const string& name, const TextureView& param, uint32_t arrayIndex = 0, vk::ImageLayout layout = vk::ImageLayout::eShaderReadOnlyOptimal);
 	STRATUM_API void SetSampler(const string& name, shared_ptr<Sampler> param, uint32_t arrayIndex = 0);

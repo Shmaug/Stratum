@@ -5,6 +5,7 @@
 namespace stm {
 
 enum class VertexAttributeType {
+	eSystemGenerated,
 	ePosition,
 	eNormal,
 	eTangent,
@@ -20,20 +21,17 @@ struct VertexAttributeId {
 	uint32_t mTypeIndex;
 	bool operator==(const VertexAttributeId&) const = default;
 };
-
-struct VertexStageVariable {
+struct RasterStageVariable {
 	uint32_t mLocation;
 	vk::Format mFormat;
 	VertexAttributeId mAttributeId;
 };
-
 struct DescriptorBinding {
 	uint32_t mSet = 0;
 	uint32_t mBinding = 0;
 	uint32_t mDescriptorCount = 0;
 	vk::DescriptorType mDescriptorType = vk::DescriptorType::eSampler;
 	vk::ShaderStageFlags mStageFlags = {};
-	vector<vk::SamplerCreateInfo> mImmutableSamplers;
 };
 
 struct SpirvModule {
@@ -47,8 +45,8 @@ struct SpirvModule {
 	unordered_map<string, vk::SpecializationMapEntry> mSpecializationMap;
 	unordered_map<string, DescriptorBinding> mDescriptorBindings;
 	unordered_map<string, vk::PushConstantRange> mPushConstants;
-	unordered_map<string, VertexStageVariable> mStageInputs;
-	unordered_map<string, VertexStageVariable> mStageOutputs;
+	unordered_map<string, RasterStageVariable> mStageInputs;
+	unordered_map<string, RasterStageVariable> mStageOutputs;
 	vk::Extent3D mWorkgroupSize;
 
 	inline ~SpirvModule() { if (mShaderModule) mDevice.destroyShaderModule(mShaderModule); }
@@ -56,15 +54,25 @@ struct SpirvModule {
 	inline const DescriptorBinding& Binding(const string& descriptor) const { return mDescriptorBindings.at(descriptor); }
 };
 
+template<> struct tuplefier<RasterStageVariable> {
+	inline auto operator()(RasterStageVariable&& m) {
+		return forward_as_tuple(m.mLocation, m.mFormat, m.mAttributeId);
+	}
+};
+template<> struct tuplefier<VertexAttributeId> {
+	inline auto operator()(VertexAttributeId&& m) {
+		return forward_as_tuple(m.mType, m.mTypeIndex);
+	}
+};
 template<> struct tuplefier<DescriptorBinding> {
+
 	inline auto operator()(stm::DescriptorBinding&& m) {
 		return forward_as_tuple(
 			m.mSet,
 			m.mBinding,
 			m.mDescriptorCount,
 			m.mDescriptorType,
-			m.mStageFlags,
-			m.mImmutableSamplers);
+			m.mStageFlags);
 	}
 };
 template<> struct tuplefier<SpirvModule> {
@@ -81,27 +89,18 @@ template<> struct tuplefier<SpirvModule> {
 			m.mWorkgroupSize);
 	}
 };
-template<> struct tuplefier<VertexAttributeId> {
-	inline auto operator()(VertexAttributeId&& m) {
-		return forward_as_tuple(m.mType, m.mTypeIndex);
-	}
-};
-template<> struct tuplefier<VertexStageVariable> {
-	inline auto operator()(VertexStageVariable&& m) {
-		return forward_as_tuple(m.mLocation, m.mFormat, m.mAttributeId);
-	}
-};
 
 static_assert(tuplefiable<DescriptorBinding>);
 static_assert(tuplefiable<SpirvModule>);
 static_assert(Hashable<SpirvModule>);
-static_assert(Hashable<unordered_map<string,VertexStageVariable>>);
+static_assert(Hashable<unordered_map<string,RasterStageVariable>>);
 
 }
 
 namespace std {
 	inline string to_string(const stm::VertexAttributeType& value) {
 		switch (value) {
+			case stm::VertexAttributeType::eSystemGenerated: return "SystemGenerated";
 			case stm::VertexAttributeType::ePosition: return "Position";
 			case stm::VertexAttributeType::eNormal: return "Normal";
 			case stm::VertexAttributeType::eTangent: return "Tangent";
