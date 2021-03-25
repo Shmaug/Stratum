@@ -166,6 +166,10 @@ int main(int argc, char** argv) {
 			instance->Device().Execute(commandBuffer);
 		}
 
+		auto shadowAtlasAttachment = vk::AttachmentDescription({}, vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
+			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
+			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
 		auto colorAttachment = vk::AttachmentDescription({}, vk::Format::eR8G8B8A8Unorm, vk::SampleCountFlagBits::e4,
 			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
@@ -180,12 +184,16 @@ int main(int argc, char** argv) {
 			vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal);
 		vk::PipelineColorBlendAttachmentState blendOpaque;
 		blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-		RenderPass::SubpassDescription subpass {
+		RenderPass::SubpassDescription shadows {
+			"shadows", vk::PipelineBindPoint::eGraphics, {
+				{ "shadow_atlas", { shadowAtlasAttachment, RenderPass::AttachmentType::eDepthStencil, blendOpaque } } }, {} };
+		RenderPass::SubpassDescription main_render {
 			"main_render", vk::PipelineBindPoint::eGraphics, {
 				{ "primary_color", { colorAttachment, RenderPass::AttachmentType::eColor, blendOpaque } },
 				{ "primary_depth", { depthAttachment, RenderPass::AttachmentType::eDepthStencil, blendOpaque } },
-				{ "primary_resolve", { resolveAttachment, RenderPass::AttachmentType::eResolve, blendOpaque } } }, {} };
-		shared_ptr<RenderPass> renderPass = make_shared<RenderPass>(instance->Device(), "main", ranges::single_view(subpass));
+				{ "primary_resolve", { resolveAttachment, RenderPass::AttachmentType::eResolve, blendOpaque } } },
+				{ "shadows"} };
+		shared_ptr<RenderPass> renderPass = make_shared<RenderPass>(instance->Device(), "main", { shadows, main_render });
 
 		auto pbr = make_shared<GraphicsPipeline>("pbr", *renderPass, 0, testMesh->Geometry(),
 			gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"), nullptr, nullptr, immutableSamplers);
