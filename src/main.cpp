@@ -10,6 +10,8 @@
 using namespace stm;
 using namespace stm::shader_interop;
 
+unordered_map<std::string, std::shared_ptr<stm::SpirvModule>> gSpirvModules;
+
 inline unordered_map<string, shared_ptr<SpirvModule>> LoadShaders(Device& device, const fs::path& spvm) {
 	unordered_map<string, shared_ptr<SpirvModule>> spirvModules;
 	unordered_map<string, SpirvModule> tmp;
@@ -30,33 +32,30 @@ inline shared_ptr<Mesh> LoadScene(CommandBuffer& commandBuffer, const fs::path& 
 		aiPostProcessSteps::aiProcess_Triangulate |
 		aiPostProcessSteps::aiProcess_SortByPType);
 
-	struct vertex_t {
-		float3 position;
-		float3 normal;
-		float3 tangent;
-		float3 texcoord;
-	};
-	vector<vertex_t> vertices;
+	vector<float3> vertices;
+	vector<float3> normals;
+	vector<float3> tangents;
+	vector<float3> texcoords;
+
 	vector<uint32_t> indices;
 	for (const aiMesh* m : span(scene->mMeshes, scene->mNumMeshes)) {
 		size_t vertsPerFace;
-		//if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_POINT) vertsPerFace = 1;
-		//else if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_LINE) vertsPerFace = 2;
-		//else
-		if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_TRIANGLE) vertsPerFace = 3;
+		if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_POINT) vertsPerFace = 1;
+		else if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_LINE) vertsPerFace = 2;
+		else if (m->mPrimitiveTypes & aiPrimitiveType::aiPrimitiveType_TRIANGLE) vertsPerFace = 3;
 		else continue;
 
 		mesh->Submeshes().emplace_back(m->mNumFaces, (uint32_t)indices.size(), (uint32_t)vertices.size());
 
 		size_t tmp = vertices.size();
-		vertices.resize(vertices.size() + m->mNumVertices);
-		for (uint32_t i = 0; i < m->mNumVertices; i++) {
-			vertex_t& v = vertices[tmp + i];
-			memcpy(&v.position, m->mVertices + i, sizeof(v.position));
-			memcpy(&v.normal, m->mNormals + i, sizeof(v.normal));
-			memcpy(&v.tangent, m->mTangents + i, sizeof(v.tangent));
-			memcpy(&v.texcoord, m->mTextureCoords[0] + i, sizeof(v.texcoord));
-		}
+		vertices.resize(tmp + m->mNumVertices);
+		normals.resize(tmp + m->mNumVertices);
+		tangents.resize(tmp + m->mNumVertices);
+		texcoords.resize(tmp + m->mNumVertices);
+		ranges::copy(span((float3*)m->mVertices, m->mNumVertices), vertices.begin() + tmp);
+		ranges::copy(span((float3*)m->mNormals, m->mNumVertices), normals.begin() + tmp);
+		ranges::copy(span((float3*)m->mTangents, m->mNumVertices), tangents.begin() + tmp);
+		ranges::copy(span((float3*)m->mTextureCoords[0], m->mNumVertices), texcoords.begin() + tmp);
 
 		tmp = indices.size();
 		indices.resize(indices.size() + m->mNumFaces*vertsPerFace);
@@ -68,45 +67,102 @@ inline shared_ptr<Mesh> LoadScene(CommandBuffer& commandBuffer, const fs::path& 
 	}
 
 	mesh->Indices() = commandBuffer.CopyToDevice("Indices", indices, vk::BufferUsageFlagBits::eIndexBuffer);
-	mesh->Geometry().mBindings.emplace_back(commandBuffer.CopyToDevice("Vertices", vertices, vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex);
-	mesh->Geometry()[VertexAttributeType::ePosition][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, offsetof(vertex_t, position));
-	mesh->Geometry()[VertexAttributeType::eNormal][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, offsetof(vertex_t, normal));
-	mesh->Geometry()[VertexAttributeType::eTangent][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, offsetof(vertex_t, tangent));
-	mesh->Geometry()[VertexAttributeType::eTexcoord][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, offsetof(vertex_t, texcoord));
+
+	mesh->Geometry().mBindings.resize(4);
+	mesh->Geometry().mBindings[0] = { commandBuffer.CopyToDevice("Vertices", vertices, vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
+	mesh->Geometry().mBindings[1] = { commandBuffer.CopyToDevice("Normals", normals, vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
+	mesh->Geometry().mBindings[2] = { commandBuffer.CopyToDevice("Tangents", tangents, vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
+	mesh->Geometry().mBindings[3] = { commandBuffer.CopyToDevice("Texcoords", texcoords, vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
+	mesh->Geometry()[VertexAttributeType::ePosition][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, 0);
+	mesh->Geometry()[VertexAttributeType::eNormal][0] = GeometryData::Attribute(1, vk::Format::eR32G32B32Sfloat, 0);
+	mesh->Geometry()[VertexAttributeType::eTangent][0] = GeometryData::Attribute(2, vk::Format::eR32G32B32Sfloat, 0);
+	mesh->Geometry()[VertexAttributeType::eTexcoord][0] = GeometryData::Attribute(3, vk::Format::eR32G32B32Sfloat, 0);
 	return mesh;
 }
 
-inline shared_ptr<Texture> LoadTexture(CommandBuffer& commandBuffer, const fs::path& filename, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
-	auto[pixels,extent,format] = Texture::LoadPixels(filename);
-	shared_ptr<Texture> tex = make_shared<Texture>(commandBuffer.mDevice, filename.stem().string(), extent, format, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+inline shared_ptr<Texture> LoadTexture(CommandBuffer& commandBuffer, const string& name, const Texture::PixelData& pixelData, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
+	const auto&[pixels,extent,format] = pixelData;
+	shared_ptr<Texture> tex = make_shared<Texture>(commandBuffer.mDevice, name, extent, format, 1, 0, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 	tex->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	auto staging = commandBuffer.CreateStagingBuffer(pixels);
 	commandBuffer->copyBufferToImage(*staging.buffer(), **tex, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(staging.offset(), 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->ArrayLayers()), {}, tex->Extent()) });
 	tex->GenerateMipMaps(commandBuffer);
 	return tex;
 }
+inline shared_ptr<Texture> LoadTexture(CommandBuffer& commandBuffer, const fs::path& filename, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
+	return LoadTexture(commandBuffer, filename.stem().string(), Texture::LoadPixels(filename), usage);
+}
+
+inline shared_ptr<Texture> CombineChannels(CommandBuffer& commandBuffer, const string& name, const Texture::PixelData& img0, const Texture::PixelData& img1, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
+	const auto&[pixels0,extent0,format0] = img0;
+	const auto&[pixels1,extent1,format1] = img1;
+	
+	if (extent0 != extent1) throw invalid_argument("Image extents must match");
+
+	vk::Format dstFormat = vk::Format::eR8G8Unorm;
+
+	auto pipeline = make_shared<ComputePipeline>(commandBuffer.mDevice, "combine", gSpirvModules.at("combine"));
+	auto staging0 = commandBuffer.CreateStagingBuffer(pixels0, vk::BufferUsageFlagBits::eUniformTexelBuffer);
+	auto staging1 = commandBuffer.CreateStagingBuffer(pixels1, vk::BufferUsageFlagBits::eUniformTexelBuffer);
+	auto combined = Buffer::RangeView(make_shared<Buffer>(commandBuffer.mDevice, name, staging0.size()+staging1.size(), vk::BufferUsageFlagBits::eStorageTexelBuffer|vk::BufferUsageFlagBits::eTransferSrc),staging0.stride()+staging1.stride());
+	auto dst      = make_shared<Texture>(commandBuffer.mDevice, name, extent0, dstFormat, 1, 0, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+
+	commandBuffer.HoldResource(combined.get());
+	commandBuffer.HoldResource(dst);
+	
+	commandBuffer.BindPipeline(pipeline);
+	commandBuffer.BindDescriptorSet(make_shared<DescriptorSet>(commandBuffer.BoundPipeline()->DescriptorSetLayouts()[0], "tmp", unordered_map<uint32_t, DescriptorSet::Entry> {
+		{ pipeline->binding("gOutput").mBinding, TexelBufferView(combined, dstFormat) },
+		{ pipeline->binding("gInput0").mBinding, TexelBufferView(staging0, format0) },
+		{ pipeline->binding("gInput1").mBinding, TexelBufferView(staging1, format1) } }), 0);
+	commandBuffer.PushConstantRef<uint32_t>("Width", extent0.width);
+	commandBuffer.DispatchTiled(extent0);
+
+	commandBuffer.Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead, combined);
+	dst->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+	commandBuffer->copyBufferToImage(*combined.buffer(), **dst, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(combined.offset(), 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), {}, extent0) });
+	dst->GenerateMipMaps(commandBuffer);
+
+	return dst;
+}
+
+inline Vector3f ProjectPointToRay(Matrix4f view, Matrix4f projection, Vector2f p) {
+	Vector4f ray = projection.inverse() * p.homogeneous().homogeneous();
+	return (view.inverse() * Vector4f(ray[0], -ray[1], 1, 0)).head<3>().normalized();
+}
+
 
 int main(int argc, char** argv) {
 	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
 
 	{
 		Window& window = instance->Window();
+		gSpirvModules = LoadShaders(instance->Device(), "Assets/core_shaders.spvm");
 
-		shared_ptr<Texture> gEnvironmentTexture, gBaseColorTexture, gNormalTexture, gMetallicRoughnessTexture;
-		//shared_ptr<Texture> gShadowAtlas = make_shared<Texture>(instance->Device(), "ShadowAtlas", vk::Extent3D(1024,1024,1), vk::Format::eR32Sfloat);
+		unordered_map<string,shared_ptr<Sampler>> immutableSamplers;
+		immutableSamplers["gSampler"] = make_shared<Sampler>(instance->Device(), "Sampler", vk::SamplerCreateInfo({},
+			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
+			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
+			0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
+		immutableSamplers["gShadowSampler"] = make_shared<Sampler>(instance->Device(), "gShadowSampler", vk::SamplerCreateInfo({},
+			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
+			vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
+			0, true, 2, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite));
+
+		shared_ptr<Texture> gBaseColorTexture, gNormalTexture, gMetallicRoughnessTexture;
+		shared_ptr<Texture> gShadowAtlas = make_shared<Texture>(instance->Device(), "ShadowAtlas", vk::Extent3D(1024,1024,1), vk::Format::eR32Sfloat);
 		shared_ptr<Mesh> testMesh;
 		
 		{
 			auto commandBuffer = instance->Device().GetCommandBuffer("Init");
 			
 			testMesh = LoadScene(*commandBuffer, "Assets/Models/suzanne.obj");
-			//gEnvironmentTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/_backgrounds/path.hdr");
-			gBaseColorTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_col.jpg");
-			gNormalTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_nrm.jpg");
-			//shared_ptr<Texture> gMetallicTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_met.jpg");
-			//shared_ptr<Texture> gRoughnessTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_rgh.jpg");
-			//gMetallicRoughnessTexture = make_shared<Texture>(instance->Device(), "Metal08_met_rgh", gBaseColorTexture->Extent(), vk::Format::eR8G8Unorm);
-			
+			gBaseColorTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/PavingStones33/PavingStones33_col.jpg");
+			gNormalTexture = LoadTexture(*commandBuffer, "E:/3d/blender/Textures/PavingStones33/PavingStones33_nrm.jpg");
+			gMetallicRoughnessTexture = CombineChannels(*commandBuffer, "PavingStones33_met_rgh",
+				Texture::PixelData(byte_blob(gBaseColorTexture->Extent().width*gBaseColorTexture->Extent().height), gBaseColorTexture->Extent(), vk::Format::eR8Unorm),
+				Texture::LoadPixels("E:/3d/blender/Textures/PavingStones33/PavingStones33_rgh.jpg"));
+
 			instance->Device().Execute(commandBuffer);
 		}
 
@@ -131,47 +187,35 @@ int main(int argc, char** argv) {
 				{ "primary_resolve", { resolveAttachment, RenderPass::AttachmentType::eResolve, blendOpaque } } }, {} };
 		shared_ptr<RenderPass> renderPass = make_shared<RenderPass>(instance->Device(), "main", ranges::single_view(subpass));
 
-		auto spirvModules = LoadShaders(instance->Device(), "Assets/core_shaders.spvm");
-		//spirvModules.at("fs_pbr")->mDescriptorBindings.at("gSampler").mImmutableSamplers = {  };
-		//spirvModules.at("fs_pbr")->mDescriptorBindings.at("gShadowSampler").mImmutableSamplers = { vk::SamplerCreateInfo({},
-		//	vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
-		//	vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
-		//	0, true, 4, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite ) };
-
-		auto pbr = make_shared<GraphicsPipeline>("pbr", *renderPass, 0, testMesh->Geometry(), spirvModules.at("vs_pbr"), spirvModules.at("fs_pbr"));
+		auto pbr = make_shared<GraphicsPipeline>("pbr", *renderPass, 0, testMesh->Geometry(),
+			gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"), nullptr, nullptr, immutableSamplers);
 		
-		shared_ptr<Framebuffer> framebuffer;
-		
-		auto gSampler = make_shared<Sampler>(instance->Device(), "Sampler", vk::SamplerCreateInfo({},
-			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
-			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
-			0, true, 4, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE));
-
 		CameraData gCamera;
-		EnvironmentData gEnvironment;
 		MaterialData gMaterial;
 		vector<LightData> gLights(1);
 		vector<InstanceData> gInstances(1);
 
-		Map4(gCamera.Position) = Vector4f(0,0,-3,0);
-		Map4x4(gCamera.View) = Matrix4f::Identity();
-		Map3(gEnvironment.Ambient) = Vector3f::Constant(0.25f);
-		gEnvironment.LightCount = 1;
-		Map4(gMaterial.gTextureST) = Vector4f(1,1,0,0);
-		Map4(gMaterial.gBaseColor) = Vector4f::Ones();
-		Map3(gMaterial.gEmission) = Vector3f::Zero();
+		Affine3f lightToWorld(AngleAxisf((float)M_PI/3, Vector3f(1,-.2f,-.1f).normalized()));
+		gLights[0].Flags = LIGHT_ATTEN_DIRECTIONAL;
+		gLights[0].ToLight = (Orthographic<float>(32,32,-512,512) * lightToWorld.inverse()).matrix();
+		gLights[0].Position = -(lightToWorld * Vector3f(0,0,1)).normalized();
+		gLights[0].Emission = Vector3f::Constant(3);
+		gInstances[0].Transform = Matrix4f::Identity();
+		gInstances[0].InverseTransform = gInstances[0].Transform.inverse();
+		gCamera.Position = Vector3f(0,0,-4);
+		gCamera.View = Matrix4f::Identity();
+		gCamera.LightCount = (uint32_t)gLights.size();
+		
+		gMaterial.gTextureST = Vector4f(1,1,0,0);
+		gMaterial.gBaseColor = Vector4f::Ones();
+		gMaterial.gEmission = Vector3f::Zero();
 		gMaterial.gBumpStrength = 1.f;
-		gMaterial.gMetallic = 1.f;
+		gMaterial.gMetallic = 0.5f;
 		gMaterial.gRoughness = 1.f;
 		gMaterial.gAlphaCutoff = 0.5f;
-		gLights[0].Type = LIGHT_DIRECTIONAL;
-		Map3(gLights[0].Emission) = Vector3f::Ones();
-		Map3(gLights[0].Position) = Vector3f(0.2f,0.8f,-1);
-		Map3(gLights[0].Direction) = Map3(gLights[0].Position).normalized();
-		Map3(gLights[0].Right) = Vector3f(0,1,0).cross(Map3(gLights[0].Direction)).normalized();
-		Map4x4(gInstances[0].Transform) = Matrix4f::Identity();
-		Map4x4(gInstances[0].InverseTransform) = Map4x4(gInstances[0].Transform).inverse();
 
+		shared_ptr<Framebuffer> framebuffer;
+		
 		auto frameTimeAccum = chrono::nanoseconds::zero();
 		uint32_t fpsAccum = 0;
 		size_t frameCount = 0;
@@ -186,27 +230,39 @@ int main(int argc, char** argv) {
 				if (!instance->PollEvents()) break; // Window was closed
 				window.AcquireNextImage(*commandBuffer);
 			}
+			
+			if (window.MouseState().mKeys.count(MOUSE_LEFT)) {
+				Vector3f r0 = ProjectPointToRay(gCamera.View, gCamera.Projection, window.WindowToClip(window.LastCursorPos()));
+				Vector3f r1 = ProjectPointToRay(gCamera.View, gCamera.Projection, window.WindowToClip(window.CursorPos()));
+				float angle = acos(r0.dot(r1)/(r0.norm()*r1.norm()));
+				if (angle > 1e-6f) {
+					gInstances[0].Transform *= Affine3f(AngleAxisf(angle, r0.cross(r1).normalized())).matrix();
+					gInstances[0].InverseTransform = gInstances[0].Transform.inverse();
+				}
+			}
 
 			if (window.Swapchain() && (!framebuffer || window.SwapchainExtent() != framebuffer->Extent())) {
 				auto primaryColor = make_shared<Texture>(instance->Device(), "primary_color", vk::Extent3D(window.SwapchainExtent(),1), colorAttachment, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
 				auto primaryDepth = make_shared<Texture>(instance->Device(), "primary_depth", vk::Extent3D(window.SwapchainExtent(),1), depthAttachment, vk::ImageUsageFlagBits::eDepthStencilAttachment);
 				auto primaryResolve = make_shared<Texture>(instance->Device(), "primary_resolve", vk::Extent3D(window.SwapchainExtent(),1), resolveAttachment, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 				framebuffer = make_shared<Framebuffer>("framebuffer", *renderPass, vector<TextureView> { TextureView(primaryColor), TextureView(primaryDepth), TextureView(primaryResolve) });
-				Map4x4(gCamera.Projection) = PerspectiveFov(radians(42.18f), (float)framebuffer->Extent().width/(float)framebuffer->Extent().height, .01f, 128.f).matrix().transpose();
-				Map4x4(gCamera.InvProjection) = Map4x4(gCamera.Projection).inverse();
-				Map4x4(gCamera.ViewProjection) = Map4x4(gCamera.View) * Map4x4(gCamera.Projection);
+				gCamera.Projection = PerspectiveFov(radians(42.18f), (float)framebuffer->Extent().width/(float)framebuffer->Extent().height, .01f, 128.f).matrix();
+				gCamera.InvProjection = gCamera.Projection.inverse();
+				gCamera.ViewProjection = gCamera.Projection * gCamera.View;
 			}
 			
 			if (framebuffer) {
 				// render
-				auto perCamera = make_shared<DescriptorSet>(instance->Device(), "PerCamera", pbr->DescriptorSetLayouts()[0]);
-				auto perMaterial = make_shared<DescriptorSet>(instance->Device(), "PerMaterial", pbr->DescriptorSetLayouts()[1]);
-				auto perObject = make_shared<DescriptorSet>(instance->Device(), "PerObject", pbr->DescriptorSetLayouts()[2]);
+				auto perCamera = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[0], "PerCamera");
+				auto perMaterial = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[1], "PerMaterial");
+				auto perObject = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[2], "PerObject");
 				perCamera->insert(pbr->binding("gCamera").mBinding, commandBuffer->CopyToDevice("gCamera", span(&gCamera,1), vk::BufferUsageFlagBits::eUniformBuffer));
+				perCamera->insert(pbr->binding("gLights").mBinding, commandBuffer->CopyToDevice("gLights", gLights, vk::BufferUsageFlagBits::eStorageBuffer));
+				perCamera->insert(pbr->binding("gShadowAtlas").mBinding, gShadowAtlas, vk::ImageLayout::eShaderReadOnlyOptimal);
 				perMaterial->insert(pbr->binding("gMaterial").mBinding, commandBuffer->CopyToDevice("gMaterial", span(&gMaterial,1), vk::BufferUsageFlagBits::eUniformBuffer));
 				perMaterial->insert(pbr->binding("gBaseColorTexture").mBinding, TextureView(gBaseColorTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
 				perMaterial->insert(pbr->binding("gNormalTexture").mBinding, TextureView(gNormalTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
-				perMaterial->insert(pbr->binding("gSampler").mBinding, gSampler);
+				perMaterial->insert(pbr->binding("gMetallicRoughnessTexture").mBinding, TextureView(gMetallicRoughnessTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
 				perObject->insert(pbr->binding("gInstances").mBinding, commandBuffer->CopyToDevice("gInstances", gInstances, vk::BufferUsageFlagBits::eStorageBuffer));
 
 				commandBuffer->TransitionImageDescriptors(*perCamera, *perMaterial, *perObject);
@@ -221,7 +277,6 @@ int main(int argc, char** argv) {
 				commandBuffer->EndRenderPass();
 
 				// copy to window
-				commandBuffer->WaitOn(vk::PipelineStageFlagBits::eTransfer, window.ImageAvailableSemaphore());
 				commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal);
 				
 				vk::ImageCopy rgn = {};
@@ -231,6 +286,7 @@ int main(int argc, char** argv) {
 				(*commandBuffer)->copyImage(*framebuffer->at("primary_resolve").texture(), vk::ImageLayout::eTransferSrcOptimal, window.BackBuffer(), vk::ImageLayout::eTransferDstOptimal, { rgn });
 
 				commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
+				commandBuffer->WaitOn(vk::PipelineStageFlagBits::eTransfer, window.ImageAvailableSemaphore());
 				commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eTransfer, renderSemaphore);
 			}
 
@@ -246,7 +302,7 @@ int main(int argc, char** argv) {
 			fpsAccum++;
 			if (frameTimeAccum > 1s) {
 				float totalTime = chrono::duration<float>(frameTimeAccum).count();
-				printf("%.2f fps (%fms)          \r", (float)fpsAccum/totalTime, totalTime/fpsAccum);
+				printf("%.2f fps (%fms)\t\t\r", (float)fpsAccum/totalTime, totalTime/fpsAccum);
 				frameTimeAccum -= 1s;
 				fpsAccum = 0;
 			}
@@ -254,6 +310,7 @@ int main(int argc, char** argv) {
 		}
 		
 		instance->Device().Flush();
+		gSpirvModules.clear();
 	}
 	
 	instance.reset();

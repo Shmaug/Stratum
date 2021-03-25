@@ -6,6 +6,8 @@
 
 namespace stm {
 
+// TODO: DescriptorSetLayouts have no way of being passed into a pipeline
+
 using VertexInputBindingData = pair< vector<vk::VertexInputAttributeDescription>, vector<vk::VertexInputBindingDescription> >;
 inline VertexInputBindingData CreateInputBindings(const GeometryData& geometry, const SpirvModule& vs) {
 	VertexInputBindingData d = {};
@@ -33,33 +35,14 @@ protected:
 	unordered_map<vk::ShaderStageFlagBits, pair<shared_ptr<SpirvModule>, vk::Optional<vk::SpecializationInfo>>> mSpirvModules;
 	vector<shared_ptr<DescriptorSetLayout>> mDescriptorSetLayouts;
 	
-	// multimap for entries with the same name and different bindings between stages
-	unordered_multimap<string, DescriptorBinding> mDescriptorBindings;
-	// multimap for entries with the same name and different ranges between stages
-	unordered_multimap<string, vk::PushConstantRange> mPushConstants;
+	unordered_map<string, DescriptorBinding> mDescriptorBindings;
+	unordered_map<string, vk::PushConstantRange> mPushConstants;
 	
 	unordered_set<shared_ptr<DeviceResource>> mResources;
 
-	// expects mSpirvModules to be populated
+	// requires mSpirvModules to be set. Will generate mDescriptorSetLayouts if empty
 	// populates mPushConstants, mDescriptorBindings; hashes spirv into mHash
-	inline vk::PipelineLayout CreatePipelineLayout() {
-		
-		if (mDescriptorSetLayouts.empty()) {
-			vector<unordered_map<uint32_t, DescriptorSetLayout::Binding>> setBindings;
-			for (const auto&[stage, p] : mSpirvModules)
-				for (const auto&[id, b] : p.first->mDescriptorBindings) {
-					if (b.mSet >= setBindings.size()) setBindings.resize(b.mSet + 1);
-					auto it = setBindings[b.mSet].find(b.mBinding);
-					if (it != setBindings[b.mSet].end() && it->second.mDescriptorType == b.mDescriptorType && it->second.mDescriptorCount == b.mDescriptorCount)
-						setBindings[b.mSet][b.mBinding].mStageFlags |= b.mStageFlags;
-					else
-						setBindings[b.mSet][b.mBinding] = DescriptorSetLayout::Binding(b.mDescriptorType, b.mStageFlags, b.mDescriptorCount);
-				}
-			for (const auto& s : setBindings)
-				mDescriptorSetLayouts.emplace_back(make_shared<DescriptorSetLayout>(mDevice, mName, s));
-		}
-
-		unordered_map<uint32_t, unordered_map<uint32_t, vk::DescriptorSetLayoutBinding>> descriptorSetBindings;
+	inline vk::PipelineLayout CreatePipelineLayout(const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) {
 		vector<vk::PushConstantRange> pushConstantRanges;
 
 		for (const auto&[stage, p] : mSpirvModules) {
@@ -69,36 +52,53 @@ protected:
 				spirv->mShaderModule = mDevice->createShaderModule(vk::ShaderModuleCreateInfo({}, spirv->mSpirv));
 			}
 			
-			for (const auto& [id, range] : spirv->mPushConstants) {
-				mPushConstants.emplace(id, range);
-				pushConstantRanges.emplace_back(range); // TODO: combine push constant ranges between stages
+			if (spirv->mPushConstants.size()) {
+				uint32_t first = ~0;
+				uint32_t last = 0;
+				for (const auto& [id, p] : spirv->mPushConstants) {
+					mPushConstants.emplace(id, vk::PushConstantRange(stage, p.first, p.second));
+					first = min(first, p.first);
+					last = max(last, p.first+p.second);
+				}
+				pushConstantRanges.emplace_back(stage, first, last-first);
 			}
 
-			bool add = true;
-			for (const auto& [id, binding] : spirv->mDescriptorBindings) {
-				for (auto it : ranges::subrange(mDescriptorBindings.find(id), mDescriptorBindings.end()))
-					if (it.second.mBinding == binding.mBinding && it.second.mSet == binding.mSet && it.second.mDescriptorType == binding.mDescriptorType && it.second.mDescriptorCount == binding.mDescriptorCount) {
-						it.second.mStageFlags |= binding.mStageFlags;
-						descriptorSetBindings[binding.mSet][binding.mBinding].stageFlags = it.second.mStageFlags;
-						add = false;
-					}
-				if (add) {
-					mDescriptorBindings.emplace(id, binding);
-					descriptorSetBindings[binding.mSet].emplace(binding.mBinding, vk::DescriptorSetLayoutBinding(binding.mBinding, binding.mDescriptorType, binding.mDescriptorCount, binding.mStageFlags));
-				}
-			}
+			for (const auto& [id, binding] : spirv->mDescriptorBindings)
+				if (auto it = mDescriptorBindings.find(id); it != mDescriptorBindings.end()) {
+					if (it->second.mBinding == binding.mBinding && it->second.mSet == binding.mSet) {
+						if (it->second.mDescriptorType != binding.mDescriptorType) throw invalid_argument("spirv modules share the same descriptor binding with different descriptor types");
+						it->second.mStageFlags |= binding.mStageFlags;
+						it->second.mDescriptorCount = max(it->second.mDescriptorCount, binding.mDescriptorCount);
+					} else
+						mDescriptorBindings[to_string(binding.mSet)+"."+to_string(binding.mBinding) + id] = binding;
+				} else
+					mDescriptorBindings[id] = binding;
 
 			mHash = hash_combine(mHash, spirv);
 			if (p.second) {
-				mHash = hash_combine(mHash, ranges::subrange(p.second->pMapEntries, p.second->pMapEntries + p.second->mapEntryCount));
-				mHash = hash_combine(mHash, ranges::subrange((const byte*)p.second->pData, (const byte*)p.second->pData + p.second->dataSize));
+				mHash = hash_combine(mHash, span(p.second->pMapEntries, p.second->mapEntryCount));
+				mHash = hash_combine(mHash, span((const byte*)p.second->pData, p.second->dataSize));
 			}
-			for (const auto& l : mDescriptorSetLayouts)
-				for (const auto&[i,b] : l->Bindings())
-					for (const auto& s : b.mImmutableSamplers)
-						mHash = hash_combine(mHash, s->CreateInfo()); // only have to hash the immutable samplers; hashing the spir-v and specialization constants takes care of bindings/push constants
 		};
-		
+	
+
+		if (mDescriptorSetLayouts.empty()) {
+			unordered_map<uint32_t, unordered_map<uint32_t, DescriptorSetLayout::Binding>> setBindings;
+			for (const auto&[name, b] : mDescriptorBindings) {
+				if (b.mSet >= mDescriptorSetLayouts.size()) mDescriptorSetLayouts.resize(b.mSet + 1);
+				setBindings[b.mSet][b.mBinding] = DescriptorSetLayout::Binding(b.mDescriptorType, b.mStageFlags, b.mDescriptorCount);
+				if (auto it = immutableSamplers.find(name); it != immutableSamplers.end())
+					setBindings[b.mSet][b.mBinding].mImmutableSamplers.push_back(it->second);
+			}
+			for (const auto&[set,s] : setBindings)
+				mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, mName, s);
+		}
+
+		for (const auto& l : mDescriptorSetLayouts)
+			for (const auto&[i,b] : l->Bindings())
+				for (const auto& s : b.mImmutableSamplers)
+					mHash = hash_combine(mHash, s->CreateInfo()); // only have to hash the immutable samplers; hashing the spir-v and specialization constants takes care of bindings/push constants
+	
 		vector<vk::DescriptorSetLayout> tmp(mDescriptorSetLayouts.size());
 		ranges::transform(mDescriptorSetLayouts, tmp.begin(), &DescriptorSetLayout::operator const vk::DescriptorSetLayout &);
 		mLayout = mDevice->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, tmp, pushConstantRanges));
@@ -138,9 +138,9 @@ public:
 
 class ComputePipeline : public Pipeline {
 public:
-	inline ComputePipeline(Device& device, const string& name, shared_ptr<SpirvModule> spirv, vk::Optional<vk::SpecializationInfo> specializationInfo = nullptr) : Pipeline(device, name) {
+	inline ComputePipeline(Device& device, const string& name, shared_ptr<SpirvModule> spirv, vk::Optional<vk::SpecializationInfo> specializationInfo = nullptr, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {}) : Pipeline(device, name) {
 		mSpirvModules.emplace(vk::ShaderStageFlagBits::eCompute, make_pair(spirv, specializationInfo));
-		CreatePipelineLayout();
+		CreatePipelineLayout(immutableSamplers);
 		mPipeline = mDevice->createComputePipeline(mDevice.PipelineCache(),
 			vk::ComputePipelineCreateInfo({},
 				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, spirv->mShaderModule, spirv->mEntryPoint.c_str(), specializationInfo),
@@ -167,6 +167,7 @@ private:
 public:
 	inline GraphicsPipeline(const string& name, const stm::RenderPass& renderPass, uint32_t subpassIndex, const GeometryData& geometry,
 		shared_ptr<SpirvModule> vs, shared_ptr<SpirvModule> fs, vk::Optional<vk::SpecializationInfo> vs_spec = nullptr, vk::Optional<vk::SpecializationInfo> fs_spec = nullptr,
+		const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {},
 		vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill,
 		bool sampleShading = false, const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = {},
@@ -175,7 +176,7 @@ public:
 		mSpirvModules.emplace(vk::ShaderStageFlagBits::eVertex, make_pair(vs, vs_spec));
 		mSpirvModules.emplace(vk::ShaderStageFlagBits::eFragment, make_pair(fs, fs_spec));
 
-		CreatePipelineLayout();
+		CreatePipelineLayout(immutableSamplers);
 
 		vector<shared_ptr<SpirvModule>> spirv { vs, fs };
 

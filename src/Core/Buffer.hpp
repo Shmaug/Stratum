@@ -46,6 +46,7 @@ public:
 	}
 
 	inline vk::BufferUsageFlags Usage() const { return mUsageFlags; }
+	inline const Device::Memory::Block& Memory() const { return *mMemoryBlock; }
 	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
 
 	class RangeView {
@@ -77,9 +78,9 @@ public:
 		inline byte* data() const { return mBuffer->data() + mBufferOffset; }
 
 		template<typename T>
-		inline operator ranges::subrange<T*>() const {
+		inline operator span<T*>() const {
 			if (sizeof(T) != mElementStride) throw runtime_error("sizeof(T) must equal buffer stride");
-			return ranges::subrange(reinterpret_cast<T*>(data()), mElementCount);
+			return span(reinterpret_cast<T*>(data()), mElementCount);
 		}
     inline RangeView subview(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
 			return RangeView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
@@ -98,9 +99,9 @@ public:
 
 	inline TexelBufferView() = default;
 	inline TexelBufferView(const TexelBufferView&) = default;
-	inline TexelBufferView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-		: RangeView(buf, ElementSize(fmt), byteOffset, elementCount), mFormat(fmt) {
-		size_t key = hash_combine(mBufferOffset, elementCount, mFormat);
+	inline TexelBufferView(const Buffer::RangeView& view, vk::Format fmt)
+		: RangeView(view), mFormat(fmt) {
+		size_t key = hash_combine(mBufferOffset, mElementCount, mFormat);
 		if (mBuffer->mViews.count(key))
 			mView = mBuffer->mViews.at(key);
 		else {
@@ -109,6 +110,8 @@ public:
 			mBuffer->mViews.emplace(key, mView);
 		}
 	}
+	inline TexelBufferView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+		: TexelBufferView(RangeView(buf, ElementSize(fmt), byteOffset, elementCount), fmt) {}
 	
 	TexelBufferView& operator=(const TexelBufferView&) = default;
 	TexelBufferView& operator=(TexelBufferView&& v) = default;

@@ -3,8 +3,7 @@
 
 [[vk::constant_id(0)]] const bool gAlphaClip = true;
 
-#include <stratum.hlsli>
-#include <lighting.hlsli>
+#include <bsdf.hlsli>
 
 ConstantBuffer<MaterialData> gMaterial 			: register(b0, space1);
 Texture2D<float4> gBaseColorTexture 				: register(t1, space1);
@@ -30,12 +29,12 @@ v2f vs_pbr(
 	uint instanceId : SV_InstanceID ) {
 	
 	InstanceData instance = gInstances[instanceId];
-	float3 cameraPos = Dehomogenize(mul(instance.Transform, float4(vertex, 1))) - gCamera.Position.xyz;
+	float3 cameraPos = hnormalize(mul(instance.Transform, homogeneous(vertex))) - gCamera.Position;
 
 	v2f o;
-	o.position = mul(gCamera.ViewProjection, float4(cameraPos,1));
-	o.normal = mul(float4(normal, 1), instance.InverseTransform).xyz;
-	o.tangent = mul(float4(tangent, 1), instance.InverseTransform).xyz;
+	o.position = mul(gCamera.ViewProjection, homogeneous(cameraPos));
+	o.normal = mul(homogeneous(normal), instance.InverseTransform).xyz;
+	o.tangent = mul(homogeneous(tangent), instance.InverseTransform).xyz;
 	o.texcoord = texcoord*gMaterial.gTextureST.xy + gMaterial.gTextureST.zw;
 	o.cameraPos = float4(cameraPos, o.position.z / o.position.w);
 	return o;
@@ -45,23 +44,20 @@ float4 fs_pbr(v2f i) : SV_Target0 {
 	float3 view = normalize(-i.cameraPos.xyz);
 
 	float4 color = gMaterial.gBaseColor * gBaseColorTexture.Sample(gSampler, i.texcoord);
-	float4 bump = gNormalTexture.Sample(gSampler, i.texcoord);
 	float2 metallicRoughness = gMetallicRoughnessTexture.Sample(gSampler, i.texcoord);
+	float4 bump = gNormalTexture.Sample(gSampler, i.texcoord);
+	BSDF bsdf = make_BSDF(color.rgb, metallicRoughness.x*gMaterial.gMetallic, metallicRoughness.y*gMaterial.gRoughness, gMaterial.gEmission);
 
 	float3 normal = normalize(i.normal);
 	float3 tangent = normalize(i.tangent);
-	normal = mul(bump.xyz*2-1, float3x3(tangent, normalize(cross(normal, tangent)), normal));
-	//if (dot(normal, view) < 0) normal = -normal;
+	normal = normalize(mul(float3(1,1,gMaterial.gBumpStrength)*bump.xyz*2-1, float3x3(tangent, normalize(cross(normal, tangent)), normal)));
 
-	return color * abs(dot(normal, view));
-
-	DisneyBSDF bsdf;
-	bsdf.diffuse = color.rgb;
-	bsdf.specular = color.rgb * metallicRoughness.x;
-	bsdf.emission = gMaterial.gEmission;
-	bsdf.roughness = max(.002, metallicRoughness.y*metallicRoughness.y);
-	bsdf.occlusion = 1;
-	return float4(Shade(bsdf, i.cameraPos.xyz, normal, view), color.a);
+	float3 eval = bsdf.emission;
+	float3 Le,Li;
+	for (uint l = 0; l < gCamera.LightCount; l++)
+		if (SampleLight(gLights[l], i.cameraPos.xyz, Le, Li))
+			eval += Le * Evaluate(bsdf, Li, view, normal, i.cameraPos.xyz);
+	return float4(eval, color.a);
 }
 
 float fs_pbr_depth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {

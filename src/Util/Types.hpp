@@ -87,7 +87,7 @@ template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T he
 	return Transform<T,3,Projective>(r);
 }
 template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
-	Transform<T,3,Projective> r;
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
 	r(0,0) = 2 / (right - left);
 	r(1,1) = 2 / (top - bottom);
 	r(2,2) = 1 / (zFar - zNear);
@@ -95,7 +95,7 @@ template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T rig
 	r(3,1) = (top + bottom) / (bottom - top);
 	r(3,2) = zNear / (zNear - zFar);
 	r(3,3) = 1;
-	return r;
+	return Transform<T,3,Projective>(r);
 }
 
 using fRay = ParametrizedLine<float,3>;
@@ -175,46 +175,39 @@ public:
 namespace shader_interop {
 	using uint = uint32_t;
 
-	#define DECLARE_FIXED_SIZE_T_V(T, N)\
-		using T##N 	= std::array<T, N>;\
-		inline Eigen::Map<Eigen::Vector<T, N>> Map##N##(T##N & r) { return Eigen::Map<Eigen::Vector<T, N>>(r.data()); }
+	#define DECLARE_VECTOR_TYPE(T, N) using T##N = Eigen::Matrix<T, N, 1, Eigen::ColMajor | Eigen::DontAlign>;
+	#define DECLARE_VECTOR_TYPES(N)\
+		DECLARE_VECTOR_TYPE(float, N)\
+		DECLARE_VECTOR_TYPE(double, N)\
+		DECLARE_VECTOR_TYPE(uint, N)\
+		DECLARE_VECTOR_TYPE(int, N)
 
-	#define DECLARE_FIXED_SIZE_T_M(T, M, N)\
-		using T##M##x##N 	= std::array<T, M*N>;\
-		inline Eigen::Map<Matrix<T, M, N, Eigen::ColMajor>> Map##M##x##N##(T##M##x##N & r) { return Eigen::Map<Matrix<T, M, N, Eigen::ColMajor>>(r.data()); }\
+	#define DECLARE_MATRIX_TYPE(T, M, N) using T##M##x##N = Eigen::Matrix<T, M, N, Eigen::ColMajor | Eigen::DontAlign>;
+	#define DECLARE_MATRIX_TYPES(M,N)\
+		DECLARE_MATRIX_TYPE(float, M, N)\
+		DECLARE_MATRIX_TYPE(double, M, N)\
+		DECLARE_MATRIX_TYPE(uint, M, N)\
+		DECLARE_MATRIX_TYPE(int, M, N)
 
-	#define DECLARE_FIXED_SIZE_V(N)\
-		DECLARE_FIXED_SIZE_T_V(float, N)\
-		DECLARE_FIXED_SIZE_T_V(double, N)\
-		DECLARE_FIXED_SIZE_T_V(uint, N)\
-		DECLARE_FIXED_SIZE_T_V(int, N)
-	#define DECLARE_FIXED_SIZE_M(M,N)\
-		DECLARE_FIXED_SIZE_T_M(float, M, N)\
-		DECLARE_FIXED_SIZE_T_M(double, M, N)\
-		DECLARE_FIXED_SIZE_T_M(uint, M, N)\
-		DECLARE_FIXED_SIZE_T_M(int, M, N)
-
-	DECLARE_FIXED_SIZE_V(2)
-	DECLARE_FIXED_SIZE_M(2,2)
-	DECLARE_FIXED_SIZE_M(2,3)
-	DECLARE_FIXED_SIZE_M(2,4)
-	DECLARE_FIXED_SIZE_V(3)
-	DECLARE_FIXED_SIZE_M(3,2)
-	DECLARE_FIXED_SIZE_M(3,3)
-	DECLARE_FIXED_SIZE_M(3,4)
-	DECLARE_FIXED_SIZE_V(4)
-	DECLARE_FIXED_SIZE_M(4,2)
-	DECLARE_FIXED_SIZE_M(4,3)
-	DECLARE_FIXED_SIZE_M(4,4)
+	DECLARE_VECTOR_TYPES(2)
+	DECLARE_MATRIX_TYPES(2,2)
+	DECLARE_MATRIX_TYPES(2,3)
+	DECLARE_MATRIX_TYPES(2,4)
+	DECLARE_VECTOR_TYPES(3)
+	DECLARE_MATRIX_TYPES(3,2)
+	DECLARE_MATRIX_TYPES(3,3)
+	DECLARE_MATRIX_TYPES(3,4)
+	DECLARE_VECTOR_TYPES(4)
+	DECLARE_MATRIX_TYPES(4,2)
+	DECLARE_MATRIX_TYPES(4,3)
+	DECLARE_MATRIX_TYPES(4,4)
 
 	#undef DECLARE_FIXED_SIZE_V
 	#undef DECLARE_FIXED_SIZE_M
 	
-	
 	#pragma pack(push)
 	#pragma pack(1)
-	#include "../Shaders/include/stratum.hlsli"
-	#include "../Shaders/include/lighting.hlsli"
+	#include "../Shaders/include/dtypes.h"
 	#pragma pack(pop)
 }
 }

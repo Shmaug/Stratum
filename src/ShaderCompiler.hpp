@@ -58,7 +58,7 @@ public:
   template<ranges::range R> requires(convertible_to<ranges::range_value_t<R>, fs::path>)
 	inline ShaderCompiler(const R& includePaths) : mIncludePaths(set<fs::path>(includePaths.begin(), includePaths.end())) {}
   inline unordered_map<string, SpirvModule> operator()(const fs::path& filename) {
-    string source = ReadFile(filename);
+    string source = ReadFile<string>(filename);
     if (source.empty()) throw logic_error("failed to open file for reading");
     unordered_map<string, SpirvModule> modules = ParseCompilerDirectives(filename, source);
     for (auto& [id,shaderModule] : modules) {

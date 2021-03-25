@@ -23,7 +23,7 @@ public:
 
 	inline Fence& CompletionFence() const { return *mCompletionFence; }
 	inline Device::QueueFamily* QueueFamily() const { return mQueueFamily; }
-
+	
 	inline shared_ptr<RenderPass> CurrentRenderPass() const { return mCurrentRenderPass; }
 	inline shared_ptr<Framebuffer> CurrentFramebuffer() const { return mCurrentFramebuffer; }
 	inline uint32_t CurrentSubpassIndex() const { return mCurrentSubpassIndex; }
@@ -31,12 +31,9 @@ public:
 
 	STRATUM_API void Reset(const string& name = "Command Buffer");
 
-	inline void WaitOn(vk::PipelineStageFlags stage, Semaphore& semaphore) { mWaitSemaphores.emplace_back(stage, forward<Semaphore&>(semaphore)); }
+	// cause a stage to delay execution until waitSemaphore signals
+	inline void WaitOn(vk::PipelineStageFlags stage, Semaphore& waitSemaphore) { mWaitSemaphores.emplace_back(stage, forward<Semaphore&>(waitSemaphore)); }
 	inline void SignalOnComplete(vk::PipelineStageFlags, shared_ptr<Semaphore> semaphore) { mSignalSemaphores.push_back(semaphore); };
-
-	// Label a region for a tool such as RenderDoc
-	STRATUM_API void BeginLabel(const string& label, const Vector4f& color = { 1,1,1,0 });
-	STRATUM_API void EndLabel();
 
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
@@ -44,59 +41,9 @@ public:
 		return *static_cast<T*>(mHeldResources.emplace(static_pointer_cast<DeviceResource>(resource)).first->get());
 	}
 
-	inline void CopyBuffer(Buffer::RangeView src, Buffer::RangeView dst) {
-		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must have the same size_bytes");
-		HoldResource(src.get());
-		HoldResource(dst.get());
-		mCommandBuffer.copyBuffer(*src.buffer(), *dst.buffer(), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
-	}
-
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { barrier }, {}, {});
-	}
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { barrier }, {});
-	}
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { barrier });
-	}
-
-	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		TransitionBarrier(image, subresourceRange, GuessStage(oldLayout), GuessStage(newLayout), oldLayout, newLayout);
-	}
-	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		if (oldLayout == newLayout) return;
-		vk::ImageMemoryBarrier barrier = {};
-		barrier.oldLayout = oldLayout;
-		barrier.newLayout = newLayout;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = image;
-		barrier.subresourceRange = subresourceRange;
-		barrier.srcAccessMask = GuessAccessMask(oldLayout);
-		barrier.dstAccessMask = GuessAccessMask(newLayout);
-		Barrier(srcStage, dstStage, barrier);
-	}
-
-	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
-	inline void TransitionImageDescriptors(T&... sets) {
-		(sets.FlushWrites(), ...);
-		auto fn = [&](auto& descriptorSet) {
-			for (auto&[idx, entry] : descriptorSet.mBoundDescriptors) {
-				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
-					case vk::DescriptorType::eCombinedImageSampler:
-					case vk::DescriptorType::eInputAttachment:
-					case vk::DescriptorType::eSampledImage:
-					case vk::DescriptorType::eStorageImage: {
-						const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
-						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
-						break;
-					}
-				}
-			}
-		};
-		(fn(sets), ...);
-	}
+	// Label a region for a tool such as RenderDoc
+	STRATUM_API void BeginLabel(const string& label, const Vector4f& color = { 1,1,1,0 });
+	STRATUM_API void EndLabel();
 
 	STRATUM_API void ClearAttachments(const vector<vk::ClearAttachment>& value);
 
@@ -106,7 +53,7 @@ public:
 
 	// Find the range for a push constant (in the current pipeline's layout) named 'name' and push it
 	STRATUM_API bool PushConstant(const string& name, const byte_blob& data);
-	template<typename T> inline bool PushConstantRef(const string& name, const T& value) { return PushConstant(name, byte_blob(sizeof(T), &value)); }
+	template<typename T> inline bool PushConstantRef(const string& name, const T& value) { return PushConstant(name, byte_blob(&value, sizeof(T))); }
 
 	STRATUM_API void BindPipeline(shared_ptr<Pipeline> pipeline);
 	
@@ -154,20 +101,20 @@ public:
 	// Call Dispatch() on ceil(size / workgroupSize)
 	inline void DispatchTiled(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
-		DispatchTiled(vk::Extent3D(
+		mCommandBuffer.dispatch(
 			(dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width,
 			(dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 
-			(dim.depth + cp->WorkgroupSize().depth - 1) / cp->WorkgroupSize().depth));
+			(dim.depth + cp->WorkgroupSize().depth - 1) / cp->WorkgroupSize().depth);
 	}
 	inline void DispatchTiled(const vk::Extent2D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
-		DispatchTiled(vk::Extent3D((dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width, (dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 1));
+		mCommandBuffer.dispatch((dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width, (dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 1);
 	}
 	inline void DispatchTiled(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return DispatchTiled(vk::Extent3D(x,y,z)); }
 
 	inline Buffer::RangeView CreateStagingBuffer(const byte_blob& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
 		Buffer::RangeView staging(
-			make_shared<Buffer>(mDevice, "staging", data.size(), usage, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+			make_shared<Buffer>(mDevice, "staging", data.size(), usage | vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent),
 			1, 0, data.size());
 		HoldResource(staging.get());
 		memcpy(staging.data(), data.data(), staging.size_bytes());
@@ -176,13 +123,20 @@ public:
 	template<ranges::contiguous_range R>
 	inline Buffer::RangeView CreateStagingBuffer(const R& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
 		Buffer::RangeView staging(
-			make_shared<Buffer>(mDevice, "staging", data.size()*sizeof(ranges::range_value_t<R>), usage, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent),
+			make_shared<Buffer>(mDevice, "staging", data.size()*sizeof(ranges::range_value_t<R>), usage | vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent),
 			sizeof(ranges::range_value_t<R>), 0, data.size());
 		HoldResource(staging.get());
 		memcpy(staging.data(), data.data(), staging.size_bytes());
 		return staging;
 	}
 	
+	inline void CopyBuffer(Buffer::RangeView src, Buffer::RangeView dst) {
+		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must have the same size_bytes");
+		HoldResource(src.get());
+		HoldResource(dst.get());
+		mCommandBuffer.copyBuffer(*src.buffer(), *dst.buffer(), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
+	}
+
 	inline Buffer::RangeView CopyToDevice(const string& name, const byte_blob& data, vk::BufferUsageFlagBits usage) {
 		auto view = Buffer::RangeView(
 			make_shared<Buffer>(mDevice, name, data.size(), usage | vk::BufferUsageFlagBits::eTransferDst),
@@ -197,6 +151,57 @@ public:
 			sizeof(ranges::range_value_t<R>), 0, data.size());
 		CopyBuffer(CreateStagingBuffer(data), view);
 		return view;
+	}
+
+	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { barrier }, {}, {});
+	}
+	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& barrier) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { barrier }, {});
+	}
+	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& barrier) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { barrier });
+	}
+
+	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::RangeView& buffer) {
+		Barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcFlags, dstFlags, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *buffer.buffer(), buffer.offset(), buffer.size()));
+	}
+
+	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+		TransitionBarrier(image, subresourceRange, GuessStage(oldLayout), GuessStage(newLayout), oldLayout, newLayout);
+	}
+	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+		if (oldLayout == newLayout) return;
+		vk::ImageMemoryBarrier barrier = {};
+		barrier.oldLayout = oldLayout;
+		barrier.newLayout = newLayout;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image = image;
+		barrier.subresourceRange = subresourceRange;
+		barrier.srcAccessMask = GuessAccessMask(oldLayout);
+		barrier.dstAccessMask = GuessAccessMask(newLayout);
+		Barrier(srcStage, dstStage, barrier);
+	}
+
+	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
+	inline void TransitionImageDescriptors(T&... sets) {
+		(sets.FlushWrites(), ...);
+		auto fn = [&](auto& descriptorSet) {
+			for (auto&[idx, entry] : descriptorSet.mBoundDescriptors) {
+				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
+					case vk::DescriptorType::eCombinedImageSampler:
+					case vk::DescriptorType::eInputAttachment:
+					case vk::DescriptorType::eSampledImage:
+					case vk::DescriptorType::eStorageImage: {
+						const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
+						break;
+					}
+				}
+			}
+		};
+		(fn(sets), ...);
 	}
 
 	size_t mPrimitiveCount;

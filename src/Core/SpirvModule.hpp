@@ -44,7 +44,7 @@ struct SpirvModule {
 	string mEntryPoint;
 	unordered_map<string, vk::SpecializationMapEntry> mSpecializationMap;
 	unordered_map<string, DescriptorBinding> mDescriptorBindings;
-	unordered_map<string, vk::PushConstantRange> mPushConstants;
+	unordered_map<string, pair<uint32_t/*offset*/, uint32_t/*size*/>> mPushConstants;
 	unordered_map<string, RasterStageVariable> mStageInputs;
 	unordered_map<string, RasterStageVariable> mStageOutputs;
 	vk::Extent3D mWorkgroupSize;

@@ -19,7 +19,7 @@ public:
 		vector<vk::DescriptorSetLayoutBinding> b;
 		for (auto&[i, binding] : mBindings) {
 			if (binding.mImmutableSamplers.size()) {
-				auto& v = immutableSamplers.emplace_front(vector<vk::Sampler>());
+				auto& v = immutableSamplers.emplace_front(vector<vk::Sampler>(binding.mImmutableSamplers.size()));
 				ranges::transform(binding.mImmutableSamplers, v.begin(), &Sampler::operator*);
 				b.emplace_back(i, binding.mDescriptorType, binding.mDescriptorCount, binding.mStageFlags, v.data());
 			} else 
@@ -47,10 +47,11 @@ private:
 
 class DescriptorSet : public DeviceResource {
 public:
+	using TextureEntry = tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>;
 	using Entry = variant<
 		Buffer::RangeView, // storage/uniform buffer
 		TexelBufferView, // texel buffer
-		tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>, // sampler/image/combined image sampler
+		TextureEntry, // sampler/image/combined image sampler
 		byte_blob, // inline uniform buffer
 		vk::AccelerationStructureKHR>; // acceleration structure
 
@@ -64,7 +65,7 @@ private:
 	unordered_set<uint64_t> mPendingWrites;
 
 public:
-	inline DescriptorSet(Device& device, const string& name, shared_ptr<const DescriptorSetLayout> layout) : DeviceResource(device, name), mLayout(layout) {
+	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name) : DeviceResource(layout->mDevice, name), mLayout(layout) {
 		auto descriptorPool = mDevice.mDescriptorPool.lock();
 		vk::DescriptorSetAllocateInfo allocInfo = {};
 		allocInfo.descriptorPool = *descriptorPool;
@@ -72,6 +73,15 @@ public:
 		allocInfo.pSetLayouts = &**mLayout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
 		mDevice.SetObjectName(mDescriptorSet, mName);
+	}
+	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Entry>& bindings) : DescriptorSet(layout, name) {
+		for (const auto&[binding, entry] : bindings)
+			insert(binding, Entry(entry));
+	}
+	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, unordered_map<uint32_t, Entry>>& bindings) : DescriptorSet(layout, name) {
+		for (const auto&[binding, entries] : bindings)
+			for (const auto&[arrayIndex, entry] : entries)
+				insert(binding, arrayIndex, Entry(entry));
 	}
 	inline ~DescriptorSet() {
 		mBoundDescriptors.clear();
@@ -98,7 +108,7 @@ public:
 	inline void insert(uint32_t binding, Entry&& entry) { insert(binding, 0, forward<Entry>(entry)); }
 
 	inline void insert(uint32_t binding, uint32_t arrayIndex, const TextureView& view, vk::ImageLayout layout = vk::ImageLayout::eGeneral, const shared_ptr<Sampler>& sampler = nullptr) {
-		mBoundDescriptors[*mPendingWrites.emplace((uint64_t(binding)<<32)|arrayIndex).first] = tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>(sampler, view, layout);
+		mBoundDescriptors[*mPendingWrites.emplace((uint64_t(binding)<<32)|arrayIndex).first] = TextureEntry(sampler, view, layout);
 	}
 	inline void insert(uint32_t binding, const TextureView& view, vk::ImageLayout layout = vk::ImageLayout::eGeneral, const shared_ptr<Sampler>& sampler = nullptr) {
 		insert(binding, 0, view, layout, sampler);
@@ -151,7 +161,7 @@ public:
 			case vk::DescriptorType::eStorageImage:
 			case vk::DescriptorType::eCombinedImageSampler:
 			case vk::DescriptorType::eSampler: {
-				const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+				const auto& t = get<TextureEntry>(entry);
 				info.mImageInfo.imageLayout = get<vk::ImageLayout>(t);
 				info.mImageInfo.imageView = *get<TextureView>(t);
 				if (write.descriptorType == vk::DescriptorType::eCombinedImageSampler || write.descriptorType == vk::DescriptorType::eSampler)

@@ -7,14 +7,6 @@ target_compile_definitions(ShaderCompiler PUBLIC ${STM_COMPILE_DEFINITIONS})
 target_include_directories(ShaderCompiler PUBLIC "${EXTERN_DIR}/include")
 target_link_directories(ShaderCompiler PUBLIC "$ENV{VULKAN_SDK}/lib")
 target_link_libraries(ShaderCompiler PUBLIC Eigen3::Eigen Vulkan::Vulkan PRIVATE spirv-cross-c-shared shaderc_shared)
-# TODO: use find_library here
-if (EXISTS "${EXTERN_DIR}/bin/dxcompiler.dll" AND EXISTS "${EXTERN_DIR}/lib/dxcompiler.lib")
-  target_compile_definitions(ShaderCompiler PUBLIC WITH_DXC)
-  target_include_directories(ShaderCompiler PUBLIC "${EXTERN_DIR}/src/DirectXShaderCompiler/include")
-  target_link_libraries(ShaderCompiler PUBLIC "${EXTERN_DIR}/lib/dxclib.lib" "${EXTERN_DIR}/lib/dxcompiler.lib")
-  configure_file("${EXTERN_DIR}/bin/dxcompiler.dll" dxcompiler.dll COPYONLY)
-endif()
-
 
 # Stratum
 

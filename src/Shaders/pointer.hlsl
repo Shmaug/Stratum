@@ -27,13 +27,13 @@ v2f vs_pointer(uint index : SV_VertexID, uint instance : SV_InstanceID) {
 	float2 p = positions[index];
 
 	float3 dir = gP1 - gP0;
-	float3 view = gCamera.Position.xyz - gP0;
+	float3 view = gCamera.Position - gP0;
 	float3 right = normalize(cross(normalize(dir), normalize(view)));
 
 	float3 worldPos = lerp(gP0, gP1, p.y) + .5 * gWidth * right * p.x;
 
 	v2f o;
-	o.position = mul(gCamera.ViewProjection, float4(worldPos, 1));
+	o.position = mul(gCamera.ViewProjection, homogeneous(worldPos));
 	o.fade = p.x;
 	return o;
 }

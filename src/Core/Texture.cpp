@@ -11,55 +11,56 @@
 
 using namespace stm;
 
-tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& filename) {
+tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& filename, bool srgb) {
 	int x,y,channels;
 	stbi_info(filename.string().c_str(), &x, &y, &channels);
 
-	vk::Format format = vk::Format::eUndefined;
+	int desiredChannels = 0;
+	if (channels == 3) desiredChannels = 4;
 
 	byte* pixels = nullptr;
 	size_t stride = 0;
-	int desiredChannels = 4;
+	vk::Format format = vk::Format::eUndefined;
 	if (stbi_is_hdr(filename.string().c_str())) {
 		pixels = (byte*)stbi_loadf(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		stride = sizeof(float);
-		switch(channels) {
-			case 1: format = vk::Format::eR32Sfloat;
-			case 2: format = vk::Format::eR32G32Sfloat;
-			case 3: format = vk::Format::eR32G32B32Sfloat;
-			case 4: format = vk::Format::eR32G32B32A32Sfloat;
+		switch(desiredChannels ? desiredChannels : channels) {
+			case 1: format = vk::Format::eR32Sfloat; break;
+			case 2: format = vk::Format::eR32G32Sfloat; break;
+			case 3: format = vk::Format::eR32G32B32Sfloat; break;
+			case 4: format = vk::Format::eR32G32B32A32Sfloat; break;
 		}
 	} else if (stbi_is_16_bit(filename.string().c_str())) {
 		pixels = (byte*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		stride = sizeof(uint16_t);
-		switch(channels) {
-			case 1: format = vk::Format::eR16Unorm;
-			case 2: format = vk::Format::eR16G16Unorm;
-			case 3: format = vk::Format::eR16G16B16Unorm;
-			case 4: format = vk::Format::eR16G16B16A16Unorm;
+		switch(desiredChannels ? desiredChannels : channels) {
+			case 1: format = vk::Format::eR16Unorm; break;
+			case 2: format = vk::Format::eR16G16Unorm; break;
+			case 3: format = vk::Format::eR16G16B16Unorm; break;
+			case 4: format = vk::Format::eR16G16B16A16Unorm; break;
 		}
 	} else {
 		pixels = (byte*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
 		stride = sizeof(uint8_t);
-		switch(channels) {
-			case 1: format = vk::Format::eR8Unorm;
-			case 2: format = vk::Format::eR8G8Unorm;
-			case 3: format = vk::Format::eR8G8B8Unorm;
-			case 4: format = vk::Format::eR8G8B8A8Unorm;
+		switch (desiredChannels ? desiredChannels : channels) {
+			case 1: format = vk::Format::eR8Unorm; break;
+			case 2: format = vk::Format::eR8G8Unorm; break;
+			case 3: format = vk::Format::eR8G8B8Unorm; break;
+			case 4: format = vk::Format::eR8G8B8A8Unorm; break;
 		}
 	}
 	if (!pixels) throw invalid_argument("could not load " + filename.string());
-	if (desiredChannels > 0) channels = desiredChannels;
+	if (desiredChannels) channels = desiredChannels;
 
 	byte_blob data(pixels, x*y*channels*stride);
 	stbi_image_free(pixels);
 	return make_tuple(move(data), vk::Extent3D(x,y,1), move(format));
 }
 
-Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, uint32_t mipLevels, uint32_t arrayLayers, vk::ImageCreateFlags createFlags, vk::MemoryPropertyFlags properties)
+Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::ImageCreateFlags createFlags, vk::MemoryPropertyFlags properties, vk::ImageTiling tiling)
 		: DeviceResource(device, name), mExtent(extent), mFormat(format), mSampleCount(numSamples), mUsage(usage), 
 		mMipLevels(mipLevels ? mipLevels : (numSamples > vk::SampleCountFlagBits::e1 ? 1 : (uint32_t)floor(log2(max(mExtent.width, mExtent.height))) + 1)),
-		mCreateFlags(createFlags), mMemoryProperties(properties), mArrayLayers(arrayLayers), mTiling(vk::ImageTiling::eOptimal) {
+		mCreateFlags(createFlags), mMemoryProperties(properties), mArrayLayers(arrayLayers), mTiling(tiling) {
 	
 	vk::ImageCreateInfo imageInfo = {};
 	imageInfo.imageType = mExtent.depth > 1 ? vk::ImageType::e3D
@@ -83,15 +84,21 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 	mMemoryBlock = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), mMemoryProperties);
 	mDevice->bindImageMemory(mImage, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
 	
-	mAspectFlags = vk::ImageAspectFlagBits::eColor;
 	switch (mFormat) {
+	default:
+		mAspectFlags = vk::ImageAspectFlagBits::eColor;
+		break;
 	case vk::Format::eD16Unorm:
 	case vk::Format::eD32Sfloat:
 		mAspectFlags = vk::ImageAspectFlagBits::eDepth;
 		break;
+	case vk::Format::eS8Uint:
+		mAspectFlags = vk::ImageAspectFlagBits::eStencil;
+		break;
 	case vk::Format::eD16UnormS8Uint:
 	case vk::Format::eD24UnormS8Uint:
 	case vk::Format::eD32SfloatS8Uint:
+	case vk::Format::eX8D24UnormPack32:
 		mAspectFlags = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
 		break;
 	}

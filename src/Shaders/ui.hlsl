@@ -62,7 +62,7 @@ v2f vs_ui(uint instance : SV_InstanceID, uint index : SV_VertexID) {
 	if (gTransformStride) {
 		uint4 addrs = instance*gTransformStride + uint4(0,16,32,48);
 		float4x4 transform = float4x4(gTransforms.Load4(addrs[0]), gTransforms.Load4(addrs[1]), gTransforms.Load4(addrs[2]), gTransforms.Load4(addrs[3])); 
-		o.position = mul(gCamera.ViewProjection, mul(float4(p, 1.0), transform));
+		o.position = mul(gCamera.ViewProjection, mul(homogeneous(p), transform));
 	} else
 		o.position = float4(p.xy*gPushConstants.gScreenTexelSize*2 - 1, p.z, 1);
 	return o;

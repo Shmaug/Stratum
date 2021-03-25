@@ -107,8 +107,8 @@ template<> struct tuplefier<vk::PipelineVertexInputStateCreateInfo> {
 	inline auto operator()(vk::PipelineVertexInputStateCreateInfo&& v) const {
 		return forward_as_tuple(
 				v.flags,
-				ranges::subrange(v.pVertexBindingDescriptions, v.pVertexBindingDescriptions + v.vertexBindingDescriptionCount),
-				ranges::subrange(v.pVertexAttributeDescriptions, v.pVertexAttributeDescriptions + v.vertexAttributeDescriptionCount));
+				span(v.pVertexBindingDescriptions, v.vertexBindingDescriptionCount),
+				span(v.pVertexAttributeDescriptions, v.vertexAttributeDescriptionCount));
 	}
 };
 template<> struct tuplefier<vk::PipelineColorBlendAttachmentState> {
@@ -176,8 +176,8 @@ template<> struct tuplefier<vk::PipelineViewportStateCreateInfo> {
 	inline auto operator()(vk::PipelineViewportStateCreateInfo&& v) const {
 		return forward_as_tuple(
 			v.flags,
-			ranges::subrange(v.pViewports, v.pViewports + v.viewportCount),
-			ranges::subrange(v.pScissors, v.pScissors + v.scissorCount));
+			span(v.pViewports, v.viewportCount),
+			span(v.pScissors, v.scissorCount));
 	}
 };
 template<> struct tuplefier<vk::PushConstantRange> {

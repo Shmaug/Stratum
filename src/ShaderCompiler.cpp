@@ -1,7 +1,3 @@
-#ifdef WITH_DXC
-#include <wrl.h>
-#include <dxc/dxcapi.h>
-#endif
 #include <spirv_cross/spirv_cross_c.h>
 #include <shaderc/shaderc.hpp>
 
@@ -28,7 +24,7 @@ public:
 				if (fs::exists(p / requested_source))
 					fullpath = p / requested_source;
 
-		if (mSources.count(fullpath.string()) == 0) mSources.emplace(fullpath.string(), ReadFile(fullpath));
+		if (mSources.count(fullpath.string()) == 0) mSources.emplace(fullpath.string(), ReadFile<string>(fullpath));
 		auto it = mSources.find(fullpath.string());
 
 		shaderc_include_result* response = new shaderc_include_result();
@@ -187,80 +183,45 @@ unordered_map<string, SpirvModule> ShaderCompiler::ParseCompilerDirectives(const
 
 	return modules;
 }
+
 vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const string& entryPoint, vk::ShaderStageFlagBits stage, const unordered_set<string>& defines) {
 	bool hlsl = filename.extension() == ".hlsl";
-	#if WITH_DXC
 	if (hlsl) {
-		using namespace Microsoft::WRL;
-		ComPtr<IDxcLibrary> library;
-		ComPtr<IDxcCompiler> compiler;
-		DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&library));
-		DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
-
-		ComPtr<IDxcBlobEncoding> sourceBlob;
-		uint32_t codePage = CP_UTF8;
-		library->CreateBlobFromFile(filename.c_str(), &codePage, &sourceBlob);
-		ComPtr<IDxcIncludeHandler> includeHandler;
-		library->CreateIncludeHandler(&includeHandler);
-
-		vector<const wchar_t*> args {
-			L"-spirv",
-			L"-fspv-target-env=vulkan1.2",
-			L"-fspv-reflect",
-			L"-Zpc", // column-major matrix packing
-			L"-Zi",  // debug information
-		};
-
-		vector<wstring> wincludes;
-		for (const auto& p : mIncludePaths) wincludes.push_back(L"-I " + p.wstring());
-		for (const auto& inc : wincludes) args.push_back(inc.c_str());
-
-		wstring entryP = s2ws(entryPoint);
-
-		wstring targetProfile;
-		switch (stage) {
-			case vk::ShaderStageFlagBits::eCompute:
-				targetProfile = L"cs_6_6";
-				break;
-			case vk::ShaderStageFlagBits::eVertex:
-				targetProfile = L"vs_6_6";
-				break;
-			case vk::ShaderStageFlagBits::eFragment:
-				targetProfile = L"ps_6_6";
-				break;
+		fs::path vk_sdk = fs::path(std::getenv("VULKAN_SDK"));
+		if (fs::exists(vk_sdk)) {
+			fs::path tmpfile =  fs::temp_directory_path()/fs::path(entryPoint).replace_extension("spv");
+			string cmd = (vk_sdk/fs::path("Bin")/fs::path("dxc")).string();
+			cmd.reserve(1024); // overkill lol
+			cmd += " -nologo -spirv -fspv-target-env=vulkan1.2 -fspv-reflect -Zpr -Zi ";
+			cmd += filename.string() + " -Fo " + tmpfile.string();
+			cmd += " -E " + entryPoint;
+			switch (stage) {
+				case vk::ShaderStageFlagBits::eCompute:
+					cmd += " -T cs_6_6";
+					break;
+				case vk::ShaderStageFlagBits::eVertex:
+					cmd += " -T vs_6_6";
+					break;
+				case vk::ShaderStageFlagBits::eFragment:
+					cmd += " -T ps_6_6";
+					break;
+				case vk::ShaderStageFlagBits::eRaygenKHR:
+					cmd += " -T ps_6_6";
+					break;
+			}
+			for (const auto& p : mIncludePaths) cmd += " -I " + p.string();
+			for (const auto& s : defines) cmd += " -D " + s;
+			cout << cmd << endl;
+			if (system(cmd.c_str()) == 0)
+				return ReadFile<vector<uint32_t>>(tmpfile);
 		}
-		
-		vector<wstring> wdefines;
-		wdefines.reserve(defines.size()*2);
-		vector<DxcDefine> dxcDefines;
-		for (const auto& s : defines) {
-			auto eq = s.find('=');
-			wdefines.push_back(s2ws(s.substr(0,eq)));
-			if (eq == string::npos) wdefines.push_back(wstring());
-			else 										wdefines.push_back(s2ws(s.substr(eq+1)));
-			dxcDefines.push_back({ (wdefines.end()-2)->c_str(), (wdefines.end()-1)->c_str() });
-		}
-
-		ComPtr<IDxcOperationResult> result;
-		compiler->Compile(sourceBlob.Get(), filename.c_str(), entryP.c_str(), targetProfile.c_str(), args.data(), (uint32_t)args.size(), dxcDefines.data(), (uint32_t)dxcDefines.size(), includeHandler.Get(), &result);
-
-		HRESULT status;
-		result->GetStatus(&status);
-		if (status != S_OK) {
-			ComPtr<IDxcBlobEncoding> msg;
-			result->GetErrorBuffer(msg.GetAddressOf());
-			throw logic_error((char*)msg->GetBufferPointer());
-		}
-
-		ComPtr<IDxcBlob> spirvBlob;
-		DXC_OUT_KIND outputKind = (DXC_OUT_KIND)result->GetResult(&spirvBlob);
-		vector<uint32_t> r(spirvBlob->GetBufferSize()/sizeof(uint32_t));
-		memcpy(r.data(), spirvBlob->GetBufferPointer(), spirvBlob->GetBufferSize());
-		return r;
 	}
-	#endif
 
-	string source = ReadFile(filename);
+	cout << "glslang -E " << entryPoint << " " << filename << " -g -Os";
+	for (const auto& s : defines) cout << " -D" + s;
+	cout << endl;
+
+	string source = ReadFile<string>(filename);
 
 	// Compile with shaderc
 	CompileOptions options;
@@ -296,6 +257,7 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 		throw logic_error(result.GetErrorMessage());
 	return spirv;
 }
+
 void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 	spvc_context context;
 	spvc_context_create(&context);
@@ -313,25 +275,26 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 	
 	size_t count;
 	const spvc_specialization_constant* constants;
+	const spvc_reflected_resource* resource_list;
+
 	spvc_compiler_get_specialization_constants(compiler, &constants, &count);
-	for (const auto& c : ranges::subrange(constants, constants+count)) {
-		auto specConstant = shaderModule.mSpecializationMap[spvc_compiler_get_name(compiler, c.id)];
+	for (const auto& c : span(constants, count)) {
+		auto& specConstant = shaderModule.mSpecializationMap[spvc_compiler_get_name(compiler, c.id)];
 		specConstant.constantID = c.constant_id;
 		specConstant.size = SizeOf(spvc_compiler_get_type_handle(compiler, spvc_constant_get_type(spvc_compiler_get_constant_handle(compiler, c.id))), compiler);
 	}
 
-	const spvc_reflected_resource* list;
-	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_PUSH_CONSTANT, &list, &count);
-	for (const auto& c : ranges::subrange(list, list+count)) {
-		spvc_type spirType = spvc_compiler_get_type_handle(compiler, c.base_type_id);
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_PUSH_CONSTANT, &resource_list, &count);
+	for (const auto& r : span<const spvc_reflected_resource>(resource_list, count)) {
+		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.base_type_id);
+		size_t c = 0;
+		uint32_t offset;
 		for (uint32_t i = 0; i < spvc_type_get_num_member_types(spirType); i++) {
-			auto& pushConstant = shaderModule.mPushConstants[spvc_compiler_get_member_name(compiler, c.base_type_id, i)];
-			pushConstant.stageFlags = shaderModule.mStage;
-			spvc_compiler_type_struct_member_offset(compiler, spirType, i, &pushConstant.offset);
-			size_t c = 0;
+			const char* name = spvc_compiler_get_member_name(compiler, r.base_type_id, i);
+			spvc_compiler_type_struct_member_offset(compiler, spirType, i, &offset);
 			spvc_compiler_get_declared_struct_member_size(compiler, spirType, i, &c);
 			if (!c) c = SizeOf(spvc_compiler_get_type_handle(compiler, spvc_type_get_member_type(spirType, i)), compiler);
-			pushConstant.size = (uint32_t)c;
+			shaderModule.mPushConstants.emplace(name, make_pair(offset, (uint32_t)c));
 		}
 	}
 
@@ -339,21 +302,24 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		{ SPVC_RESOURCE_TYPE_SAMPLED_IMAGE, vk::DescriptorType::eSampledImage },
 		{ SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, vk::DescriptorType::eSampledImage },
 		{ SPVC_RESOURCE_TYPE_STORAGE_IMAGE, vk::DescriptorType::eStorageImage },
-		{ SPVC_RESOURCE_TYPE_SEPARATE_SAMPLERS, vk::DescriptorType::eSampler },
-		{ SPVC_RESOURCE_TYPE_SUBPASS_INPUT, vk::DescriptorType::eInputAttachment },
 		{ SPVC_RESOURCE_TYPE_STORAGE_BUFFER, vk::DescriptorType::eStorageBuffer },
 		{ SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, vk::DescriptorType::eUniformBuffer },
+		{ SPVC_RESOURCE_TYPE_SEPARATE_SAMPLERS, vk::DescriptorType::eSampler },
+		{ SPVC_RESOURCE_TYPE_SUBPASS_INPUT, vk::DescriptorType::eInputAttachment },
 		{ SPVC_RESOURCE_TYPE_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
 	};
 	for (const auto&[spvtype,descriptorType] : typeMap) {
-		spvc_resources_get_resource_list_for_type(resources, spvtype, &list, &count);
-		for (const auto& r : ranges::subrange(list, list+count)){
+		spvc_resources_get_resource_list_for_type(resources, spvtype, &resource_list, &count);
+		for (const auto& r : span(resource_list, count)) {
 			spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
-			DescriptorBinding& binding = shaderModule.mDescriptorBindings[r.name];
-			binding.mDescriptorType = descriptorType;
+			DescriptorBinding& binding = shaderModule.mDescriptorBindings[spvc_compiler_get_name(compiler, r.id)];
 			binding.mSet = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationDescriptorSet);
 			binding.mBinding = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationBinding);
 			binding.mStageFlags |= shaderModule.mStage;
+			if (spvc_type_get_image_dimension(spirType) == SpvDimBuffer)
+				binding.mDescriptorType = spvc_type_get_image_is_storage(spirType) ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eUniformTexelBuffer;
+			else
+				binding.mDescriptorType = descriptorType;
 			binding.mDescriptorCount = 1;
 			uint32_t n = spvc_type_get_num_array_dimensions(spirType);
 			for (uint32_t i = 0; i < n; i++)
@@ -361,10 +327,9 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		};
 	}
 
-
 	auto ReflectStageVariables = [&](unordered_map<string, RasterStageVariable>& vars, const spvc_reflected_resource& r) {
 		spvc_type spirType = spvc_compiler_get_type_handle(compiler, r.type_id);
-		auto& var = vars[r.name];
+		auto& var = vars[spvc_compiler_get_name(compiler, r.id)];
 		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
 		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
 		var.mAttributeId = stovertexattribute(spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
@@ -373,11 +338,11 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			var.mAttributeId.mTypeIndex++;
 	};
 	
-	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_INPUT, &list, &count);
-	ranges::for_each_n(list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageInputs)));
-	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_OUTPUT, &list, &count);
-	ranges::for_each_n(list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageOutputs)));
-	
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_INPUT, &resource_list, &count);
+	ranges::for_each_n(resource_list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageInputs)));
+	spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_STAGE_OUTPUT, &resource_list, &count);
+	ranges::for_each_n(resource_list, count, bind_front(ReflectStageVariables, ref(shaderModule.mStageOutputs)));
+
 	shaderModule.mWorkgroupSize = vk::Extent3D(
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 0), 
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 1), 
@@ -416,7 +381,7 @@ int main(int argc, char* argv[]) {
 			results.merge(compiler(i));
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), i.string().c_str());
-			throw;
+			return EXIT_FAILURE;
 		}
 
 	if (!output.empty()) {
@@ -425,7 +390,7 @@ int main(int argc, char* argv[]) {
 			printf(output.string().c_str());
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile writing %s\n", e.what(), output.string().c_str());
-			throw;
+			return EXIT_FAILURE;
 		}
 	}
 

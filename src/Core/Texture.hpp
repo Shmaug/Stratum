@@ -4,14 +4,23 @@
 
 namespace stm {
 
+// TODO: TextureView object for Swapchain images, to allow for the swapchain to be used directly in a renderpass
+
 class Texture : public DeviceResource {
 public:
-	STRATUM_API static tuple<byte_blob, vk::Extent3D, vk::Format> LoadPixels(const fs::path& filename);
+	using PixelData = tuple<byte_blob, vk::Extent3D, vk::Format>;
+	STRATUM_API static PixelData LoadPixels(const fs::path& filename, bool srgb = true);
 
 	// If mipLevels = 0, will auto-determine according to extent 
-	STRATUM_API Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, uint32_t mipLevels = 0, uint32_t arrayLayers = 1, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal);
-	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, const vk::AttachmentDescription& description, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal)
-		: Texture(device, name, extent, description.format, description.samples, usage, 1, 1, createFlags, memoryProperties) {}
+	STRATUM_API Texture(Device& device, const string& name,
+		const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0,
+		vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1, 
+		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, 
+		vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageTiling tiling = vk::ImageTiling::eOptimal);
+	
+	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, const vk::AttachmentDescription& description, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, 
+		vk::ImageCreateFlags createFlags = {}, vk::MemoryPropertyFlags memoryProperties = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageTiling tiling = vk::ImageTiling::eOptimal)
+		: Texture(device, name, extent, description.format, 1, 1, description.samples, usage, createFlags, memoryProperties, tiling) {}
 	inline ~Texture() {
 		for (auto&[k,v] : mViews) mDevice->destroyImageView(v);
 		mDevice->destroyImage(mImage);
@@ -29,6 +38,7 @@ public:
 	inline uint32_t ArrayLayers() const { return mArrayLayers; }
 	inline vk::ImageAspectFlags AspectFlags() const { return mAspectFlags; }
 	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
+	inline const Device::Memory::Block& Memory() const { return *mMemoryBlock; }
 	inline vk::ImageCreateFlags CreateFlags() const { return mCreateFlags; }
 
 	// Texture must support vk::ImageAspect::eColor and vk::ImageLayout::eTransferDstOptimal
@@ -117,6 +127,7 @@ public:
 			texture->mViews.emplace(key, mView);
 		}
 	}
+
 	TextureView& operator=(const TextureView&) = default;
 	TextureView& operator=(TextureView&& v) = default;
 	inline bool operator==(const TextureView& rhs) const = default;
