@@ -193,10 +193,12 @@ int main(int argc, char** argv) {
 				{ "primary_depth", { depthAttachment, RenderPass::AttachmentType::eDepthStencil, blendOpaque } },
 				{ "primary_resolve", { resolveAttachment, RenderPass::AttachmentType::eResolve, blendOpaque } } },
 				{ "shadows"} };
-		shared_ptr<RenderPass> renderPass = make_shared<RenderPass>(instance->Device(), "main", { shadows, main_render });
+		shared_ptr<RenderPass> renderPass = make_shared<RenderPass>(instance->Device(), "main", vk::ArrayProxy<const RenderPass::SubpassDescription>{ shadows, main_render });
 
-		auto pbr = make_shared<GraphicsPipeline>("pbr", *renderPass, 0, testMesh->Geometry(),
-			gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"), nullptr, nullptr, immutableSamplers);
+		auto pbr_depth = make_shared<GraphicsPipeline>("pbr", *renderPass, 0, testMesh->Geometry(),
+			gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"), Pipeline::SpecializationMap{ { "gDepth", byte_blob(vk::Bool32(true)) } }, immutableSamplers);
+		auto pbr = make_shared<GraphicsPipeline>("pbr", *renderPass, 1, testMesh->Geometry(),
+			gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"), Pipeline::SpecializationMap(), immutableSamplers);
 		
 		CameraData gCamera;
 		MaterialData gMaterial;
@@ -276,6 +278,14 @@ int main(int argc, char** argv) {
 				commandBuffer->TransitionImageDescriptors(*perCamera, *perMaterial, *perObject);
 				
 				commandBuffer->BeginRenderPass(renderPass, framebuffer, vector<vk::ClearValue>{ vk::ClearColorValue(std::array<float,4>{0.25f, 0.3f, 0.9f, 1}), vk::ClearDepthStencilValue{1.f,0}, vk::ClearColorValue(std::array<float,4>{0,0,0,0}) });
+				
+				commandBuffer->BindPipeline(pbr_depth);
+				(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)gShadowAtlas->Extent().height, (float)gShadowAtlas->Extent().width, -(float)gShadowAtlas->Extent().height, 0, 1) });
+				(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), vk::Extent2D(gShadowAtlas->Extent().width, gShadowAtlas->Extent().height)) });
+				(*commandBuffer)->setLineWidth(1);
+
+				commandBuffer->NextSubpass();
+				
 				commandBuffer->BindPipeline(pbr);
 				(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)framebuffer->Extent().height, (float)framebuffer->Extent().width, -(float)framebuffer->Extent().height, 0, 1) });
 				(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), framebuffer->Extent()) });

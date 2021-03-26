@@ -1,5 +1,6 @@
 #pragma once
 
+#include "byte_blob.hpp"
 #include "tuplefier.hpp"
 
 namespace stm {
@@ -63,6 +64,13 @@ struct hash<R> {
 		size_t h = 0;
 		for (const auto& i : r) h = stm::hash_combine(h, i);
 		return h;
+	}
+};
+
+template<>
+struct hash<stm::byte_blob> {
+	inline size_t operator()(const stm::byte_blob& b) const {
+		return hash<vector<byte>>()((vector<byte>)b);
 	}
 };
 

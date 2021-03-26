@@ -23,8 +23,7 @@ public:
 		unordered_set<string> mSubpassDependencies;
 	};
 
-	template<ranges::range R> requires(convertible_to<ranges::range_reference_t<R>, SubpassDescription&>)
-	inline RenderPass(Device& device, const string& name, const R& subpassDescriptions)
+	inline RenderPass(Device& device, const string& name, const vk::ArrayProxy<const SubpassDescription>& subpassDescriptions)
 		: DeviceResource(device, name), mHash(hash_combine(name, subpassDescriptions)) {
 		
 		// Resolve dependencies & sort subpasses

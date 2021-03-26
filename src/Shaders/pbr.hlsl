@@ -1,7 +1,7 @@
-#pragma compile vertex vs_pbr fragment fs_pbr_depth
 #pragma compile vertex vs_pbr fragment fs_pbr
 
 [[vk::constant_id(0)]] const bool gAlphaClip = true;
+[[vk::constant_id(1)]] const bool gDepth = false;
 
 #include <bsdf.hlsli>
 
@@ -41,9 +41,13 @@ v2f vs_pbr(
 }
 
 float4 fs_pbr(v2f i) : SV_Target0 {
+	float4 color = gMaterial.gBaseColor * gBaseColorTexture.Sample(gSampler, i.texcoord);
+
+	if (gAlphaClip && color.a < gMaterial.gAlphaCutoff) discard;
+	if (gDepth) return i.position.z;
+
 	float3 view = normalize(-i.cameraPos.xyz);
 
-	float4 color = gMaterial.gBaseColor * gBaseColorTexture.Sample(gSampler, i.texcoord);
 	float2 metallicRoughness = gMetallicRoughnessTexture.Sample(gSampler, i.texcoord);
 	float4 bump = gNormalTexture.Sample(gSampler, i.texcoord);
 	BSDF bsdf = make_BSDF(color.rgb, metallicRoughness.x*gMaterial.gMetallic, metallicRoughness.y*gMaterial.gRoughness, gMaterial.gEmission);
@@ -58,9 +62,4 @@ float4 fs_pbr(v2f i) : SV_Target0 {
 		if (SampleLight(gLights[l], i.cameraPos.xyz, Le, Li))
 			eval += Le * Evaluate(bsdf, Li, view, normal, i.cameraPos.xyz);
 	return float4(eval, color.a);
-}
-
-float fs_pbr_depth(float4 position : SV_Position, in float2 texcoord : TEXCOORD2) : SV_Target0 {
-	if (gAlphaClip && gBaseColorTexture.Sample(gSampler, texcoord).a * gMaterial.gBaseColor.a < gMaterial.gAlphaCutoff) discard;
-	return position.z;
 }
