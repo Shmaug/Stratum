@@ -22,7 +22,7 @@ public:
 	};
 	
 private:
-	vector<unique_ptr<Node>> mTopologicalNodes;
+	deque<unique_ptr<Node>> mTopologicalNodes; // weak topological ordering, also maybe use vector?
 	unordered_multimap<type_index, Node*> mNodesByType;
 	unordered_map<Node*, Node*> mParentEdges; // node -> node.parent
 	unordered_multimap<Node*, Node*> mChildrenEdges; // node -> node.child
@@ -166,6 +166,14 @@ public:
 		return ranges::subrange(descendents_begin(node), descendents_end(node));
 	}
 
+	/*
+	 * This provides a weakly ordered iterator which guarantees that every parent will be evaluated before its children,
+	 * but does not guarantee that it will iterate in bfs/dfs order (unless sort() has been called)
+	 */
+	inline auto nodes() {
+		return views::transform(mTopologicalNodes, [](auto& uptr) { return uptr.get(); });
+	}
+
 	using type_iterator = unordered_multimap<type_index, Node*>::iterator;
 	template<typename NodeType> requires(derived_from(NodeType, Node))
 	inline type_iterator types_begin() {
@@ -221,15 +229,43 @@ public:
 		mChildrenEdges.insert(begin(scene.mChildrenEdges), end(scene.mChildrenEdges));
 	}
 
+	/*
+	 * Expensive so it's better to remove in batches
+	 */
+	inline void remove(const vector<Node*>& nodes) {
+		unordered_set<Node*> parents(begin(nodes), end(nodes));
+		deque<unique_ptr<Node>> cleaned;
+
+		size_t startIdx;
+		for(startIdx = 0; !parents.contains(mTopologicalNodes[startIdx].get()); startIdx++);
+
+		const auto removeBegin = next(begin(mTopologicalNodes), startIdx), removeEnd = end(mTopologicalNodes);
+		for (auto removeItr = removeBegin; removeItr != removeEnd; removeItr++) {
+			if (!parents.contains(removeItr->get())) {
+				Node* parent = mParentEdges.at(removeItr->get());
+				if(!parents.contains(parent)) {
+					cleaned.push_back(move(*removeItr));
+				}
+				else {
+					parents.insert(removeItr->get());
+				}
+			}
+		}
+
+		mTopologicalNodes.erase(removeBegin, removeEnd);
+		mTopologicalNodes.insert(end(mTopologicalNodes), make_move_iterator(begin(cleaned)), make_move_iterator(end(cleaned)));
+	}
+
+	/* 
+	 * sketch, assumes all nodes can be accessed by a root descendent iterator (there are no free nodes and no extra roots)
+	 * releases all the pointers and then re-claims them when traversing
+	 */
 	inline void traversal_sort() {
-		// sketch, assumes all nodes can be accessed by a root descendent iterator (there are no free nodes and no extra roots)
 		Node* r = root();
-		const size_t numNodes = mTopologicalNodes.size();
 		for (unique_ptr<Node>& p : mTopologicalNodes) p.release();
 
-		mTopologicalNodes.clear();
-		mTopologicalNodes.reserve(numNodes);
-		ranges::copy(views::transform(descendents(r), [](Node& n) { return unique_ptr<Node>(&n); }), back_inserter(mTopologicalNodes));
+		auto overwrite_inserter = inserter(mTopologicalNodes, begin(mTopologicalNodes));
+		ranges::copy(views::transform(descendents(r), [](Node& n) { return unique_ptr<Node>(&n); }), overwrite_inserter);
 	}
 
 	template<typename F> requires(invocable<F,Node&>)
@@ -272,7 +308,7 @@ public:
 class WeakNodePtr
 {
 public:
-	WeakNodePtr(Scene::Node* ptr) : mPtr(ptr) {
+	explicit WeakNodePtr(Scene::Node* ptr) : mPtr(ptr) {
 		if (!sIndexCache.contains(mPtr)) {
 			sIndexCache.insert(make_pair(mPtr, 0));
 		}
@@ -296,6 +332,10 @@ public:
 			sIndexCache[mPtr] = distance(begin(scene.mTopologicalNodes), itr);
 		}
 		return true;
+	}
+
+	inline size_t Index() const {
+		return sIndexCache.at(mPtr);
 	}
 
 private:

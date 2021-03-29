@@ -2,6 +2,7 @@
 #include "Core/CommandBuffer.hpp"
 #include "Core/Mesh.hpp"
 #include "Core/Profiler.hpp"
+#include "Scene/GuiContext.hpp"
 
 using namespace stm;
 

@@ -1,13 +1,12 @@
 #include "GuiContext.hpp"
 
+#include "Material.hpp"
 #include "Camera.hpp"
 #include "imgui.h"
 
 using namespace stm;
 
-GuiContext::GuiContext(stm::Scene& scene) : mScene(scene) {
-	mIconsTexture = mScene.mInstance.Device().FindOrLoadAsset<Texture>("Assets/Textures/icons.png");
-
+GuiContext::GuiContext() {
 	SpirvModuleGroup uiSpirv(scene.mInstance.Device(), "Assets/Shaders/ui.stmb");
 	
 	mMaterials["ui"] = make_shared<Material>("GuiContext/UI", uiSpirv);

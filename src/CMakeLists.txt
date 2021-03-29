@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.0)
 # ImGui dir for compiling with project
 set(IMGUI_DIR "${EXTERN_DIR}/include/src/imgui")
 # TODO: why does freetype require png??
-find_package(PNG REQUIRED)
+#find_package(PNG REQUIRED)
 
 # ShaderCompiler
 
@@ -27,9 +27,9 @@ file(GLOB IMGUI_CPP "${IMGUI_DIR}/**.cpp")
 file(GLOB_RECURSE STRATUM_HPP "Core/*.hpp")
 file(GLOB_RECURSE STRATUM_CPP "Core/*.cpp")
 
-add_executable(Stratum main.cpp ${STRATUM_CPP} stratum.rc ${IMGUI_CPP})
+add_executable(Stratum main.cpp ${STRATUM_CPP} stratum.rc ${IMGUI_CPP} "Scene/Scene.cpp" "Scene/GuiContext.cpp")
 target_compile_definitions(Stratum PUBLIC ${STM_COMPILE_DEFINITIONS} STRATUM_CORE)
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp msdfgen::msdfgen-ext PNG::PNG zlibstatic)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp msdfgen::msdfgen-ext zlibstatic)
 
 set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
 
