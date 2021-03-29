@@ -1,10 +1,6 @@
 #!/bin/bash
 
 git submodule update --init
-cd extern/src/DirectXShaderCompiler
-git submodule update --init
-cd ../../..
-python extern/src/shaderc/utils/git-sync-deps
 
 mkdir -p extern/include
 wget -qO "extern/include/json.hpp" "https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp"

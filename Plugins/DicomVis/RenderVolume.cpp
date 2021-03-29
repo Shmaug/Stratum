@@ -80,10 +80,10 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     commandBuffer.BindPipeline(pipeline);
 
     auto ds = commandBuffer.GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
-    ds->CreateTextureDescriptor("Volume", mRawVolume, pipeline);
-    if (mRawMask) ds->CreateTextureDescriptor("RawMask", mRawMask, pipeline);
-    ds->CreateTextureDescriptor("Output", mBakedVolume, pipeline);
-    ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);
+    ds->WriteTexture("Volume", mRawVolume, pipeline);
+    if (mRawMask) ds->WriteTexture("RawMask", mRawMask, pipeline);
+    ds->WriteTexture("Output", mBakedVolume, pipeline);
+    ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
     commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
@@ -99,13 +99,13 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
 
     auto ds = commandBuffer.GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
     if (mBakedVolume)
-      ds->CreateTextureDescriptor("Volume", mBakedVolume, pipeline);
+      ds->WriteTexture("Volume", mBakedVolume, pipeline);
     else {
-      ds->CreateTextureDescriptor("Volume", mRawVolume, pipeline);
-      if (mRawMask) ds->CreateTextureDescriptor("RawMask", mRawMask, pipeline);
+      ds->WriteTexture("Volume", mRawVolume, pipeline);
+      if (mRawMask) ds->WriteTexture("RawMask", mRawMask, pipeline);
     }
-    ds->CreateTextureDescriptor("Output", mGradient, pipeline);
-    ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);
+    ds->WriteTexture("Output", mGradient, pipeline);
+    ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
     commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
@@ -156,12 +156,12 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   auto renderTarget = framebuffer->Attachment("stm_main_resolve");
 
   auto ds = commandBuffer.GetDescriptorSet("Draw Volume", pipeline->mDescriptorSetLayouts[0]);
-  ds->CreateTextureDescriptor("RenderTarget", renderTarget, pipeline);
-  ds->CreateTextureDescriptor("DepthBuffer", framebuffer->Attachment("stm_main_depth"), pipeline, 0, vk::ImageLayout::eShaderReadOnlyOptimal);
-  ds->CreateBufferDescriptor("VolumeUniforms", mUniformBuffer, pipeline);
-  ds->CreateTextureDescriptor("Volume", mBakedVolume ? mBakedVolume : mRawVolume, pipeline);
-  if (mRawMask) ds->CreateTextureDescriptor("RawMask", mRawMask, pipeline);
-  if (mGradient) ds->CreateTextureDescriptor("Gradient", mGradient, pipeline);
+  ds->WriteTexture("RenderTarget", renderTarget, pipeline);
+  ds->WriteTexture("DepthBuffer", framebuffer->Attachment("stm_main_depth"), pipeline, 0, vk::ImageLayout::eShaderReadOnlyOptimal);
+  ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
+  ds->WriteTexture("Volume", mBakedVolume ? mBakedVolume : mRawVolume, pipeline);
+  if (mRawMask) ds->WriteTexture("RawMask", mRawMask, pipeline);
+  if (mGradient) ds->WriteTexture("Gradient", mGradient, pipeline);
   commandBuffer.BindDescriptorSet(ds, 0);
 
   commandBuffer.PushConstantRef("CameraPosition", camPos[0]);

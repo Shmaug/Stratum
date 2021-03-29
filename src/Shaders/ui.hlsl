@@ -1,5 +1,4 @@
-#pragma compile vertex vs_ui
-#pragma compile fragment fs_ui
+#pragma compile vertex vs_ui fragment fs_ui
 
 #include <stratum.hlsli>
 

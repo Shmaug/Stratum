@@ -222,7 +222,6 @@ Instance::Instance(int argc, char** argv) {
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
 	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, validationLayers);
-	mWindow->CreateSwapchain(*mDevice);
 }
 Instance::~Instance() {
 	mWindow.reset();
@@ -274,25 +273,19 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
-		if (mn->same_screen){
+		if (mn->same_screen)
 			mWindow->mMouseState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
-			if (mWindow->mXCBWindow == mn->event)
-				if (mWindow->mTargetCamera){
-					Vector2f uv = mWindow->mMouseState.mCursorPos / Vector2f((float)mWindow->mClientRect.extent.width, (float)mWindow->mClientRect.extent.height);
-					mMouseKeyboard->mMousePointer.mWorldRay = mWindow->mTargetCamera->ScreenToWorldRay(uv);
-				}
-		}
 		break;
 
 	case XCB_KEY_PRESS:
 		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindow->mMouseState.mKeys[kc] = true;
+		mWindow->mMouseState.mKeys.insert(kc);
 		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_LALT))
 			mWindow->Fullscreen(!mWindow->Fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
 		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindow->mMouseState.mKeys[kc] = false;
+		mWindow->mMouseState.mKeys.erase(kc);
 		break;
 
 	case XCB_BUTTON_PRESS:
@@ -352,6 +345,10 @@ xcb_generic_event_t* Instance::PollEvent() {
 #endif
 
 bool Instance::PollEvents() {
+	mWindow->mLastMouseState = mWindow->mMouseState;
+	mWindow->mMouseState.mScrollDelta = 0;
+	mWindow->mMouseState.mCursorDelta = Vector2f::Zero();
+
 	#ifdef __linux
 	xcb_generic_event_t* event;
 	while (event = PollEvent()) {
@@ -393,18 +390,17 @@ bool Instance::PollEvents() {
 
 			if (raw.header.dwType == RIM_TYPEMOUSE) {
 				mWindow->mMouseState.mCursorDelta += Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_LEFT] = true;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mMouseState.mKeys[MOUSE_LEFT] = false;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mMouseState.mKeys[MOUSE_RIGHT] = true;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mMouseState.mKeys[MOUSE_RIGHT] = false;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = true;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 		mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = false;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_X1] = true;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 		mWindow->mMouseState.mKeys[MOUSE_X1] = false;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mWindow->mMouseState.mKeys[MOUSE_X2] = true;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 		mWindow->mMouseState.mKeys[MOUSE_X2] = false;
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) mWindow->mMouseState.mScrollDelta += (short)(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
-
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_LEFT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mMouseState.mKeys.erase(MOUSE_LEFT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mMouseState.mKeys.insert(MOUSE_RIGHT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mMouseState.mKeys.erase(MOUSE_RIGHT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_MIDDLE);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_MIDDLE);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_X1);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X1);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_X2);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X2);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) mWindow->mMouseState.mScrollDelta += (float)raw.data.mouse.usButtonData / (float)WHEEL_DELTA;
 				if (mWindow->mLockMouse) {
 					RECT rect;
 					GetWindowRect(msg.hwnd, &rect);
@@ -413,10 +409,14 @@ bool Instance::PollEvents() {
 			}
 			if (raw.header.dwType == RIM_TYPEKEYBOARD) {
 				USHORT key = raw.data.keyboard.VKey;
-				if (key == VK_SHIFT) key = VK_LSHIFT;
-				if (key == VK_MENU) key = VK_LMENU;
-				if (key == VK_CONTROL) key = VK_LCONTROL;
-				mWindow->mMouseState.mKeys[(KeyCode)key] = (raw.data.keyboard.Flags & RI_KEY_BREAK) == 0;
+				if      (key == VK_LSHIFT || key == VK_RSHIFT) 		 key = VK_SHIFT;
+				else if (key == VK_LMENU || key == VK_RMENU) 			 key = VK_MENU;
+				else if (key == VK_LCONTROL || key == VK_RCONTROL) key = VK_CONTROL;
+				
+				if (raw.data.keyboard.Flags & RI_KEY_BREAK)
+					mWindow->mMouseState.mKeys.erase((KeyCode)key);
+				else
+					mWindow->mMouseState.mKeys.insert((KeyCode)key);
 			}
 			break;
 		}
@@ -430,5 +430,6 @@ bool Instance::PollEvents() {
 	ScreenToClient(mWindow->mHwnd, &pt);
 	mWindow->mMouseState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
 	#endif
+
 	return true;
 }

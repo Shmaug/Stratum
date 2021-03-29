@@ -62,26 +62,12 @@ void CommandBuffer::Reset(const string& name) {
 	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 	mState = CommandBufferState::eRecording;
 }
-bool CommandBuffer::CheckDone() {
-	if (mState == CommandBufferState::eInFlight) {
-		vk::Result status = mDevice->getFenceStatus(**mCompletionFence);
-		if (status == vk::Result::eSuccess) {
-			mState = CommandBufferState::eDone;
-			Clear();
-			return true;
-		}
-	}
-	return mState == CommandBufferState::eDone;
-}
 
-void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, vk::SubpassContents contents) {
+void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
-	vector<vk::ClearValue> clearValues(renderPass->AttachmentDescriptions().size());
-	for (uint32_t i = 0; i < renderPass->AttachmentDescriptions().size(); i++) {
-		framebuffer->Attachments()[i]->TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->AttachmentDescriptions()[i]).initialLayout);
-		clearValues[i] = get<vk::ClearValue>(renderPass->AttachmentDescriptions()[i]);
-	}
+	for (uint32_t i = 0; i < renderPass->AttachmentDescriptions().size(); i++)
+		framebuffer->Attachments()[i].texture().TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->AttachmentDescriptions()[i]).initialLayout);
 
 	vk::RenderPassBeginInfo info = {};
 	info.renderPass = **renderPass;
@@ -93,6 +79,8 @@ void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_pt
 	mCurrentRenderPass = renderPass;
 	mCurrentFramebuffer = framebuffer;
 	mCurrentSubpassIndex = 0;
+	HoldResource(renderPass);
+	HoldResource(framebuffer);
 }
 void CommandBuffer::NextSubpass(vk::SubpassContents contents) {
 	mCommandBuffer.nextSubpass(contents);
@@ -104,10 +92,10 @@ void CommandBuffer::EndRenderPass() {
 	// Update tracked image layouts
 	for (uint32_t i = 0; i < mCurrentRenderPass->AttachmentDescriptions().size(); i++) {
 		auto layout = get<vk::AttachmentDescription>(mCurrentRenderPass->AttachmentDescriptions()[i]).finalLayout;
-		auto attachment = mCurrentFramebuffer->Attachments()[i];
-		attachment->mTrackedLayout = layout;
-		attachment->mTrackedStageFlags = GuessStage(layout);
-		attachment->mTrackedAccessFlags = GuessAccessMask(layout);
+		auto& attachment = mCurrentFramebuffer->Attachments()[i];
+		attachment.texture().mTrackedLayout = layout;
+		attachment.texture().mTrackedStageFlags = GuessStage(layout);
+		attachment.texture().mTrackedAccessFlags = GuessAccessMask(layout);
 	}
 	
 	mCurrentRenderPass = nullptr;
@@ -138,25 +126,56 @@ void CommandBuffer::BindPipeline(shared_ptr<Pipeline> pipeline) {
 	mBoundDescriptorSets.clear();
 	mBoundVertexBuffers.clear();
 	mBoundIndexBuffer = {};
+	HoldResource(pipeline);
 }
 
-void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t set) {
-	if (!mBoundPipeline) throw logic_error("cannot bind a descriptor set without a bound pipeline\n");
-	if (mBoundDescriptorSets.size() <= set) mBoundDescriptorSets.resize(set + 1);
-	else if (mBoundDescriptorSets[set] == descriptorSet) return;
+void CommandBuffer::BindDescriptorSets(const vector<shared_ptr<DescriptorSet>>& descriptorSets, uint32_t index) {
+	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
+	if (mBoundDescriptorSets.size() < index + descriptorSets.size()) mBoundDescriptorSets.resize(index + descriptorSets.size());
+
+	vector<vk::DescriptorSet> sets;
+	sets.reserve(descriptorSets.size());
+	for (const auto& descriptorSet : descriptorSets) {
+		descriptorSet->FlushWrites();
+		if (!mCurrentRenderPass)
+			for (auto&[idx, entry] : descriptorSet->mBoundDescriptors) {
+				switch (descriptorSet->layout_at(idx >> 32).mDescriptorType) {
+					case vk::DescriptorType::eCombinedImageSampler:
+					case vk::DescriptorType::eInputAttachment:
+					case vk::DescriptorType::eSampledImage:
+					case vk::DescriptorType::eStorageImage: {
+						const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
+						break;
+					}
+				}
+			}
+		mBoundDescriptorSets[index + sets.size()] = descriptorSet;
+		sets.push_back(**descriptorSet);
+		HoldResource(descriptorSet);
+	}
+	mCommandBuffer.bindDescriptorSets(mBoundPipeline->BindPoint(), mBoundPipeline->Layout(), index, sets, {});
+}
+void CommandBuffer::BindDescriptorSet(shared_ptr<DescriptorSet> descriptorSet, uint32_t index) {
+	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
+	if (mBoundDescriptorSets.size() <= index) mBoundDescriptorSets.resize(index + 1);
+	else if (mBoundDescriptorSets[index] == descriptorSet) return;
 	
 	descriptorSet->FlushWrites();
 	if (!mCurrentRenderPass)
 		for (auto&[idx, entry] : descriptorSet->mBoundDescriptors) {
-			switch (entry.mType) {
+			switch (descriptorSet->layout_at(idx >> 32).mDescriptorType) {
 				case vk::DescriptorType::eCombinedImageSampler:
 				case vk::DescriptorType::eInputAttachment:
 				case vk::DescriptorType::eSampledImage:
-				case vk::DescriptorType::eStorageImage:
-					entry.mTextureView.get()->TransitionBarrier(*this, entry.mImageLayout);
+				case vk::DescriptorType::eStorageImage: {
+					const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+					get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
 					break;
+				}
 			}
 		}
-	mCommandBuffer.bindDescriptorSets(mBoundPipeline->BindPoint(), mBoundPipeline->Layout(), set, { *descriptorSet }, {});
-	mBoundDescriptorSets[set] = descriptorSet;
+	mBoundDescriptorSets[index] = descriptorSet;
+	HoldResource(descriptorSet);
+	mCommandBuffer.bindDescriptorSets(mBoundPipeline->BindPoint(), mBoundPipeline->Layout(), index, { *descriptorSet }, {});
 }

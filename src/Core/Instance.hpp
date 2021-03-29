@@ -14,7 +14,7 @@ public:
 	STRATUM_API Instance(int argc, char** argv);
 	STRATUM_API ~Instance();
 
-	inline vk::Instance operator*() const { return mInstance; }
+	inline const vk::Instance& operator*() const { return mInstance; }
 	inline const vk::Instance* operator->() const { return &mInstance; }
 
 	inline string TryGetOption(const string& name) const { return mOptions.at(name); }

@@ -4,57 +4,6 @@
 
 namespace stm {
 
-template<typename T> inline Transform<T,3,Projective> Perspective(T width, T height, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2*zNear/width;
-	r(1,1) = 2*zNear/height;
-	r(2,2) = zFar / (zFar - zNear);
-	r(2,3) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Perspective(T left, T right, T top, T bottom, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2*zNear / (right - left);
-	r(1,1) = 2*zNear / (top - bottom);
-	r(2,0) = (left + right) / (left - right);
-	r(1,2) = (top + bottom) / (bottom - top);
-	r(2,2) = zFar / (zFar - zNear);
-	r(2,3) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
-	T sy = 1 / tan(fovy / 2);
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = sy/aspect;
-	r(1,1) = sy;
-	r(2,2) = zFar / (zFar - zNear);
-	r(3,2) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T height, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2/width;
-	r(1,1) = 2/height;
-	r(2,2) = 1/(zFar - zNear);
-	r(3,2) = -zNear * r(2,2);
-	r(3,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
-	Transform<T,3,Projective> r;
-	r(0,0) = 2 / (right - left);
-	r(1,1) = 2 / (top - bottom);
-	r(2,2) = 1 / (zFar - zNear);
-	r(3,0) = (left + right) / (left - right);
-	r(3,1) = (top + bottom) / (bottom - top);
-	r(3,2) = zNear / (zNear - zFar);
-	r(3,3) = 1;
-	return r;
-}
-
 enum class StereoEye : uint32_t {
 	eNone = 0,
 	eLeft = 0,

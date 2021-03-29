@@ -31,4 +31,7 @@ float2 ToSpherical(float3 v) { return float2(atan2(v.z, v.x)*M_1_PI*.5+.5, acos(
 
 float Luminance(float3 c) { return dot(c, float3(0.3, 0.6, 1)); }
 
+inline float4 homogeneous(float3 v) { return float4(v.xyz,1); }
+inline float3 hnormalize(float4 v) { return v.xyz/v.w; }
+
 #endif

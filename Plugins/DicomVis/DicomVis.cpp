@@ -149,7 +149,7 @@ private:
 					VertexAttributeType type = semanticMap.count(typeName) ? semanticMap.at(typeName) : VertexAttributeType::eOther;
 					
 
-					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(Buffer::ArrayView<>(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
+					accessorMap.emplace(accessorIndex, Mesh::VertexAttribute(Buffer::RangeView(nullptr, 0, elementStride), elementOffset, type, typeIndex, vk::InputRate::eVertex));
 					elementOffset += elementStride;
 				}
 			}
@@ -181,12 +181,12 @@ private:
 
 				if (!mesh->GetAttribute(VertexAttributeType::eTexcoord, 0)) {
 					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/VertexData", device, (sizeof(Vector4f)+sizeof(Vector2f))*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-					mesh->SetVertexAttribute(VertexAttributeType::eTangent , 0, Buffer::ArrayView(b, 0, sizeof(Vector4f)), 0);
-					mesh->SetVertexAttribute(VertexAttributeType::eTexcoord, 0, Buffer::ArrayView(b, vertexCount*sizeof(Vector4f), sizeof(Vector2f)), 0);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent , 0, Buffer::RangeView(b, 0, sizeof(Vector4f)), 0);
+					mesh->SetVertexAttribute(VertexAttributeType::eTexcoord, 0, Buffer::RangeView(b, vertexCount*sizeof(Vector4f), sizeof(Vector2f)), 0);
 				} else if (!mesh->GetAttribute(VertexAttributeType::eTangent, 0)) {
 					// TODO: generate tangents
 					shared_ptr<Buffer> b = make_shared<Buffer>(mesh->mName + "/Tangents", device, sizeof(Vector4f)*vertexCount, vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
-					mesh->SetVertexAttribute(VertexAttributeType::eTangent, 0, Buffer::ArrayView(b, 0, sizeof(Vector4f)), 0);
+					mesh->SetVertexAttribute(VertexAttributeType::eTangent, 0, Buffer::RangeView(b, 0, sizeof(Vector4f)), 0);
 				}
 
 				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)model.accessors[prim.indices].count, 0, nullptr));

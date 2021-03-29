@@ -249,15 +249,25 @@ enum KeyCode {
 
 class MouseState : public InputState {
 public:
-	Vector2f mCursorPos = Vector2f(0);
-	Vector2f mCursorDelta = Vector2f(0);
+	Vector2f mCursorPos = Vector2f::Zero();
+	Vector2f mCursorDelta = Vector2f::Zero();
 	float mScrollDelta = 0;
-	unordered_map<KeyCode, bool> mKeys;
+	unordered_set<KeyCode> mKeys;
+
 	inline MouseState() : InputState("Mouse") {};
+	inline MouseState& operator=(const MouseState& ms) {
+		mCursorPos = ms.mCursorPos;
+		mCursorDelta = ms.mCursorDelta;
+		mScrollDelta = ms.mScrollDelta;
+		mKeys = ms.mKeys;
+		return *this;
+	};
 };
 
 class Window {
 public:
+	Instance& mInstance;
+	
 	STRATUM_API Window(Instance& instance, const string& title, vk::Rect2D position);
 	STRATUM_API ~Window();
 
@@ -290,7 +300,7 @@ public:
 	inline xcb_window_t XCBWindow() const { return mXCBWindow; }
 	#endif
 
-	STRATUM_API void AcquireNextImage();
+	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
 
@@ -299,23 +309,25 @@ public:
 	inline bool LockMouse() const { return mLockMouse; }
 	inline const stm::MouseState& MouseState() const { return mMouseState; }
 	inline const stm::MouseState& LastMouseState() const { return mLastMouseState; }
-	inline bool KeyDownFirst(KeyCode key) { return mMouseState.mKeys[key] && !mLastMouseState.mKeys[key]; }
-	inline bool KeyUpFirst(KeyCode key) { return mLastMouseState.mKeys[key] && !mMouseState.mKeys[key]; }
-	inline bool KeyDown(KeyCode key) { return mMouseState.mKeys[key]; }
-	inline bool KeyUp(KeyCode key) { return !mMouseState.mKeys[key]; }
+	inline bool KeyDownFirst(KeyCode key) const { return mMouseState.mKeys.count(key) && !mLastMouseState.mKeys.count(key); }
+	inline bool KeyUpFirst(KeyCode key) const { return mLastMouseState.mKeys.count(key) && !mMouseState.mKeys.count(key); }
+	inline bool KeyDown(KeyCode key) const { return mMouseState.mKeys.count(key); }
+	inline bool KeyUp(KeyCode key) const { return !mMouseState.mKeys.count(key); }
 	inline float ScrollDelta() const { return mMouseState.mScrollDelta; }
 	inline Vector2f CursorPos() const { return mMouseState.mCursorPos; }
 	inline Vector2f LastCursorPos() const { return mLastMouseState.mCursorPos; }
 	inline Vector2f CursorDelta() const { return mMouseState.mCursorDelta; }
 
+	inline Vector2f ClipToWindow(const Vector2f& clip) const { return (clip.array()*.5f+Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height); }
+	inline Vector2f WindowToClip(const Vector2f& screen) const { return screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones(); }
+
 private:
 	friend class Instance;
 
-	STRATUM_API void CreateSwapchain(Device& device);
+	STRATUM_API void CreateSwapchain(CommandBuffer& commandBUffer);
 	STRATUM_API void DestroySwapchain();
 	
 	vk::SurfaceKHR mSurface;
-	Instance& mInstance;
 	Device* mSwapchainDevice = nullptr;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;

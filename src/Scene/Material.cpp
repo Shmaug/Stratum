@@ -4,10 +4,10 @@
 
 using namespace stm;
 
-void Material::SetUniformBuffer(const string& name, const Buffer::ArrayView<>& buffer, uint32_t arrayIndex) {
-	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
+void Material::SetUniformBuffer(const string& name, const Buffer::RangeView& buffer, uint32_t arrayIndex) {
+	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
-	DescriptorSetEntry p = vec[arrayIndex];
+	DescriptorSet::Entry p = vec[arrayIndex];
 	p.mType = vk::DescriptorType::eUniformBuffer;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferView = buffer;
@@ -15,10 +15,10 @@ void Material::SetUniformBuffer(const string& name, const Buffer::ArrayView<>& b
 	vec[arrayIndex] = p;
 	mCacheValid = false;
 }
-void Material::SetStorageBuffer(const string& name, const Buffer::ArrayView<>& buffer, uint32_t arrayIndex) {
-	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
+void Material::SetStorageBuffer(const string& name, const Buffer::RangeView& buffer, uint32_t arrayIndex) {
+	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
-	DescriptorSetEntry p = {};
+	DescriptorSet::Entry p = {};
 	p.mType = vk::DescriptorType::eStorageBuffer;
 	p.mArrayIndex = arrayIndex;
 	p.mBufferView = buffer;
@@ -27,9 +27,9 @@ void Material::SetStorageBuffer(const string& name, const Buffer::ArrayView<>& b
 	mCacheValid = false;
 }
 void Material::SetSampledTexture(const string& name, const TextureView& texture, uint32_t arrayIndex, vk::ImageLayout layout) {
-	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
+	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
-	DescriptorSetEntry p = {};
+	DescriptorSet::Entry p = {};
 	p.mType = vk::DescriptorType::eSampledImage;
 	p.mArrayIndex = arrayIndex;
 	p.mTextureView = texture;
@@ -40,9 +40,9 @@ void Material::SetSampledTexture(const string& name, const TextureView& texture,
 	mCacheValid = false;
 }
 void Material::SetStorageTexture(const string& name, const TextureView& texture, uint32_t arrayIndex, vk::ImageLayout layout) {
-	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
+	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
-	DescriptorSetEntry p = {};
+	DescriptorSet::Entry p = {};
 	p.mType = vk::DescriptorType::eStorageImage;
 	p.mArrayIndex = arrayIndex;
 	p.mTextureView = texture;
@@ -53,9 +53,9 @@ void Material::SetStorageTexture(const string& name, const TextureView& texture,
 	mCacheValid = false;
 }
 void Material::SetSampler(const string& name, shared_ptr<Sampler> sampler, uint32_t arrayIndex) {
-	vector<DescriptorSetEntry>& vec = mDescriptorParameters[name];
+	vector<DescriptorSet::Entry>& vec = mDescriptorParameters[name];
 	if (vec.size() <= arrayIndex) vec.resize(arrayIndex + 1);
-	DescriptorSetEntry p = {};
+	DescriptorSet::Entry p = {};
 	p.mType = vk::DescriptorType::eSampler;
 	p.mArrayIndex = arrayIndex;
 	p.mSampler = sampler;
@@ -68,11 +68,6 @@ void Material::SetSampler(const string& name, shared_ptr<Sampler> sampler, uint3
 
 shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, optional<GeometryData> g) {
 	ProfilerRegion ps("Material::Bind");
-
-	const auto& attachmentDescriptions = commandBuffer.CurrentRenderPass()->SubpassDescriptions()[commandBuffer.CurrentSubpassIndex()].mAttachmentDescriptions;
-	vector<vk::PipelineColorBlendAttachmentState> blendStates(commandBuffer.CurrentRenderPass()->AttachmentDescriptions().size());
-	for (auto&[id, it] : attachmentDescriptions)
-		blendStates[ commandBuffer.CurrentRenderPass()->AttachmentMap().at(id) ] = get<vk::PipelineColorBlendAttachmentState>(it);
 
 	vector<byte_blob> specializationData(mModules.size());
 	vector<vector<vk::SpecializationMapEntry>> specializationEntries(mModules.size());
@@ -101,21 +96,9 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 		i++;
 	}
 
-
-	vector<vk::VertexInputAttributeDescription> attributes;
-	vector<vk::VertexInputBindingDescription> bindings(g->mBindings.size());
 	vk::PipelineVertexInputStateCreateInfo vertexInfo = {};
 	if (g) {
-		auto vs = mModules.at(vk::ShaderStageFlagBits::eVertex);
-		for (auto& [id, attrib] : g->mAttributes) {
-			if (ranges::find_if(vs.mStageInputs, [&](const auto& kp) { return kp.second.mAttributeId == id; }) != vs.mStageInputs.end())
-				attributes.push_back(attrib);
-		}
-		for (uint32_t i = 0; i < bindings.size(); i++) {
-			bindings[i].binding = i;
-			bindings[i].stride = (uint32_t)g->mBindings[i].mBuffer.stride();
-			bindings[i].inputRate = g->mBindings[i].mInputRate;
-		}
+		auto[attributes, bindings] = CreateInputBindings(*g, mModules.at(vk::ShaderStageFlagBits::eVertex));
 		vertexInfo.setVertexAttributeDescriptions(attributes);
 		vertexInfo.setVertexBindingDescriptions(bindings);
 	}
@@ -125,8 +108,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 	shared_ptr<GraphicsPipeline> pipeline = make_shared<GraphicsPipeline>(mName, **commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(),
 		mModules, specializationInfos,
 		vertexInfo, g->mPrimitiveTopology, mCullMode, mPolygonMode,
-		mSampleShading, vk::PipelineDepthStencilStateCreateInfo({}, mDepthTest, mDepthWrite, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1),
-		blendStates);
+		mSampleShading, vk::PipelineDepthStencilStateCreateInfo({}, mDepthTest, mDepthWrite, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1));
 
 
 	commandBuffer.BindPipeline(pipeline);
@@ -149,7 +131,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 
 			for (uint32_t i = 0; i < entries.size(); i++) {
 				if (!entries[i]) continue;
-				mDescriptorSetCache.at(setIndex)->CreateDescriptor(it->second.mBinding.binding, entries[i]);
+				mDescriptorSetCache.at(setIndex)->at(it->second.mBinding.binding) = entries[i];
 			}
 		}
 		mCacheValid = true;

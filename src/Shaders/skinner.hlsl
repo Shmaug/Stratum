@@ -1,28 +1,27 @@
 #pragma compile compute skin_vertices
 #pragma compile compute blend_vertices
 
-#include <stratum.hlsli>
-
 struct VertexWeight {
 	float4 Weights;
 	uint4 Indices;
 };
 
-RWByteAddressBuffer Vertices;
-RWByteAddressBuffer BlendTarget0;
-RWByteAddressBuffer BlendTarget1;
-RWByteAddressBuffer BlendTarget2;
-RWByteAddressBuffer BlendTarget3;
-RWStructuredBuffer<VertexWeight> Weights;
-RWStructuredBuffer<float4x4> Pose;
+RWByteAddressBuffer Vertices : register(u0);
+RWByteAddressBuffer BlendTarget0 : register(u1);
+RWByteAddressBuffer BlendTarget1 : register(u2);
+RWByteAddressBuffer BlendTarget2 : register(u3);
+RWByteAddressBuffer BlendTarget3 : register(u4);
+RWStructuredBuffer<VertexWeight> Weights : register(u5);
+RWStructuredBuffer<float4x4> Pose : register(u6);
 
-[[vk::push_constant]] struct {
+struct PushConstants {
 	uint VertexCount;
 	uint VertexStride;
 	uint NormalOffset;
 	uint TangentOffset;
 	float4 BlendFactors;
-} gPushConstants;
+};
+[[vk::push_constant]] const PushConstants gPushConstants = { 0, 0, 0, 0, float4(0,0,0,0) };
 
 [numthreads(64, 1, 1)]
 void skin_vertices(uint3 index : SV_DispatchThreadID) {

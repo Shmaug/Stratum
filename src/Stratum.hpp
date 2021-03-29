@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Util/byte_stream.hpp"
-#include "Util/byte_blob.hpp"
 #include "Util/hash_combine.hpp"
 #include "Util/Platform.hpp"
 
@@ -105,14 +104,16 @@ inline string ws2s(const wstring &wstr) {
 		return strTo;
 }
 
-inline string ReadFile(const fs::path& filename) {
+template<ranges::contiguous_range R>
+inline R ReadFile(const fs::path& filename) {
 	ifstream file(filename, ios::ate | ios::binary);
 	if (!file.is_open()) return {};
-	string dst((size_t)file.tellg(), '\0');
+	R dst;
+	dst.resize((size_t)file.tellg()/sizeof(ranges::range_value_t<R>), '\0');
 	if (dst.empty()) return dst;
 	file.seekg(0);
 	file.clear();
-	file.read(reinterpret_cast<char*>(dst.data()), dst.size());
+	file.read(reinterpret_cast<char*>(dst.data()), dst.size()*sizeof(ranges::range_value_t<R>));
 	return dst;
 }
 

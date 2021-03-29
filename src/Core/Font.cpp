@@ -56,7 +56,7 @@ void ReadGlyphCache(const fs::path& filename, unordered_map<uint32_t, msdfgen::B
 	printf("Loaded %s\n", filename.string().c_str());
 }
 
-Font::Font(Device& device, const fs::path& filename) {
+Font::Font(CommandBuffer& commandBuffer, const fs::path& filename) {
 	msdfgen::FreetypeHandle* ft = msdfgen::initializeFreetype();
 	msdfgen::FontHandle* font = msdfgen::loadFont(ft, filename.string().c_str());
 	if (!font) throw invalid_argument("failed to load font " + filename.string());
@@ -116,7 +116,6 @@ Font::Font(Device& device, const fs::path& filename) {
 	
 	WriteGlyphCache(cacheFile, bitmaps);
 
-	
 	vk::Extent2D extent = { 0, 32 };
 	extent.width = (uint32_t)sqrt((double)area);
 	// next power of 2
@@ -156,8 +155,12 @@ Font::Font(Device& device, const fs::path& filename) {
 			for (uint32_t x = 0; x < 4*(uint32_t)img.width(); x++)
 				dst[x] = (uint8_t)(fminf(fmaxf(img.operator()(0, y)[x], -1), 1)*127);
 		}
-	mSDF = make_shared<Texture>(device, filename.string()+"_msdf", vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, byte_blob(data), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 1);
-	
+
+	mSDF = make_shared<Texture>(commandBuffer.mDevice, filename.string()+"_msdf", vk::Extent3D(extent, 1), vk::Format::eR8G8B8A8Snorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
+	mSDF->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+	commandBuffer->copyBufferToImage(*commandBuffer.CreateStagingBuffer(data).buffer(), **mSDF, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy() });
+	mSDF->GenerateMipMaps(commandBuffer);
+
 	msdfgen::destroyFont(font);
 	msdfgen::deinitializeFreetype(ft);
 }

@@ -101,15 +101,14 @@ Window::~Window() {
 	#endif
 }
 
-void Window::AcquireNextImage() {
-	if (!mSwapchain && mSwapchainDevice) CreateSwapchain(*mSwapchainDevice);
-	if (!mSwapchain) return;
+void Window::AcquireNextImage(CommandBuffer& commandBuffer) {
+	if (!mSwapchain) CreateSwapchain(commandBuffer);
 	
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
 
 	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
-		CreateSwapchain(*mSwapchainDevice);
+		CreateSwapchain(commandBuffer);
 		if (!mSwapchain) return; // swapchain failed to create (happens when window is minimized, etc)
 		result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	}
@@ -204,9 +203,9 @@ void Window::Fullscreen(bool fs) {
 	#endif
 }
 
-void Window::CreateSwapchain(Device& device) {
+void Window::CreateSwapchain(CommandBuffer& commandBuffer) {
 	if (mSwapchain) DestroySwapchain();
-	mSwapchainDevice = &device;
+	mSwapchainDevice = &commandBuffer.mDevice;
 	mSwapchainDevice->SetObjectName(mSurface, "WindowSurface");
 	
 	mPresentQueueFamily = mSwapchainDevice->FindQueueFamily(mSurface);
@@ -225,7 +224,9 @@ void Window::CreateSwapchain(Device& device) {
 	// select the format of the swapchain
 	mSurfaceFormat = formats[0];
 	for (const vk::SurfaceFormatKHR& format : formats)
-		if (format.format == vk::Format::eB8G8R8A8Unorm)
+		if (format.format == vk::Format::eR8G8B8A8Unorm)
+			mSurfaceFormat = format;
+		else if (format.format == vk::Format::eB8G8R8A8Unorm)
 			mSurfaceFormat = format;
 
 	vector<vk::PresentModeKHR> preferredPresentModes { vk::PresentModeKHR::eMailbox };
@@ -258,8 +259,6 @@ void Window::CreateSwapchain(Device& device) {
 	mImageAvailableSemaphores.resize(images.size());
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
-
-	auto commandBuffer = mSwapchainDevice->GetCommandBuffer("Swapchain Create", vk::QueueFlagBits::eTransfer);
 	
 	// create per-frame image views and semaphores
 	uint32_t i = 0;
@@ -267,7 +266,7 @@ void Window::CreateSwapchain(Device& device) {
 		img = images[i];
 		mSwapchainDevice->SetObjectName(img, "Swapchain/Image" + to_string(i));
 
-		commandBuffer->TransitionBarrier(img, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
+		commandBuffer.TransitionBarrier(img, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
 
 		vk::ImageViewCreateInfo createInfo = {};
 		createInfo.image = img;
@@ -284,9 +283,6 @@ void Window::CreateSwapchain(Device& device) {
 		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
 		i++;
 	}
-	
-	mSwapchainDevice->Execute(commandBuffer);
-	vk::createResultValue(commandBuffer->CompletionFence().wait(), "Window::CreateSwapchain");
 }
 void Window::DestroySwapchain() {
 	mSwapchainDevice->Flush();

@@ -16,9 +16,15 @@ public:
 	inline byte_blob& operator=(byte_blob&& rhs) = default;
 	
 	inline explicit byte_blob(size_t sz) : mData(vector<byte>(sz)) {}
+	inline operator bool() const { return !mData.empty(); }
 
+	template<typename T> requires(is_trivially_copyable_v<T>)
+	inline byte_blob(const T* first, size_t count) : mData(sizeof(T)*count) {
+		memcpy(mData.data(), first, mData.size());
+	}
+	
 	template<ranges::contiguous_range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
-	inline byte_blob(const R& r) : mData(vector<byte>(reinterpret_cast<const byte*>(ranges::data(r)), reinterpret_cast<const byte*>(ranges::data(r)+ranges::size(r)))) {}
+	inline byte_blob(const R& r) : byte_blob(ranges::data(r), ranges::size(r)) {}
 	
 	inline bool empty() const { return mData.empty(); }
 	inline void clear() { mData.clear(); }

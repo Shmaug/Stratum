@@ -35,10 +35,12 @@ public:
 				mFrameHistory.pop_back();
 		}
 	}
-	inline static void EndSample() {
+	inline static ProfilerSample& EndSample() {
 		if (!mCurrentSample) throw logic_error("attempt to end nonexistant profiler sample!");
 		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
+		ProfilerSample* tmp = mCurrentSample;
 		mCurrentSample = mCurrentSample->mParent;
+		return *tmp;
 	}
 
 	inline static const list<ProfilerSample>& FrameHistory() { return mFrameHistory; }

@@ -107,10 +107,8 @@ template<> struct tuplefier<vk::PipelineVertexInputStateCreateInfo> {
 	inline auto operator()(vk::PipelineVertexInputStateCreateInfo&& v) const {
 		return forward_as_tuple(
 				v.flags,
-				span(v.pVertexBindingDescriptions,
-				v.vertexBindingDescriptionCount),
-				span(v.pVertexAttributeDescriptions,
-				v.vertexAttributeDescriptionCount));
+				span(v.pVertexBindingDescriptions, v.vertexBindingDescriptionCount),
+				span(v.pVertexAttributeDescriptions, v.vertexAttributeDescriptionCount));
 	}
 };
 template<> struct tuplefier<vk::PipelineColorBlendAttachmentState> {

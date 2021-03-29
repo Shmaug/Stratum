@@ -6,7 +6,6 @@
 
 #include <typeindex>
 
-
 #include <mutex>
 #include <thread>
 #include <chrono>
@@ -28,6 +27,7 @@
 #include <span>
 
 #include <bitset>
+#include <locale>
 
 #include <math.h>
 #include <numeric>
@@ -46,6 +46,57 @@ namespace fs = std::filesystem;
 
 using namespace std;
 using namespace Eigen;
+
+template<typename T> inline Transform<T,3,Projective> Perspective(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear/width;
+	r(1,1) = 2*zNear/height;
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Perspective(T left, T right, T top, T bottom, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2*zNear / (right - left);
+	r(1,1) = 2*zNear / (top - bottom);
+	r(2,0) = (left + right) / (left - right);
+	r(1,2) = (top + bottom) / (bottom - top);
+	r(2,2) = zFar / (zFar - zNear);
+	r(2,3) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
+	T sy = 1 / tan(fovy / 2);
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = sy/aspect;
+	r(1,1) = sy;
+	r(2,2) = zFar / (zFar - zNear);
+	r(3,2) = zNear * -r(2,2);
+	r(2,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T height, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2/width;
+	r(1,1) = 2/height;
+	r(2,2) = 1/(zFar - zNear);
+	r(3,2) = -zNear * r(2,2);
+	r(3,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
+template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
+	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
+	r(0,0) = 2 / (right - left);
+	r(1,1) = 2 / (top - bottom);
+	r(2,2) = 1 / (zFar - zNear);
+	r(3,0) = (left + right) / (left - right);
+	r(3,1) = (top + bottom) / (bottom - top);
+	r(3,2) = zNear / (zNear - zFar);
+	r(3,3) = 1;
+	return Transform<T,3,Projective>(r);
+}
 
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
@@ -124,24 +175,39 @@ public:
 namespace shader_interop {
 	using uint = uint32_t;
 
-	#define DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, SizeSuffix) \
-		using TypeName##SizeSuffix = Vector##SizeSuffix##TypeSuffix; \
-		using TypeName##SizeSuffix##x##SizeSuffix = Matrix##SizeSuffix##TypeSuffix;
+	#define DECLARE_VECTOR_TYPE(T, N) using T##N = Eigen::Matrix<T, N, 1, Eigen::ColMajor | Eigen::DontAlign>;
+	#define DECLARE_VECTOR_TYPES(N)\
+		DECLARE_VECTOR_TYPE(float, N)\
+		DECLARE_VECTOR_TYPE(double, N)\
+		DECLARE_VECTOR_TYPE(uint, N)\
+		DECLARE_VECTOR_TYPE(int, N)
 
-	#define DECLARE_FIXED_SIZE_TYPES(TypeName, TypeSuffix) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 2) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 3) \
-		DECLARE_FIXED_SIZE_TYPE(TypeName, TypeSuffix, 4)
+	#define DECLARE_MATRIX_TYPE(T, M, N) using T##M##x##N = Eigen::Matrix<T, M, N, Eigen::ColMajor | Eigen::DontAlign>;
+	#define DECLARE_MATRIX_TYPES(M,N)\
+		DECLARE_MATRIX_TYPE(float, M, N)\
+		DECLARE_MATRIX_TYPE(double, M, N)\
+		DECLARE_MATRIX_TYPE(uint, M, N)\
+		DECLARE_MATRIX_TYPE(int, M, N)
+
+	DECLARE_VECTOR_TYPES(2)
+	DECLARE_MATRIX_TYPES(2,2)
+	DECLARE_MATRIX_TYPES(2,3)
+	DECLARE_MATRIX_TYPES(2,4)
+	DECLARE_VECTOR_TYPES(3)
+	DECLARE_MATRIX_TYPES(3,2)
+	DECLARE_MATRIX_TYPES(3,3)
+	DECLARE_MATRIX_TYPES(3,4)
+	DECLARE_VECTOR_TYPES(4)
+	DECLARE_MATRIX_TYPES(4,2)
+	DECLARE_MATRIX_TYPES(4,3)
+	DECLARE_MATRIX_TYPES(4,4)
+
+	#undef DECLARE_FIXED_SIZE_V
+	#undef DECLARE_FIXED_SIZE_M
 	
-	DECLARE_FIXED_SIZE_TYPES(float,f)
-	DECLARE_FIXED_SIZE_TYPES(double,d)
-	DECLARE_FIXED_SIZE_TYPES(int,i)
-	DECLARE_FIXED_SIZE_TYPES(uint,i)
-	
-	#undef DECLARE_FIXED_SIZE_TYPES
-	#undef DECLARE_FIXED_SIZE_TYPE
-	
-	#include "../Shaders/include/stratum.hlsli"
+	#pragma pack(push)
+	#pragma pack(1)
+	#include "../Shaders/include/dtypes.h"
+	#pragma pack(pop)
 }
-
 }
