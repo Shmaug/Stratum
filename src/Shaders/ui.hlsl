@@ -1,9 +1,9 @@
-#pragma compile vertex vs_ui fragment fs_ui
+#pragma compile fragment fs_ui
 
 #include <stratum.hlsli>
 
 SamplerState gFontsSampler : register(s0, space2);
-Texture2D<float4> gFontsTexture: register(t3, space2);
+Texture2D<float4> gFontsTexture : register(t3, space2);
 
 [[vk::push_constant]] struct {
 	uint gScale;

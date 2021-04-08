@@ -105,7 +105,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 
 	// TODO: cache pipeline
 
-	shared_ptr<GraphicsPipeline> pipeline = make_shared<GraphicsPipeline>(mName, **commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(),
+	shared_ptr<GraphicsPipeline> pipeline = make_shared<GraphicsPipeline>(Name(), **commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(),
 		mModules, specializationInfos,
 		vertexInfo, g->mPrimitiveTopology, mCullMode, mPolygonMode,
 		mSampleShading, vk::PipelineDepthStencilStateCreateInfo({}, mDepthTest, mDepthWrite, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1));
@@ -127,7 +127,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, option
 				mDescriptorSetCache.erase(setIndex);
 			}
 			if (mDescriptorSetCache.count(setIndex) == 0) 
-				mDescriptorSetCache.emplace(setIndex, commandBuffer.mDevice.GetPooledDescriptorSet(mName+"/DescriptorSet"+to_string(setIndex), pipeline->DescriptorSetLayouts()[setIndex]));
+				mDescriptorSetCache.emplace(setIndex, commandBuffer.mDevice.GetPooledDescriptorSet(Name()+"/DescriptorSet"+to_string(setIndex), pipeline->DescriptorSetLayouts()[setIndex]));
 
 			for (uint32_t i = 0; i < entries.size(); i++) {
 				if (!entries[i]) continue;

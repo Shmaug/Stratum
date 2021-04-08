@@ -24,7 +24,7 @@ public:
 		: DeviceResource(device, name), mSize(size), mUsageFlags(usage), mMemoryProperties(memoryFlags), mSharingMode(sharingMode) {
 		
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
-		mDevice.SetObjectName(mBuffer, mName);
+		mDevice.SetObjectName(mBuffer, Name());
 		
 		mMemoryBlock = mDevice.AllocateMemory(mDevice->getBufferMemoryRequirements(mBuffer), mMemoryProperties);
 		mDevice->bindBufferMemory(mBuffer, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
@@ -38,7 +38,6 @@ public:
 	inline const vk::Buffer* operator->() const { return &mBuffer; }
 	inline operator bool() const { return mBuffer; }
 
-	inline string Name() const { return mName; }
 	inline vk::DeviceSize size() const { return mSize; }
 	inline byte* data() const {
 		if (!(mMemoryProperties & vk::MemoryPropertyFlagBits::eHostVisible)) throw runtime_error("Cannot call data() on buffer that is not host visible");
@@ -62,6 +61,10 @@ public:
 		RangeView(RangeView&&) = default;
 		inline RangeView(shared_ptr<Buffer> buffer, vk::DeviceSize elementStride, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
 			: mBuffer(buffer), mBufferOffset(byteOffset), mElementCount(elementCount == VK_WHOLE_SIZE ? (buffer->size() - mBufferOffset)/elementStride : elementCount), mElementStride(elementStride) {}
+    
+		inline RangeView subrange(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
+			return RangeView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
+    }
 
 		RangeView& operator=(const RangeView&) = default;
 		RangeView& operator=(RangeView&&) = default;
@@ -82,9 +85,7 @@ public:
 			if (sizeof(T) != mElementStride) throw runtime_error("sizeof(T) must equal buffer stride");
 			return span(reinterpret_cast<T*>(data()), mElementCount);
 		}
-    inline RangeView subview(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
-			return RangeView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
-    }
+
 	};
 };
 

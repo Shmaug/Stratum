@@ -400,7 +400,7 @@ bool Instance::PollEvents() {
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X1);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_X2);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X2);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) mWindow->mMouseState.mScrollDelta += (float)raw.data.mouse.usButtonData / (float)WHEEL_DELTA;
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mWindow->mMouseState.mScrollDelta += (float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				if (mWindow->mLockMouse) {
 					RECT rect;
 					GetWindowRect(msg.hwnd, &rect);

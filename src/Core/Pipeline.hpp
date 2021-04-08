@@ -85,9 +85,15 @@ protected:
 				uint32_t first = ~0;
 				uint32_t last = 0;
 				for (const auto& [id, p] : spirv->mPushConstants) {
-					mPushConstants.emplace(id, vk::PushConstantRange(stage, p.first, p.second));
+					auto it = mPushConstants.find(id);
+					if (it == mPushConstants.end())
+						mPushConstants.emplace(id, vk::PushConstantRange(stage, p.first, p.second));
+					else {
+						if (it->second.offset != p.first || it->second.size != p.second) throw runtime_error("spirv modules share the same push constant names with different offsets/sizes"); 
+						it->second.stageFlags |= stage;
+					}
 					first = min(first, p.first);
-					last = max(last, p.first+p.second);
+					last = max(last, p.first + p.second);
 				}
 				pushConstantRanges.emplace_back(stage, first, last-first);
 			}
@@ -113,8 +119,11 @@ protected:
 				if (auto it = immutableSamplers.find(name); it != immutableSamplers.end())
 					setBindings[b.mSet][b.mBinding].mImmutableSamplers.push_back(it->second);
 			}
-			for (const auto&[set,s] : setBindings)
-				mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, mName, s);
+			for (uint32_t set = 0; set < mDescriptorSetLayouts.size(); set++)
+				if (setBindings.count(set))
+					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, Name(), setBindings.at(set));
+				else
+					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, Name());
 		}
 
 		for (const auto& l : mDescriptorSetLayouts)
@@ -178,12 +187,10 @@ public:
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = {},
 		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name) {
 		
-		mSpirvModules.emplace(vk::ShaderStageFlagBits::eVertex, vs);
-		mSpirvModules.emplace(vk::ShaderStageFlagBits::eFragment, fs);
+		if (vs) mSpirvModules.emplace(vk::ShaderStageFlagBits::eVertex, vs);
+		if (fs) mSpirvModules.emplace(vk::ShaderStageFlagBits::eFragment, fs);
 		mSpecializationConstants = specializationConstants;
 		CreatePipelineLayout(immutableSamplers);
-
-		vector<shared_ptr<SpirvModule>> spirv { vs, fs };
 
 		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
 		for (const auto&[desc,type,blendState] : renderPass.SubpassDescriptions()[subpassIndex].mAttachmentDescriptions | views::values) {
@@ -235,7 +242,7 @@ public:
 		mPipeline = mDevice->createGraphicsPipeline(mDevice.PipelineCache(), 
 			vk::GraphicsPipelineCreateInfo({}, stages, &vertexInfo, &mInputAssemblyState, nullptr, &mViewportState,
 			&mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex)).value;
-		mDevice.SetObjectName(mPipeline, mName);
+		mDevice.SetObjectName(mPipeline, Name());
 	}
 	
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eGraphics; }

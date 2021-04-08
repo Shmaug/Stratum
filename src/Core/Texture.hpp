@@ -122,7 +122,7 @@ public:
 			info.subresourceRange.levelCount = mMipCount;
 			info.components = components;
 			mView = mTexture->mDevice->createImageView(info);
-			mTexture->mDevice.SetObjectName(mView, mTexture->mName+"/TextureView");
+			mTexture->mDevice.SetObjectName(mView, mTexture->Name() + "/TextureView");
 
 			texture->mViews.emplace(key, mView);
 		}

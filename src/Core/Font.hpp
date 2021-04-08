@@ -28,6 +28,8 @@ private:
 public:
 	STRATUM_API Font(CommandBuffer& commandBuffer, const fs::path& filename);
 
+	inline const string& Name() const { return mName; }
+
 	inline float Ascent(float pixelHeight) const { return mAscent*pixelHeight/mEmSize; }
 	inline float Descent(float pixelHeight) const { return mDescent*pixelHeight/mEmSize; }
 	inline float LineSpace(float pixelHeight) const { return mLineSpace*pixelHeight/mEmSize; }

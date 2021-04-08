@@ -5,11 +5,13 @@
 namespace stm {
 
 class DeviceResource {
+private:
+	string mName;
 public:
 	Device& mDevice;
-	string mName;
 	inline DeviceResource(Device& device, string name) : mDevice(device), mName(name) {}
 	inline virtual ~DeviceResource() {}
+	inline const string& Name() const { return mName; }
 };
 
 class Fence;
@@ -141,7 +143,7 @@ private:
 public:
 	inline Fence(Device& device, const string& name) : DeviceResource(device,name) {
 		mFence = mDevice->createFence({});
-		mDevice.SetObjectName(mFence, mName);
+		mDevice.SetObjectName(mFence, Name());
 	}
 	inline ~Fence() { mDevice->destroyFence(mFence); }
 	inline const vk::Fence& operator*() const { return mFence; }
@@ -160,7 +162,7 @@ private:
 public:
 	inline Semaphore(Device& device, const string& name) : DeviceResource(device, name) {
 		mSemaphore = mDevice->createSemaphore({});
-		mDevice.SetObjectName(mSemaphore, mName);
+		mDevice.SetObjectName(mSemaphore, Name());
 	}
 	inline ~Semaphore() { mDevice->destroySemaphore(mSemaphore); }
 	inline const vk::Semaphore& operator*() { return mSemaphore; }
@@ -175,7 +177,7 @@ private:
 public:
 	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name), mInfo(samplerInfo) {
 		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, mName);
+		mDevice.SetObjectName(mSampler, Name());
 	}
 	inline Sampler(Device& device, const string& name, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : DeviceResource(device, name) {
 		mInfo.magFilter = filter;
@@ -194,7 +196,7 @@ public:
 		mInfo.maxLod = VK_LOD_CLAMP_NONE;
 		mInfo.mipLodBias = 0;
 		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, mName);
+		mDevice.SetObjectName(mSampler, Name());
 	}
 	inline ~Sampler() {
 		mDevice->destroySampler(mSampler);
