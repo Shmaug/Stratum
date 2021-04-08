@@ -32,77 +32,33 @@
 #include <math.h>
 #include <numeric>
 
+#include <vulkan/vulkan.hpp>
+
 #define EIGEN_HAS_STD_RESULT_OF 0
 #include <Eigen/Geometry>
 #include <Eigen/LU>
 #include <unsupported/Eigen/BVH>
 #include <unsupported/Eigen/CXX11/Tensor>
 
-#include <vulkan/vulkan.hpp>
-
 namespace stm {
-
-namespace fs = std::filesystem;
 
 using namespace std;
 using namespace Eigen;
 
-template<typename T> inline Transform<T,3,Projective> Perspective(T width, T height, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2*zNear/width;
-	r(1,1) = 2*zNear/height;
-	r(2,2) = zFar / (zFar - zNear);
-	r(2,3) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Perspective(T left, T right, T top, T bottom, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2*zNear / (right - left);
-	r(1,1) = 2*zNear / (top - bottom);
-	r(2,0) = (left + right) / (left - right);
-	r(1,2) = (top + bottom) / (bottom - top);
-	r(2,2) = zFar / (zFar - zNear);
-	r(2,3) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> PerspectiveFov(T fovy, T aspect, T zNear, T zFar) {
-	T sy = 1 / tan(fovy / 2);
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = sy/aspect;
-	r(1,1) = sy;
-	r(2,2) = zFar / (zFar - zNear);
-	r(3,2) = zNear * -r(2,2);
-	r(2,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Orthographic(T width, T height, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2/width;
-	r(1,1) = 2/height;
-	r(2,2) = 1/(zFar - zNear);
-	r(3,2) = -zNear * r(2,2);
-	r(3,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
-template<typename T> inline Transform<T,3,Projective> Orthographic(T left, T right, T bottom, T top, T zNear, T zFar) {
-	Matrix<T,4,4> r = Matrix<T,4,4>::Zero();
-	r(0,0) = 2 / (right - left);
-	r(1,1) = 2 / (top - bottom);
-	r(2,2) = 1 / (zFar - zNear);
-	r(3,0) = (left + right) / (left - right);
-	r(3,1) = (top + bottom) / (bottom - top);
-	r(3,2) = zNear / (zNear - zFar);
-	r(3,3) = 1;
-	return Transform<T,3,Projective>(r);
-}
+namespace fs = std::filesystem;
 
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
 
 template<class _Type, template<class...> class _Template> constexpr bool is_specialization_v = false;
 template<template<class...> class _Template, class... _Types> constexpr bool is_specialization_v<_Template<_Types...>, _Template> = true;
+
+
+template<typename R> concept fixed_size_range = ranges::sized_range<R> && requires(R r) { tuple_size<R>::value; };
+template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_size_range<R> && requires(R r, size_t n) { r.resize(n); };
+
+template<typename S, typename T> concept stream_extractable = requires(S s, T t) { s >> t; };
+template<typename S, typename T> concept stream_insertable = requires(S s, T t) { s << t; };
 
 
 template<typename T>
@@ -135,12 +91,6 @@ struct add_const_tuple<tuple<Types...>> {
 template<typename T> using add_const_tuple_t = typename add_const_tuple<T>::type;
 
 
-template<typename R> concept fixed_size_range = ranges::sized_range<R> && requires(R r) { tuple_size<R>::value; };
-template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_size_range<R> && requires(R r, size_t n) { r.resize(n); };
-
-template<typename S, typename T> concept stream_extractable = requires(S s, T t) { s >> t; };
-template<typename S, typename T> concept stream_insertable = requires(S s, T t) { s << t; };
-
 template <typename T>
 class locked_object {
 private:
@@ -172,42 +122,99 @@ public:
 	inline mutex& m() const { return mMutex; }
 };
 
-namespace shader_interop {
-	using uint = uint32_t;
 
-	#define DECLARE_VECTOR_TYPE(T, N) using T##N = Eigen::Matrix<T, N, 1, Eigen::ColMajor | Eigen::DontAlign>;
-	#define DECLARE_VECTOR_TYPES(N)\
-		DECLARE_VECTOR_TYPE(float, N)\
-		DECLARE_VECTOR_TYPE(double, N)\
-		DECLARE_VECTOR_TYPE(uint, N)\
-		DECLARE_VECTOR_TYPE(int, N)
+namespace hlsl {
 
-	#define DECLARE_MATRIX_TYPE(T, M, N) using T##M##x##N = Eigen::Matrix<T, M, N, Eigen::ColMajor | Eigen::DontAlign>;
-	#define DECLARE_MATRIX_TYPES(M,N)\
-		DECLARE_MATRIX_TYPE(float, M, N)\
-		DECLARE_MATRIX_TYPE(double, M, N)\
-		DECLARE_MATRIX_TYPE(uint, M, N)\
-		DECLARE_MATRIX_TYPE(int, M, N)
+using uint = uint32_t;
 
-	DECLARE_VECTOR_TYPES(2)
-	DECLARE_MATRIX_TYPES(2,2)
-	DECLARE_MATRIX_TYPES(2,3)
-	DECLARE_MATRIX_TYPES(2,4)
-	DECLARE_VECTOR_TYPES(3)
-	DECLARE_MATRIX_TYPES(3,2)
-	DECLARE_MATRIX_TYPES(3,3)
-	DECLARE_MATRIX_TYPES(3,4)
-	DECLARE_VECTOR_TYPES(4)
-	DECLARE_MATRIX_TYPES(4,2)
-	DECLARE_MATRIX_TYPES(4,3)
-	DECLARE_MATRIX_TYPES(4,4)
+template<typename T, int M, int N = 1> using ArrayType = Eigen::Array<T, M, N, Eigen::ColMajor, M, N>;
+template<typename T, int M, int N = 1> using MatrixType = Eigen::Matrix<T, M, N, Eigen::ColMajor, M, N>;
 
-	#undef DECLARE_FIXED_SIZE_V
-	#undef DECLARE_FIXED_SIZE_M
-	
-	#pragma pack(push)
-	#pragma pack(1)
-	#include "../Shaders/include/dtypes.h"
-	#pragma pack(pop)
+using int2    	= ArrayType<int32_t, 2>;
+using int3    	= ArrayType<int32_t, 3>;
+using int4    	= ArrayType<int32_t, 4>;
+using uint2   	= ArrayType<int32_t, 2>;
+using uint3   	= ArrayType<int32_t, 3>;
+using uint4   	= ArrayType<int32_t, 4>;
+using float2  	= ArrayType<float, 2>;
+using float3  	= ArrayType<float, 3>;
+using float4  	= ArrayType<float, 4>;
+using double2 	= ArrayType<double, 2>;
+using double3 	= ArrayType<double, 3>;
+using double4 	= ArrayType<double, 4>;
+using int2x2    = ArrayType<int32_t, 2, 2>;
+using int3x2    = ArrayType<int32_t, 3, 2>;
+using int4x2    = ArrayType<int32_t, 4, 2>;
+using uint2x2   = ArrayType<int32_t, 2, 2>;
+using uint3x2   = ArrayType<int32_t, 3, 2>;
+using uint4x2   = ArrayType<int32_t, 4, 2>;
+using float2x2  = ArrayType<float, 2, 2>;
+using float3x2  = ArrayType<float, 3, 2>;
+using float4x2  = ArrayType<float, 4, 2>;
+using double2x2 = ArrayType<double, 2, 2>;
+using double3x2 = ArrayType<double, 3, 2>;
+using double4x2 = ArrayType<double, 4, 2>;
+using int2x3    = ArrayType<int32_t, 2, 3>;
+using int3x3    = ArrayType<int32_t, 3, 3>;
+using int4x3    = ArrayType<int32_t, 4, 3>;
+using uint2x3   = ArrayType<int32_t, 2, 3>;
+using uint3x3   = ArrayType<int32_t, 3, 3>;
+using uint4x3   = ArrayType<int32_t, 4, 3>;
+using float2x3  = ArrayType<float, 2, 3>;
+using float3x3  = ArrayType<float, 3, 3>;
+using float4x3  = ArrayType<float, 4, 3>;
+using double2x3 = ArrayType<double, 2, 3>;
+using double3x3 = ArrayType<double, 3, 3>;
+using double4x3 = ArrayType<double, 4, 3>;
+using int2x4    = ArrayType<int32_t, 2, 4>;
+using int3x4    = ArrayType<int32_t, 3, 4>;
+using int4x4    = ArrayType<int32_t, 4, 4>;
+using uint2x4   = ArrayType<int32_t, 2, 4>;
+using uint3x4   = ArrayType<int32_t, 3, 4>;
+using uint4x4   = ArrayType<int32_t, 4, 4>;
+using float2x4  = ArrayType<float, 2, 4>;
+using float3x4  = ArrayType<float, 3, 4>;
+using float4x4  = ArrayType<float, 4, 4>;
+using double2x4 = ArrayType<double, 2, 4>;
+using double3x4 = ArrayType<double, 3, 4>;
+using double4x4 = ArrayType<double, 4, 4>;
+
+using quatf = Quaternion<float>;
+using quatd = Quaternion<double>;
+
+template<typename T, int M, int N, int K>
+inline ArrayType<T,M,K> mul(const ArrayType<T,M,N>& a, const ArrayType<T,N,K>& b) {
+	return (a.matrix()*b.matrix()).array();
 }
+
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> max(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.max(b); }
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> min(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.min(b); }
+
+template<typename T, int M, int N>
+inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int M, int N>
+inline T length(const ArrayType<T,M,N>& a) { return a.matrix().norm(); }
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> normalize(const ArrayType<T,M,N>& a) { return a.matrix().normalized().array(); }
+template<typename T>
+inline ArrayType<T,3> cross(const T& a, const T& b) { return a.matrix().cross(b.matrix()).array(); }
+
+template<typename T, int M, int N = 1>
+inline ArrayType<T,M-1,N> hnormalized(const ArrayType<T,M,N>& a) { return a.matrix().hnormalized().array(); }
+template<typename T, int M, int N = 1>
+inline ArrayType<T,M+1,N> homogeneous(const ArrayType<T,M,N>& a) { return a.matrix().homogeneous().array(); }
+
+template<typename T>
+inline Quaternion<T> qmul(const Quaternion<T>& q1, const Quaternion<T>& q2) { return q1*q2; }
+template<typename T>
+inline Quaternion<T> inverse(const Quaternion<T>& q) { return q.inverse(); }
+template<typename T>
+inline ArrayType<T,3> rotate_vector(const Quaternion<T>& q, const ArrayType<T,3>& v) { return q*v; }
+
+#define QUATF_I Quaternionf::Identity()
+
+}
+
 }

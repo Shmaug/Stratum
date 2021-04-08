@@ -19,26 +19,22 @@ public:
 		string mName;
 		vk::PipelineBindPoint mBindPoint;
 		unordered_map<RenderAttachmentId, tuple<vk::AttachmentDescription, AttachmentType, vk::PipelineColorBlendAttachmentState>> mAttachmentDescriptions;
-		// subpasses that must execute before this one
-		unordered_set<string> mSubpassDependencies;
+		// names of attachments that this subpass depends on, and their accessflags for this subpass
+		//unordered_map<string, vk::AccessFlags> mSubpassDependencies;
 	};
 
-	inline RenderPass(Device& device, const string& name, const vk::ArrayProxy<const SubpassDescription>& subpassDescriptions)
-		: DeviceResource(device, name), mHash(hash_combine(name, subpassDescriptions)) {
+	inline RenderPass(Device& device, const string& name, const vector<SubpassDescription>& subpassDescriptions)
+		: DeviceResource(device, name), mSubpassDescriptions(subpassDescriptions),  mHash(hash_combine(name, subpassDescriptions)) {
 		
-		// Resolve dependencies & sort subpasses
-		unordered_set<const SubpassDescription*> remaining;
-		for (const SubpassDescription& s : subpassDescriptions) remaining.insert(&s);
-
 		struct SubpassData {
-			vector<vk::AttachmentReference> inputAttachments;
-			vector<vk::AttachmentReference> colorAttachments;
-			vector<vk::AttachmentReference> resolveAttachments;
-			vector<uint32_t> preserveAttachments;
-			vk::AttachmentReference depthAttachment;
+			vector<vk::AttachmentReference> mInputAttachments;
+			vector<vk::AttachmentReference> mColorAttachments;
+			vector<vk::AttachmentReference> mResolveAttachments;
+			vector<uint32_t> mPreserveAttachments;
+			vk::AttachmentReference mDepthAttachment;
 		};
-		vector<SubpassData> subpassData(remaining.size());
-		vector<vk::SubpassDescription> subpasses(remaining.size());
+		vector<SubpassData> subpassData(subpassDescriptions.size());
+		vector<vk::SubpassDescription> subpasses(subpassDescriptions.size());
 		vector<vk::SubpassDependency> dependencies;
 		vector<vk::AttachmentDescription> attachments;
 
@@ -46,106 +42,113 @@ public:
 			auto& sp = subpasses[i];
 			auto& sd = subpassData[i];
 
-			// find subpass with the fewest unsatisfied dependencies
-			const SubpassDescription* r_min = nullptr;
-			size_t tmp = -1;
-			for (const SubpassDescription* s : remaining) {
-				size_t c = ranges::count_if(s->mSubpassDependencies, [&](const string& sdep) {
-					return ranges::find_if(remaining, [&](const SubpassDescription* s2) { return s2->mName == sdep; }) != remaining.end();
-				});
-				if (c < tmp) {
-					tmp = c;
-					r_min = s;
-				}
-			}
+			for (const auto& [attachmentName,attachmentData] : subpassDescriptions[i].mAttachmentDescriptions) {
 
-			for (const auto& [attachmentName,d] : r_min->mAttachmentDescriptions) {
-				const auto& attachmentDesc = get<vk::AttachmentDescription>(d);
+				// TODO: attachment order is just whatever they appear in the unordered_map. needs to match framebuffer creation
+				
+				const auto& vkdesc = get<vk::AttachmentDescription>(attachmentData);
 				if (mAttachmentMap.count(attachmentName)) {
 					// track layout of attachment through whole renderpass
 					auto&[desc,id] = mAttachmentDescriptions[mAttachmentMap.at(attachmentName)];
-					desc.finalLayout = attachmentDesc.finalLayout;
-					desc.storeOp = attachmentDesc.storeOp;
-					desc.stencilStoreOp = attachmentDesc.stencilStoreOp;
+					desc.finalLayout = vkdesc.finalLayout;
+					desc.storeOp = vkdesc.storeOp;
+					desc.stencilStoreOp = vkdesc.stencilStoreOp;
 				} else {
 					mAttachmentMap.emplace(attachmentName, mAttachmentDescriptions.size());
-					mAttachmentDescriptions.push_back(make_tuple(attachmentDesc, attachmentName));
-					attachments.push_back(attachmentDesc);
+					mAttachmentDescriptions.push_back(make_tuple(vkdesc, attachmentName));
+					attachments.push_back(vkdesc);
 				}
 
-				vk::SubpassDependency dep = {};
-				dep.dstSubpass = i;
-				dep.dependencyFlags = vk::DependencyFlagBits::eByRegion;
-				switch (get<AttachmentType>(d)) {
+				switch (get<AttachmentType>(attachmentData)) {
 					case AttachmentType::eColor:
-						sd.colorAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eColorAttachmentOptimal);
-						dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
-						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+						sd.mColorAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eColorAttachmentOptimal);
 						break;
 					case AttachmentType::eDepthStencil:
-						sd.depthAttachment = vk::AttachmentReference((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eDepthStencilAttachmentOptimal);
-						dep.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
-						dep.dstStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
+						sd.mDepthAttachment = vk::AttachmentReference((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eDepthStencilAttachmentOptimal);
 						break;
 					case AttachmentType::eResolve:
-						sd.resolveAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eColorAttachmentOptimal );
-						dep.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-						dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+						sd.mResolveAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eColorAttachmentOptimal );
 						break;
 					case AttachmentType::eInput:
-						sd.inputAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eShaderReadOnlyOptimal);
-						dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-						dep.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
+						sd.mInputAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName), vk::ImageLayout::eShaderReadOnlyOptimal);
 						break;
 					case AttachmentType::ePreserve:
-						sd.preserveAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName));
-						dep.dstAccessMask = {};
-						dep.dstStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
+						sd.mPreserveAttachments.emplace_back((uint32_t)mAttachmentMap.at(attachmentName));
 						break;
 				}
 
-				auto srcSubpass = ranges::find_if(mSubpassDescriptions, [&](const auto& s) { return r_min->mSubpassDependencies.count(attachmentName); });
-				dep.srcSubpass = (uint32_t)ranges::distance(mSubpassDescriptions.begin(), srcSubpass);
+				uint32_t srcSubpass = i;
+				for (int32_t j = i - 1; j >= 0; j--)
+					if (mSubpassDescriptions[j].mAttachmentDescriptions.count(attachmentName)) {
+						AttachmentType t = get<AttachmentType>(mSubpassDescriptions[j].mAttachmentDescriptions.at(attachmentName));
+						if (t == AttachmentType::eColor || t == AttachmentType::eDepthStencil || t == AttachmentType::eResolve) {
+							srcSubpass = j;
+							break;
+						}
+					}
 				
-				if (dep.srcSubpass < dep.dstSubpass) {
-					switch (get<AttachmentType>(srcSubpass->mAttachmentDescriptions.at(attachmentName))) {
+				if (srcSubpass < i) {
+					const auto& srcAttachment = mSubpassDescriptions[srcSubpass].mAttachmentDescriptions.at(attachmentName);
+					vk::SubpassDependency dep(srcSubpass, i);
+					dep.dependencyFlags =  vk::DependencyFlagBits::eByRegion;
+					switch (get<AttachmentType>(srcAttachment)) {
 					case AttachmentType::eColor:
 						dep.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
+							throw invalid_argument("Color attachment " + attachmentName + " must use vk::AttachmentStoreOp::eStore");
 						break;
 					case AttachmentType::eDepthStencil:
 						dep.srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
-						dep.srcStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
+						dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
+							throw invalid_argument("DepthStencil attachment " + attachmentName + " must use vk::AttachmentStoreOp::eStore");
 						break;
 					case AttachmentType::eResolve:
 						dep.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eTransfer;
+						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
+							throw invalid_argument("Resolve attachment " + attachmentName + " must use vk::AttachmentStoreOp::eStore");
 						break;
-					case AttachmentType::eInput:
-						dep.srcAccessMask = vk::AccessFlagBits::eShaderRead;
-						break;
-					case AttachmentType::ePreserve:
-						dep.srcAccessMask = {};
-						dep.srcStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
-						break;
+					default:
+						throw invalid_argument("Attachment " + attachmentName + " cannot act as a dependency source");
+					}
+					switch (get<AttachmentType>(attachmentData)) {
+						case AttachmentType::eColor:
+							dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+							dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+							break;
+						case AttachmentType::eDepthStencil:
+							dep.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+							dep.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+							break;
+						case AttachmentType::eResolve:
+							dep.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+							dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+							break;
+						case AttachmentType::eInput:
+							dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+							dep.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
+							break;
+						case AttachmentType::ePreserve:
+							dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+							dep.dstStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
+							break;
 					}
 					dependencies.push_back(dep);
 				}
 			}
 
-			auto& subpass = mSubpassDescriptions.emplace_back(*r_min);
-			remaining.erase(r_min);
-
-			sp.pipelineBindPoint = subpass.mBindPoint;
-			sp.pDepthStencilAttachment = &sd.depthAttachment;
-			sp.setColorAttachments(sd.colorAttachments);
-			sp.setInputAttachments(sd.inputAttachments);
-			sp.setPreserveAttachments(sd.preserveAttachments);
-			sp.setResolveAttachments(sd.resolveAttachments);
+			sp.pipelineBindPoint = mSubpassDescriptions[i].mBindPoint;
+			sp.pDepthStencilAttachment = &sd.mDepthAttachment;
+			sp.setColorAttachments(sd.mColorAttachments);
+			sp.setInputAttachments(sd.mInputAttachments);
+			sp.setPreserveAttachments(sd.mPreserveAttachments);
+			sp.setResolveAttachments(sd.mResolveAttachments);
 		}
 
 		mRenderPass = mDevice->createRenderPass(vk::RenderPassCreateInfo({}, attachments, subpasses, dependencies));
-		mDevice.SetObjectName(mRenderPass, mName);
+		mDevice.SetObjectName(mRenderPass, Name());
 	}
 	inline ~RenderPass() {
 		mDevice->destroyRenderPass(mRenderPass);
@@ -154,7 +157,6 @@ public:
 	inline const vk::RenderPass& operator*() const { return mRenderPass; }
 	inline const vk::RenderPass* operator->() const { return &mRenderPass; }
 
-	inline const string& Name() const { return mName; }
 	inline const auto& SubpassDescriptions() const { return mSubpassDescriptions; }
 	inline const auto& AttachmentDescriptions() const { return mAttachmentDescriptions; }
 	inline const auto& AttachmentMap() const { return mAttachmentMap; }

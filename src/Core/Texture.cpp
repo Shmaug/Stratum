@@ -52,7 +52,7 @@ tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& f
 	if (!pixels) throw invalid_argument("could not load " + filename.string());
 	if (desiredChannels) channels = desiredChannels;
 
-	byte_blob data(pixels, x*y*channels*stride);
+	byte_blob data(span<byte>(pixels, x*y*channels*stride));
 	stbi_image_free(pixels);
 	return make_tuple(move(data), vk::Extent3D(x,y,1), move(format));
 }
@@ -79,7 +79,7 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 	imageInfo.sharingMode = vk::SharingMode::eExclusive;
 	imageInfo.flags = mCreateFlags;
 	mImage = mDevice->createImage(imageInfo);
-	mDevice.SetObjectName(mImage, mName);
+	mDevice.SetObjectName(mImage, Name());
 
 	mMemoryBlock = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), mMemoryProperties);
 	mDevice->bindImageMemory(mImage, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);

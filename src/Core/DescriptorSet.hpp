@@ -14,7 +14,7 @@ public:
 		vector<shared_ptr<Sampler>> mImmutableSamplers;
 	};
 
-	inline DescriptorSetLayout(Device& device, const string& name, const unordered_map<uint32_t, Binding>& bindings, vk::DescriptorSetLayoutCreateFlags flags = {}) : DeviceResource(device, name), mFlags(flags), mBindings(bindings) {
+	inline DescriptorSetLayout(Device& device, const string& name, const unordered_map<uint32_t, Binding>& bindings = {}, vk::DescriptorSetLayoutCreateFlags flags = {}) : DeviceResource(device, name), mFlags(flags), mBindings(bindings) {
 		forward_list<vector<vk::Sampler>> immutableSamplers;
 		vector<vk::DescriptorSetLayoutBinding> b;
 		for (auto&[i, binding] : mBindings) {
@@ -72,7 +72,7 @@ public:
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &**mLayout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
-		mDevice.SetObjectName(mDescriptorSet, mName);
+		mDevice.SetObjectName(mDescriptorSet, Name());
 	}
 	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Entry>& bindings) : DescriptorSet(layout, name) {
 		for (const auto&[binding, entry] : bindings)
@@ -94,7 +94,6 @@ public:
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }
 	inline operator vk::DescriptorSet() const { return mDescriptorSet; }
 
-	inline const string& Name() const { return mName; }
 	inline auto DescriptorSetLayout() const { return mLayout; }
 
 	inline const DescriptorSetLayout::Binding& layout_at(uint32_t binding) const { return mLayout->at(binding); }

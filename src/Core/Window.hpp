@@ -318,8 +318,14 @@ public:
 	inline Vector2f LastCursorPos() const { return mLastMouseState.mCursorPos; }
 	inline Vector2f CursorDelta() const { return mMouseState.mCursorDelta; }
 
-	inline Vector2f ClipToWindow(const Vector2f& clip) const { return (clip.array()*.5f+Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height); }
-	inline Vector2f WindowToClip(const Vector2f& screen) const { return screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones(); }
+	inline Vector2f ClipToWindow(const Vector2f& clip) const {
+		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
+	}
+	inline Vector2f WindowToClip(const Vector2f& screen) const {
+		Vector2f r = screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones();
+		r.y() = -r.y();
+		return r;
+	}
 
 private:
 	friend class Instance;

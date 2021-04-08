@@ -34,7 +34,7 @@ public:
 		mSpecializationConstants.at(name) = v;
 		mCacheValid = false;
 	}
-	template<typename T> inline void SetSpecialization(const string& name, const T& v) { SetSpecialization(name, byte_blob(sizeof(T), &v)); }
+	template<typename T> inline void SetSpecialization(const string& name, const T& v) { SetSpecialization(name, make_byte_blob(v)); }
 
 	inline void SetPushParameter(const string& name, const byte_blob& t) { mPushParameters[name] = t; }
 	inline const byte_blob& GetPushParameter(const string& name) const { if (mPushParameters.count(name)) return mPushParameters.at(name); return {}; }
