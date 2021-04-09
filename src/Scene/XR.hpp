@@ -1,12 +1,9 @@
 #pragma once
 
-#include "Camera.hpp"
-
 #include <openxr/openxr.h>
-#include <openxr/openxr_platform.h>
 
 namespace stm {
-
+/*
 class XR {
 public:
     STRATUM_API XR();
@@ -57,5 +54,5 @@ private:
     STRATUM_API void CreateSession();
     STRATUM_API bool FailMsg(XrResult result, const string& errmsg);
 };
-
+*/
 }

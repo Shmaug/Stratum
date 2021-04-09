@@ -1,8 +1,6 @@
 #pragma once
 
-#include "../Core/GeometryData.hpp"
-#include "../Core/CommandBuffer.hpp"
-#include "../Core/Pipeline.hpp"
+#include "RenderNode.hpp"
 
 namespace stm {
 

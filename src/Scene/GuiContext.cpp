@@ -1,12 +1,11 @@
 #include "GuiContext.hpp"
 
-#include "../Core/SpirvModule.hpp"
-#include "../Core/Mesh.hpp"
+#include "../Core/Window.hpp"
 #include "imgui.h"
 
 using namespace stm;
 
-static inline unordered_map<string, shared_ptr<SpirvModule>> LoadShaders(Device& device, const fs::path& spvm) {
+inline unordered_map<string, shared_ptr<SpirvModule>> LoadShaders(Device& device, const fs::path& spvm) {
 	unordered_map<string, shared_ptr<SpirvModule>> spirvModules;
 	unordered_map<string, SpirvModule> tmp;
 	byte_stream<ifstream>(spvm, ios::binary) >> tmp;
@@ -16,19 +15,20 @@ static inline unordered_map<string, shared_ptr<SpirvModule>> LoadShaders(Device&
 
 GuiContext::GuiContext(CommandBuffer& commandBuffer) {
 	Device& device = commandBuffer.mDevice;
-	unordered_map<string, shared_ptr<SpirvModule>> moduleGroup = LoadShaders(device, "Assets/core_shaders.stmb");
+	unordered_map<string, shared_ptr<SpirvModule>> modules = LoadShaders(device, "Assets/core_shaders.stmb");
 	
 	shared_ptr<Mesh> mMesh = make_shared<Mesh>("UIMesh");
 
-	const stm::RenderPass& renderPass, uint32_t subpassIndex, const GeometryData& geometry,
-		shared_ptr<SpirvModule> vs, shared_ptr<SpirvModule> fs,
-	mPipeline = make_shared<GraphicsPipeline>("ui", commandBuffer.moduleGroup.at("ui"));
+	const stm::RenderPass& renderPass;
+	uint32_t subpassIndex;
+	const GeometryData& geometry;
+	mPipeline = make_shared<GraphicsPipeline>("ui", modules.at("ui"));
 
 	ImGuiIO& io = ImGui::GetIO();
 
-    unsigned char* pixels;
-    int width, height;
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+	unsigned char* pixels;
+	int width, height;
+	io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
 	const vk::Extent3D fontsTexExtent = vk::Extent3D(width, height, 0);
 	const size_t uploadSize = width * height * 4 * sizeof(char);
@@ -36,7 +36,8 @@ GuiContext::GuiContext(CommandBuffer& commandBuffer) {
 	mFontsTexture = make_shared<Texture>("FontsTexture", device, fontsTexExtent, vk::Format::eR8G8B8A8Unorm, fontsBlob);
 	mFontsTextureView = TextureView(mFontsTexture);
 
-	vk::SamplerCreateInfo samplerCreateInfo = vk::SamplerCreateInfo()
+	vk::SamplerCreateInfo samplerCreateInfo = 
+	mFontsSampler = make_shared<Sampler>(device, "FontsSampler", vk::SamplerCreateInfo()
     	.setMagFilter(vk::Filter::eLinear)
     	.setMinFilter(vk::Filter::eLinear)
     	.setMipmapMode(vk::SamplerMipmapMode::eLinear)
@@ -45,29 +46,17 @@ GuiContext::GuiContext(CommandBuffer& commandBuffer) {
     	.setAddressModeW(vk::SamplerAddressMode::eRepeat)
     	.setMinLod(-1000)
     	.setMaxLod(1000)
-    	.setMaxAnisotropy(1.0f);
-	mFontsSampler = make_shared<Sampler>(device, "FontsSampler", samplerCreateInfo);
+    	.setMaxAnisotropy(1.0f));
 
 	mMesh->Geometry()[VertexAttributeType::ePosition][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, 0);
-
-	mDescriptorSet = make_shared<DescriptorSet>(mPipeline->DescriptorSetLayouts()[0], string("UIDescriptorSet"));
 }
 
 void GuiContext::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
-	const Vector2f screenSize = Vector2f((float)commandBuffer.CurrentFramebuffer()->Extent().width, (float)commandBuffer.CurrentFramebuffer()->Extent().height);
-
 	ImGui::Render();
 	const ImDrawData* drawData = ImGui::GetDrawData();
-	const bool isMinimized = (drawData->DisplaySize.x <= 0.f || drawData->DisplaySize.y <= 0.f);
-	if (isMinimized) { // TODO: really needed? shouldn't even call this method
-		return;
-	}
-
 	const float fbWidth = drawData->DisplaySize.x * drawData->FramebufferScale.x;
-    const float fbHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
-    if (fbWidth <= 0.f || fbHeight <= 0.f) {
-        return;
-	}
+	const float fbHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
+	if (fbWidth <= 0 || fbHeight <= 0) return;
 
 	if (drawData->TotalVtxCount > 0) {
 		const size_t vertexSize = drawData->TotalVtxCount * sizeof(ImDrawVert);
@@ -104,8 +93,6 @@ void GuiContext::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
 	commandBuffer.BindDescriptorSet(make_shared<DescriptorSet>(commandBuffer.BoundPipeline()->DescriptorSetLayouts()[0], "tmp", unordered_map<uint32_t, DescriptorSet::Entry> {
 		{ pipeline->binding("gFontsSampler").mBinding, fontsTextureEntry },
 		{ pipeline->binding("gFontsTexture").mBinding, fontsSamplerEntry }), 0);
-
-	//camera.SetViewportScissor(commandBuffer, StereoEye::eLeft);
 
 	if(drawData->TotalVtxCount > 0) {
 		commandBuffer.BindVertexBuffer(0, get<0>(mMesh->Geometry().mBindings[0]));
@@ -160,8 +147,7 @@ void GuiContext::OnDraw(CommandBuffer& commandBuffer, Camera& camera) {
                     commandBuffer->setScissor(0, 1, &scissor);
 
                     // Draw
-                    commandBuffer->drawIndexed(cmd->ElemCount, 1, cmd->IdxOffset + globalIdxOffset, 
-						cmd->VtxOffset + globalVtxOffset, 0);
+                    commandBuffer->drawIndexed(cmd->ElemCount, 1, cmd->IdxOffset + globalIdxOffset, cmd->VtxOffset + globalVtxOffset, 0);
                 }
 			}
 		}

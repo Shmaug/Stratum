@@ -1,19 +1,19 @@
 #pragma once
 
-#include "SceneNode.hpp"
+#include "Scene.hpp"
 
 namespace stm {
 
-class PluginLoader : public SceneNode::Component {
+class PluginLoader : public Scene::Node {
 public:
-  inline PluginLoader(SceneNode& node, const string& name) : SceneNode::Component(node, name) {
+  inline PluginLoader(Scene& scene, const string& name) : Scene::Node(scene, name) {
 	}
 
   STRATUM_API void Update(CommandBuffer& commandBuffer);
 
 private:
     
-  SceneNode::Component* LoadPlugin(const fs::path& filename) {
+  Scene::Node* LoadPlugin(const fs::path& filename) {
     try {
       
   #ifdef WIN32
@@ -33,7 +33,7 @@ private:
   #ifdef __linux
       throw; // TODO loadplugin linux
   #endif
-      SceneNode::Component* plugin = ((SceneNode::Component*(*)(SceneNode::Component*))funcPtr)(this);
+      Scene::Node* plugin = ((Scene::Node*(*)(Scene::Node*))funcPtr)(this);
       mPlugins.push_back(plugin);
       return plugin;
     } catch(exception e) {}

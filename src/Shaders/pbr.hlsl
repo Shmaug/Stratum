@@ -11,8 +11,8 @@ struct LightData {
 	TransformData LightToWorld;
 	ProjectionData ShadowProjection;
 	float4 ShadowST;
-	float SpotAngleScale;
-	float SpotAngleOffset;
+	float SpotAngleScale;  // 1/(cos(InnerAngle) - cos(OuterAngle))
+	float SpotAngleOffset; // -cos(OuterAngle) * SpotAngleScale;
 	float ShadowBias;
 	uint pad;
 };

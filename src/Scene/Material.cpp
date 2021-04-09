@@ -1,6 +1,4 @@
 #include "Material.hpp"
-#include "Camera.hpp"
-#include "Scene.hpp"
 
 using namespace stm;
 

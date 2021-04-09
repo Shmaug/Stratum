@@ -1,22 +1,18 @@
 #pragma once
 
-#include "../Core/CommandBuffer.hpp"
-#include "../Core/Window.hpp"
+#include "RenderNode.hpp"
 
 namespace stm {
 
-class GuiContext {
+class GuiContext : public Scene::Node {
 private:
-	shared_ptr<DescriptorSet> mDescriptorSet;
-	shared_ptr<class Mesh> mMesh;
-	shared_ptr<Texture> mFontsTexture;
-	shared_ptr<Sampler> mFontsSampler;
-	TextureView mFontsTextureView;
-	shared_ptr<SpirvModule> mPipeline;
+	shared_ptr<Mesh> mMesh;
+	TextureView mFonts;
+	shared_ptr<GraphicsPipeline> mPipeline;
 
 public:
 	STRATUM_API GuiContext(CommandBuffer& commandBuffer);
-	STRATUM_API void OnDraw(CommandBuffer& commandBuffer, class Camera& camera);
+	STRATUM_API void OnDraw(CommandBuffer& commandBuffer);
 };
 
 }

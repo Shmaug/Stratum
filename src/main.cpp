@@ -125,7 +125,7 @@ inline shared_ptr<Texture> CombineChannels(CommandBuffer& commandBuffer, const s
 
 	vk::Format dstFormat = vk::Format::eR8G8Unorm;
 
-	auto pipeline = make_shared<ComputePipeline>(commandBuffer.mDevice, "combine", gSpirvModules.at("combine"));
+	auto pipeline = make_shared<ComputePipeline>(commandBuffer.mDevice, "interleave", gSpirvModules.at("interleave"));
 	auto staging0 = commandBuffer.CreateStagingBuffer(pixels0, vk::BufferUsageFlagBits::eUniformTexelBuffer);
 	auto staging1 = commandBuffer.CreateStagingBuffer(pixels1, vk::BufferUsageFlagBits::eUniformTexelBuffer);
 	auto combined = Buffer::RangeView(make_shared<Buffer>(commandBuffer.mDevice, name, staging0.size()+staging1.size(), vk::BufferUsageFlagBits::eStorageTexelBuffer|vk::BufferUsageFlagBits::eTransferSrc),staging0.stride()+staging1.stride());
@@ -136,9 +136,9 @@ inline shared_ptr<Texture> CombineChannels(CommandBuffer& commandBuffer, const s
 	
 	commandBuffer.BindPipeline(pipeline);
 	commandBuffer.BindDescriptorSet(0, make_shared<DescriptorSet>(commandBuffer.BoundPipeline()->DescriptorSetLayouts()[0], "tmp", unordered_map<uint32_t, DescriptorSet::Entry> {
-		{ pipeline->binding("gOutput").mBinding, TexelBufferView(combined, dstFormat) },
-		{ pipeline->binding("gInput0").mBinding, TexelBufferView(staging0, format0) },
-		{ pipeline->binding("gInput1").mBinding, TexelBufferView(staging1, format1) } }));
+		{ pipeline->binding("gOutputRG").mBinding, TexelBufferView(combined, dstFormat) },
+		{ pipeline->binding("gInputR").mBinding, TexelBufferView(staging0, format0) },
+		{ pipeline->binding("gInputG").mBinding, TexelBufferView(staging1, format1) } }));
 	commandBuffer.PushConstant<uint32_t>("Width", extent0.width);
 	commandBuffer.DispatchTiled(extent0);
 
@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
 			instance->Device().Execute(commandBuffer);
 		}
 		unordered_map<string,shared_ptr<Sampler>> immutableSamplers;
-		immutableSamplers["gSampler"] = make_shared<Sampler>(instance->Device(), "Sampler", vk::SamplerCreateInfo({},
+		immutableSamplers["gSampler"] = make_shared<Sampler>(instance->Device(), "gSampler", vk::SamplerCreateInfo({},
 			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 			0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));

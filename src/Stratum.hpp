@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Util/byte_stream.hpp"
-#include "Util/hash_combine.hpp"
-#include "Util/Platform.hpp"
+#include "byte_stream.hpp"
+#include "hash_combine.hpp"
+#include "Platform.hpp"
 
 namespace stm {
 

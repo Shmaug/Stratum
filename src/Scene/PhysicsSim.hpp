@@ -1,13 +1,13 @@
 #pragma once
 
-#include "../Core/InputState.hpp"
+#include "../Core/CommandBuffer.hpp"
 #include "Scene.hpp"
 
 namespace stm {
 
-class PhysicsSim : public SceneNode::Component {
+class PhysicsSim : public Scene::Node {
 public:
-  inline PhysicsSim(SceneNode& node, const string& name) : SceneNode::Component(node, name) {
+  inline PhysicsSim(Scene& scene, const string& name) : Scene::Node(scene, name) {
 		mStartTime = mLastFrame = mClock.now();
 	}
 

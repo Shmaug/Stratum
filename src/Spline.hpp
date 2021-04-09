@@ -3,7 +3,7 @@
 namespace stm {
 
 template<typename T>
-class AnimationCurve {
+class Spline {
 public:
 	enum class ExtrapolateMode {
 		eConstant,
@@ -29,8 +29,8 @@ public:
 		TangentMode mTangentModeOut = TangentMode::eSmooth;
 	};
 
-	AnimationCurve() = default;
-	inline AnimationCurve(const vector<Keyframe>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
+	Spline() = default;
+	inline Spline(const vector<Keyframe>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
 		: mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
 
 		if (!mKeyframes.size()) return;

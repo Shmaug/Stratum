@@ -1,7 +1,8 @@
 #include "XR.hpp"
 
-
 using namespace stm;
+
+/*
 
 bool XR::FailMsg(XrResult result, const string& errmsg) {
 	if (XR_FAILED(result)) {
@@ -623,3 +624,4 @@ void XR::OnFrameEnd() {
 		return;
 	}
 }
+*/
