@@ -159,7 +159,7 @@ public:
 
 	inline const auto& SubpassDescriptions() const { return mSubpassDescriptions; }
 	inline const auto& AttachmentDescriptions() const { return mAttachmentDescriptions; }
-	inline const auto& AttachmentMap() const { return mAttachmentMap; }
+	inline size_t AttachmentIndex(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
 
 private:
  	friend class CommandBuffer;

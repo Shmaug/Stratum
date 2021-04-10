@@ -86,7 +86,7 @@ public:
 					case vk::DescriptorType::eInputAttachment:
 					case vk::DescriptorType::eSampledImage:
 					case vk::DescriptorType::eStorageImage: {
-						const auto& t = get<tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>>(entry);
+						const auto& t = get<DescriptorSet::TextureEntry>(entry);
 						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
 						break;
 					}
@@ -173,8 +173,14 @@ public:
 		auto it = mBoundPipeline->PushConstants().find(name);
 		if (it == mBoundPipeline->PushConstants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
-		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->Layout(), range.stageFlags, range.offset, range.size, &value);
+		if constexpr (is_same_v<value, byte_blob>) {
+			if (range.size != value.size()) throw invalid_argument("argument size (" + value.size() + ") must match push constant size (" + to_string(range.size) +")");
+			mCommandBuffer.pushConstants(mBoundPipeline->Layout(), range.stageFlags, range.offset, range.size, value.data());
+		} else {
+			static_assert(is_trivially_copyable_v<T>);
+			if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
+			mCommandBuffer.pushConstants(mBoundPipeline->Layout(), range.stageFlags, range.offset, range.size, &value);
+		}
 	}
 
 	template<ranges::range R> requires(is_same_v<shared_ptr<DescriptorSet>, ranges::range_value_t<R>>)

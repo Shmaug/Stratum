@@ -14,7 +14,7 @@ private:
   shared_ptr<Framebuffer> mFramebuffer;
 
 public:
-  NodeDelegate<RenderNode*, const RenderPass::SubpassDescription&> OnRenderSubpass;
+  Scene::NodeDelegate<RenderNode*, const RenderPass::SubpassDescription&> OnRenderSubpass;
 
   inline RenderNode(Scene& scene, const string& name) : Node(scene, name) {}
 
@@ -24,24 +24,22 @@ public:
     if (!mRenderPass) {
       // Create new renderpasses/framebuffers
       vector<RenderPass::SubpassDescription> subpasses(mSubpasses.size());
-      ranges::copy(ranges::values(mSubpasses), subpasses.begin());
-      vector<shared_ptr<Texture>> attachments;
+      vector<TextureView> attachments;
+      
       // TODO: this
+
       mRenderPass = make_shared<RenderPass>(mName+"/RenderPass", commandBuffer.mDevice, subpasses);
-      mFramebuffer = make_shared<Framebuffer>(mName+"/Framebuffer", commandBuffer.mDevice, attachments);
+      mFramebuffer = make_shared<Framebuffer>(mName+"/Framebuffer", *mRenderPass, attachments);
     }
 
-    commandBuffer.BeginRenderPass(mRenderPass, mFramebuffer);
-    
-    for (const auto& subpass : mRenderPass->SubpassDescriptions()) {
+    vector<vk::ClearValue> clearValues(mFramebuffer->size());
+    commandBuffer.BeginRenderPass(mRenderPass, mFramebuffer, clearValues);
+    for (const RenderPass::SubpassDescription& subpass : mRenderPass->SubpassDescriptions()) {
       ProfilerRegion ps(subpass.mName, commandBuffer);
-
       OnRenderSubpass(this, subpass);
-      
       if (mRenderPass->SubpassDescriptions().size() > 1)
         commandBuffer.NextSubpass();
     }
-    
     commandBuffer.EndRenderPass();
     return mFramebuffer;
   }
@@ -51,7 +49,9 @@ public:
     mRenderPass = nullptr;
   }
   inline void erase(const string& name) {
-    if (mSubpasses.erase(ranges::find(mSubpasses, name, RenderPass::SubpassDescription::mName))
+    auto it = ranges::find(mSubpasses, name, &RenderPass::SubpassDescription::mName);
+    if (it != mSubpasses.end())
+      mSubpasses.erase(it);
       mRenderPass = nullptr;
   }
 };

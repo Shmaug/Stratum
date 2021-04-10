@@ -108,7 +108,7 @@ size_t SizeOf(spvc_type type, spvc_compiler compiler) {
 	return sz;
 }
 
-void ShaderCompiler::DirectiveCompile(unordered_map<string, SpirvModule>& modules, word_iterator arg, const word_iterator& argEnd) {
+void ShaderCompiler::DirectiveCompile(vector<SpirvModule>& modules, word_iterator arg, const word_iterator& argEnd) {
 	static const unordered_map<string, vk::ShaderStageFlagBits> stageMap {
     { "vertex", vk::ShaderStageFlagBits::eVertex },
     { "tess_control", vk::ShaderStageFlagBits::eTessellationControl }, { "hull", vk::ShaderStageFlagBits::eTessellationControl }, // TODO: idk if 'tess_control' == 'hull'
@@ -139,14 +139,14 @@ void ShaderCompiler::DirectiveCompile(unordered_map<string, SpirvModule>& module
 		m.mStage = stageMap.at(*arg);
 		if (++arg == argEnd) throw logic_error("expected an entry point");
 		m.mEntryPoint = *arg;
-		modules.emplace(m.mEntryPoint, m);
+		modules.push_back(m);
 	}
 }
 
-unordered_map<string, SpirvModule> ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
+vector<SpirvModule> ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
 	uint32_t lineNumber = 0;
 
-	unordered_map<string, SpirvModule> modules;
+	vector<SpirvModule> modules;
 
 	string line;
 	istringstream srcstream(source);
@@ -374,11 +374,13 @@ int main(int argc, char* argv[]) {
 			inputs.push_back(argv[i]);
 	}
 
-	unordered_map<string, SpirvModule> results;
+	vector<SpirvModule> results;
 	ShaderCompiler compiler(includes);
 	for (const auto& i : inputs)
 		try {
-			results.merge(compiler(i));
+			auto r = compiler(i);
+			results.resize(results.size() + r.size());
+			ranges::copy_backward(r, results.end()-1);
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), i.string().c_str());
 			return EXIT_FAILURE;

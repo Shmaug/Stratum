@@ -1,7 +1,6 @@
-﻿#include "Core/Window.hpp"
-#include "Core/CommandBuffer.hpp"
-#include "Core/Mesh.hpp"
+﻿#include "Scene/RenderNode.hpp"
 #include "Core/Profiler.hpp"
+#include "Core/Window.hpp"
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -14,15 +13,7 @@ using namespace stm::hlsl;
 #include "Shaders/pbr.hlsl"
 #pragma pack(pop)
 
-unordered_map<std::string, std::shared_ptr<stm::SpirvModule>> gSpirvModules;
-
-inline unordered_map<string, shared_ptr<SpirvModule>> LoadShaders(Device& device, const fs::path& spvm) {
-	unordered_map<string, shared_ptr<SpirvModule>> spirvModules;
-	unordered_map<string, SpirvModule> tmp;
-	byte_stream<ifstream>(spvm, ios::binary) >> tmp;
-	ranges::for_each(tmp | views::values, [&](const auto& m){ spirvModules.emplace(m.mEntryPoint, make_shared<SpirvModule>(m)); });
-	return spirvModules;
-}
+unordered_map<string, shared_ptr<SpirvModule>> gSpirvModules;
 
 inline void GenerateMipMaps(CommandBuffer& commandBuffer, shared_ptr<Texture> texture) {
 	texture->TransitionBarrier(commandBuffer, vk::ImageLayout::eGeneral);
@@ -39,8 +30,8 @@ inline void GenerateMipMaps(CommandBuffer& commandBuffer, shared_ptr<Texture> te
 				vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, i, 1, 0, texture->ArrayLayers()))
 			);
 		commandBuffer.BindDescriptorSet(0, make_shared<DescriptorSet>(pipeline->DescriptorSetLayouts()[0], "mipmap tmp" + to_string(i), unordered_map<uint32_t, DescriptorSet::Entry> {
-			{ pipeline->binding("gInput2").mBinding, DescriptorSet::TextureEntry{nullptr,TextureView(texture,i,1), vk::ImageLayout::eGeneral } },
-			{ pipeline->binding("gOutput2").mBinding, DescriptorSet::TextureEntry{nullptr,TextureView(texture,i+1,1), vk::ImageLayout::eGeneral } } }));
+			{ pipeline->binding("gInput2").mBinding, DescriptorSet::TextureEntry(TextureView(texture,i,1), vk::ImageLayout::eGeneral, nullptr) },
+			{ pipeline->binding("gOutput2").mBinding, DescriptorSet::TextureEntry(TextureView(texture,i+1,1), vk::ImageLayout::eGeneral, nullptr) } }));
 		commandBuffer.DispatchTiled(extent);
 	}
 }
@@ -154,7 +145,9 @@ int main(int argc, char** argv) {
 	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
 	{
 		Window& window = instance->Window();
-		gSpirvModules = LoadShaders(instance->Device(), "Assets/core_shaders.spvm");
+
+		ranges::for_each( byte_stream<ifstream>("Assets/core_shaders.spvm", ios::binary).read<vector<SpirvModule>>(),
+			[&](const auto& m) { gSpirvModules.emplace(m.mEntryPoint, make_shared<SpirvModule>(m)).first->second; });
 
 		// Create render passes
 
@@ -299,12 +292,12 @@ int main(int argc, char** argv) {
 			if (framebuffer) {
 				auto perCamera = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[0], "PerCamera");
 				perCamera->insert(pbr->binding("gLights").mBinding, commandBuffer->CopyToDevice("gLights", gLights, vk::BufferUsageFlagBits::eStorageBuffer));
-				perCamera->insert(pbr->binding("gShadowAtlas").mBinding, gShadowAtlas, vk::ImageLayout::eShaderReadOnlyOptimal);
+				perCamera->insert(pbr->binding("gShadowAtlas").mBinding, DescriptorSet::TextureEntry(gShadowAtlas, vk::ImageLayout::eShaderReadOnlyOptimal, nullptr));
 				auto perMaterial = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[1], "PerMaterial");
 				perMaterial->insert(pbr->binding("gMaterial").mBinding, commandBuffer->CopyToDevice("gMaterial", span(&gMaterial,1), vk::BufferUsageFlagBits::eUniformBuffer));
-				perMaterial->insert(pbr->binding("gBaseColorTexture").mBinding, TextureView(gBaseColorTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
-				perMaterial->insert(pbr->binding("gNormalTexture").mBinding, TextureView(gNormalTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
-				perMaterial->insert(pbr->binding("gMetallicRoughnessTexture").mBinding, TextureView(gMetallicRoughnessTexture), vk::ImageLayout::eShaderReadOnlyOptimal);
+				perMaterial->insert(pbr->binding("gBaseColorTexture").mBinding, DescriptorSet::TextureEntry(TextureView(gBaseColorTexture), vk::ImageLayout::eShaderReadOnlyOptimal, nullptr));
+				perMaterial->insert(pbr->binding("gNormalTexture").mBinding, DescriptorSet::TextureEntry(TextureView(gNormalTexture), vk::ImageLayout::eShaderReadOnlyOptimal, nullptr));
+				perMaterial->insert(pbr->binding("gMetallicRoughnessTexture").mBinding, DescriptorSet::TextureEntry(TextureView(gMetallicRoughnessTexture), vk::ImageLayout::eShaderReadOnlyOptimal, nullptr));
 				auto perObject = make_shared<DescriptorSet>(pbr->DescriptorSetLayouts()[2], "PerObject");
 				perObject->insert(pbr->binding("gInstanceTransforms").mBinding, commandBuffer->CopyToDevice("gInstanceTransforms", gInstanceTransforms, vk::BufferUsageFlagBits::eStorageBuffer));
 
@@ -351,8 +344,8 @@ int main(int argc, char** argv) {
 				vk::ImageCopy rgn = {};
 				rgn.dstSubresource = rgn.srcSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 };
 				rgn.extent = vk::Extent3D(window.SwapchainExtent(), 1);
-				framebuffer->at("primary_resolve").texture().TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
-				(*commandBuffer)->copyImage(*framebuffer->at("primary_resolve").texture(), vk::ImageLayout::eTransferSrcOptimal, window.BackBuffer(), vk::ImageLayout::eTransferDstOptimal, { rgn });
+				(*framebuffer)["primary_resolve"].texture().TransitionBarrier(*commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
+				(*commandBuffer)->copyImage(*(*framebuffer)["primary_resolve"].texture(), vk::ImageLayout::eTransferSrcOptimal, window.BackBuffer(), vk::ImageLayout::eTransferDstOptimal, { rgn });
 
 				commandBuffer->TransitionBarrier(window.BackBuffer(), { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR);
 				commandBuffer->WaitOn(vk::PipelineStageFlagBits::eTransfer, window.ImageAvailableSemaphore());

@@ -47,7 +47,7 @@ private:
 
 class DescriptorSet : public DeviceResource {
 public:
-	using TextureEntry = tuple<shared_ptr<Sampler>, TextureView, vk::ImageLayout>;
+	using TextureEntry = tuple<TextureView, vk::ImageLayout, shared_ptr<Sampler>>;
 	using Entry = variant<
 		Buffer::RangeView, // storage/uniform buffer
 		TexelBufferView, // texel buffer
@@ -94,30 +94,17 @@ public:
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }
 	inline operator vk::DescriptorSet() const { return mDescriptorSet; }
 
-	inline auto DescriptorSetLayout() const { return mLayout; }
+	inline auto Layout() const { return mLayout; }
 
 	inline const DescriptorSetLayout::Binding& layout_at(uint32_t binding) const { return mLayout->at(binding); }
-	inline const Entry& at(uint32_t binding, uint32_t arrayIndex = 0) const {
-		return mBoundDescriptors.at((uint64_t(binding)<<32)|arrayIndex);
-	}
 
-	inline void insert(uint32_t binding, uint32_t arrayIndex, Entry&& entry) {
+	inline const Entry& at(uint32_t binding, uint32_t arrayIndex = 0) const { return mBoundDescriptors.at((uint64_t(binding)<<32)|arrayIndex); }
+	inline const Entry& operator[](uint32_t binding) const { return at(binding); }
+
+	inline void insert(uint32_t binding, uint32_t arrayIndex, const Entry& entry) {
 		mBoundDescriptors[*mPendingWrites.emplace((uint64_t(binding)<<32)|arrayIndex).first] = entry;
 	}
-	inline void insert(uint32_t binding, Entry&& entry) { insert(binding, 0, forward<Entry>(entry)); }
-
-	inline void insert(uint32_t binding, uint32_t arrayIndex, const TextureView& view, vk::ImageLayout layout = vk::ImageLayout::eGeneral, const shared_ptr<Sampler>& sampler = nullptr) {
-		mBoundDescriptors[*mPendingWrites.emplace((uint64_t(binding)<<32)|arrayIndex).first] = TextureEntry(sampler, view, layout);
-	}
-	inline void insert(uint32_t binding, const TextureView& view, vk::ImageLayout layout = vk::ImageLayout::eGeneral, const shared_ptr<Sampler>& sampler = nullptr) {
-		insert(binding, 0, view, layout, sampler);
-	}
-	inline void insert(uint32_t binding, uint32_t arrayIndex, shared_ptr<Sampler> sampler) {
-		insert(binding, arrayIndex, {}, vk::ImageLayout::eUndefined, sampler);
-	}
-	inline void insert(uint32_t binding, shared_ptr<Sampler> sampler) {
-		insert(binding, 0, {}, vk::ImageLayout::eUndefined, sampler);
-	}
+	inline void insert(uint32_t binding, const Entry& entry) { insert(binding, 0, entry); }
 
 	inline void FlushWrites() {
 		if (mPendingWrites.empty()) return;

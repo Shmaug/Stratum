@@ -64,7 +64,7 @@ void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_pt
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < renderPass->AttachmentDescriptions().size(); i++)
-		framebuffer->Attachments()[i].texture().TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->AttachmentDescriptions()[i]).initialLayout);
+		(*framebuffer)[i].texture().TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->AttachmentDescriptions()[i]).initialLayout);
 
 	vk::RenderPassBeginInfo info = {};
 	info.renderPass = **renderPass;
@@ -89,7 +89,7 @@ void CommandBuffer::EndRenderPass() {
 	// Update tracked image layouts
 	for (uint32_t i = 0; i < mCurrentRenderPass->AttachmentDescriptions().size(); i++) {
 		auto layout = get<vk::AttachmentDescription>(mCurrentRenderPass->AttachmentDescriptions()[i]).finalLayout;
-		auto& attachment = mCurrentFramebuffer->Attachments()[i];
+		auto& attachment = (*mCurrentFramebuffer)[i];
 		attachment.texture().mTrackedLayout = layout;
 		attachment.texture().mTrackedStageFlags = GuessStage(layout);
 		attachment.texture().mTrackedAccessFlags = GuessAccessMask(layout);

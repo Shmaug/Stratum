@@ -55,7 +55,6 @@ public:
 			static_assert_tuplefiable<T>();
 		return *this;
 	}
-
 	template<typename T> inline byte_stream& operator<<(const T& rhs) {
 		auto write_fn = [&]<typename...Types>(const Types&... x){ (operator<< <Types> (x), ...); };
 		if constexpr (is_trivially_copyable_v<T>)
@@ -76,6 +75,12 @@ public:
 		} else
 			static_assert_tuplefiable<T>();
 		return *this;
+	}
+
+	template<typename T> inline T read() {
+		T t;
+		operator>>(t);
+		return t;
 	}
 };
 

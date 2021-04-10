@@ -34,8 +34,9 @@ struct DescriptorBinding {
 	vk::ShaderStageFlags mStageFlags = {};
 };
 
-struct SpirvModule {
-	vk::ShaderModule mShaderModule;
+class SpirvModule {
+public:
+	vk::ShaderModule mShaderModule; // created when the SpirvModule is used to create a Pipeline
 	vk::Device mDevice;
 
 	vector<uint32_t> mSpirv;
@@ -48,10 +49,8 @@ struct SpirvModule {
 	unordered_map<string, RasterStageVariable> mStageInputs;
 	unordered_map<string, RasterStageVariable> mStageOutputs;
 	vk::Extent3D mWorkgroupSize;
-
+	
 	inline ~SpirvModule() { if (mShaderModule) mDevice.destroyShaderModule(mShaderModule); }
-
-	inline const DescriptorBinding& Binding(const string& descriptor) const { return mDescriptorBindings.at(descriptor); }
 };
 
 template<> struct tuplefier<RasterStageVariable> {
