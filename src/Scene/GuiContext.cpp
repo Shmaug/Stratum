@@ -1,7 +1,13 @@
 #include "GuiContext.hpp"
 
 #include "../Core/Window.hpp"
-#include "imgui.h"
+
+#include <imgui.h>
+#include <imgui.cpp>
+#include <imgui_demo.cpp>
+#include <imgui_draw.cpp>
+#include <imgui_tables.cpp>
+#include <imgui_widgets.cpp>
 
 using namespace stm;
 
