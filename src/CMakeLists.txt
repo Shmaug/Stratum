@@ -15,7 +15,7 @@ file(GLOB_RECURSE STRATUM_CPP "Core/*.cpp" "Scene/*.cpp")
 
 add_executable(Stratum main.cpp ${STRATUM_CPP} stratum.rc)
 target_compile_definitions(Stratum PUBLIC ${STM_COMPILE_DEFINITIONS} STRATUM_CORE)
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp msdfgen::msdfgen-ext)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp)
 
 set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
 

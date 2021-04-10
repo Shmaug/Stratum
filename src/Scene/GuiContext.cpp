@@ -2,7 +2,6 @@
 
 #include "../Core/Window.hpp"
 
-#include <imgui.h>
 #include <imgui.cpp>
 #include <imgui_demo.cpp>
 #include <imgui_draw.cpp>

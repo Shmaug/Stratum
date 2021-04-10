@@ -16,3 +16,6 @@
 [submodule "extern/src/imgui"]
 	path = extern/src/imgui
 	url = https://github.com/ocornut/imgui
+[submodule "extern/include/imgui"]
+	path = extern/include/imgui
+	url = https://github.com/ocornut/imgui
