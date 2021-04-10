@@ -14,7 +14,7 @@ private:
   shared_ptr<Framebuffer> mFramebuffer;
 
 public:
-  Delegate<RenderNode*, const RenderPass::SubpassDescription&> OnRenderSubpass;
+  NodeDelegate<RenderNode*, const RenderPass::SubpassDescription&> OnRenderSubpass;
 
   inline RenderNode(Scene& scene, const string& name) : Node(scene, name) {}
 

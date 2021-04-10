@@ -5,8 +5,7 @@
 
 #ifdef WIN32
 #include <vulkan/vulkan_win32.h>
-#endif
-#ifdef __linux
+#elif defined(__linux)
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
 namespace x11 {
@@ -132,8 +131,7 @@ enum KeyCode {
 	KEY_BACKSLASH = 0xdc, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the '\|' key
 	KEY_BRACKET_R = 0xdd, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the ']}' key
 	KEY_QUOTE = 0xde, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the 'single-quote/double-quote' key
-#endif
-#ifdef __linux
+#elif defined(__linux)
 	KEY_NONE = 0x0000,
 
 	MOUSE_LEFT = 0x001,
@@ -293,12 +291,11 @@ public:
 	inline uint32_t BackBufferIndex() const { return mBackBufferIndex; }
 	inline bool AllowTearing() const { return mAllowTearing; }
 
-	#ifdef WIN32
+#ifdef WIN32
 	inline HWND Hwnd() const { return mHwnd; }
-	#endif
-	#ifdef __linux
+#elif defined(__linux)
 	inline xcb_window_t XCBWindow() const { return mXCBWindow; }
-	#endif
+#endif
 
 	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
@@ -353,18 +350,17 @@ private:
 	stm::MouseState mLastMouseState = {};
 	bool mLockMouse = false;
 
-	#ifdef WIN32
+#ifdef WIN32
 	HWND mHwnd = 0;
 	RECT mWindowedRect;
-	#endif
-	#ifdef __linux
+	#elif defined(__linux)
 	xcb_connection_t* mXCBConnection = nullptr;
 	xcb_screen_t* mXCBScreen = nullptr;
 	xcb_window_t mXCBWindow;
 	xcb_atom_t mXCBProtocols;
 	xcb_atom_t mXCBDeleteWin;
 	vk::Rect2D mWindowedRect;
-	#endif
+#endif
 };
 
 }

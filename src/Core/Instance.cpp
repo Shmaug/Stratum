@@ -93,12 +93,11 @@ Instance::Instance(int argc, char** argv) {
 	}
 	if (TryGetOption("ext_debug_utils", arg)) instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	
-	#ifdef __linux
-	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-	mInstanceExtensions.insert(VK_KHR_DISPLAY_EXTENSION_NAME);
-	#endif
 	#ifdef WIN32
 	instanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+	#elif defined(__linux)
+	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+	mInstanceExtensions.insert(VK_KHR_DISPLAY_EXTENSION_NAME);
 	#endif
 
 	if (validationLayers.size()) {
@@ -155,33 +154,8 @@ Instance::Instance(int argc, char** argv) {
 
 	// Create window
 
-	#ifdef __linux
-	// create xcb connection
-	mXCBConnection = xcb_connect(nullptr, nullptr);
-	if (int err = xcb_connection_has_error(mXCBConnection)) throw runtime_error("Failed to connect to xcb: " + to_string(err));
-	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
-
-	// find xcb screen
-	for (xcb_screen_iterator_t iter = xcb_setup_roots_iterator(xcb_get_setup(mXCBConnection)); iter.rem; xcb_screen_next(&iter)) {
-		xcb_screen_t* screen = iter.data;
-
-		// find suitable physical device
-		uint32_t queueFamilyCount;
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-		vector<vk::QueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-		for (uint32_t q = 0; q < queueFamilyCount; q++)
-			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
-				mScreen = screen;
-				break;
-			}
-		if (mScreen) break;
-	}
-	if (!mScreen) throw runtime_error("Failed to find a device with XCB presentation support!")
-
-	#endif
 	#ifdef WIN32
+
 	// Create window class
 	mHInstance = GetModuleHandleA(NULL);
 
@@ -210,6 +184,33 @@ Instance::Instance(int argc, char** argv) {
 	rID[1].usUsagePage = 0x01;
 	rID[1].usUsage = 0x06;
 	if (RegisterRawInputDevices(rID.data(), (UINT)rID.size(), sizeof(RAWINPUTDEVICE)) == FALSE) throw runtime_error("Failed to register raw mMouseKeyboard device(s)");
+
+	#elif defined(__linux)
+
+	// create xcb connection
+	mXCBConnection = xcb_connect(nullptr, nullptr);
+	if (int err = xcb_connection_has_error(mXCBConnection)) throw runtime_error("Failed to connect to xcb: " + to_string(err));
+	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
+
+	// find xcb screen
+	for (xcb_screen_iterator_t iter = xcb_setup_roots_iterator(xcb_get_setup(mXCBConnection)); iter.rem; xcb_screen_next(&iter)) {
+		xcb_screen_t* screen = iter.data;
+
+		// find suitable physical device
+		uint32_t queueFamilyCount;
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+		vector<vk::QueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
+
+		for (uint32_t q = 0; q < queueFamilyCount; q++)
+			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
+				mScreen = screen;
+				break;
+			}
+		if (mScreen) break;
+	}
+	if (!mScreen) throw runtime_error("Failed to find a device with XCB presentation support!")
+
 	#endif
 
 	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
@@ -234,12 +235,12 @@ Instance::~Instance() {
 
 	mInstance.destroy();
 
-	#ifdef __linux
+#ifdef WIN32
+	UnregisterClassA("Stratum", GetModuleHandleA(NULL));
+#elif defined(__linux)
 	xcb_key_symbols_free(mXCBKeySymbols);
 	xcb_disconnect(mXCBConnection);
-	#else
-	UnregisterClassA("Stratum", GetModuleHandleA(NULL));
-	#endif
+#endif
 }
 
 #ifdef WIN32
@@ -349,28 +350,8 @@ bool Instance::PollEvents() {
 	mWindow->mMouseState.mScrollDelta = 0;
 	mWindow->mMouseState.mCursorDelta = Vector2f::Zero();
 
-	#ifdef __linux
-	xcb_generic_event_t* event;
-	while (event = PollEvent()) {
-		if (!event) break;
-		ProcessEvent(event);
-		free(event);
-	}
+	#ifdef WIN32
 
-	xcb_get_geometry_cookie_t cookie = xcb_get_geometry(mXCBConnection, mWindow->mXCBWindow);
-	if (xcb_get_geometry_reply_t* reply = xcb_get_geometry_reply(mXCBConnection, cookie, NULL)) {
-		mWindow->mClientRect.offset.x = reply->x;
-		mWindow->mClientRect.offset.y = reply->y;
-		mWindow->mClientRect.extent.width = reply->width;
-		mWindow->mClientRect.extent.height = reply->height;
-		free(reply);
-	}
-
-	mWindow->mMouseState.mCursorDelta = mWindow->mMouseState.mCursorPos - mMouseKeyboard->mLast.mCursorPos;
-	mMouseKeyboard->mWindowExtentWidth = mWindow->mClientRect.extent;
-	if (mDestroyPending) return false;
-	#endif
-	#ifdef WIN32	
 	MSG msg = {};
 	while (true) { // go through all messages
 		if (mDestroyPending) return false;
@@ -429,6 +410,29 @@ bool Instance::PollEvents() {
 	GetCursorPos(&pt);
 	ScreenToClient(mWindow->mHwnd, &pt);
 	mWindow->mMouseState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
+
+	#elif defined(__linux)
+
+	xcb_generic_event_t* event;
+	while (event = PollEvent()) {
+		if (!event) break;
+		ProcessEvent(event);
+		free(event);
+	}
+
+	xcb_get_geometry_cookie_t cookie = xcb_get_geometry(mXCBConnection, mWindow->mXCBWindow);
+	if (xcb_get_geometry_reply_t* reply = xcb_get_geometry_reply(mXCBConnection, cookie, NULL)) {
+		mWindow->mClientRect.offset.x = reply->x;
+		mWindow->mClientRect.offset.y = reply->y;
+		mWindow->mClientRect.extent.width = reply->width;
+		mWindow->mClientRect.extent.height = reply->height;
+		free(reply);
+	}
+
+	mWindow->mMouseState.mCursorDelta = mWindow->mMouseState.mCursorPos - mMouseKeyboard->mLast.mCursorPos;
+	mMouseKeyboard->mWindowExtentWidth = mWindow->mClientRect.extent;
+	if (mDestroyPending) return false;
+
 	#endif
 
 	return true;

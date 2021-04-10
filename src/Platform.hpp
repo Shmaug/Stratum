@@ -25,13 +25,13 @@
 #define PLUGIN_EXPORT __declspec(dllexport)
 #endif
 
-#endif
+#elif defined(__linux)
 
-#ifdef __GNUC__
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <experimental/filesystem>
 #define STRATUM_API
 #define PLUGIN_EXPORT
+
 #endif

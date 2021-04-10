@@ -33,8 +33,7 @@ public:
 
 	#ifdef WIN32
 	inline HINSTANCE HInstance() const { return mHInstance; }
-	#endif
-	#ifdef __linux
+	#elif defined(__linux)
 	inline xcb_window_t XCBScreen() const { return mXCBScreen; }
 	#endif
 
@@ -53,8 +52,7 @@ private:
 	void HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;
-	#endif
-	#ifdef __linux
+	#elif defined(__linux)
 	STRATUM_API void ProcessEvent(xcb_generic_event_t* event);
 	STRATUM_API xcb_generic_event_t* PollEvent();
 	x11::Display* mXDisplay;

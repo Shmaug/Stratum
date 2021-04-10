@@ -7,6 +7,7 @@ using namespace stm;
 
 Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
 	#ifdef WIN32
+
 	mWindowedRect = {};
 
 	SetProcessDPIAware();
@@ -37,8 +38,9 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	GetClientRect(mHwnd, &cr);
 	mClientRect.offset = vk::Offset2D((int32_t)cr.top, (int32_t)cr.left);
 	mClientRect.extent = vk::Extent2D((uint32_t)(cr.right - cr.left), (uint32_t)(cr.bottom - cr.top));
-	#endif
-	#ifdef __linux
+
+	#elif defined(__linux)
+
 	xcbConnection = mInstance.XCBConnection();
 	xcbScreen = mInstance->XCBScreen();
 	mXCBWindow = xcb_generate_id(xcbConnection);
@@ -86,19 +88,19 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	info.connection = xcbConnection;
 	info.window = mXCBWindow;
 	mSurface = mInstance->vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface);
+
 	#endif
 }
 Window::~Window() {
 	DestroySwapchain();
 	mInstance->destroySurfaceKHR(mSurface);
 
-	#ifdef __linux
+#ifdef WIN32
+	::DestroyWindow(mHwnd);
+#elif defined(__linux)
 	if (mInstance.XCBConnection() && mXCBWindow)
  		xcb_destroy_window(mInstance.XCBConnection(), mXCBWindow);
- 	#endif
-	#ifdef WIN32
-	::DestroyWindow(mHwnd);
-	#endif
+#endif
 }
 
 void Window::AcquireNextImage(CommandBuffer& commandBuffer) {
@@ -130,7 +132,7 @@ xcb_atom_t getReplyAtomFromCookie(xcb_connection_t* connection, xcb_intern_atom_
 #endif
 
 void Window::Resize(uint32_t w, uint32_t h) {
-	#ifdef WIN32
+#ifdef WIN32
 	RECT r;
 	GetWindowRect(mHwnd, &r);
 	int x = r.left, y = r.top;
@@ -139,13 +141,14 @@ void Window::Resize(uint32_t w, uint32_t h) {
 	r.bottom = r.top + h;
 	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	SetWindowPos(mHwnd, HWND_TOPMOST, x, y, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
-	#else
-	throw exception("window resize not implemented on linux");
-	#endif
+#else
+	throw exception("Window::Resize not implemented");
+#endif
 }
 
 void Window::Fullscreen(bool fs) {
 	#ifdef WIN32
+	
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
 
@@ -179,8 +182,8 @@ void Window::Fullscreen(bool fs) {
 
 		mFullscreen = false;
 	}
-	#endif
-	#ifdef __linux
+
+	#elif defined(__linux)
 
 	if (fs == mFullscreen) return;
 	mFullscreen = fs;
