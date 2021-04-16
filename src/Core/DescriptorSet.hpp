@@ -1,9 +1,34 @@
 #pragma once
 
 #include "Texture.hpp"
+#include "Sampler.hpp"
 #include "SpirvModule.hpp"
 
 namespace stm {
+using Descriptor = variant<
+	tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
+	Buffer::View, // storage/uniform buffer
+	Buffer::TexelView, // texel buffer
+	byte_blob, // inline uniform buffer
+	vk::AccelerationStructureKHR>; // acceleration structure
+
+template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
+constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
+template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
+constexpr const T& get(const stm::Descriptor& d) { return get<T>(get<0>(d)); }
+
+inline Descriptor texture_descriptor(Texture::View&& texture, vk::ImageLayout&& layout, shared_ptr<Sampler>&& sampler) {
+	return make_tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>(forward<Texture::View>(texture), forward<vk::ImageLayout>(layout), forward<shared_ptr<Sampler>>(sampler));
+}
+inline Descriptor sampler_descriptor(shared_ptr<Sampler>&& sampler) {
+	return texture_descriptor(Texture::View(), vk::ImageLayout::eUndefined, forward<shared_ptr<Sampler>>(sampler));
+}
+inline Descriptor storage_texture_descriptor(Texture::View&& texture) {
+	return texture_descriptor(forward<Texture::View>(texture), vk::ImageLayout::eGeneral, nullptr);
+}
+inline Descriptor sampled_texture_descriptor(Texture::View&& texture, shared_ptr<Sampler> sampler = nullptr) {
+	return texture_descriptor(forward<Texture::View>(texture), vk::ImageLayout::eShaderReadOnlyOptimal, forward<shared_ptr<Sampler>>(sampler));
+}
 
 class DescriptorSetLayout : public DeviceResource {
 public:
@@ -47,13 +72,6 @@ private:
 
 class DescriptorSet : public DeviceResource {
 public:
-	using TextureEntry = tuple<TextureView, vk::ImageLayout, shared_ptr<Sampler>>;
-	using Entry = variant<
-		Buffer::RangeView, // storage/uniform buffer
-		TexelBufferView, // texel buffer
-		TextureEntry, // sampler/image/combined image sampler
-		byte_blob, // inline uniform buffer
-		vk::AccelerationStructureKHR>; // acceleration structure
 
 private:
 	friend class Device;
@@ -61,7 +79,7 @@ private:
 	vk::DescriptorSet mDescriptorSet;
 	shared_ptr<const DescriptorSetLayout> mLayout;
 	
-	unordered_map<uint64_t/*{binding,arrayIndex}*/, Entry> mBoundDescriptors;
+	unordered_map<uint64_t/*{binding,arrayIndex}*/, Descriptor> mBoundDescriptors;
 	unordered_set<uint64_t> mPendingWrites;
 
 public:
@@ -74,14 +92,14 @@ public:
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
 		mDevice.SetObjectName(mDescriptorSet, Name());
 	}
-	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Entry>& bindings) : DescriptorSet(layout, name) {
-		for (const auto&[binding, entry] : bindings)
-			insert(binding, Entry(entry));
+	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Descriptor>& bindings) : DescriptorSet(layout, name) {
+		for (const auto&[binding, d] : bindings)
+			insert_or_assign(binding, d);
 	}
-	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, unordered_map<uint32_t, Entry>>& bindings) : DescriptorSet(layout, name) {
+	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, unordered_map<uint32_t, Descriptor>>& bindings) : DescriptorSet(layout, name) {
 		for (const auto&[binding, entries] : bindings)
-			for (const auto&[arrayIndex, entry] : entries)
-				insert(binding, arrayIndex, Entry(entry));
+			for (const auto&[arrayIndex, d] : entries)
+				insert_or_assign(binding, arrayIndex, d);
 	}
 	inline ~DescriptorSet() {
 		mBoundDescriptors.clear();
@@ -98,13 +116,18 @@ public:
 
 	inline const DescriptorSetLayout::Binding& layout_at(uint32_t binding) const { return mLayout->at(binding); }
 
-	inline const Entry& at(uint32_t binding, uint32_t arrayIndex = 0) const { return mBoundDescriptors.at((uint64_t(binding)<<32)|arrayIndex); }
-	inline const Entry& operator[](uint32_t binding) const { return at(binding); }
+	inline const Descriptor& find(uint32_t binding, uint32_t arrayIndex = 0) const {
+		auto it = mBoundDescriptors.find((uint64_t(binding)<<32)|arrayIndex);
+		if (it == mBoundDescriptors.end()) return {};
+		return it->second;
+	}
+	inline const Descriptor& at(uint32_t binding, uint32_t arrayIndex = 0) const { return mBoundDescriptors.at((uint64_t(binding)<<32)|arrayIndex); }
+	inline const Descriptor& operator[](uint32_t binding) const { return at(binding); }
 
-	inline void insert(uint32_t binding, uint32_t arrayIndex, const Entry& entry) {
+	inline void insert_or_assign(uint32_t binding, uint32_t arrayIndex, const Descriptor& entry) {
 		mBoundDescriptors[*mPendingWrites.emplace((uint64_t(binding)<<32)|arrayIndex).first] = entry;
 	}
-	inline void insert(uint32_t binding, const Entry& entry) { insert(binding, 0, entry); }
+	inline void insert_or_assign(uint32_t binding, const Descriptor& entry) { insert_or_assign(binding, 0, entry); }
 
 	inline void FlushWrites() {
 		if (mPendingWrites.empty()) return;
@@ -129,17 +152,17 @@ public:
 			case vk::DescriptorType::eStorageBuffer:
 			case vk::DescriptorType::eUniformBufferDynamic:
 			case vk::DescriptorType::eStorageBufferDynamic: {
-				const auto& view = get<Buffer::RangeView>(entry);
+				const auto& view = get<Buffer::View>(entry);
 				info.mBufferInfo.buffer = *view.buffer();
 				info.mBufferInfo.offset = view.offset();
-				info.mBufferInfo.range = view.size_bytes();
+				info.mBufferInfo.range = view.size();
 				write.pBufferInfo = &info.mBufferInfo;
 				break;
 			}
 
 			case vk::DescriptorType::eUniformTexelBuffer:
 			case vk::DescriptorType::eStorageTexelBuffer:
-				write.pTexelBufferView = get<TexelBufferView>(entry).operator->();
+				write.pTexelBufferView = get<Buffer::TexelView>(entry).operator->();
 				break;
 
 			case vk::DescriptorType::eInputAttachment:
@@ -147,11 +170,10 @@ public:
 			case vk::DescriptorType::eStorageImage:
 			case vk::DescriptorType::eCombinedImageSampler:
 			case vk::DescriptorType::eSampler: {
-				const auto& t = get<TextureEntry>(entry);
-				info.mImageInfo.imageLayout = get<vk::ImageLayout>(t);
-				info.mImageInfo.imageView = *get<TextureView>(t);
+				info.mImageInfo.imageLayout = get<vk::ImageLayout>(entry);
+				info.mImageInfo.imageView = *get<Texture::View>(entry);
 				if (write.descriptorType == vk::DescriptorType::eCombinedImageSampler || write.descriptorType == vk::DescriptorType::eSampler)
-					info.mImageInfo.sampler = **get<shared_ptr<Sampler>>(t);
+					info.mImageInfo.sampler = **get<shared_ptr<Sampler>>(entry);
 				write.pImageInfo = &info.mImageInfo;
 				break;
 			}

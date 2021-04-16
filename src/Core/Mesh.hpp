@@ -15,8 +15,9 @@ public:
 	};
 	
 	inline Mesh(const string& name, const GeometryData& geometry = { vk::PrimitiveTopology::eTriangleList }) : mName(name), mGeometry(geometry) {}
+	STRATUM_API Mesh(CommandBuffer& commandBuffer, const fs::path& filename);
 	
-	inline Buffer::RangeView& Indices() { return mIndices; }
+	inline Buffer::StrideView& Indices() { return mIndices; }
 	inline GeometryData& Geometry() { return mGeometry; }
 	inline vector<Submesh>& Submeshes() { return mSubmeshes; }
 
@@ -33,7 +34,6 @@ public:
 		else
 			return baseVertex + i;
 	}
-
 	inline void Draw(CommandBuffer& commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0) {
 		auto pipeline = dynamic_pointer_cast<GraphicsPipeline>(commandBuffer.BoundPipeline());
 		if (!pipeline) throw logic_error("cannot draw a mesh without a bound graphics pipeline\n");
@@ -55,7 +55,7 @@ public:
 
 private:
 	GeometryData mGeometry;
-	Buffer::RangeView mIndices;
+	Buffer::StrideView mIndices;
 	vector<Submesh> mSubmeshes;
 	string mName;
 };

@@ -6,12 +6,12 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+
 #include <stb_image.h>
-#include <stb_image_write.h>
 
 using namespace stm;
 
-tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& filename, bool srgb) {
+Texture::PixelData Texture::LoadPixels(Device& device, const fs::path& filename, bool srgb) {
 	int x,y,channels;
 	stbi_info(filename.string().c_str(), &x, &y, &channels);
 
@@ -19,11 +19,9 @@ tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& f
 	if (channels == 3) desiredChannels = 4;
 
 	byte* pixels = nullptr;
-	size_t stride = 0;
 	vk::Format format = vk::Format::eUndefined;
 	if (stbi_is_hdr(filename.string().c_str())) {
 		pixels = (byte*)stbi_loadf(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		stride = sizeof(float);
 		switch(desiredChannels ? desiredChannels : channels) {
 			case 1: format = vk::Format::eR32Sfloat; break;
 			case 2: format = vk::Format::eR32G32Sfloat; break;
@@ -32,7 +30,6 @@ tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& f
 		}
 	} else if (stbi_is_16_bit(filename.string().c_str())) {
 		pixels = (byte*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		stride = sizeof(uint16_t);
 		switch(desiredChannels ? desiredChannels : channels) {
 			case 1: format = vk::Format::eR16Unorm; break;
 			case 2: format = vk::Format::eR16G16Unorm; break;
@@ -41,7 +38,6 @@ tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& f
 		}
 	} else {
 		pixels = (byte*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		stride = sizeof(uint8_t);
 		switch (desiredChannels ? desiredChannels : channels) {
 			case 1: format = vk::Format::eR8Unorm; break;
 			case 2: format = vk::Format::eR8G8Unorm; break;
@@ -52,16 +48,13 @@ tuple<byte_blob, vk::Extent3D, vk::Format> Texture::LoadPixels(const fs::path& f
 	if (!pixels) throw invalid_argument("could not load " + filename.string());
 	if (desiredChannels) channels = desiredChannels;
 
-	byte_blob data(span<byte>(pixels, x*y*channels*stride));
+	auto memory = device.AllocateMemory(x*y*ElementSize(format), 0, host_visible_coherent);
+	memcpy(memory->data(), pixels, memory->size());
 	stbi_image_free(pixels);
-	return make_tuple(move(data), vk::Extent3D(x,y,1), move(format));
+	return Texture::PixelData(memory, vk::Extent3D(x,y,1), format);
 }
 
-Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::ImageCreateFlags createFlags, vk::MemoryPropertyFlags properties, vk::ImageTiling tiling)
-		: DeviceResource(device, name), mExtent(extent), mFormat(format), mSampleCount(numSamples), mUsage(usage), 
-		mMipLevels(mipLevels ? mipLevels : (numSamples > vk::SampleCountFlagBits::e1 ? 1 : (uint32_t)floor(log2(max(mExtent.width, mExtent.height))) + 1)),
-		mCreateFlags(createFlags), mMemoryProperties(properties), mArrayLayers(arrayLayers), mTiling(tiling) {
-	
+void Texture::Create() {
 	vk::ImageCreateInfo imageInfo = {};
 	imageInfo.imageType = mExtent.depth > 1 ? vk::ImageType::e3D
 		: (mExtent.height > 1 || (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1)) ? vk::ImageType::e2D // special 1x1 case: force 2D
@@ -81,9 +74,6 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 	mImage = mDevice->createImage(imageInfo);
 	mDevice.SetObjectName(mImage, Name());
 
-	mMemoryBlock = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), mMemoryProperties);
-	mDevice->bindImageMemory(mImage, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
-	
 	switch (mFormat) {
 	default:
 		mAspectFlags = vk::ImageAspectFlagBits::eColor;
@@ -102,10 +92,20 @@ Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent,
 		mAspectFlags = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
 		break;
 	}
+}
 
-	mTrackedLayout = vk::ImageLayout::eUndefined;
-	mTrackedStageFlags = vk::PipelineStageFlagBits::eTopOfPipe;
-	mTrackedAccessFlags = {};
+Texture::Texture(shared_ptr<Device::Memory::View> memory, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::ImageCreateFlags createFlags, vk::ImageTiling tiling)
+		: DeviceResource(memory->mMemory.mDevice, name), mMemory(memory), mExtent(extent), mFormat(format), mArrayLayers(arrayLayers), mSampleCount(numSamples), mUsage(usage), 
+		mMipLevels(mipLevels ? mipLevels : (numSamples > vk::SampleCountFlagBits::e1) ? 1 : MaxMips(extent)), mCreateFlags(createFlags), mTiling(tiling) {
+	Create();
+	mDevice->bindImageMemory(mImage, *mMemory->mMemory, mMemory->mOffset);
+}
+Texture::Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::ImageUsageFlags usage, vk::ImageCreateFlags createFlags, vk::MemoryPropertyFlags properties, vk::ImageTiling tiling)
+		: DeviceResource(device, name), mExtent(extent), mFormat(format), mArrayLayers(arrayLayers), mSampleCount(numSamples), mUsage(usage), 
+		mMipLevels(mipLevels ? mipLevels : (numSamples > vk::SampleCountFlagBits::e1) ? 1 : MaxMips(extent)), mCreateFlags(createFlags), mTiling(tiling) {
+	Create();
+	mMemory = mDevice.AllocateMemory(mDevice->getImageMemoryRequirements(mImage), properties);
+	mDevice->bindImageMemory(mImage, *mMemory->mMemory, mMemory->mOffset);
 }
 
 void Texture::TransitionBarrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
@@ -174,4 +174,37 @@ void Texture::GenerateMipMaps(CommandBuffer& commandBuffer) {
 	mTrackedLayout = vk::ImageLayout::eTransferSrcOptimal;
 	mTrackedStageFlags = vk::PipelineStageFlagBits::eTransfer;
 	mTrackedAccessFlags = vk::AccessFlagBits::eTransferRead;
+}
+
+Texture::View::View(shared_ptr<Texture> texture, uint32_t baseMip, uint32_t mipCount, uint32_t baseLayer, uint32_t layerCount, vk::ImageAspectFlags aspectMask, vk::ComponentMapping components)
+	: mTexture(texture), mBaseMip(baseMip), mMipCount(mipCount ? mipCount : mMipCount = texture->MipLevels()), mBaseLayer(baseLayer), mLayerCount(layerCount ? layerCount : texture->ArrayLayers()), mAspectMask(aspectMask) {
+	if (mAspectMask == (vk::ImageAspectFlags)0) mAspectMask = texture->AspectFlags();
+
+	size_t key = hash_combine(mBaseMip, mMipCount, mBaseLayer, mLayerCount, mAspectMask, components);
+	if (texture->mViews.count(key))
+		mView = texture->mViews.at(key);
+	else {
+		vk::ImageViewCreateInfo info = {};
+		if (mTexture->CreateFlags() & vk::ImageCreateFlagBits::eCubeCompatible)
+			info.viewType = vk::ImageViewType::eCube;
+		else if (mTexture->Extent().depth > 1)
+			info.viewType = vk::ImageViewType::e3D;
+		else if (mTexture->Extent().height > 1)
+			info.viewType = vk::ImageViewType::e2D;
+		else
+			info.viewType = vk::ImageViewType::e1D;
+		
+		info.image = **mTexture;
+		info.format = mTexture->Format();
+		info.subresourceRange.aspectMask = mAspectMask;
+		info.subresourceRange.baseArrayLayer = mBaseLayer;
+		info.subresourceRange.layerCount = mLayerCount;
+		info.subresourceRange.baseMipLevel = mBaseMip;
+		info.subresourceRange.levelCount = mMipCount;
+		info.components = components;
+		mView = mTexture->mDevice->createImageView(info);
+		mTexture->mDevice.SetObjectName(mView, mTexture->Name() + "/Texture::View");
+
+		texture->mViews.emplace(key, mView);
+	}
 }

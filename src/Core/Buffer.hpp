@@ -9,28 +9,32 @@ class CommandBuffer;
 class Buffer : public DeviceResource {
 private:
 	vk::Buffer mBuffer;
-	shared_ptr<Device::Memory::Block> mMemoryBlock;
+	shared_ptr<Device::Memory::View> mMemory;
 	vk::DeviceSize mSize = 0;
 	vk::BufferUsageFlags mUsageFlags;
-	vk::MemoryPropertyFlags mMemoryProperties;
 	vk::SharingMode mSharingMode;
 
-	unordered_map<size_t, vk::BufferView> mViews;
+	unordered_map<size_t, vk::BufferView> mTexelViews;
 
-	friend class TexelBufferView;
+	friend class TexelView;
 
 public:
-	inline Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
-		: DeviceResource(device, name), mSize(size), mUsageFlags(usage), mMemoryProperties(memoryFlags), mSharingMode(sharingMode) {
-		
+	inline Buffer(shared_ptr<Device::Memory::View> memory, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
+		: DeviceResource(memory->mMemory.mDevice, name), mSize(size), mUsageFlags(usage), mMemory(memory), mSharingMode(sharingMode) {
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
 		mDevice.SetObjectName(mBuffer, Name());
-		
-		mMemoryBlock = mDevice.AllocateMemory(mDevice->getBufferMemoryRequirements(mBuffer), mMemoryProperties);
-		mDevice->bindBufferMemory(mBuffer, *mMemoryBlock->mMemory, mMemoryBlock->mOffset);
+		mDevice->bindBufferMemory(mBuffer, *mMemory->mMemory, mMemory->mOffset);
 	}
+	inline Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
+		: DeviceResource(device, name), mSize(size), mUsageFlags(usage), mSharingMode(sharingMode) {
+		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsageFlags, mSharingMode));
+		mDevice.SetObjectName(mBuffer, Name());
+		mMemory = mDevice.AllocateMemory(mDevice->getBufferMemoryRequirements(mBuffer), memoryFlags);
+		mDevice->bindBufferMemory(mBuffer, *mMemory->mMemory, mMemory->mOffset);
+	}
+	
 	inline ~Buffer() {
-		for (auto&[k,v] : mViews) mDevice->destroyBufferView(v);
+		for (auto&[k,v] : mTexelViews) mDevice->destroyBufferView(v);
 		mDevice->destroyBuffer(mBuffer);
 	}
 
@@ -39,86 +43,122 @@ public:
 	inline operator bool() const { return mBuffer; }
 
 	inline vk::DeviceSize size() const { return mSize; }
-	inline byte* data() const {
-		if (!(mMemoryProperties & vk::MemoryPropertyFlagBits::eHostVisible)) throw runtime_error("Cannot call data() on buffer that is not host visible");
-		return mMemoryBlock->data();
-	}
+	inline byte* data() const { return mMemory->data(); }
 
 	inline vk::BufferUsageFlags Usage() const { return mUsageFlags; }
-	inline const Device::Memory::Block& Memory() const { return *mMemoryBlock; }
-	inline vk::MemoryPropertyFlags MemoryProperties() const { return mMemoryProperties; }
+	inline const Device::Memory::View& Memory() const { return *mMemory; }
 
-	class RangeView {
+	class View {
 	protected:
 		shared_ptr<Buffer> mBuffer;
-		vk::DeviceSize mBufferOffset; // in bytes
-		vk::DeviceSize mElementCount;
-		vk::DeviceSize mElementStride;
-
+		vk::DeviceSize mOffset;
+		vk::DeviceSize mSize;
 	public:
-		RangeView() = default;
-		RangeView(const RangeView&) = default;
-		RangeView(RangeView&&) = default;
-		inline RangeView(shared_ptr<Buffer> buffer, vk::DeviceSize elementStride, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-			: mBuffer(buffer), mBufferOffset(byteOffset), mElementCount(elementCount == VK_WHOLE_SIZE ? (buffer->size() - mBufferOffset)/elementStride : elementCount), mElementStride(elementStride) {}
-    
-		inline RangeView subrange(size_t firstElement = 0, size_t elementCount = ~size_t(0)) const {
-			return RangeView(mBuffer, mBufferOffset + firstElement*stride(), min(elementCount, mElementCount - firstElement), mElementStride);
-    }
+		View() = default;
+		View(const View&) = default;
+		View(View&&) = default;
+		inline View(shared_ptr<Buffer> buffer, vk::DeviceSize offset = 0, vk::DeviceSize size = VK_WHOLE_SIZE)
+			: mBuffer(buffer), mOffset(offset), mSize(size == VK_WHOLE_SIZE ? buffer->size() - offset : size){}
 
-		RangeView& operator=(const RangeView&) = default;
-		RangeView& operator=(RangeView&&) = default;
-		bool operator==(const RangeView& rhs) const = default;
-		inline operator bool() const { return mBuffer && mElementStride; }
+		View& operator=(const View&) = default;
+		View& operator=(View&&) = default;
+		bool operator==(const View& rhs) const = default;
+
+		inline operator bool() const { return !empty(); }
 
 		inline shared_ptr<Buffer> get() const { return mBuffer; }
 		inline Buffer& buffer() const { return *mBuffer; }
-    inline size_t offset() const { return mBufferOffset; }
-    inline size_t stride() const { return mElementStride; }
-    inline size_t size() const { return mElementCount; }
-    inline size_t size_bytes() const { return mElementCount*mElementStride; }
-    inline bool empty() const { return !mBuffer || mElementCount == 0; }
-		inline byte* data() const { return mBuffer->data() + mBufferOffset; }
-
-		template<typename T>
-		inline operator span<T*>() const {
-			if (sizeof(T) != mElementStride) throw runtime_error("sizeof(T) must equal buffer stride");
-			return span(reinterpret_cast<T*>(data()), mElementCount);
+    inline vk::DeviceSize offset() const { return mOffset; }
+    inline vk::DeviceSize size() const { return mSize; }
+    inline bool empty() const { return !mBuffer || mSize == 0; }
+		inline byte* data() const { return mBuffer->data() + mOffset; }
+	};
+	class TexelView : public View {
+	private:
+		vk::BufferView mView;
+		vk::Format mFormat;
+	public:
+		inline TexelView() = default;
+		inline TexelView(const TexelView&) = default;
+		inline TexelView(TexelView&&) = default;
+		inline TexelView(const View& view, vk::Format fmt) : View(view), mFormat(fmt) {
+			size_t key = hash_combine(offset(), size(), mFormat);
+			if (mBuffer->mTexelViews.count(key))
+				mView = mBuffer->mTexelViews.at(key);
+			else {
+				mView = mBuffer->mDevice->createBufferView(vk::BufferViewCreateInfo({}, **mBuffer, mFormat, offset(), size()));
+				mBuffer->mDevice.SetObjectName(mView, mBuffer->Name()+"/View");
+				mBuffer->mTexelViews.emplace(key, mView);
+			}
 		}
+		inline TexelView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize offset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+			: TexelView(View(buf, offset, elementCount*ElementSize(fmt)), fmt) {}
+		
+		inline const vk::BufferView& operator*() const { return mView; }
+		inline const vk::BufferView* operator->() const { return &mView; }
 
+		TexelView& operator=(const TexelView&) = default;
+		TexelView& operator=(TexelView&& v) = default;
+		inline bool operator==(const TexelView& rhs) const = default;
+
+		inline vk::Format format() const { return mFormat; }
+	};
+	template<typename T>
+	class SpanView : public View {
+	public:
+		using value_t = T;
+		using iterator_t = T*;
+
+		SpanView() = default;
+		SpanView(const SpanView&) = default;
+		SpanView(SpanView&&) = default;
+		inline SpanView(const View& view) : View(view) {}
+		inline SpanView(shared_ptr<Buffer> buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+			: View(View(buffer, byteOffset, elementCount == VK_WHOLE_SIZE ? elementCount : elementCount*sizeof(T))) {}
+
+		SpanView& operator=(const SpanView&) = default;
+		SpanView& operator=(SpanView&&) = default;
+		bool operator==(const SpanView& rhs) const = default;
+
+    inline size_t stride() const { return sizeof(T); }
+		inline T& operator[](size_t index) const { return data()[index]; }
+
+		inline iterator_t begin() const { return (T*)data(); }
+		inline iterator_t end() const { return (T*)(data() + size()); }
+		inline vk::DeviceSize size() const { return View::size() / sizeof(T); }
+		inline size_t size_bytes() const { return View::size(); }
+	};
+	class StrideView : public View {
+	protected:
+		vk::DeviceSize mStride;
+	public:
+		StrideView() = default;
+		StrideView(const StrideView&) = default;
+		StrideView(StrideView&&) = default;
+		inline StrideView(const View& view, vk::DeviceSize stride) : View(view), mStride(stride) {}
+		inline StrideView(shared_ptr<Buffer> buffer, vk::DeviceSize stride, vk::DeviceSize offset = 0, vk::DeviceSize size = VK_WHOLE_SIZE)
+			: View(View(buffer, offset, size)), mStride(stride) {}
+		template<typename T>
+		inline StrideView(const SpanView<T>& v) : View(v), mStride(sizeof(T)) {}
+    
+		StrideView& operator=(const StrideView&) = default;
+		StrideView& operator=(StrideView&&) = default;
+		bool operator==(const StrideView& rhs) const = default;
+
+    inline size_t stride() const { return mStride; }
 	};
 };
 
-class TexelBufferView : public Buffer::RangeView {
-private:
-	vk::BufferView mView;
-	vk::Format mFormat;
+template<typename T> 
+inline Buffer::SpanView<T> make_buffer(Device& device, const string& name, size_t count, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags memoryFlags = vk::MemoryPropertyFlagBits::eDeviceLocal, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) {
+	return Buffer::SpanView<T>(make_shared<Buffer>(device, name, count*sizeof(T), usage, memoryFlags, sharingMode), 0, count);
+}
 
-public:
-	inline const vk::BufferView& operator*() const { return mView; }
-	inline const vk::BufferView* operator->() const { return &mView; }
-
-	inline TexelBufferView() = default;
-	inline TexelBufferView(const TexelBufferView&) = default;
-	inline TexelBufferView(const Buffer::RangeView& view, vk::Format fmt)
-		: RangeView(view), mFormat(fmt) {
-		size_t key = hash_combine(mBufferOffset, mElementCount, mFormat);
-		if (mBuffer->mViews.count(key))
-			mView = mBuffer->mViews.at(key);
-		else {
-			mView = mBuffer->mDevice->createBufferView(vk::BufferViewCreateInfo({}, **mBuffer, mFormat, mBufferOffset, size_bytes()));
-			mBuffer->mDevice.SetObjectName(mView, mBuffer->Name()+"/View");
-			mBuffer->mViews.emplace(key, mView);
-		}
-	}
-	inline TexelBufferView(shared_ptr<Buffer> buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-		: TexelBufferView(RangeView(buf, ElementSize(fmt), byteOffset, elementCount), fmt) {}
-	
-	TexelBufferView& operator=(const TexelBufferView&) = default;
-	TexelBufferView& operator=(TexelBufferView&& v) = default;
-	inline bool operator==(const TexelBufferView& rhs) const = default;
-
-	inline vk::Format format() const { return mFormat; }
-};
+template<device_allocator_range R>
+inline Buffer::SpanView<ranges::range_value_t<R>> make_buffer(R& range, const string& name, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) {
+	return Buffer::SpanView<ranges::range_value_t<R>>(
+		make_shared<Buffer>(range.get_allocator().device_memory(ranges::data(range)), name, ranges::size(range)*sizeof(ranges::range_value_t<R>), usage, sharingMode),
+		0, ranges::size(range));
+}
 
 }

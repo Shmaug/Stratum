@@ -380,7 +380,7 @@ int main(int argc, char* argv[]) {
 		try {
 			auto r = compiler(i);
 			results.resize(results.size() + r.size());
-			ranges::copy_backward(r, results.end()-1);
+			ranges::copy_backward(r, results.end());
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile compiling %s\n", e.what(), i.string().c_str());
 			return EXIT_FAILURE;

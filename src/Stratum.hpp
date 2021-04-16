@@ -11,13 +11,16 @@ template<typename T> inline void safe_delete_array(T*& x) { if (x) { delete[] x;
 
 #pragma region misc math expressions
 
-template<typename T> constexpr T degrees(const T& r) { return r * (T)180/(T)M_PI; }
-template<typename T> constexpr T radians(const T& d) { return d * (T)M_PI/(T)180; }
+template<unsigned_integral T>
+constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
 
-template<typename T> constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
-template<typename T> constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
-template<typename T> constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
-template<typename T> constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
+template<floating_point T> constexpr T degrees(const T& r) { return r * (T)180/numbers::pi_v<float>; }
+template<floating_point T> constexpr T radians(const T& d) { return d * numbers::pi_v<float>/(T)180; }
+
+template<integral T> constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
+template<integral T> constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
+template<integral T> constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
+template<integral T> constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
 
 template<typename T>
 inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
@@ -29,9 +32,9 @@ inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box
 
 #pragma endregion
 
-constexpr vk::DeviceSize operator"" _kB(vk::DeviceSize x) { return x*1024; }
-constexpr vk::DeviceSize operator"" _mB(vk::DeviceSize x) { return x*1024*1024; }
-constexpr vk::DeviceSize operator"" _gB(vk::DeviceSize x) { return x*1024*1024*1024; }
+constexpr size_t operator"" _kB(size_t x) { return x*1024; }
+constexpr size_t operator"" _mB(size_t x) { return x*1024*1024; }
+constexpr size_t operator"" _gB(size_t x) { return x*1024*1024*1024; }
 
 enum class ConsoleColorBits {
 	eBlack	= 0,
@@ -45,7 +48,6 @@ enum class ConsoleColorBits {
 	eWhite 		= eRed | eGreen | eBlue,
 };
 using ConsoleColor = vk::Flags<ConsoleColorBits>;
-
 template<typename... Args>
 inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Args&&... a) {
 	#ifdef WIN32
@@ -116,6 +118,8 @@ inline R ReadFile(const fs::path& filename) {
 	file.read(reinterpret_cast<char*>(dst.data()), dst.size()*sizeof(ranges::range_value_t<R>));
 	return dst;
 }
+
+constexpr vk::MemoryPropertyFlags host_visible_coherent = vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent;
 
 // Size of an element of format, in bytes
 inline constexpr vk::DeviceSize ElementSize(vk::Format format) {
@@ -450,71 +454,6 @@ inline constexpr uint32_t PrimitiveDegree(vk::PrimitiveTopology topo) {
 		case vk::PrimitiveTopology::eTriangleListWithAdjacency:
 		case vk::PrimitiveTopology::eTriangleStripWithAdjacency:
 			return 3;
-	}
-}
-
-inline vk::AccessFlags GuessAccessMask(vk::ImageLayout layout) {
-	switch (layout) {
-    case vk::ImageLayout::eUndefined:
-    case vk::ImageLayout::ePresentSrcKHR:
-    case vk::ImageLayout::eColorAttachmentOptimal:
-			return {};
-
-    case vk::ImageLayout::eGeneral:
-			return vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-
-    case vk::ImageLayout::eDepthAttachmentOptimal:
-    case vk::ImageLayout::eStencilAttachmentOptimal:
-    case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
-    case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
-    case vk::ImageLayout::eDepthStencilAttachmentOptimal:
-			return vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
-
-    case vk::ImageLayout::eDepthReadOnlyOptimal:
-    case vk::ImageLayout::eStencilReadOnlyOptimal:
-    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
-			return vk::AccessFlagBits::eDepthStencilAttachmentRead;
-		
-    case vk::ImageLayout::eShaderReadOnlyOptimal:
-			return vk::AccessFlagBits::eShaderRead;
-    case vk::ImageLayout::eTransferSrcOptimal:
-			return vk::AccessFlagBits::eTransferRead;
-    case vk::ImageLayout::eTransferDstOptimal:
-			return vk::AccessFlagBits::eTransferWrite;
-	}
-	return vk::AccessFlagBits::eShaderRead;
-}
-inline vk::PipelineStageFlags GuessStage(vk::ImageLayout layout) {
-	switch (layout) {
-		case vk::ImageLayout::eGeneral:
-			return vk::PipelineStageFlagBits::eComputeShader;
-
-		case vk::ImageLayout::eColorAttachmentOptimal:
-			return vk::PipelineStageFlagBits::eColorAttachmentOutput;
-		
-		case vk::ImageLayout::eShaderReadOnlyOptimal:
-		case vk::ImageLayout::eDepthReadOnlyOptimal:
-		case vk::ImageLayout::eStencilReadOnlyOptimal:
-		case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
-			return vk::PipelineStageFlagBits::eFragmentShader;
-
-		case vk::ImageLayout::eTransferSrcOptimal:
-		case vk::ImageLayout::eTransferDstOptimal:
-			return vk::PipelineStageFlagBits::eTransfer;
-
-		case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
-		case vk::ImageLayout::eDepthStencilAttachmentOptimal:
-		case vk::ImageLayout::eStencilAttachmentOptimal:
-		case vk::ImageLayout::eDepthAttachmentOptimal:
-		case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
-			return vk::PipelineStageFlagBits::eLateFragmentTests;
-
-		case vk::ImageLayout::ePresentSrcKHR:
-		case vk::ImageLayout::eSharedPresentKHR:
-			return vk::PipelineStageFlagBits::eBottomOfPipe;
-
-		default:
-			return vk::PipelineStageFlagBits::eTopOfPipe;
 	}
 }
 

@@ -37,8 +37,13 @@ public:
 
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
-	inline T& HoldResource(const shared_ptr<T>& resource) {
-		return *static_cast<T*>(mHeldResources.emplace(static_pointer_cast<DeviceResource>(resource)).first->get());
+	inline T& HoldResource(const shared_ptr<T>& r) {
+		return *static_cast<T*>(mHeldResources.emplace(static_pointer_cast<DeviceResource>(r)).first->get());
+	}
+	template<DeviceResourceView T>
+	inline const T& HoldResource(const T& v) {
+		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.get()));
+		return v;
 	}
 
 	// Label a region for a tool such as RenderDoc
@@ -55,7 +60,7 @@ public:
 		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { barrier });
 	}
 
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::RangeView& buffer) {
+	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::View& buffer) {
 		Barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcFlags, dstFlags, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *buffer.buffer(), buffer.offset(), buffer.size()));
 	}
 
@@ -86,8 +91,7 @@ public:
 					case vk::DescriptorType::eInputAttachment:
 					case vk::DescriptorType::eSampledImage:
 					case vk::DescriptorType::eStorageImage: {
-						const auto& t = get<DescriptorSet::TextureEntry>(entry);
-						get<TextureView>(t).texture().TransitionBarrier(*this, get<vk::ImageLayout>(t));
+						get<Texture::View>(entry).texture().TransitionBarrier(*this, get<vk::ImageLayout>(entry));
 						break;
 					}
 				}
@@ -96,45 +100,11 @@ public:
 		(fn(sets), ...);
 	}
 
-	inline void CopyBuffer(Buffer::RangeView src, Buffer::RangeView dst) {
-		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must have the same size_bytes");
-		HoldResource(src.get());
-		HoldResource(dst.get());
-		mCommandBuffer.copyBuffer(*src.buffer(), *dst.buffer(), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
-	}
-
-	inline Buffer::RangeView CreateStagingBuffer(const byte_blob& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
-		Buffer::RangeView staging(
-			make_shared<Buffer>(mDevice, "staging", data.size(), usage | vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent),
-			1, 0, data.size());
-		HoldResource(staging.get());
-		memcpy(staging.data(), data.data(), staging.size_bytes());
-		return staging;
-	}
-	template<ranges::contiguous_range R>
-	inline Buffer::RangeView CreateStagingBuffer(const R& data, vk::BufferUsageFlagBits usage = vk::BufferUsageFlagBits::eTransferSrc) {
-		Buffer::RangeView staging(
-			make_shared<Buffer>(mDevice, "staging", data.size()*sizeof(ranges::range_value_t<R>), usage | vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent),
-			sizeof(ranges::range_value_t<R>), 0, data.size());
-		HoldResource(staging.get());
-		memcpy(staging.data(), data.data(), staging.size_bytes());
-		return staging;
-	}
-	
-	inline Buffer::RangeView CopyToDevice(const string& name, const byte_blob& data, vk::BufferUsageFlagBits usage) {
-		auto view = Buffer::RangeView(
-			make_shared<Buffer>(mDevice, name, data.size(), usage | vk::BufferUsageFlagBits::eTransferDst),
-			1, 0, data.size());
-		CopyBuffer(CreateStagingBuffer(data), view);
-		return view;
-	}
-	template<ranges::contiguous_range R>
-	inline Buffer::RangeView CopyToDevice(const string& name, const R& data, vk::BufferUsageFlagBits usage) {
-		auto view = Buffer::RangeView(
-			make_shared<Buffer>(mDevice, name, data.size()*sizeof(ranges::range_value_t<R>), usage | vk::BufferUsageFlagBits::eTransferDst),
-			sizeof(ranges::range_value_t<R>), 0, data.size());
-		CopyBuffer(CreateStagingBuffer(data), view);
-		return view;
+	inline void CopyBuffer(const Buffer::View& src, const Buffer::View& dst) {
+		if (src.size() != dst.size()) throw invalid_argument("src and dst must be the same size");
+		HoldResource(src);
+		HoldResource(dst);
+		mCommandBuffer.copyBuffer(*src.buffer(), *dst.buffer(), { vk::BufferCopy(src.offset(), dst.offset(), src.size()) });
 	}
 
 	inline void Dispatch(const vk::Extent2D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, 1); }
@@ -162,7 +132,7 @@ public:
 		if (mBoundPipeline == pipeline) return;
 		mCommandBuffer.bindPipeline(pipeline->BindPoint(), **pipeline);
 		mBoundPipeline = pipeline;
-		mBoundDescriptorSets.clear();
+		mBoundDescriptorSets.clear(); // TODO: do descriptorsets need to be cleared?
 		mBoundVertexBuffers.clear();
 		mBoundIndexBuffer = {};
 		HoldResource(pipeline);
@@ -173,8 +143,8 @@ public:
 		auto it = mBoundPipeline->PushConstants().find(name);
 		if (it == mBoundPipeline->PushConstants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
-		if constexpr (is_same_v<value, byte_blob>) {
-			if (range.size != value.size()) throw invalid_argument("argument size (" + value.size() + ") must match push constant size (" + to_string(range.size) +")");
+		if constexpr (is_same_v<T, byte_blob>) {
+			if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
 			mCommandBuffer.pushConstants(mBoundPipeline->Layout(), range.stageFlags, range.offset, range.size, value.data());
 		} else {
 			static_assert(is_trivially_copyable_v<T>);
@@ -189,6 +159,7 @@ public:
 		vector<vk::DescriptorSet> sets;
 		vector<uint32_t> dynamicOffsets;
 		for (const shared_ptr<DescriptorSet>& descriptorSet : descriptorSets) {
+			descriptorSet->FlushWrites();
 			HoldResource(descriptorSet);
 			if (!mCurrentRenderPass) TransitionImageDescriptors(*descriptorSet);
 
@@ -202,13 +173,13 @@ public:
 		BindDescriptorSets(index, span(&descriptorSet,1));
 	}
 
-	inline void BindVertexBuffer(uint32_t index, const Buffer::RangeView& view) {
+	inline void BindVertexBuffer(uint32_t index, const Buffer::View& view) {
 		if (mBoundVertexBuffers[index] != view) {
 			mBoundVertexBuffers[index] = view;
 			mCommandBuffer.bindVertexBuffers(index, { *view.buffer() }, { view.offset() });
 		}
 	}
-	template<ranges::input_range R> requires(convertible_to<ranges::range_value_t<R>, Buffer::RangeView>)
+	template<ranges::input_range R> requires(convertible_to<ranges::range_value_t<R>, Buffer::View>)
 	inline void BindVertexBuffers(uint32_t index, const R& views) {
 		vector<vk::Buffer> bufs(views.size());
 		vector<vk::DeviceSize> offsets(views.size());
@@ -225,7 +196,7 @@ public:
 		}
 		if (needBind) mCommandBuffer.bindVertexBuffers(index, bufs, offsets);
 	}
-	inline void BindIndexBuffer(const Buffer::RangeView& view) {
+	inline void BindIndexBuffer(const Buffer::StrideView& view) {
 		if (mBoundIndexBuffer != view) {
 			mBoundIndexBuffer = view;
 			vk::IndexType type;
@@ -276,8 +247,8 @@ private:
 	shared_ptr<RenderPass> mCurrentRenderPass;
 	uint32_t mCurrentSubpassIndex = 0;
 	shared_ptr<Pipeline> mBoundPipeline = nullptr;
-	unordered_map<uint32_t, Buffer::RangeView> mBoundVertexBuffers;
-	Buffer::RangeView mBoundIndexBuffer;
+	unordered_map<uint32_t, Buffer::View> mBoundVertexBuffers;
+	Buffer::StrideView mBoundIndexBuffer;
 	vector<shared_ptr<DescriptorSet>> mBoundDescriptorSets;
 };
 

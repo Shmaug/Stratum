@@ -4,6 +4,8 @@
 
 namespace stm {
 
+class CommandBuffer;
+
 class DeviceResource {
 private:
 	string mName;
@@ -14,44 +16,45 @@ public:
 	inline const string& Name() const { return mName; }
 };
 
-class Fence;
-class CommandBuffer;
+template<typename T>
+concept DeviceResourceView = requires(T t) { { t.get() } -> convertible_to<shared_ptr<DeviceResource>>; };
 
 class Device {
 public:
 	stm::Instance& mInstance;
-	static const vk::DeviceSize mMemoryBlockSize = 256_kB;
-	static const vk::DeviceSize mMemoryMinAlloc = 256_mB;
+	static const vk::DeviceSize mDeviceMemoryAllocSize = 256_mB;
 
-	struct QueueFamily {
-		uint32_t mFamilyIndex = 0;
-		vector<vk::Queue> mQueues;
-		vk::QueueFamilyProperties mProperties;
-		bool mSurfaceSupport;
-		// CommandBuffers may be in-flight or idle
-		unordered_map<thread::id, pair<vk::CommandPool, list<shared_ptr<CommandBuffer>>>> mCommandBuffers;
-	};
-	
 	class Memory : public DeviceResource {
+	private:
+		friend class Device;
+		friend class View;
+		vk::DeviceMemory mDeviceMemory;
+		uint32_t mTypeIndex;
+		vk::DeviceSize mSize = 0;
+		byte* mMapped = nullptr;
+		std::list<std::pair<VkDeviceSize, VkDeviceSize>> mUnallocated;
+
 	public:
-		class Block {
+		class View {
+		private:
+			friend class Memory;
+			inline View(Memory& memory, vk::DeviceSize offset, vk::DeviceSize size) : mMemory(memory), mOffset(offset), mSize(size) {}
 		public:
 			Memory& mMemory;
 			const vk::DeviceSize mOffset = 0;
 			const vk::DeviceSize mSize = 0;
-			Block() = default;
-			Block(const Block& b) = default;
-			STRATUM_API ~Block();
-			inline Block& operator=(const Block& b) { return *new (this) Block(b); }
+			View() = default;
+			View(const View& b) = default;
+			STRATUM_API ~View();
+			inline View& operator=(const View& b) { return *new (this) View(b); }
+			inline vk::DeviceSize offset() const { return mOffset; }
+			inline vk::DeviceSize size() const { return mSize; }
 			inline byte* data() const { return mMemory.mMapped + mOffset; }
-		private:
-			friend class Memory;
-			inline Block(Memory& memory, vk::DeviceSize offset, vk::DeviceSize size) : mMemory(memory), mOffset(offset), mSize(size) {}
 		};
 
-		inline Memory(Device& device, uint32_t memoryTypeIndex, vk::DeviceSize size) : DeviceResource(device, "/mem"+to_string(memoryTypeIndex)+"_"+to_string(size)), mMemoryTypeIndex(memoryTypeIndex), mSize(size) {
-			mDeviceMemory = mDevice->allocateMemory(vk::MemoryAllocateInfo(size, memoryTypeIndex));
-			if (mDevice.MemoryProperties().memoryTypes[mMemoryTypeIndex].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
+		inline Memory(Device& device, uint32_t typeIndex, vk::DeviceSize size) : DeviceResource(device, "DeviceMemory"), mTypeIndex(typeIndex), mSize(size) {
+			mDeviceMemory = mDevice->allocateMemory(vk::MemoryAllocateInfo(size, typeIndex));
+			if (mDevice.mMemoryTypes[typeIndex].propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
 				mMapped = (byte*)mDevice->mapMemory(mDeviceMemory, 0, mSize);
 			mUnallocated = { { 0, mSize } };
 		}
@@ -63,35 +66,29 @@ public:
 				mDevice->freeMemory(mDeviceMemory);
 			}
 		}
-
 		inline const vk::DeviceMemory& operator*() const { return mDeviceMemory; }
 		inline const vk::DeviceMemory* operator->() const { return &mDeviceMemory; }
-
-		inline uint32_t TypeIndex() const { return mMemoryTypeIndex; }
 		inline byte* data() const { return mMapped; }
 		inline vk::DeviceSize size() const { return mSize; }
-
-		STRATUM_API shared_ptr<Block> AllocateBlock(const vk::MemoryRequirements& requirements);
-
-	private:
-		friend class Device;
-		friend class Block;
-		vk::DeviceMemory mDeviceMemory;
-
-		uint32_t mMemoryTypeIndex = 0;
-		vk::DeviceSize mSize = 0;
-		byte* mMapped = nullptr;
-
-		std::list<std::pair<VkDeviceSize, VkDeviceSize>> mUnallocated;
+		inline const vk::MemoryType& Type() const { return mDevice.mMemoryTypes[mTypeIndex]; }
+		STRATUM_API shared_ptr<View> Allocate(vk::DeviceSize size, vk::DeviceSize alignment);
 	};
 
+	struct QueueFamily {
+		uint32_t mFamilyIndex = 0;
+		vector<vk::Queue> mQueues;
+		vk::QueueFamilyProperties mProperties;
+		bool mSurfaceSupport;
+		// CommandBuffers may be in-flight or idle
+		unordered_map<thread::id, pair<vk::CommandPool, list<shared_ptr<CommandBuffer>>>> mCommandBuffers;
+	};
+	
 	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers);
 	STRATUM_API ~Device();
 	inline const vk::Device& operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
 	
 	inline vk::PhysicalDevice PhysicalDevice() const { return mPhysicalDevice; }
-	inline const vk::PhysicalDeviceMemoryProperties& MemoryProperties() const { return mMemoryProperties; }
 	inline const vk::PhysicalDeviceLimits& Limits() const { return mLimits; }
 	inline vk::PipelineCache PipelineCache() const { return mPipelineCache; }
 	inline const vector<uint32_t>& QueueFamilies(uint32_t index) const { return mQueueFamilyIndices; }
@@ -99,8 +96,42 @@ public:
 	STRATUM_API QueueFamily* FindQueueFamily(vk::SurfaceKHR surface);
 	STRATUM_API vk::SampleCountFlagBits GetMaxUsableSampleCount();
 
+	inline uint32_t MemoryTypeIndex(vk::MemoryPropertyFlags properties, uint32_t typeBits = 0) {
+		if (typeBits == 0) typeBits = ~uint32_t(0) >> (32 - mMemoryTypes.size());
+		uint32_t best = -1;
+		while (typeBits) {
+    	int i = countr_zero(typeBits);
+			if (mMemoryTypes[i].propertyFlags & properties) {
+				best = i;
+				break;
+			}
+			typeBits &= ~(1 << i);
+		}
+		return best;
+	}
+
 	// Will attempt to sub-allocate from larger allocations, will create a new allocation if unsuccessful. Host-Visible memory is automatically mapped.
-	STRATUM_API shared_ptr<Memory::Block> AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties);
+	inline shared_ptr<Memory::View> AllocateMemory(vk::DeviceSize size, vk::DeviceSize alignment, uint32_t memoryTypeIndex) {
+		const auto& memoryType = mMemoryTypes[memoryTypeIndex];
+		auto memoryPool = mMemoryPool.lock();
+		for (auto& memory : (*memoryPool)[memoryType.heapIndex])
+			if (auto block = memory->Allocate(size, alignment))
+				return block;
+		// Failed to sub-allocate, allocate new memory
+		auto& m = (*memoryPool)[memoryType.heapIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, (memoryType.propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal) ? AlignUp(size, 256_mB) : size));
+		return m->Allocate(size, alignment);
+	}
+	inline shared_ptr<Memory::View> AllocateMemory(vk::DeviceSize size, vk::DeviceSize alignment, vk::MemoryPropertyFlags properties) {
+		uint32_t memoryIndex = MemoryTypeIndex(properties);
+		if (memoryIndex > mMemoryTypes.size()) return nullptr;
+		return AllocateMemory(size, alignment, memoryIndex);
+	}
+	inline shared_ptr<Memory::View> AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties) {
+		uint32_t memoryIndex = MemoryTypeIndex(properties, requirements.memoryTypeBits);
+		if (memoryIndex > mMemoryTypes.size()) return nullptr;
+		return AllocateMemory(requirements.size, requirements.alignment, memoryIndex);
+	}
+	
 
 	template<typename T> requires(convertible_to<decltype(T::objectType), vk::ObjectType>)
 	inline void SetObjectName(const T& object, const string& name) {
@@ -125,7 +156,8 @@ private:
 	vk::Device mDevice;
  	vk::PhysicalDevice mPhysicalDevice;
 	vk::PipelineCache mPipelineCache;
-	vk::PhysicalDeviceMemoryProperties mMemoryProperties;
+	vector<vk::MemoryType> mMemoryTypes;
+	
 	vk::PhysicalDeviceLimits mLimits;
 	vk::SampleCountFlagBits mMaxMSAASamples;
 	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
@@ -139,7 +171,6 @@ private:
 class Fence : public DeviceResource {
 private:
 	vk::Fence mFence;
-
 public:
 	inline Fence(Device& device, const string& name) : DeviceResource(device,name) {
 		mFence = mDevice->createFence({});
@@ -148,9 +179,7 @@ public:
 	inline ~Fence() { mDevice->destroyFence(mFence); }
 	inline const vk::Fence& operator*() const { return mFence; }
 	inline const vk::Fence* operator->() const { return &mFence; }
-
 	inline vk::Result status() { return mDevice->getFenceStatus(mFence); }
-
 	inline vk::Result wait(uint64_t timeout = numeric_limits<uint64_t>::max()) {
 		return mDevice->waitForFences({ mFence }, true, timeout);
 	}
@@ -158,7 +187,6 @@ public:
 class Semaphore : public DeviceResource {
 private:
 	vk::Semaphore mSemaphore;
-
 public:
 	inline Semaphore(Device& device, const string& name) : DeviceResource(device, name) {
 		mSemaphore = mDevice->createSemaphore({});
@@ -169,42 +197,46 @@ public:
 	inline const vk::Semaphore* operator->() { return &mSemaphore; }
 };
 
-class Sampler : public DeviceResource {
-private:
-	vk::Sampler mSampler;
-	vk::SamplerCreateInfo mInfo;
+template<class T>
+struct device_allocator : std::allocator<T> {
+	using value_type = T;
+	Device& mDevice;
+	uint32_t mMemoryTypeBits;
+	vk::DeviceSize mAlignment;
+	unordered_map<T*, shared_ptr<Device::Memory::View>> mAllocations;
+	
+  device_allocator() = delete;
+  device_allocator(Device& device, uint32_t memoryType, size_t alignment = 0) : mDevice(device), mMemoryTypeBits(memoryType), mAlignment(alignment) {}
+  template<class U> device_allocator(const device_allocator<U>& v) noexcept : mDevice(v.mDevice), mMemoryTypeBits(v.mMemoryTypeBits), mAlignment(v.mAlignment) {}
 
-public:
-	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name), mInfo(samplerInfo) {
-		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, Name());
-	}
-	inline Sampler(Device& device, const string& name, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : DeviceResource(device, name) {
-		mInfo.magFilter = filter;
-		mInfo.minFilter = filter;
-		mInfo.addressModeU = addressMode;
-		mInfo.addressModeV = addressMode;
-		mInfo.addressModeW = addressMode;
-		mInfo.anisotropyEnable = maxAnisotropy > 0 ? VK_TRUE : VK_FALSE;
-		mInfo.maxAnisotropy = maxAnisotropy;
-		mInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
-		mInfo.unnormalizedCoordinates = VK_FALSE;
-		mInfo.compareEnable = VK_FALSE;
-		mInfo.compareOp = vk::CompareOp::eAlways;
-		mInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-		mInfo.minLod = 0;
-		mInfo.maxLod = VK_LOD_CLAMP_NONE;
-		mInfo.mipLodBias = 0;
-		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, Name());
-	}
-	inline ~Sampler() {
-		mDevice->destroySampler(mSampler);
-	}
-	inline const vk::Sampler& operator*() const { return mSampler; }
-	inline const vk::Sampler* operator->() const { return &mSampler; }
+  template <class U> 
+  struct rebind { typedef device_allocator<U> other; };
 
-	inline const vk::SamplerCreateInfo& CreateInfo() const { return mInfo; }
+	inline T* allocate(size_t n) {
+		auto view = mDevice.AllocateMemory(n*sizeof(T), mAlignment, mMemoryTypeBits);
+		auto it = mAllocations.emplace(reinterpret_cast<T*>(view->data()), view).first;
+		return it->first;
+	}
+  inline void deallocate(T* p, size_t n) {
+		mAllocations.erase(p);
+	}
+	
+	inline shared_ptr<Device::Memory::View> device_memory(T* ptr) const {
+		auto it = mAllocations.find(ptr);
+		if (it == mAllocations.end()) return nullptr;
+		else return it->second;
+	}
 };
+
+template<class T, class U>
+constexpr bool operator==(const device_allocator<T>& lhs, const device_allocator<U>& rhs) noexcept { return lhs.mDevice == rhs.mDevice && lhs.mMemoryType == rhs.mMemoryType; }
+template<class T, class U>
+constexpr bool operator!=(const device_allocator<T>& lhs, const device_allocator<U>& rhs) noexcept { return !operator==(lhs, rhs); }
+
+template<typename R>
+concept device_allocator_range = requires { is_specialization_v<typename R::allocator_type, device_allocator>; };
+
+template<typename T>
+using device_vector = vector<T, device_allocator<T>>;
 
 }

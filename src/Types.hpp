@@ -31,6 +31,7 @@
 
 #include <math.h>
 #include <numeric>
+#include <numbers>
 
 #include <vulkan/vulkan.hpp>
 

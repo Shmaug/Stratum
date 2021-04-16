@@ -52,9 +52,4 @@ public:
 	}
 };
 
-template<typename T>
-inline byte_blob make_byte_blob(const T& v) {
-	return byte_blob(span(&v, 1));
-}
-
 }

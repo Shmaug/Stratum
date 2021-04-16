@@ -32,4 +32,4 @@ include_directories(${EXTERN_DIR}/include)
 link_directories(${EXTERN_DIR}/lib)
 
 add_subdirectory(src)
-add_subdirectory(Plugins/DicomVis)
+#add_subdirectory(Plugins/DicomVis)

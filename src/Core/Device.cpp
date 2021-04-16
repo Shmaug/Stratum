@@ -11,6 +11,12 @@ using namespace stm;
 Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers)
 	: mPhysicalDevice(physicalDevice), mInstance(instance) {
 
+	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
+	mLimits = properties.limits;
+	auto memoryProperties = mPhysicalDevice.getMemoryProperties();
+	mMemoryTypes.resize(memoryProperties.memoryTypeCount);
+	ranges::copy_n(memoryProperties.memoryTypes.begin(), memoryProperties.memoryTypeCount, mMemoryTypes.begin());
+
 	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)mInstance->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
 	mMaxMSAASamples = GetMaxUsableSampleCount();
@@ -50,11 +56,8 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	vk::DeviceCreateInfo createInfo({}, queueCreateInfos, validationLayers, deviceExts, &deviceFeatures);
 	createInfo.pNext = &indexingFeatures;
 	mDevice = mPhysicalDevice.createDevice(createInfo);
-	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
 	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
 	SetObjectName(mDevice, name);
-	mLimits = properties.limits;
-	mMemoryProperties = mPhysicalDevice.getMemoryProperties();
 	#pragma endregion
 	
 	#pragma region Create PipelineCache and DesriptorPool
@@ -138,7 +141,7 @@ Device::~Device() {
 	mDevice.destroy();
 }
 
-shared_ptr<Device::Memory::Block> Device::Memory::AllocateBlock(const vk::MemoryRequirements& requirements) {
+shared_ptr<Device::Memory::View> Device::Memory::Allocate(vk::DeviceSize allocSize, vk::DeviceSize alignment) {
 	if (mUnallocated.empty()) return nullptr;
 	
 	vk::DeviceSize blockSize = 0;
@@ -148,11 +151,10 @@ shared_ptr<Device::Memory::Block> Device::Memory::AllocateBlock(const vk::Memory
 	// find smallest unallocated block that can fit the requirements
 	auto block = mUnallocated.end();
 	for (auto it = mUnallocated.begin(); it != mUnallocated.end(); it++) {
-		vk::DeviceSize offset = it->first ? AlignUp(it->first, requirements.alignment) : 0;
-		vk::DeviceSize blockEnd = AlignUp(offset + requirements.size, Device::mMemoryBlockSize);
+		vk::DeviceSize offset = (it->first && alignment) ? AlignUp(it->first, alignment) : 0;
+		vk::DeviceSize blockEnd = offset + allocSize;
 
 		if (blockEnd > it->first + it->second) continue;
-
 		if (block == mUnallocated.end() || it->second < block->second) {
 			memLocation = offset;
 			memSize = blockEnd - offset;
@@ -169,9 +171,9 @@ shared_ptr<Device::Memory::Block> Device::Memory::AllocateBlock(const vk::Memory
 	} else
 		mUnallocated.erase(block);
 
-	return shared_ptr<Block>(new Block(*this, memLocation, memSize));
+	return shared_ptr<View>(new View(*this, memLocation, memSize));
 }
-Device::Memory::Block::~Block() {
+Device::Memory::View::~View() {
 	auto memoryPool = mMemory.mDevice.mMemoryPool.lock();
 
 	vk::DeviceSize end = mOffset + mSize;
@@ -208,24 +210,6 @@ Device::Memory::Block::~Block() {
 		startBlock->second += mSize + endBlock->second;
 		mMemory.mUnallocated.erase(endBlock);
 	}
-}
-
-shared_ptr<Device::Memory::Block> Device::AllocateMemory(const vk::MemoryRequirements& requirements, vk::MemoryPropertyFlags properties) {
-	uint32_t memoryTypeIndex = mMemoryProperties.memoryTypeCount;
-	for (uint32_t i = 0; i < mMemoryProperties.memoryTypeCount; i++)
-		if ((requirements.memoryTypeBits & (1 << i)) && (mMemoryProperties.memoryTypes[i].propertyFlags & properties)) {
-			memoryTypeIndex = i;
-			break;
-	}
-	if (memoryTypeIndex == mMemoryProperties.memoryTypeCount)
-		throw invalid_argument("could not find compatible memory type");
-	
-	auto memoryPool = mMemoryPool.lock();
-	for (auto& memory : (*memoryPool)[memoryTypeIndex])
-		if (auto block = memory->AllocateBlock(requirements))
-			return block;
-	// Failed to sub-allocate a block, allocate new memory
-	return (*memoryPool)[memoryTypeIndex].emplace_back(make_unique<Memory>(*this, memoryTypeIndex, AlignUp(requirements.size, mMemoryMinAlloc)))->AllocateBlock(requirements);
 }
 
 inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {

@@ -104,6 +104,7 @@ Window::~Window() {
 }
 
 void Window::AcquireNextImage(CommandBuffer& commandBuffer) {
+	ProfilerRegion ps("Window::AcquireNextImage");
 	if (!mSwapchain) CreateSwapchain(commandBuffer);
 	
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
@@ -120,6 +121,7 @@ void Window::Present(const vector<vk::Semaphore>& waitSemaphores) {
 	vector<vk::SwapchainKHR> swapchains { mSwapchain };
 	vector<uint32_t> imageIndices { mBackBufferIndex };
 	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, swapchains, imageIndices));
+	mPresentCount++;
 }
 
 #ifdef __linux
@@ -264,34 +266,17 @@ void Window::CreateSwapchain(CommandBuffer& commandBuffer) {
 	mImageAvailableSemaphoreIndex = 0;
 	
 	// create per-frame image views and semaphores
-	uint32_t i = 0;
-	for (auto& [img, view] : mSwapchainImages) {
-		img = images[i];
-		mSwapchainDevice->SetObjectName(img, "Swapchain/Image" + to_string(i));
-
-		commandBuffer.TransitionBarrier(img, { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTopOfPipe, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
-
-		vk::ImageViewCreateInfo createInfo = {};
-		createInfo.image = img;
-		createInfo.viewType = vk::ImageViewType::e2D;
-		createInfo.format = mSurfaceFormat.format;
-		createInfo.components.r = vk::ComponentSwizzle::eIdentity;
-		createInfo.components.g = vk::ComponentSwizzle::eIdentity;
-		createInfo.components.b = vk::ComponentSwizzle::eIdentity;
-		createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-		createInfo.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-		view = (*mSwapchainDevice)->createImageView(createInfo);
-		mSwapchainDevice->SetObjectName(view, "Swapchain/ImageView" + to_string(i));
-		
+	for (uint32_t i = 0; i < images.size(); i++) {
+		mSwapchainDevice->SetObjectName(images[i], "swapchain_image");
+		mSwapchainImages[i] = Texture::View(
+			make_shared<Texture>(images[i], *mSwapchainDevice, "swapchain_image", vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
+			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
+		mSwapchainImages[i].texture().TransitionBarrier(commandBuffer, vk::ImageLayout::ePresentSrcKHR);
 		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
-		i++;
 	}
 }
 void Window::DestroySwapchain() {
 	mSwapchainDevice->Flush();
-
-	for (auto&[img,view] : mSwapchainImages)
-		if (view) (*mSwapchainDevice)->destroyImageView(view);
 	mSwapchainImages.clear();
 	mImageAvailableSemaphores.clear();
 	if (mSwapchain) (*mSwapchainDevice)->destroySwapchainKHR(mSwapchain);

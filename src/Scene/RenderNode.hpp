@@ -2,7 +2,7 @@
 
 #include "Scene.hpp"
 
-#include "../Core/CommandBuffer.hpp"
+#include "../Core/Material.hpp"
 #include "../Core/Mesh.hpp"
 
 namespace stm {
@@ -24,7 +24,7 @@ public:
     if (!mRenderPass) {
       // Create new renderpasses/framebuffers
       vector<RenderPass::SubpassDescription> subpasses(mSubpasses.size());
-      vector<TextureView> attachments;
+      vector<Texture::View> attachments;
       
       // TODO: this
 

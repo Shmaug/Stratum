@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Buffer.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
@@ -12,7 +13,7 @@ struct GeometryData {
 	};
 
 	vk::PrimitiveTopology mPrimitiveTopology;
-	vector<pair<Buffer::RangeView, vk::VertexInputRate>> mBindings;
+	vector<pair<Buffer::StrideView, vk::VertexInputRate>> mBindings;
 	unordered_map<VertexAttributeId, Attribute> mAttributes;
 
 	struct VertexAttributeArrayView {
@@ -26,6 +27,12 @@ struct GeometryData {
 	inline VertexAttributeArrayView operator[](const VertexAttributeType& type) { return VertexAttributeArrayView(*this, type); }
 	inline Attribute& at(const VertexAttributeId& id) { return mAttributes.at(id); }
 	inline Attribute& at(const VertexAttributeType& type, uint32_t idx = 0) { return mAttributes.at(VertexAttributeId(type, idx)); }
+};
+
+template<> struct tuplefier<GeometryData::Attribute> {
+	inline auto operator()(GeometryData::Attribute&& a) {
+		return forward_as_tuple(a.mBinding, a.mFormat, a.mOffset);
+	}
 };
 
 }

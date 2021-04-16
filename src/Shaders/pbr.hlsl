@@ -37,7 +37,7 @@ StructuredBuffer<LightData> gLights					: register(t0, space0);
 Texture2D<float> gShadowAtlas 							: register(t1, space0);
 SamplerComparisonState gShadowSampler 			: register(s2, space0);
 
-ConstantBuffer<MaterialData> gMaterial 			: register(b0, space1);
+StructuredBuffer<MaterialData> gMaterials		: register(t0, space1);
 Texture2D<float4> gBaseColorTexture 				: register(t1, space1);
 Texture2D<float4> gNormalTexture 						: register(t2, space1);
 Texture2D<float2> gMetallicRoughnessTexture : register(t3, space1);
@@ -61,7 +61,7 @@ struct v2f {
 	float3 cameraPos : TEXCOORD2;
 };
 
-v2f vs_pbr(uint instanceId : SV_InstanceID, float3 vertex : POSITION, float3 normal : NORMAL, float2 texcoord : TEXCOORD0, float3 tangent : TANGENT) {
+v2f vs_pbr(inout uint instanceId : SV_InstanceID, float3 vertex : POSITION, float3 normal : NORMAL, float2 texcoord : TEXCOORD0, float3 tangent : TANGENT) {
 	v2f o;
 	TransformData objectToCamera = tmul(gPushConstants.WorldToCamera, gInstanceTransforms[instanceId]);
 	o.cameraPos = transform_point(objectToCamera, vertex);
@@ -95,9 +95,11 @@ float4 SampleLight(LightData light, float3 cameraPos) {
 	return r;
 }
 
-float4 fs_pbr(v2f i) : SV_Target0 {
-	float2 uv = float2(i.pack0.w, i.pack1.w)*gMaterial.gTextureST.xy + gMaterial.gTextureST.zw;
-	float4 color = gMaterial.gBaseColor * gBaseColorTexture.Sample(gSampler, uv);
+float4 fs_pbr(v2f i, uint instanceId : SV_InstanceID) : SV_Target0 {
+	MaterialData material = gMaterials[instanceId];
+
+	float2 uv = float2(i.pack0.w, i.pack1.w)*material.gTextureST.xy + material.gTextureST.zw;
+	float4 color = material.gBaseColor * gBaseColorTexture.Sample(gSampler, uv);
 
 	if (gAlphaClip >= 0 && color.a < gAlphaClip) discard;
 
@@ -106,10 +108,10 @@ float4 fs_pbr(v2f i) : SV_Target0 {
 	float3 view 	 = normalize(-i.cameraPos);
 	float3 normal  = normalize(i.pack0.xyz);
 	float3 tangent = normalize(i.pack1.xyz);
-	normal = normalize(mul(float3(1,1,gMaterial.gBumpStrength)*bump.xyz*2-1, float3x3(tangent, normalize(cross(normal, tangent)), normal)));
+	normal = normalize(mul(float3(1,-1,material.gBumpStrength)*(bump.xyz*2-1), float3x3(tangent, normalize(cross(normal, tangent)), normal)));
 
 	float2 metallicRoughness = gMetallicRoughnessTexture.Sample(gSampler, uv);
-	BSDF bsdf = make_BSDF(color.rgb, metallicRoughness.x*gMaterial.gMetallic, metallicRoughness.y*gMaterial.gRoughness, gMaterial.gEmission);
+	BSDF bsdf = make_BSDF(color.rgb, metallicRoughness.x*material.gMetallic, metallicRoughness.y*material.gRoughness, material.gEmission);
 
 	float3 eval = bsdf.emission;
 	for (uint l = 0; l < gPushConstants.LightCount; l++) {

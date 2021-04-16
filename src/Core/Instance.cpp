@@ -346,6 +346,7 @@ xcb_generic_event_t* Instance::PollEvent() {
 #endif
 
 bool Instance::PollEvents() {
+	ProfilerRegion ps("Instance::PollEvents");
 	mWindow->mLastMouseState = mWindow->mMouseState;
 	mWindow->mMouseState.mScrollDelta = 0;
 	mWindow->mMouseState.mCursorDelta = Vector2f::Zero();

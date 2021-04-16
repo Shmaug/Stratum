@@ -13,6 +13,7 @@ inline VertexAttributeId stovertexattribute(const string& semantic) {
     { "normal", 		    VertexAttributeType::eNormal },
     { "pointsize", 	    VertexAttributeType::ePointSize },
     { "psize", 			    VertexAttributeType::ePointSize },
+    { "sv_position", 	  VertexAttributeType::ePosition },
     { "position", 	    VertexAttributeType::ePosition },
     { "tangent", 		    VertexAttributeType::eTangent },
     { "texcoord", 	    VertexAttributeType::eTexcoord }

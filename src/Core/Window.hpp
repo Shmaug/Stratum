@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Device.hpp"
+#include "Texture.hpp"
 #include "InputState.hpp"
 
 #ifdef WIN32
@@ -277,10 +277,8 @@ public:
 	inline vk::SwapchainKHR Swapchain() const { return mSwapchain; }
 	inline vk::SurfaceFormatKHR SurfaceFormat() const { return mSurfaceFormat; }
 	inline vk::Extent2D SwapchainExtent() const { return mSwapchainExtent; }
-	inline vk::Image BackBuffer() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].first; }
-	inline vk::Image BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].first; }
-	inline vk::ImageView BackBufferView() const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[mBackBufferIndex].second; }
-	inline vk::ImageView BackBufferView(uint32_t i) const { return mSwapchainImages.empty() ? nullptr : mSwapchainImages[i].second; }
+	inline Texture::View BackBuffer() const { return mSwapchainImages.empty() ? Texture::View() : mSwapchainImages[mBackBufferIndex]; }
+	inline Texture::View BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? Texture::View() : mSwapchainImages[i]; }
 	inline Semaphore& ImageAvailableSemaphore() const { return *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* PresentQueueFamily() const { return mPresentQueueFamily; }
 
@@ -300,7 +298,7 @@ public:
 	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
-
+	inline size_t PresentCount() const { return mPresentCount; }
 
 	STRATUM_API void LockMouse(bool l);
 	inline bool LockMouse() const { return mLockMouse; }
@@ -334,12 +332,13 @@ private:
 	Device* mSwapchainDevice = nullptr;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
-	vector<pair<vk::Image, vk::ImageView>> mSwapchainImages;
+	vector<Texture::View> mSwapchainImages;
 	vector<unique_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
+	size_t mPresentCount = 0;
 	
 	bool mFullscreen = false;
 	bool mAllowTearing = false;
@@ -353,7 +352,7 @@ private:
 #ifdef WIN32
 	HWND mHwnd = 0;
 	RECT mWindowedRect;
-	#elif defined(__linux)
+#elif defined(__linux)
 	xcb_connection_t* mXCBConnection = nullptr;
 	xcb_screen_t* mXCBScreen = nullptr;
 	xcb_window_t mXCBWindow;
