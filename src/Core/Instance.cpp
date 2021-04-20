@@ -17,7 +17,7 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBi
 
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
 		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
-		throw runtime_error(pCallbackData->pMessage);
+		throw logic_error(pCallbackData->pMessage);
 	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
 		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 	else
@@ -117,6 +117,8 @@ Instance::Instance(int argc, char** argv) {
 	appInfo.pEngineName = "Stratum";
 	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR,STRATUM_VERSION_MINOR, 0);
 	appInfo.apiVersion = VK_API_VERSION_1_2;
+	
+	mVulkanApiVersion = appInfo.apiVersion;
 
 	vector<const char*> instanceExts;
 	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
@@ -215,14 +217,14 @@ Instance::Instance(int argc, char** argv) {
 
 	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
 	
-	if (fullscreen) mWindow->Fullscreen(true);
+	if (fullscreen) mWindow->fullscreen(true);
 	
 	unordered_set<string> deviceExtensions {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
-	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, validationLayers);
+	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, validationLayers, mWindow->back_buffer_count());
 }
 Instance::~Instance() {
 	mWindow.reset();
@@ -275,40 +277,40 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen)
-			mWindow->mMouseState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
+			mWindow->mInputState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
 		break;
 
 	case XCB_KEY_PRESS:
 		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindow->mMouseState.mKeys.insert(kc);
-		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_ENTER) && mMouseKeyboard->KeyDown(KEY_LALT))
-			mWindow->Fullscreen(!mWindow->Fullscreen());
+		mWindow->mInputState.mKeys.insert(kc);
+		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboard->is_key_down(KEY_ENTER) && mMouseKeyboard->is_key_down(KEY_LALT))
+			mWindow->fullscreen(!mWindow->fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
 		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindow->mMouseState.mKeys.erase(kc);
+		mWindow->mInputState.mKeys.erase(kc);
 		break;
 
 	case XCB_BUTTON_PRESS:
 		if (bp->detail == 4){
-			mWindow->mMouseState.mScrollDelta += 1.0f;
+			mWindow->mInputState.mScrollDelta += 1.0f;
 			break;
 		}
 		if (bp->detail == 5){
-			mWindow->mMouseState.mScrollDelta =- 1.0f;
+			mWindow->mInputState.mScrollDelta =- 1.0f;
 			break;
 		}
 	case XCB_BUTTON_RELEASE:
 		switch (bp->detail){
 		case 1:
-			mWindow->mMouseState.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mInputState.mKeys[MOUSE_LEFT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			mMouseKeyboard->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 2:
-			mWindow->mMouseState.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mInputState.mKeys[MOUSE_MIDDLE] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		case 3:
-			mWindow->mMouseState.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mWindow->mInputState.mKeys[MOUSE_RIGHT] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			mMouseKeyboard->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
 			break;
 		}
@@ -347,9 +349,9 @@ xcb_generic_event_t* Instance::PollEvent() {
 
 bool Instance::PollEvents() {
 	ProfilerRegion ps("Instance::PollEvents");
-	mWindow->mLastMouseState = mWindow->mMouseState;
-	mWindow->mMouseState.mScrollDelta = 0;
-	mWindow->mMouseState.mCursorDelta = Vector2f::Zero();
+	mWindow->mInputStateLast = mWindow->mInputState;
+	mWindow->mInputState.mScrollDelta = 0;
+	mWindow->mInputState.mCursorDelta = Vector2f::Zero();
 
 	#ifdef WIN32
 
@@ -371,18 +373,18 @@ bool Instance::PollEvents() {
 			const RAWINPUT& raw = (RAWINPUT)lpb;
 
 			if (raw.header.dwType == RIM_TYPEMOUSE) {
-				mWindow->mMouseState.mCursorDelta += Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_LEFT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mMouseState.mKeys.erase(MOUSE_LEFT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mMouseState.mKeys.insert(MOUSE_RIGHT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mMouseState.mKeys.erase(MOUSE_RIGHT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_MIDDLE);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_MIDDLE);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_X1);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X1);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mMouseState.mKeys.insert(MOUSE_X2);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mWindow->mMouseState.mKeys.erase(MOUSE_X2);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mWindow->mMouseState.mScrollDelta += (float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
+				mWindow->mInputState.mCursorDelta += Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_LEFT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mInputState.mKeys.erase(MOUSE_LEFT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mInputState.mKeys.insert(MOUSE_RIGHT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mInputState.mKeys.erase(MOUSE_RIGHT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_MIDDLE);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_MIDDLE);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_X1);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_X1);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_X2);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_X2);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mWindow->mInputState.mScrollDelta += (float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				if (mWindow->mLockMouse) {
 					RECT rect;
 					GetWindowRect(msg.hwnd, &rect);
@@ -396,9 +398,9 @@ bool Instance::PollEvents() {
 				else if (key == VK_LCONTROL || key == VK_RCONTROL) key = VK_CONTROL;
 				
 				if (raw.data.keyboard.Flags & RI_KEY_BREAK)
-					mWindow->mMouseState.mKeys.erase((KeyCode)key);
+					mWindow->mInputState.mKeys.erase((KeyCode)key);
 				else
-					mWindow->mMouseState.mKeys.insert((KeyCode)key);
+					mWindow->mInputState.mKeys.insert((KeyCode)key);
 			}
 			break;
 		}
@@ -410,7 +412,7 @@ bool Instance::PollEvents() {
 	POINT pt;
 	GetCursorPos(&pt);
 	ScreenToClient(mWindow->mHwnd, &pt);
-	mWindow->mMouseState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
+	mWindow->mInputState.mCursorPos = Vector2f((float)pt.x, (float)pt.y);
 
 	#elif defined(__linux)
 
@@ -430,7 +432,7 @@ bool Instance::PollEvents() {
 		free(reply);
 	}
 
-	mWindow->mMouseState.mCursorDelta = mWindow->mMouseState.mCursorPos - mMouseKeyboard->mLast.mCursorPos;
+	mWindow->mInputState.mCursorDelta = mWindow->mInputState.mCursorPos - mMouseKeyboard->mLast.mCursorPos;
 	mMouseKeyboard->mWindowExtentWidth = mWindow->mClientRect.extent;
 	if (mDestroyPending) return false;
 

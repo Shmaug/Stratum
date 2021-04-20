@@ -9,12 +9,12 @@ size_t Profiler::mHistoryCount = 256;
 
 /*
 void Profiler::DrawGui(GuiContext& gui, uint32_t framerate) {
-	Device& device = gui.Scene().mInstance.Device();
+	Device& device = gui.Scene().mInstance.device();
 	auto font = device.FindOrLoadAsset<Font>("Assets/Fonts/OpenSans/OpenSans-Regular.ttf");
 
 	float toolbarHeight = 24;
 
-	Vector2f s((float)gui.Scene().mInstance.Window().SwapchainExtent().width, (float)gui.Scene().mInstance.Window().SwapchainExtent().height);
+	Vector2f s((float)gui.Scene().mInstance.window().swapchain_extent().width, (float)gui.Scene().mInstance.window().swapchain_extent().height);
 	AlignedBox2f windowRect(Vector2f::Zero(), Vector2f(s.x(), toolbarHeight + mGraphHeight));
 
 	gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, windowRect);

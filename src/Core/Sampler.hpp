@@ -12,7 +12,7 @@ private:
 public:
 	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name), mInfo(samplerInfo) {
 		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, Name());
+		mDevice.SetObjectName(mSampler, name);
 	}
 	inline Sampler(Device& device, const string& name, vk::Filter filter, vk::SamplerAddressMode addressMode, float maxAnisotropy) : DeviceResource(device, name) {
 		mInfo.magFilter = filter;
@@ -31,7 +31,7 @@ public:
 		mInfo.maxLod = VK_LOD_CLAMP_NONE;
 		mInfo.mipLodBias = 0;
 		mSampler = mDevice->createSampler(mInfo);
-		mDevice.SetObjectName(mSampler, Name());
+		mDevice.SetObjectName(mSampler, name);
 	}
 	inline ~Sampler() {
 		mDevice->destroySampler(mSampler);

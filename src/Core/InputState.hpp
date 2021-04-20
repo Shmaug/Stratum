@@ -15,7 +15,7 @@ public:
 	virtual ~InputState() = default;
 
 	inline InputState(const string& id) : mName(id) {};
-	inline string Name() const { return mName; }
+	inline string name() const { return mName; }
 };
 
 }

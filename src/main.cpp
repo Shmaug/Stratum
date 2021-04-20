@@ -1,4 +1,4 @@
-﻿#include "Core/Material.hpp"
+#include "Core/Material.hpp"
 #include "Core/Mesh.hpp"
 #include "Core/Profiler.hpp"
 #include "Core/Window.hpp"
@@ -16,15 +16,15 @@ inline void GenerateMipMaps(CommandBuffer& commandBuffer, shared_ptr<Texture> te
 	texture->TransitionBarrier(commandBuffer, vk::ImageLayout::eGeneral);
 	auto pipeline = make_shared<ComputePipeline>(commandBuffer.mDevice, "average2d", gSpirvModules.at("average2d"));
 	commandBuffer.BindPipeline(pipeline);
-	vk::Extent3D extent = texture->Extent();
-	for (uint32_t i = 0; i < texture->MipLevels()-1; i++) {
+	vk::Extent3D extent = texture->extent();
+	for (uint32_t i = 0; i < texture->mip_levels()-1; i++) {
 		extent.width  = max(1u, extent.width/2);
 		extent.height = max(1u, extent.height/2);
 		extent.depth  = max(1u, extent.depth/2);
 		if (i > 0)
 			commandBuffer.Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::ImageMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, 
 				vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **texture,
-				vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, i, 1, 0, texture->ArrayLayers()))
+				vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, i, 1, 0, texture->array_layers()))
 			);
 		commandBuffer.BindDescriptorSet(0, make_shared<DescriptorSet>(pipeline->DescriptorSetLayouts()[0], "mipmap tmp" + to_string(i), unordered_map<uint32_t, Descriptor> {
 			{ pipeline->binding("gInput2").mBinding, storage_texture_descriptor(Texture::View(texture,i,1)) },
@@ -34,13 +34,10 @@ inline void GenerateMipMaps(CommandBuffer& commandBuffer, shared_ptr<Texture> te
 }
 
 inline shared_ptr<Texture> LoadTexture(CommandBuffer& commandBuffer, const string& name, const Texture::PixelData& pixelData, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
-	const auto&[pixels,extent,format] = pixelData;
-	shared_ptr<Texture> tex = make_shared<Texture>(commandBuffer.mDevice, name, extent, format, 1, 0, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+	const auto&[pixels,extent] = pixelData;
+	shared_ptr<Texture> tex = make_shared<Texture>(commandBuffer.mDevice, name, extent, pixels.format(), 1, 0, vk::SampleCountFlagBits::e1, usage|vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 	tex->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
-	
-	auto& staging = commandBuffer.HoldResource(make_shared<Buffer>(pixels, "copy src", pixels->size(), vk::BufferUsageFlagBits::eTransferSrc));
-	commandBuffer->copyBufferToImage(*staging, **tex, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->ArrayLayers()), {}, tex->Extent()) });
-	
+	commandBuffer->copyBufferToImage(*commandBuffer.HoldResource(pixels.buffer_ptr()), **tex, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(pixels.offset(), 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->array_layers()), {}, tex->extent()) });
 	GenerateMipMaps(commandBuffer, tex);
 	return tex;
 }
@@ -49,43 +46,37 @@ inline shared_ptr<Texture> LoadTexture(CommandBuffer& commandBuffer, const fs::p
 }
 
 inline shared_ptr<Texture> CombineChannels(CommandBuffer& commandBuffer, const string& name, const Texture::PixelData& img0, const Texture::PixelData& img1, vk::ImageUsageFlagBits usage = vk::ImageUsageFlagBits::eSampled) {
-	const auto&[pixels0,extent0,format0] = img0;
-	const auto&[pixels1,extent1,format1] = img1;
+	const auto&[pixels0,extent0] = img0;
+	const auto&[pixels1,extent1] = img1;
 	
 	if (extent0 != extent1) throw invalid_argument("Image extents must match");
 
-	vk::Format dstFormat = vk::Format::eR8G8Unorm;
-
 	auto pipeline = make_shared<ComputePipeline>(commandBuffer.mDevice, "interleave", gSpirvModules.at("interleave"));
-	auto staging0 = Buffer::View(make_shared<Buffer>(pixels0, "gInputR", pixels0->size(), vk::BufferUsageFlagBits::eUniformTexelBuffer));
-	auto staging1 = Buffer::View(make_shared<Buffer>(pixels1, "gInputG", pixels1->size(), vk::BufferUsageFlagBits::eUniformTexelBuffer));
-	auto combined = Buffer::StrideView(make_shared<Buffer>(commandBuffer.mDevice, name, staging0.size()+staging1.size(), vk::BufferUsageFlagBits::eStorageTexelBuffer|vk::BufferUsageFlagBits::eTransferSrc), ElementSize(dstFormat));
-	auto dst = make_shared<Texture>(commandBuffer.mDevice, name, extent0, dstFormat, 1, 0, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
-
-	commandBuffer.HoldResource(combined);
-	commandBuffer.HoldResource(dst);
+	auto combined = commandBuffer.HoldResource(Buffer::TexelView(
+		make_shared<Buffer>(commandBuffer.mDevice, name, pixels0.size_bytes() + pixels1.size_bytes(), vk::BufferUsageFlagBits::eStorageTexelBuffer|vk::BufferUsageFlagBits::eTransferSrc), vk::Format::eR8G8Unorm));
 	
 	commandBuffer.BindPipeline(pipeline);
-	commandBuffer.BindDescriptorSet(0, make_shared<DescriptorSet>(commandBuffer.BoundPipeline()->DescriptorSetLayouts()[0], "tmp", unordered_map<uint32_t, Descriptor> {
-		{ pipeline->binding("gOutputRG").mBinding, Buffer::TexelView(combined, dstFormat) },
-		{ pipeline->binding("gInputR").mBinding, Buffer::TexelView(staging0, format0) },
-		{ pipeline->binding("gInputG").mBinding, Buffer::TexelView(staging1, format1) } }));
-	commandBuffer.PushConstant<uint32_t>("Width", extent0.width);
+	commandBuffer.BindDescriptorSet(0, make_shared<DescriptorSet>(commandBuffer.bound_pipeline()->DescriptorSetLayouts()[0], "tmp", unordered_map<uint32_t, Descriptor> {
+		{ pipeline->binding("gOutputRG").mBinding, combined },
+		{ pipeline->binding("gInputR").mBinding, pixels0 },
+		{ pipeline->binding("gInputG").mBinding, pixels1 } }));
+	commandBuffer.push_constant<uint32_t>("Width", extent0.width);
 	commandBuffer.DispatchTiled(extent0);
 
 	commandBuffer.Barrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead, combined);
-	dst->TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+
+	auto dst = make_shared<Texture>(commandBuffer.mDevice, name, extent0, combined.format(), 1, 0, vk::SampleCountFlagBits::e1, usage | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+	commandBuffer.HoldResource(dst).TransitionBarrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	commandBuffer->copyBufferToImage(*combined.buffer(), **dst, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(combined.offset(), 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), {}, extent0) });
 	GenerateMipMaps(commandBuffer, dst);
-
 	return dst;
 }
 
 int main(int argc, char** argv) {
 	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
 	{
-		Window& window = instance->Window();
-		Device& device = instance->Device();
+		Window& window = instance->window();
+		Device& device = instance->device();
 
 		ranges::for_each( byte_stream<ifstream>("Assets/core_shaders.spvm", ios::binary).read<vector<SpirvModule>>(),
 			[&](const auto& m) { gSpirvModules.emplace(m.mEntryPoint, make_shared<SpirvModule>(m)).first->second; });
@@ -137,27 +128,25 @@ int main(int argc, char** argv) {
 		{
 			auto commandBuffer = device.GetCommandBuffer("Init");
 			testMesh = make_shared<Mesh>(*commandBuffer, "Assets/Models/suzanne.obj");
-			pbrMaterial->Descriptor("gBaseColorTexture") 				 = sampled_texture_descriptor(Texture::View(LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_col.jpg")));
-			pbrMaterial->Descriptor("gNormalTexture") 					 = sampled_texture_descriptor(Texture::View(LoadTexture(*commandBuffer, "E:/3d/blender/Textures/copper/Metal08_nrm.jpg")));
-			pbrMaterial->Descriptor("gMetallicRoughnessTexture") = sampled_texture_descriptor(Texture::View(CombineChannels(*commandBuffer, "Metal08_met_rgh", Texture::LoadPixels(device, "E:/3d/blender/Textures/copper/Metal08_met.jpg"), Texture::LoadPixels(device, "E:/3d/blender/Textures/copper/Metal08_rgh.jpg"))));
+			pbrMaterial->descriptor("gBaseColorTexture") 				 = sampled_texture_descriptor(Texture::View(LoadTexture(*commandBuffer, "E:/3d/blender/Textures/Metal008/Metal008_2K_Color.jpg")));
+			pbrMaterial->descriptor("gNormalTexture") 					 = sampled_texture_descriptor(Texture::View(LoadTexture(*commandBuffer, "E:/3d/blender/Textures/Metal008/Metal008_2K_Normal.jpg")));
+			pbrMaterial->descriptor("gMetallicRoughnessTexture") = sampled_texture_descriptor(Texture::View(CombineChannels(*commandBuffer, "Metal08_met_rgh", Texture::LoadPixels(device, "E:/3d/blender/Textures/Metal008/Metal008_2K_Metalness.jpg"), Texture::LoadPixels(device, "E:/3d/blender/Textures/Metal008/Metal008_2K_Roughness.jpg"))));
 			device.Execute(commandBuffer);
 		}
 
-		pbrMaterial->SetImmutableSampler("gSampler", make_shared<Sampler>(device, "gSampler", vk::SamplerCreateInfo({},
+		pbrMaterial->immutable_sampler("gSampler", make_shared<Sampler>(device, "gSampler", vk::SamplerCreateInfo({},
 			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 			0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
-		pbrMaterial->SetImmutableSampler("gShadowSampler", make_shared<Sampler>(device, "gShadowSampler", vk::SamplerCreateInfo({},
+		pbrMaterial->immutable_sampler("gShadowSampler", make_shared<Sampler>(device, "gShadowSampler", vk::SamplerCreateInfo({},
 			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 			vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
 			0, true, 2, true, vk::CompareOp::eLessOrEqual, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
-
-		auto deviceAlloc = device_allocator<byte>(device, device.MemoryTypeIndex(host_visible_coherent), device.Limits().minStorageBufferOffsetAlignment);
-
+			
 		TransformData gCameraToWorld = make_transform(Vector3f(0,0,-4));
-		device_vector<TransformData> gInstanceTransforms(1, deviceAlloc);
-		device_vector<MaterialData> gMaterials(1, deviceAlloc);
-		device_vector<LightData> gLights(1, deviceAlloc);
+		buffer_vector<TransformData> gInstanceTransforms(device, 1, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
+		buffer_vector<MaterialData> gMaterials(device, 1, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
+		buffer_vector<LightData> gLights(device, 1, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer);
 		gInstanceTransforms[0] = make_transform(Vector3f::Zero());
 		gMaterials[0].gTextureST = Vector4f(1,1,0,0);
 		gMaterials[0].gBaseColor = Vector4f::Ones();
@@ -180,11 +169,11 @@ int main(int argc, char** argv) {
 			auto commandBuffer = device.GetCommandBuffer("Frame");
 
 			shared_ptr<Semaphore> renderSemaphore = make_shared<Semaphore>(device, "RenderSemaphore");
-			commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eAllCommands, renderSemaphore);
+			commandBuffer->SignalOnComplete(vk::PipelineStageFlagBits::eTransfer, renderSemaphore);
 			
 			if (!instance->PollEvents()) break; // Window was closed
 			window.AcquireNextImage(*commandBuffer);
-			commandBuffer->WaitOn(vk::PipelineStageFlagBits::eAllCommands, window.ImageAvailableSemaphore());
+			commandBuffer->WaitOn(vk::PipelineStageFlagBits::eColorAttachmentOutput, window.image_available_semaphore());
 
 			static auto t0 = chrono::high_resolution_clock::now();
 			auto t1 = chrono::high_resolution_clock::now();
@@ -195,49 +184,47 @@ int main(int argc, char** argv) {
 			{
 				ProfilerRegion ps("Camera Controls");
 
-				fovy = clamp(fovy - window.ScrollDelta(), 20.f, 90.f);
+				fovy = clamp(fovy - window.scroll_delta(), 20.f, 90.f);
 
-				if (window.KeyDown(MOUSE_RIGHT)) {
+				if (window.is_key_down(MOUSE_RIGHT)) {
 					static Vector2f euler = Vector2f::Zero();
-					euler += window.CursorDelta().reverse() * .005f;
+					euler += window.cursor_delta().reverse() * .005f;
 					euler.x() = clamp(euler.x(), -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
 					gCameraToWorld.Rotation = Quaternionf(AngleAxisf(euler.y(), Vector3f(0,1,0))) * Quaternionf(AngleAxisf(euler.x(), Vector3f(1,0,0)));
 				}
 				Vector3f mv = Vector3f::Zero();
-				if (window.KeyDown(KEY_D)) mv += Vector3f( 1,0,0);
-				if (window.KeyDown(KEY_A)) mv += Vector3f(-1,0,0);
-				if (window.KeyDown(KEY_W)) mv += Vector3f(0,0, 1);
-				if (window.KeyDown(KEY_S)) mv += Vector3f(0,0,-1);
+				if (window.is_key_down(KEY_D)) mv += Vector3f( 1,0,0);
+				if (window.is_key_down(KEY_A)) mv += Vector3f(-1,0,0);
+				if (window.is_key_down(KEY_W)) mv += Vector3f(0,0, 1);
+				if (window.is_key_down(KEY_S)) mv += Vector3f(0,0,-1);
 				gCameraToWorld.Translation += (gCameraToWorld.Rotation * mv*deltaTime).array();
 
-				if (window.KeyDown(KEY_LEFT))  gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf( deltaTime, gCameraToWorld.Rotation * Vector3f(0,1,0)));
-				if (window.KeyDown(KEY_RIGHT)) gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf(-deltaTime, gCameraToWorld.Rotation * Vector3f(0,1,0)));
-				if (window.KeyDown(KEY_UP)) 	 gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf( deltaTime, gCameraToWorld.Rotation * Vector3f(1,0,0)));
-				if (window.KeyDown(KEY_DOWN))  gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf(-deltaTime, gCameraToWorld.Rotation * Vector3f(1,0,0)));
+				if (window.is_key_down(KEY_LEFT))  gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf( deltaTime, gCameraToWorld.Rotation * Vector3f(0,1,0)));
+				if (window.is_key_down(KEY_RIGHT)) gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf(-deltaTime, gCameraToWorld.Rotation * Vector3f(0,1,0)));
+				if (window.is_key_down(KEY_UP)) 	 gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf( deltaTime, gCameraToWorld.Rotation * Vector3f(1,0,0)));
+				if (window.is_key_down(KEY_DOWN))  gInstanceTransforms[0].Rotation *= Quaternionf(AngleAxisf(-deltaTime, gCameraToWorld.Rotation * Vector3f(1,0,0)));
 			}
 
 			// render
-			if (window.Swapchain()) {
+			if (window.swapchain()) {
 				auto gShadowAtlas = make_shared<Texture>(device, "shadow_atlas", vk::Extent3D(2048,2048,1), shadowAtlasAttachment, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc);
-				auto primaryColor = make_shared<Texture>(device, "primary_color", vk::Extent3D(window.SwapchainExtent(),1), colorAttachment, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
-				auto primaryDepth = make_shared<Texture>(device, "primary_depth", vk::Extent3D(window.SwapchainExtent(),1), depthAttachment, vk::ImageUsageFlagBits::eDepthStencilAttachment);
-				auto instanceTransforms = make_buffer(gInstanceTransforms, "gInstanceTransforms", vk::BufferUsageFlagBits::eStorageBuffer);
-						
+				auto primaryColor = make_shared<Texture>(device, "primary_color", vk::Extent3D(window.swapchain_extent(),1), colorAttachment, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
+				auto primaryDepth = make_shared<Texture>(device, "primary_depth", vk::Extent3D(window.swapchain_extent(),1), depthAttachment, vk::ImageUsageFlagBits::eDepthStencilAttachment);
+				
+				pbrMaterial->descriptor("gLights") = gLights;
+				pbrMaterial->descriptor("gMaterials") = gMaterials;
+				pbrMaterial->descriptor("gInstanceTransforms") = gInstanceTransforms;
+				pbrMaterial->descriptor("gShadowAtlas") = sampled_texture_descriptor(gShadowAtlas);
+				pbrMaterial->push_constant("WorldToCamera", inverse(gCameraToWorld));
+				pbrMaterial->push_constant("Projection", make_perspective(radians(fovy), (float)window.swapchain_extent().height/(float)window.swapchain_extent().width, 0, 64));
+				pbrMaterial->push_constant("LightCount", (uint32_t)gLights.size());
 
-				shadowMaterial->Descriptor("gInstanceTransforms") = instanceTransforms;
-				shadowMaterial->PushConstant("WorldToCamera", inverse(gLights[0].LightToWorld));
-				shadowMaterial->PushConstant("Projection", gLights[0].ShadowProjection);
+				shadowMaterial->descriptor("gInstanceTransforms") = pbrMaterial->descriptor("gInstanceTransforms");
+				shadowMaterial->push_constant("WorldToCamera", inverse(gLights[0].LightToWorld));
+				shadowMaterial->push_constant("Projection", gLights[0].ShadowProjection);
 
-				pbrMaterial->Descriptor("gShadowAtlas") = sampled_texture_descriptor(gShadowAtlas);
-				pbrMaterial->Descriptor("gLights") = make_buffer(gLights, "gLights", vk::BufferUsageFlagBits::eStorageBuffer);
-				pbrMaterial->Descriptor("gMaterials") = make_buffer(gMaterials, "gMaterial", vk::BufferUsageFlagBits::eStorageBuffer);
-				pbrMaterial->Descriptor("gInstanceTransforms") = instanceTransforms;
-				pbrMaterial->PushConstant("WorldToCamera", inverse(gCameraToWorld));
-				pbrMaterial->PushConstant("Projection", make_perspective(radians(fovy), (float)window.SwapchainExtent().height/(float)window.SwapchainExtent().width, 0, 64));
-				pbrMaterial->PushConstant("LightCount", (uint32_t)gLights.size());
-
-				axisMaterial->PushConstant("WorldToCamera", pbrMaterial->PushConstant("WorldToCamera"));
-				axisMaterial->PushConstant("Projection", pbrMaterial->PushConstant("Projection"));
+				axisMaterial->push_constant("WorldToCamera", pbrMaterial->push_constant("WorldToCamera"));
+				axisMaterial->push_constant("Projection", pbrMaterial->push_constant("Projection"));
 
 				{
 					ProfilerRegion ps("Render Shadows");
@@ -245,10 +232,10 @@ int main(int argc, char** argv) {
 					
 					auto framebuffer = make_shared<Framebuffer>("shadow_framebuffer", *shadowPass, Texture::View(gShadowAtlas));
 					commandBuffer->BeginRenderPass(shadowPass, framebuffer, { vk::ClearDepthStencilValue{1.f,0} });
-					(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)gShadowAtlas->Extent().height, (float)gShadowAtlas->Extent().width, -(float)gShadowAtlas->Extent().height, 0, 1) });
-					(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), vk::Extent2D(gShadowAtlas->Extent().width, gShadowAtlas->Extent().height)) });
+					(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)framebuffer->extent().height, (float)framebuffer->extent().width, -(float)framebuffer->extent().height, 0, 1) });
+					(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), framebuffer->extent()) });
 
-					shadowMaterial->Bind(*commandBuffer, testMesh->Geometry());
+					shadowMaterial->Bind(*commandBuffer, testMesh->geometry());
 					testMesh->Draw(*commandBuffer);
 					
 					commandBuffer->EndRenderPass();
@@ -258,21 +245,21 @@ int main(int argc, char** argv) {
 					pbrMaterial->TransitionTextures(*commandBuffer);
 					axisMaterial->TransitionTextures(*commandBuffer);
 
-					auto framebuffer = make_shared<Framebuffer>("framebuffer", *mainPass, Texture::View(primaryColor), window.BackBuffer(), Texture::View(primaryDepth));
-					vector<vk::ClearValue> clearValues(framebuffer->size());
-					clearValues[mainPass->AttachmentIndex("primary_color")].setColor(std::array<float,4>{0.2f, 0.2f, 0.2f, 1});
-					clearValues[mainPass->AttachmentIndex("swapchain_image")].setColor(std::array<float,4>{0,0,0,0});
-					clearValues[mainPass->AttachmentIndex("primary_depth")].setDepthStencil({1,0});
+					vector<vk::ClearValue> clearValues(mainPass->attachments().size());
+					clearValues[mainPass->find("primary_color")].setColor(std::array<float,4>{0.2f, 0.2f, 0.2f, 1});
+					clearValues[mainPass->find("swapchain_image")].setColor(std::array<float,4>{0,0,0,0});
+					clearValues[mainPass->find("primary_depth")].setDepthStencil({1,0});
 
+					auto framebuffer = make_shared<Framebuffer>("framebuffer", *mainPass, Texture::View(primaryColor), window.back_buffer(), Texture::View(primaryDepth));
 					commandBuffer->BeginRenderPass(mainPass, framebuffer, clearValues);
-					(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)framebuffer->Extent().height, (float)framebuffer->Extent().width, -(float)framebuffer->Extent().height, 0, 1) });
-					(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), framebuffer->Extent()) });
+					(*commandBuffer)->setViewport(0, { vk::Viewport(0, (float)framebuffer->extent().height, (float)framebuffer->extent().width, -(float)framebuffer->extent().height, 0, 1) });
+					(*commandBuffer)->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), framebuffer->extent()) });
 
 					axisMaterial->Bind(*commandBuffer, vk::PrimitiveTopology::eLineList);
 					(*commandBuffer)->setLineWidth(1);
 					(*commandBuffer)->draw(2, 3, 0, 0);
 
-					pbrMaterial->Bind(*commandBuffer, testMesh->Geometry());
+					pbrMaterial->Bind(*commandBuffer, testMesh->geometry());
 					testMesh->Draw(*commandBuffer);
 					
 					commandBuffer->EndRenderPass();
@@ -281,7 +268,7 @@ int main(int argc, char** argv) {
 
 			device.Execute(commandBuffer);
 			
-			if (window.Swapchain()) {
+			if (window.swapchain()) {
 				ProfilerRegion ps("Present");
 				window.Present({ **renderSemaphore });
 			}

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Texture.hpp"
+#include "CommandBuffer.hpp"
 #include "InputState.hpp"
 
 #ifdef WIN32
@@ -245,19 +245,23 @@ enum KeyCode {
 #endif
 };
 
-class MouseState : public InputState {
+class MouseKeyboardState : public InputState {
 public:
 	Vector2f mCursorPos = Vector2f::Zero();
 	Vector2f mCursorDelta = Vector2f::Zero();
 	float mScrollDelta = 0;
 	unordered_set<KeyCode> mKeys;
+	bool mLockMouse = false;
 
-	inline MouseState() : InputState("Mouse") {};
-	inline MouseState& operator=(const MouseState& ms) {
-		mCursorPos = ms.mCursorPos;
-		mCursorDelta = ms.mCursorDelta;
-		mScrollDelta = ms.mScrollDelta;
-		mKeys = ms.mKeys;
+	MouseKeyboardState(const MouseKeyboardState& ms) = default;
+	MouseKeyboardState(MouseKeyboardState&& ms) = default;
+	inline MouseKeyboardState() : InputState("MouseKeyboard") {};
+	inline MouseKeyboardState& operator=(const MouseKeyboardState& rhs) {
+		mCursorPos = rhs.mCursorPos;
+		mCursorDelta = rhs.mCursorDelta;
+		mScrollDelta = rhs.mScrollDelta;
+		mKeys = rhs.mKeys;
+		mLockMouse = rhs.mLockMouse;
 		return *this;
 	};
 };
@@ -269,49 +273,53 @@ public:
 	STRATUM_API Window(Instance& instance, const string& title, vk::Rect2D position);
 	STRATUM_API ~Window();
 
-	STRATUM_API void Resize(uint32_t w, uint32_t h);
-	STRATUM_API void Fullscreen(bool fs);
-	inline void AllowTearing(bool v) { mAllowTearing = v; }
+	inline const string& title() const { return mTitle; }
+	inline const vk::Rect2D& client_rect() const { return mClientRect; };
+	inline vk::SurfaceKHR surface() const { return mSurface; }
+	inline vk::SwapchainKHR swapchain() const { return mSwapchain; }
+	inline vk::SurfaceFormatKHR surface_format() const { return mSurfaceFormat; }
+	inline vk::Extent2D swapchain_extent() const { return mSwapchainExtent; }
+	inline Semaphore& image_available_semaphore() const { return *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
+	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
+	
+	inline void allow_tearing(bool v) { mAllowTearing = v; }
+	inline bool allow_tearing() const { return mAllowTearing; }
 
-	inline vk::SurfaceKHR Surface() const { return mSurface; }
-	inline vk::SwapchainKHR Swapchain() const { return mSwapchain; }
-	inline vk::SurfaceFormatKHR SurfaceFormat() const { return mSurfaceFormat; }
-	inline vk::Extent2D SwapchainExtent() const { return mSwapchainExtent; }
-	inline Texture::View BackBuffer() const { return mSwapchainImages.empty() ? Texture::View() : mSwapchainImages[mBackBufferIndex]; }
-	inline Texture::View BackBuffer(uint32_t i) const { return mSwapchainImages.empty() ? Texture::View() : mSwapchainImages[i]; }
-	inline Semaphore& ImageAvailableSemaphore() const { return *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
-	inline Device::QueueFamily* PresentQueueFamily() const { return mPresentQueueFamily; }
+	STRATUM_API void fullscreen(bool fs);
+	inline bool fullscreen() const { return mFullscreen; }
 
-	inline bool Fullscreen() const { return mFullscreen; }
-	inline string Title() const { return mTitle; }
-	inline vk::Rect2D ClientRect() const { return mClientRect; };
-	inline uint32_t BackBufferCount() const { return (uint32_t)mSwapchainImages.size(); }
-	inline uint32_t BackBufferIndex() const { return mBackBufferIndex; }
-	inline bool AllowTearing() const { return mAllowTearing; }
+	inline uint32_t back_buffer_count() const { return (uint32_t)mSwapchainImages.size(); }
+	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
+	inline Texture::View back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
+	inline Texture::View back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
+
 
 #ifdef WIN32
-	inline HWND Hwnd() const { return mHwnd; }
+	inline HWND hWnd() const { return mHwnd; }
 #elif defined(__linux)
-	inline xcb_window_t XCBWindow() const { return mXCBWindow; }
+	inline xcb_window_t window() const { return mXCBWindow; }
 #endif
+
+	STRATUM_API void Resize(uint32_t w, uint32_t h);
 
 	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
+	// Number of times Present has been called
 	inline size_t PresentCount() const { return mPresentCount; }
 
 	STRATUM_API void LockMouse(bool l);
 	inline bool LockMouse() const { return mLockMouse; }
-	inline const stm::MouseState& MouseState() const { return mMouseState; }
-	inline const stm::MouseState& LastMouseState() const { return mLastMouseState; }
-	inline bool KeyDownFirst(KeyCode key) const { return mMouseState.mKeys.count(key) && !mLastMouseState.mKeys.count(key); }
-	inline bool KeyUpFirst(KeyCode key) const { return mLastMouseState.mKeys.count(key) && !mMouseState.mKeys.count(key); }
-	inline bool KeyDown(KeyCode key) const { return mMouseState.mKeys.count(key); }
-	inline bool KeyUp(KeyCode key) const { return !mMouseState.mKeys.count(key); }
-	inline float ScrollDelta() const { return mMouseState.mScrollDelta; }
-	inline Vector2f CursorPos() const { return mMouseState.mCursorPos; }
-	inline Vector2f LastCursorPos() const { return mLastMouseState.mCursorPos; }
-	inline Vector2f CursorDelta() const { return mMouseState.mCursorDelta; }
+	inline const MouseKeyboardState& input_state() const { return mInputState; }
+	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
+	inline Vector2f cursor_pos() const { return mInputState.mCursorPos; }
+	inline Vector2f cursor_pos_last() const { return mInputStateLast.mCursorPos; }
+	inline Vector2f cursor_delta() const { return mInputState.mCursorDelta; }
+	inline float scroll_delta() const { return mInputState.mScrollDelta; }
+	inline bool is_key_down(KeyCode key) const { return mInputState.mKeys.count(key); }
+	inline bool is_key_up(KeyCode key) const { return !mInputState.mKeys.count(key); }
+	inline bool is_key_down_redge(KeyCode key) const { return mInputState.mKeys.count(key) && !mInputStateLast.mKeys.count(key); }
+	inline bool is_key_up_redge(KeyCode key) const { return mInputStateLast.mKeys.count(key) && !mInputState.mKeys.count(key); }
 
 	inline Vector2f ClipToWindow(const Vector2f& clip) const {
 		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
@@ -345,8 +353,8 @@ private:
 	vk::Rect2D mClientRect;
 	string mTitle;
 
-	stm::MouseState mMouseState = {};
-	stm::MouseState mLastMouseState = {};
+	MouseKeyboardState mInputState = {};
+	MouseKeyboardState mInputStateLast = {};
 	bool mLockMouse = false;
 
 #ifdef WIN32

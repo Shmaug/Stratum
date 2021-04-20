@@ -91,13 +91,13 @@ protected:
 			}
 			for (uint32_t set = 0; set < mDescriptorSetLayouts.size(); set++)
 				if (setBindings.count(set))
-					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, Name(), setBindings.at(set));
+					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, name(), setBindings.at(set));
 				else
-					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, Name());
+					mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, name());
 		}
 
 		for (const auto& l : mDescriptorSetLayouts)
-			for (const auto&[i,b] : l->Bindings())
+			for (const auto&[i,b] : l->bindings())
 				for (const auto& s : b.mImmutableSamplers)
 					mHash = hash_combine(mHash, s->CreateInfo()); // only have to hash the immutable samplers; hashing the spir-v takes care of bindings/etc
 	
@@ -123,7 +123,7 @@ public:
 
 	inline bool operator==(const Pipeline& rhs) const { return rhs.mPipeline == mPipeline; }
 	inline size_t Hash() const { return mHash; }
-	inline vk::PipelineLayout Layout() const { return mLayout; }
+	inline vk::PipelineLayout layout() const { return mLayout; }
 	inline const auto& SpirvModules() const { return mSpirvModules; };
 	inline const auto& DescriptorSetLayouts() const { return mDescriptorSetLayouts; };
 	// most of the time, a pipeline wont have named descriptors with different bindings, so there is usually only one item in this range
@@ -153,7 +153,7 @@ public:
 				memcpy(specData.data() + it->second.offset, data.data(), min(data.size(), it->second.size));
 			}
 		vk::SpecializationInfo specInfo((uint32_t)mapEntries.size(), mapEntries.data(), (uint32_t)specData.size(), specData.data());
-		mPipeline = mDevice->createComputePipeline(mDevice.PipelineCache(),
+		mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(),
 			vk::ComputePipelineCreateInfo({},
 				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, spirv->mShaderModule, spirv->mEntryPoint.c_str(), mapEntries.size() ? &specInfo : nullptr),
 				mLayout)).value;
@@ -191,7 +191,7 @@ public:
 		CreatePipelineLayout(immutableSamplers);
 
 		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
-		for (const auto&[desc,type,blendState] : renderPass.SubpassDescriptions()[subpassIndex].mAttachmentDescriptions | views::values) {
+		for (const auto&[desc,type,blendState] : renderPass.subpasses()[subpassIndex].mAttachmentDescriptions | views::values) {
 			if (type == RenderPass::AttachmentType::eColor || type == RenderPass::AttachmentType::eDepthStencil)
 				sampleCount = desc.samples;
 			if (blendStates.empty() && type == RenderPass::AttachmentType::eColor)
@@ -203,7 +203,7 @@ public:
 		for (const auto state : mBlendStates) mHash = hash_combine(mHash, state);
 		for (const auto state : dynamicStates) mHash = hash_combine(mHash, state);
 
-		for (auto& [id, desc] : renderPass.SubpassDescriptions()[subpassIndex].mAttachmentDescriptions)
+		for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].mAttachmentDescriptions)
 			if (get<RenderPass::AttachmentType>(desc) & (RenderPass::AttachmentType::eColor | RenderPass::AttachmentType::eDepthStencil)) {
 				mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
 				break;
@@ -238,10 +238,10 @@ public:
 			return vk::PipelineShaderStageCreateInfo({}, spirv->mStage, spirv->mShaderModule, spirv->mEntryPoint.c_str(), specInfo.dataSize ? &specInfo : nullptr);
 		});
 
-		mPipeline = mDevice->createGraphicsPipeline(mDevice.PipelineCache(), 
+		mPipeline = mDevice->createGraphicsPipeline(mDevice.pipeline_cache(), 
 			vk::GraphicsPipelineCreateInfo({}, stages, &vertexInfo, &mInputAssemblyState, nullptr, &mViewportState,
 			&mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex)).value;
-		mDevice.SetObjectName(mPipeline, Name());
+		mDevice.SetObjectName(mPipeline, name);
 	}
 	
 	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eGraphics; }

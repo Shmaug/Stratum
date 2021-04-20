@@ -1,8 +1,5 @@
 #include "Window.hpp"
 
-#include "CommandBuffer.hpp"
-
-
 using namespace stm;
 
 Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
@@ -23,14 +20,14 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 		position.extent.height,
 		NULL,
 		NULL,
-		mInstance.HInstance(),
+		mInstance.hInstance(),
 		nullptr );
 	if (!mHwnd) throw runtime_error("failed to create window");
 
 	ShowWindow(mHwnd, SW_SHOW);
 	
 	vk::Win32SurfaceCreateInfoKHR info = {};
-	info.hinstance = mInstance.HInstance();
+	info.hinstance = mInstance.hInstance();
 	info.hwnd = mHwnd;
 	mSurface = mInstance->createWin32SurfaceKHR(info);
 
@@ -148,7 +145,7 @@ void Window::Resize(uint32_t w, uint32_t h) {
 #endif
 }
 
-void Window::Fullscreen(bool fs) {
+void Window::fullscreen(bool fs) {
 	#ifdef WIN32
 	
 	if (fs && !mFullscreen) {
@@ -216,14 +213,14 @@ void Window::CreateSwapchain(CommandBuffer& commandBuffer) {
 	mPresentQueueFamily = mSwapchainDevice->FindQueueFamily(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device does not support the window surface!");
 
-	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->PhysicalDevice().getSurfaceCapabilitiesKHR(mSurface);
-	auto formats 							 = mSwapchainDevice->PhysicalDevice().getSurfaceFormatsKHR(mSurface);
-	auto presentModes 				 = mSwapchainDevice->PhysicalDevice().getSurfacePresentModesKHR(mSurface);
-	auto queueFamilyProperties = mSwapchainDevice->PhysicalDevice().getQueueFamilyProperties();
+	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->physical().getSurfaceCapabilitiesKHR(mSurface);
+	auto formats 							 = mSwapchainDevice->physical().getSurfaceFormatsKHR(mSurface);
+	auto presentModes 				 = mSwapchainDevice->physical().getSurfacePresentModesKHR(mSurface);
+	auto queueFamilyProperties = mSwapchainDevice->physical().getQueueFamilyProperties();
 
 	// get the size of the swapchain
 	mSwapchainExtent = capabilities.currentExtent;
-	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mSwapchainDevice->Limits().maxImageDimension2D || mSwapchainExtent.height > mSwapchainDevice->Limits().maxImageDimension2D)
+	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mSwapchainDevice->limits().maxImageDimension2D || mSwapchainExtent.height > mSwapchainDevice->limits().maxImageDimension2D)
 		return; // invalid swapchain size, window invalid
 
 	// select the format of the swapchain

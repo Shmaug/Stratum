@@ -376,9 +376,9 @@ void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
 	binding.instance = *mScene->mInstance;
-	binding.physicalDevice = mScene->mInstance.Device().PhysicalDevice();
-	binding.device = *mScene->mInstance.Device();
-	binding.queueFamilyIndex = mScene->mInstance.Window().PresentQueueFamily()->mFamilyIndex;
+	binding.physicalDevice = mScene->mInstance.device().physical();
+	binding.device = *mScene->mInstance.device();
+	binding.queueFamilyIndex = mScene->mInstance.window().present_queue_family()->mFamilyIndex;
 	binding.queueIndex = 0;
 
 	XrSessionCreateInfo sessioninfo = {};

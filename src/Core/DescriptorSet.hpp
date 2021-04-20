@@ -5,12 +5,14 @@
 #include "SpirvModule.hpp"
 
 namespace stm {
+
 using Descriptor = variant<
 	tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
-	Buffer::View, // storage/uniform buffer
+	Buffer::View<byte>, // storage/uniform buffer
 	Buffer::TexelView, // texel buffer
-	byte_blob, // inline uniform buffer
-	vk::AccelerationStructureKHR>; // acceleration structure
+	byte_blob, // inline buffer data
+	vk::AccelerationStructureKHR // acceleration structure
+>;
 
 template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
 constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
@@ -62,7 +64,7 @@ public:
 	inline const Binding& at(uint32_t binding) const { return mBindings.at(binding); }
 	inline const Binding& operator[](uint32_t binding) const { return mBindings.at(binding); }
 
-	inline const unordered_map<uint32_t, Binding>& Bindings() const { return mBindings; }
+	inline const unordered_map<uint32_t, Binding>& bindings() const { return mBindings; }
 
 private:
 	vk::DescriptorSetLayout mLayout;
@@ -90,7 +92,7 @@ public:
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &**mLayout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
-		mDevice.SetObjectName(mDescriptorSet, Name());
+		mDevice.SetObjectName(mDescriptorSet, name);
 	}
 	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Descriptor>& bindings) : DescriptorSet(layout, name) {
 		for (const auto&[binding, d] : bindings)
@@ -112,7 +114,7 @@ public:
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }
 	inline operator vk::DescriptorSet() const { return mDescriptorSet; }
 
-	inline auto Layout() const { return mLayout; }
+	inline auto layout() const { return mLayout; }
 
 	inline const DescriptorSetLayout::Binding& layout_at(uint32_t binding) const { return mLayout->at(binding); }
 
@@ -140,6 +142,7 @@ public:
 		};
 		vector<WriteInfo> infos;
 		vector<vk::WriteDescriptorSet> writes;
+		vector<vk::CopyDescriptorSet> copies;
 		writes.reserve(mPendingWrites.size());
 		infos.reserve(mPendingWrites.size());
 		for (uint64_t idx : mPendingWrites) {
@@ -148,23 +151,6 @@ public:
 			auto& info = infos.emplace_back(WriteInfo{});
 			auto& write = writes.emplace_back(vk::WriteDescriptorSet(mDescriptorSet, idx >> 32, idx & uint64_t(~uint32_t(0)), 1, binding.mDescriptorType));
 			switch (write.descriptorType) {
-			case vk::DescriptorType::eUniformBuffer:
-			case vk::DescriptorType::eStorageBuffer:
-			case vk::DescriptorType::eUniformBufferDynamic:
-			case vk::DescriptorType::eStorageBufferDynamic: {
-				const auto& view = get<Buffer::View>(entry);
-				info.mBufferInfo.buffer = *view.buffer();
-				info.mBufferInfo.offset = view.offset();
-				info.mBufferInfo.range = view.size();
-				write.pBufferInfo = &info.mBufferInfo;
-				break;
-			}
-
-			case vk::DescriptorType::eUniformTexelBuffer:
-			case vk::DescriptorType::eStorageTexelBuffer:
-				write.pTexelBufferView = get<Buffer::TexelView>(entry).operator->();
-				break;
-
 			case vk::DescriptorType::eInputAttachment:
 			case vk::DescriptorType::eSampledImage:
 			case vk::DescriptorType::eStorageImage:
@@ -178,6 +164,24 @@ public:
 				break;
 			}
 
+			case vk::DescriptorType::eUniformBuffer:
+			case vk::DescriptorType::eStorageBuffer:
+			case vk::DescriptorType::eUniformBufferDynamic:
+			case vk::DescriptorType::eStorageBufferDynamic: {
+				const auto& view = get<Buffer::View<byte>>(entry);
+
+				info.mBufferInfo.buffer = *view.buffer();
+				info.mBufferInfo.offset = view.offset();
+				info.mBufferInfo.range = view.size_bytes();
+				write.pBufferInfo = &info.mBufferInfo;
+				break;
+			}
+
+			case vk::DescriptorType::eUniformTexelBuffer:
+			case vk::DescriptorType::eStorageTexelBuffer:
+				write.pTexelBufferView = get<Buffer::TexelView>(entry).operator->();
+				break;
+
 			case vk::DescriptorType::eInlineUniformBlockEXT: {
 				const auto& data = get<byte_blob>(entry);
 				info.mInlineInfo.pData = data.data();
@@ -186,6 +190,7 @@ public:
 				write.pNext = &info.mInlineInfo;
 				break;
 			}
+
 			case vk::DescriptorType::eAccelerationStructureKHR:
 				info.mAccelerationStructureInfo.accelerationStructureCount = 1;
 				info.mAccelerationStructureInfo.pAccelerationStructures = &get<vk::AccelerationStructureKHR>(entry);
@@ -193,7 +198,6 @@ public:
 				break;
 			}
 		}
-		vector<vk::CopyDescriptorSet> copies;
 		mDevice->updateDescriptorSets(writes, copies);
 		mPendingWrites.clear();
 	}

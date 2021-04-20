@@ -28,18 +28,7 @@ public:
 	template<convertible_to<SpirvModule>... Args>
 	inline Material(const string& name, const shared_ptr<Args>&... args) : Material(name, { args... }) {}
 
-	inline void TransitionTextures(CommandBuffer& commandBuffer) {
-		for (auto& [name, darray] : mDescriptors)
-			for (auto& [arrayIndex, d] : darray)
-				if (d.index() == 0)
-					if (Texture::View view = get<Texture::View>(d))
-						view.texture().TransitionBarrier(commandBuffer, get<vk::ImageLayout>(d));
-	}
-
-	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, const GeometryData& g = {});
-	inline shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, vk::PrimitiveTopology topo) { return Bind(commandBuffer, GeometryData { topo, {}, {}}); }
-
-	inline void SetImmutableSampler(const string& name, const shared_ptr<Sampler>& sampler) {
+	inline void immutable_sampler(const string& name, const shared_ptr<Sampler>& sampler) {
 		auto it = mImmutableSamplers.find(name);
 		mImmutableSamplers.emplace(name, sampler);
 		auto pipelines = mPipelines.lock();
@@ -47,7 +36,7 @@ public:
 	}
 	
 	template<typename T = byte_blob>
-	inline void SpecializationConstant(const string& name, const T& v) {
+	inline void specialization_constant(const string& name, const T& v) {
 		auto it = mSpecializationConstants.find(name);
 		size_t sz = 0;
 		if (it == mSpecializationConstants.end()) {
@@ -73,7 +62,7 @@ public:
 		pipelines->clear();
 	}
 	template<typename T = byte_blob>
-	inline const T& SpecializationConstant(const string& name) {
+	inline const T& specialization_constant(const string& name) {
 		auto it = mSpecializationConstants.find(name);
 		if (it == mSpecializationConstants.end()) throw invalid_argument("No specialization constant named " + name);
 		if constexpr (is_same_v<T,byte_blob>)
@@ -85,7 +74,7 @@ public:
 	}
 	
 	template<typename T = byte_blob>
-	inline void PushConstant(const string& name, const T& v) {
+	inline void push_constant(const string& name, const T& v) {
 		auto it = mPushConstants.find(name);
 		size_t sz = 0;
 		if (it == mPushConstants.end()) {
@@ -109,7 +98,7 @@ public:
 		}
 	}
 	template<typename T = byte_blob>
-	inline const T& PushConstant(const string& name) const {
+	inline const T& push_constant(const string& name) const {
 		auto it = mPushConstants.find(name);
 		if (it == mPushConstants.end()) throw invalid_argument("No push constant named " + name);
 		if constexpr (is_same_v<T,byte_blob>)
@@ -120,7 +109,7 @@ public:
 		}
 	}
 
-	inline stm::Descriptor& Descriptor(const string& name, uint32_t arrayIndex = 0) {
+	inline stm::Descriptor& descriptor(const string& name, uint32_t arrayIndex = 0) {
 		auto desc_it = mDescriptors.find(name);
 		if (desc_it != mDescriptors.end()) {
 			auto it = desc_it->second.find(arrayIndex);
@@ -134,9 +123,20 @@ public:
 		
 		throw invalid_argument("Descriptor " + name + " does not exist");
 	}
-	inline const stm::Descriptor& Descriptor(const string& name, uint32_t arrayIndex = 0) const {
+	inline const stm::Descriptor& descriptor(const string& name, uint32_t arrayIndex = 0) const {
 		return mDescriptors.at(name).at(arrayIndex);
 	}
+
+	inline void TransitionTextures(CommandBuffer& commandBuffer) {
+		for (auto& [name, darray] : mDescriptors)
+			for (auto& [arrayIndex, d] : darray)
+				if (d.index() == 0)
+					if (Texture::View view = get<Texture::View>(d))
+						view.texture().TransitionBarrier(commandBuffer, get<vk::ImageLayout>(d));
+	}
+
+	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, const GeometryData& g = {});
+	inline shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, vk::PrimitiveTopology topo) { return Bind(commandBuffer, GeometryData { topo, {}, {}}); }
 };
 
 }

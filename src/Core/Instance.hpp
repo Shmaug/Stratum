@@ -17,6 +17,11 @@ public:
 	inline const vk::Instance& operator*() const { return mInstance; }
 	inline const vk::Instance* operator->() const { return &mInstance; }
 
+	inline uint32_t vulkan_version() const { return mVulkanApiVersion; }
+
+	inline stm::Device& device() const { return *mDevice; }
+	inline stm::Window& window() const { return *mWindow; }
+	
 	inline string TryGetOption(const string& name) const { return mOptions.at(name); }
 	inline bool TryGetOption(const string& name, string& value) const {
 		if (mOptions.count(name)) {
@@ -26,13 +31,10 @@ public:
 		return false;
 	}
 	
-	inline stm::Device& Device() const { return *mDevice; }
-	inline stm::Window& Window() const { return *mWindow; }
-	
 	STRATUM_API bool PollEvents();
 
 	#ifdef WIN32
-	inline HINSTANCE HInstance() const { return mHInstance; }
+	inline HINSTANCE hInstance() const { return mHInstance; }
 	#elif defined(__linux)
 	inline xcb_window_t XCBScreen() const { return mXCBScreen; }
 	#endif
@@ -43,6 +45,7 @@ private:
 	unique_ptr<stm::Window> mWindow;
 	vector<string> mCommandLine;
 	unordered_map<string, string> mOptions;
+	uint32_t mVulkanApiVersion;
 
 	vk::DebugUtilsMessengerEXT mDebugMessenger;
 

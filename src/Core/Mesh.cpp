@@ -21,12 +21,11 @@ Mesh::Mesh(CommandBuffer& commandBuffer, const fs::path& filename) : Mesh(filena
 	static_assert(sizeof(aiVector3D) == sizeof(float)*3);
 	static_assert(sizeof(std::array<aiVector3D,4>) == sizeof(float)*12);
 
-	device_allocator<aiVector3D> alloc(device, device.MemoryTypeIndex(host_visible_coherent));
-	device_vector<aiVector3D> vertices(alloc);
-	device_vector<aiVector3D> normals(alloc);
-	device_vector<aiVector3D> tangents(alloc);
-	device_vector<aiVector3D> texcoords(alloc);
-	device_vector<uint32_t> indices(alloc);
+	buffer_vector<aiVector3D> vertices(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<aiVector3D> normals(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<aiVector3D> tangents(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<aiVector3D> texcoords(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<uint32_t> indices(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
 
 	for (const aiMesh* m : span(scene->mMeshes, scene->mNumMeshes)) {
 		size_t vertsPerFace;
@@ -37,33 +36,35 @@ Mesh::Mesh(CommandBuffer& commandBuffer, const fs::path& filename) : Mesh(filena
 
 		mSubmeshes.emplace_back(m->mNumFaces, (uint32_t)indices.size(), (uint32_t)vertices.size());
 
-		size_t tmp = vertices.size();
-		vertices.resize(tmp + m->mNumVertices);
-		normals.resize(tmp + m->mNumVertices);
-		tangents.resize(tmp + m->mNumVertices);
-		texcoords.resize(tmp + m->mNumVertices);
-		ranges::copy_n(m->mVertices, m->mNumVertices, &vertices[tmp]);
-		ranges::copy_n(m->mNormals, m->mNumVertices, &normals[tmp]);
-		ranges::copy_n(m->mTangents, m->mNumVertices, &tangents[tmp]);
-		ranges::copy_n(m->mTextureCoords[0], m->mNumVertices, &texcoords[tmp]);
+		size_t start = vertices.size();
+		size_t sz = start + m->mNumVertices;
+		vertices.resize(sz);
+		normals.resize(sz);
+		tangents.resize(sz);
+		texcoords.resize(sz);
+		ranges::copy_n(m->mVertices, m->mNumVertices, &vertices[start]);
+		ranges::copy_n(m->mNormals, m->mNumVertices, &normals[start]);
+		ranges::copy_n(m->mTangents, m->mNumVertices, &tangents[start]);
+		ranges::copy_n(m->mTextureCoords[0], m->mNumVertices, &texcoords[start]);
 
-		tmp = indices.size();
-		indices.resize(indices.size() + m->mNumFaces*vertsPerFace);
+		start = indices.size();
+		indices.resize(start + m->mNumFaces*vertsPerFace);
 		for (const aiFace& f : span(m->mFaces, m->mNumFaces)) {
-			ranges::copy_n(f.mIndices, f.mNumIndices, &indices[tmp]);
-			tmp += f.mNumIndices;
+			ranges::copy_n(f.mIndices, f.mNumIndices, &indices[start]);
+			start += f.mNumIndices;
 		}
 	}
 
-	mIndices = make_buffer(indices, "Indices", vk::BufferUsageFlagBits::eIndexBuffer);
+	mIndices = commandBuffer.CopyBuffer<uint32_t>(indices, vk::BufferUsageFlagBits::eIndexBuffer);
 
 	mGeometry.mBindings.resize(4);
-	mGeometry.mBindings[0] = { make_buffer(vertices, "Vertices", vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
-	mGeometry.mBindings[1] = { make_buffer(normals, "Normals", vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
-	mGeometry.mBindings[2] = { make_buffer(tangents, "Tangents", vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
-	mGeometry.mBindings[3] = { make_buffer(texcoords, "Texcoords", vk::BufferUsageFlagBits::eVertexBuffer), vk::VertexInputRate::eVertex };
+	mGeometry.mBindings[0].first = commandBuffer.CopyBuffer<aiVector3D>(vertices, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[1].first = commandBuffer.CopyBuffer<aiVector3D>(normals, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[2].first = commandBuffer.CopyBuffer<aiVector3D>(tangents, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[3].first = commandBuffer.CopyBuffer<aiVector3D>(texcoords, vk::BufferUsageFlagBits::eVertexBuffer);
+
 	mGeometry[VertexAttributeType::ePosition][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, 0);
-	mGeometry[VertexAttributeType::eNormal][0] = GeometryData::Attribute(1, vk::Format::eR32G32B32Sfloat, 0);
-	mGeometry[VertexAttributeType::eTangent][0] = GeometryData::Attribute(2, vk::Format::eR32G32B32Sfloat, 0);
+	mGeometry[VertexAttributeType::eNormal][0]   = GeometryData::Attribute(1, vk::Format::eR32G32B32Sfloat, 0);
+	mGeometry[VertexAttributeType::eTangent][0]  = GeometryData::Attribute(2, vk::Format::eR32G32B32Sfloat, 0);
 	mGeometry[VertexAttributeType::eTexcoord][0] = GeometryData::Attribute(3, vk::Format::eR32G32B32Sfloat, 0);
 }

@@ -28,10 +28,10 @@ RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, con
 
 	// TODO: check device->MemoryUsage(), only create the baked volume and gradient textures if there is enough VRAM
 
-	//mBakedVolume = new Texture("Baked Volume", device, mRawVolume->Extent(), vk::Format::eR8G8B8A8Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage);
+	//mBakedVolume = new Texture("Baked Volume", device, mRawVolume->extent(), vk::Format::eR8G8B8A8Unorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage);
 	//mBakeDirty = true;
 
-	//mGradient = new Texture("Gradient", device, mRawVolume->Extent(), vk::Format::eR8G8B8A8Snorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage);
+	//mGradient = new Texture("Gradient", device, mRawVolume->extent(), vk::Format::eR8G8B8A8Snorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage);
 	//mGradientDirty = true;
 
   mUniformBuffer = make_shared<Buffer>("Volume Uniforms", device, sizeof(VolumeUniformBuffer), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -64,11 +64,11 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice.FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
-	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
+	uniforms->VolumeResolution = { mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth };
 
   unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
-  if (ChannelCount(mRawVolume->Format()) == 1) {
+  if (ChannelCount(mRawVolume->format()) == 1) {
     defines.emplace("SINGLE_CHANNEL");
     if (mColorize) defines.emplace("COLORIZE");
   }
@@ -86,7 +86,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
-    commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
+    commandBuffer.DispatchTiled(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
 
     commandBuffer.Barrier(*mBakedVolume);
     mBakeDirty = false;
@@ -108,7 +108,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
     commandBuffer.BindDescriptorSet(ds, 0);
 
-    commandBuffer.DispatchTiled(mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth);
+    commandBuffer.DispatchTiled(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
 
     commandBuffer.Barrier(*mBakedVolume);
     mGradientDirty = false;
@@ -129,12 +129,12 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   uniforms->FrameIndex = (uint32_t)(commandBuffer.mDevice.FrameCount() % 0x00000000FFFFFFFFull);
   uniforms->RemapRange = mRemapRange;
   uniforms->HueRange = mHueRange;
-	uniforms->VolumeResolution = { mRawVolume->Extent().width, mRawVolume->Extent().height, mRawVolume->Extent().depth };
+	uniforms->VolumeResolution = { mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth };
 
   unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
   if (mBakedVolume) defines.emplace("BAKED");
-  else if (ChannelCount(mRawVolume->Format()) == 1) {
+  else if (ChannelCount(mRawVolume->format()) == 1) {
     defines.emplace("SINGLE_CHANNEL");
     if (mColorize) defines.emplace("COLORIZE");
   }
@@ -169,7 +169,7 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   commandBuffer.PushConstantRef("WriteOffset", Vector2i(0, 0));
   commandBuffer.PushConstantRef("SampleRate", mSampleRate);
 
-  Vector2i res(renderTarget->Extent().width, renderTarget->Extent().height);
+  Vector2i res(renderTarget->extent().width, renderTarget->extent().height);
   switch (camera.StereoMode()) {
   case StereoMode::eNone:
     commandBuffer.PushConstantRef("ScreenResolution", res);

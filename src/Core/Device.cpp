@@ -1,3 +1,4 @@
+#define VMA_IMPLEMENTATION
 #include "Device.hpp"
 
 #include "Buffer.hpp"
@@ -8,14 +9,11 @@
 
 using namespace stm;
 
-Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers)
+Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers, uint32_t frameInUseCount)
 	: mPhysicalDevice(physicalDevice), mInstance(instance) {
 
 	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
 	mLimits = properties.limits;
-	auto memoryProperties = mPhysicalDevice.getMemoryProperties();
-	mMemoryTypes.resize(memoryProperties.memoryTypeCount);
-	ranges::copy_n(memoryProperties.memoryTypes.begin(), memoryProperties.memoryTypeCount, mMemoryTypes.begin());
 
 	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)mInstance->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
@@ -59,7 +57,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
 	SetObjectName(mDevice, name);
 	#pragma endregion
-	
+
 	#pragma region Create PipelineCache and DesriptorPool
 	vk::PipelineCacheCreateInfo cacheInfo = {};
 	string tmp;
@@ -102,15 +100,22 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 		QueueFamily q = {};
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
-		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.Window().Surface());
+		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.window().surface());
 		// TODO: create more queues to utilize more parallelization (if necessary?)
 		for (uint32_t i = 0; i < 1; i++) {
 			q.mQueues.push_back(mDevice.getQueue(info.queueFamilyIndex, i));
 			SetObjectName(q.mQueues[i], "DeviceQueue"+to_string(i));
 		}
 		mQueueFamilies.lock()->emplace(q.mFamilyIndex, q);
-		mQueueFamilyIndices.push_back(q.mFamilyIndex);
 	}
+
+	VmaAllocatorCreateInfo allocatorInfo = {};
+	allocatorInfo.physicalDevice = mPhysicalDevice;
+	allocatorInfo.device = mDevice;
+	allocatorInfo.frameInUseCount = frameInUseCount;
+	allocatorInfo.instance = *mInstance;
+	allocatorInfo.vulkanApiVersion = mInstance.vulkan_version();
+	vmaCreateAllocator(&allocatorInfo, &mAllocator);
 }
 Device::~Device() {
 	Flush();
@@ -125,7 +130,8 @@ Device::~Device() {
 	queueFamilies->clear();
 	
 	mDevice.destroyDescriptorPool(*mDescriptorPool.lock());
-	mMemoryPool.lock()->clear();
+
+	vmaDestroyAllocator(mAllocator);
 
 	string tmp;
 	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
@@ -139,77 +145,6 @@ Device::~Device() {
 	}
 	mDevice.destroyPipelineCache(mPipelineCache);
 	mDevice.destroy();
-}
-
-shared_ptr<Device::Memory::View> Device::Memory::Allocate(vk::DeviceSize allocSize, vk::DeviceSize alignment) {
-	if (mUnallocated.empty()) return nullptr;
-	
-	vk::DeviceSize blockSize = 0;
-	vk::DeviceSize memLocation = 0;
-	vk::DeviceSize memSize = 0;
-
-	// find smallest unallocated block that can fit the requirements
-	auto block = mUnallocated.end();
-	for (auto it = mUnallocated.begin(); it != mUnallocated.end(); it++) {
-		vk::DeviceSize offset = (it->first && alignment) ? AlignUp(it->first, alignment) : 0;
-		vk::DeviceSize blockEnd = offset + allocSize;
-
-		if (blockEnd > it->first + it->second) continue;
-		if (block == mUnallocated.end() || it->second < block->second) {
-			memLocation = offset;
-			memSize = blockEnd - offset;
-			blockSize = blockEnd - it->first;
-			block = it;
-		}
-	}
-	if (block == mUnallocated.end()) return nullptr;
-
-	if (block->second > blockSize) {
-		// still room left after this allocation, shift this block over
-		block->first += blockSize;
-		block->second -= blockSize;
-	} else
-		mUnallocated.erase(block);
-
-	return shared_ptr<View>(new View(*this, memLocation, memSize));
-}
-Device::Memory::View::~View() {
-	auto memoryPool = mMemory.mDevice.mMemoryPool.lock();
-
-	vk::DeviceSize end = mOffset + mSize;
-
-	auto firstAfter = mMemory.mUnallocated.end();
-	auto startBlock = mMemory.mUnallocated.end();
-	auto endBlock = mMemory.mUnallocated.end();
-
-	for (auto it = mMemory.mUnallocated.begin(); it != mMemory.mUnallocated.end(); it++) {
-		if (it->first > mOffset && (firstAfter == mMemory.mUnallocated.end() || it->first < firstAfter->first)) firstAfter = it;
-
-		if (it->first == end)
-			endBlock = it;
-		if (it->first + it->second == mOffset)
-			startBlock = it;
-	}
-
-	//if (startBlock == endBlock && startBlock != mMemory.mUnallocated.end()) throw; // this should NOT happen
-
-	// merge blocks
-
-	if (startBlock == mMemory.mUnallocated.end() && endBlock == mMemory.mUnallocated.end())
-		// block isn't adjacent to any other blocks
-		mMemory.mUnallocated.insert(firstAfter, make_pair(mOffset, mSize));
-	else if (startBlock == mMemory.mUnallocated.end()) {
-		//  --------     |---- allocation ----|---- endBlock ----|
-		endBlock->first = mOffset;
-		endBlock->second += mSize;
-	} else if (endBlock == mMemory.mUnallocated.end()) {
-		//  |---- startBlock ----|---- allocation ----|     --------
-		startBlock->second += mSize;
-	} else {
-		//  |---- startBlock ----|---- allocation ----|---- endBlock ----|
-		startBlock->second += mSize + endBlock->second;
-		mMemory.mUnallocated.erase(endBlock);
-	}
 }
 
 inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {

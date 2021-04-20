@@ -241,15 +241,15 @@ protected:
 		return true;
 	}
 	PLUGIN_EXPORT void OnUpdate(CommandBuffer& commandBuffer) override {
-		if (mKeyboardInput->KeyDownFirst(KEY_TILDE)) mShowPerformance = !mShowPerformance;
+		if (mKeyboardInput->is_key_down_redge(KEY_TILDE)) mShowPerformance = !mShowPerformance;
 
 		if (mKeyboardInput->GetPointerLast(0)->mGuiHitT < 0) {
-			if (mKeyboardInput->ScrollDelta() != 0) {
-				mZoom = clamp(mZoom - mKeyboardInput->ScrollDelta() * .025f, -1.f, 5.f);
+			if (mKeyboardInput->scroll_delta() != 0) {
+				mZoom = clamp(mZoom - mKeyboardInput->scroll_delta() * .025f, -1.f, 5.f);
 				mMainCamera->LocalPosition(0, 1.6f, -mZoom);
 			}
-			if (mVolume && mKeyboardInput->KeyDown(MOUSE_LEFT)) {
-				Vector3f axis = mMainCamera->WorldRotation() * Vector3f(0, 1, 0) * mKeyboardInput->CursorDelta().x - mMainCamera->WorldRotation() * Vector3f(1, 0, 0) * mKeyboardInput->CursorDelta().y;
+			if (mVolume && mKeyboardInput->is_key_down(MOUSE_LEFT)) {
+				Vector3f axis = mMainCamera->WorldRotation() * Vector3f(0, 1, 0) * mKeyboardInput->cursor_delta().x - mMainCamera->WorldRotation() * Vector3f(1, 0, 0) * mKeyboardInput->cursor_delta().y;
 				if (dot(axis, axis) > .001f) {
 					mVolume->LocalRotation(fquat::AxisAngle(-normalize(axis), length(axis) * .003f) * mVolume->LocalRotation());
 				}
@@ -268,7 +268,7 @@ protected:
 		if (worldSpace)
 			gui.BeginWorldLayout(GuiContext::LayoutAxis::eVertical, Matrix4f::TRS(Vector3f(-.85f, 1, 0), fquat::Identity(), .001f), Rect2D(0, 0, 300, 850));
 		else
-			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, Rect2D(10, (float)mScene->mInstance->Window()->SwapchainExtent().height - 450 - 10, 300, 450));
+			gui.BeginScreenLayout(GuiContext::LayoutAxis::eVertical, Rect2D(10, (float)mScene->mInstance->window()->swapchain_extent().height - 450 - 10, 300, 450));
 
 
 		gui.LayoutTitle("Load Dataset");

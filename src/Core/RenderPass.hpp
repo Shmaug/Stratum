@@ -148,7 +148,7 @@ public:
 		}
 
 		mRenderPass = mDevice->createRenderPass(vk::RenderPassCreateInfo({}, attachments, subpasses, dependencies));
-		mDevice.SetObjectName(mRenderPass, Name());
+		mDevice.SetObjectName(mRenderPass, name);
 	}
 	inline ~RenderPass() {
 		mDevice->destroyRenderPass(mRenderPass);
@@ -157,9 +157,9 @@ public:
 	inline const vk::RenderPass& operator*() const { return mRenderPass; }
 	inline const vk::RenderPass* operator->() const { return &mRenderPass; }
 
-	inline const auto& SubpassDescriptions() const { return mSubpassDescriptions; }
-	inline const auto& AttachmentDescriptions() const { return mAttachmentDescriptions; }
-	inline size_t AttachmentIndex(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
+	inline const auto& subpasses() const { return mSubpassDescriptions; }
+	inline const auto& attachments() const { return mAttachmentDescriptions; }
+	inline size_t find(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
 
 private:
  	friend class CommandBuffer;

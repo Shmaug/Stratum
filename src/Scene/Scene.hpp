@@ -53,7 +53,7 @@ public:
 
 		inline Node(Scene& scene, const string& name) : mName(name), mScene(scene) {}
 		virtual ~Node() = default;
-		inline const string& Name() const { return mName; }
+		inline const string& name() const { return mName; }
 
 		inline Node* parent() const {
 			auto it = mScene.mParentEdges.find(this);

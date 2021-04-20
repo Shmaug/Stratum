@@ -20,13 +20,13 @@ shared_ptr<GraphicsPipeline> Material::CreatePipeline(RenderPass& renderPass, ui
 shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, const GeometryData& geometry) {
 	ProfilerRegion ps("Material::Bind");
 
-	size_t key = hash_combine(*commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(), geometry.mPrimitiveTopology, geometry.mAttributes | views::values);
+	size_t key = hash_combine(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry.mPrimitiveTopology, geometry.mAttributes | views::values);
 
 	shared_ptr<GraphicsPipeline> pipeline;
 	{
 		auto pipelines = mPipelines.lock();
 		auto p_it = pipelines->find(key);
-		if (p_it == pipelines->end()) pipeline = pipelines->emplace(key, CreatePipeline(*commandBuffer.CurrentRenderPass(), commandBuffer.CurrentSubpassIndex(), geometry)).first->second;
+		if (p_it == pipelines->end()) pipeline = pipelines->emplace(key, CreatePipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry)).first->second;
 		else pipeline = p_it->second;
 	}
 
@@ -47,7 +47,7 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, const 
 	}
 	
 	for (const auto&[index, descriptorSet] : descriptorSets) commandBuffer.BindDescriptorSet(index, descriptorSet);
-	for (const auto&[name, data] : mPushConstants) commandBuffer.PushConstant(name, data);
+	for (const auto&[name, data] : mPushConstants) commandBuffer.push_constant(name, data);
 
 	return pipeline;
 }

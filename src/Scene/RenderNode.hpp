@@ -34,10 +34,10 @@ public:
 
     vector<vk::ClearValue> clearValues(mFramebuffer->size());
     commandBuffer.BeginRenderPass(mRenderPass, mFramebuffer, clearValues);
-    for (const RenderPass::SubpassDescription& subpass : mRenderPass->SubpassDescriptions()) {
+    for (const RenderPass::SubpassDescription& subpass : mRenderPass->subpasses()) {
       ProfilerRegion ps(subpass.mName, commandBuffer);
       OnRenderSubpass(this, subpass);
-      if (mRenderPass->SubpassDescriptions().size() > 1)
+      if (mRenderPass->subpasses().size() > 1)
         commandBuffer.NextSubpass();
     }
     commandBuffer.EndRenderPass();
