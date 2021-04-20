@@ -169,14 +169,15 @@ public:
 
   buffer_vector() = delete;
   buffer_vector(buffer_vector<T>&&) = default;
-  inline buffer_vector(const buffer_vector<T>& v) : mDevice(v.mDevice), mSize(v.mSize), mBufferUsage(v.mBufferUsage), mMemoryUsage(v.mMemoryUsage), mSharingMode(v.mSharingMode) {
-		if (v.mBuffer) {
-			mBuffer = make_shared<Buffer>(mDevice, "buffer_vector", v.size_bytes(), v.buffer_usage(), v.memory_usage(), v.sharing_mode());
-			memcpy(mBuffer->data(), v.data(), v.size_bytes());
-		}
-	}
   inline buffer_vector(Device& device, size_type size, vk::BufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) : mDevice(device), mSize(0), mBufferUsage(bufferUsage), mMemoryUsage(memoryUsage), mSharingMode(sharingMode) {
 		if (size) resize(size);
+	}
+  inline buffer_vector(const buffer_vector<T>& v) : mDevice(v.mDevice), mSize(v.mSize), mBufferUsage(v.mBufferUsage), mMemoryUsage(v.mMemoryUsage), mSharingMode(v.mSharingMode) {
+		if (mSize) {
+			reserve(mSize);
+			for (size_type i = 0; i < mSize; i++)
+				new (data() + i) T(v[i]);
+		}
 	}
 	inline ~buffer_vector() {
 		for (size_type i = 0; i < mSize; i++)
@@ -194,6 +195,8 @@ public:
 	inline VmaMemoryUsage memory_usage() const { return mMemoryUsage; }
 	inline vk::SharingMode sharing_mode() const { return mSharingMode; }
 
+	inline pointer data() { return reinterpret_cast<pointer>(mBuffer->data()); }
+
 	inline void reserve(size_type newcap) {
 		if ((!mBuffer && newcap > 0) || newcap*sizeof(T) > mBuffer->size()) {
 			vk::MemoryRequirements requirements;
@@ -205,6 +208,7 @@ public:
 				requirements = mDevice->getBufferMemoryRequirements(tmp);
 				mDevice->destroyBuffer(tmp);
 			}
+			requirements.alignment = max(requirements.alignment, alignment_of_v<T>);
 			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector", requirements.size, mBufferUsage, mSharingMode);
 			if (mBuffer) memcpy(b->data(), mBuffer->data(), mBuffer->size());
 			mBuffer = b;
@@ -227,8 +231,6 @@ public:
 			at(i).~T();
 		mSize = 0;
 	}
-
-	inline pointer data() { return reinterpret_cast<pointer>(mBuffer->data()); }
 
 	inline reference front() { return *data(); }
 	inline reference back() { return *(data() + (mSize - 1)); }
