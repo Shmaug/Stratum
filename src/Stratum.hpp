@@ -17,17 +17,17 @@ constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
 template<floating_point T> constexpr T degrees(const T& r) { return r * (T)180/numbers::pi_v<float>; }
 template<floating_point T> constexpr T radians(const T& d) { return d * numbers::pi_v<float>/(T)180; }
 
-template<integral T> constexpr T AlignUpWithMask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
-template<integral T> constexpr T AlignDownWithMask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
-template<integral T> constexpr T AlignUp(T value, size_t alignment) { return AlignUpWithMask(value, alignment - 1); }
-template<integral T> constexpr T AlignDown(T value, size_t alignment) { return AlignDownWithMask(value, alignment - 1); }
+template<integral T> constexpr T align_up_mask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
+template<integral T> constexpr T align_down_mask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
+template<integral T> constexpr T align_up(T value, size_t alignment) { return align_up_mask(value, alignment - 1); }
+template<integral T> constexpr T align_down(T value, size_t alignment) { return align_down_mask(value, alignment - 1); }
 
 template<typename T>
-inline T signedDistance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
+inline T signed_distance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
 	Vector3f normal = plane.normal();
 	Hyperplane<float,3> dilatatedPlane(normal, plane.offset() - abs(box.sizes().dot(normal)));
 	Vector3f n = lerp(box.max(), box.min(), max<Array3f>(normal.array().sign(), Array3f::Zero()));
-	return dilatatedPlane.signedDistance(n);
+	return dilatatedPlane.signed_distance(n);
 }
 
 #pragma endregion
@@ -107,7 +107,7 @@ inline string ws2s(const wstring &wstr) {
 }
 
 template<ranges::contiguous_range R>
-inline R ReadFile(const fs::path& filename) {
+inline R read_file(const fs::path& filename) {
 	ifstream file(filename, ios::ate | ios::binary);
 	if (!file.is_open()) return {};
 	R dst;
@@ -121,8 +121,19 @@ inline R ReadFile(const fs::path& filename) {
 
 constexpr vk::MemoryPropertyFlags host_visible_coherent = vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent;
 
+inline constexpr bool is_depth_stencil(vk::Format format) {
+	return
+		format == vk::Format::eS8Uint ||
+		format == vk::Format::eD16Unorm ||
+		format == vk::Format::eD16UnormS8Uint ||
+		format == vk::Format::eX8D24UnormPack32 ||
+		format == vk::Format::eD24UnormS8Uint ||
+		format == vk::Format::eD32Sfloat ||
+		format == vk::Format::eD32SfloatS8Uint;
+}
+
 // Size of an element of format, in bytes
-inline constexpr vk::DeviceSize ElementSize(vk::Format format) {
+inline constexpr vk::DeviceSize texel_size(vk::Format format) {
 	switch (format) {
 	case vk::Format::eR4G4UnormPack8:
 	case vk::Format::eR8Unorm:
@@ -276,7 +287,7 @@ inline constexpr vk::DeviceSize ElementSize(vk::Format format) {
 	}
 	return 0;
 }
-inline constexpr uint32_t ChannelCount(vk::Format format) {
+inline constexpr uint32_t channel_count(vk::Format format) {
 	switch (format) {
 		case vk::Format::eR8Unorm:
 		case vk::Format::eR8Snorm:
@@ -420,24 +431,8 @@ inline constexpr uint32_t ChannelCount(vk::Format format) {
 	}
 	return 0;
 }
-inline constexpr bool HasDepthComponent(vk::Format format) {
-	return
-		format == vk::Format::eD16Unorm ||
-		format == vk::Format::eX8D24UnormPack32 ||
-		format == vk::Format::eD32Sfloat ||
-		format == vk::Format::eD16UnormS8Uint ||
-		format == vk::Format::eD24UnormS8Uint ||
-		format == vk::Format::eD32SfloatS8Uint;
-}
-inline constexpr bool HasStencilComponent(vk::Format format) {
-	return
-		format == vk::Format::eS8Uint ||
-		format == vk::Format::eD16UnormS8Uint ||
-		format == vk::Format::eD24UnormS8Uint ||
-		format == vk::Format::eD32SfloatS8Uint;
-}
 
-inline constexpr uint32_t PrimitiveDegree(vk::PrimitiveTopology topo) {
+inline constexpr uint32_t verts_per_prim(vk::PrimitiveTopology topo) {
 	switch (topo) {
 		default:
 		case vk::PrimitiveTopology::ePatchList:

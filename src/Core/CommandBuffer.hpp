@@ -14,7 +14,7 @@ public:
 	inline ~CommandBuffer() {
 		if (mState == CommandBufferState::eInFlight)
 			fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying CommandBuffer %s that is in-flight\n", name().c_str());
-		Clear();
+		clear();
 		mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 	}
 
@@ -28,73 +28,72 @@ public:
 	inline uint32_t subpass_index() const { return mSubpassIndex; }
 	inline shared_ptr<Pipeline> bound_pipeline() const { return mBoundPipeline; }
 
-	STRATUM_API void Reset(const string& name = "Command Buffer");
+	// Label a region for a tool such as RenderDoc
+	STRATUM_API void begin_label(const string& label, const Vector4f& color = { 1,1,1,0 });
+	STRATUM_API void end_label();
+
+	STRATUM_API void reset(const string& name = "Command Buffer");
 
 	// cause a stage to delay execution until waitSemaphore signals
-	inline void WaitOn(vk::PipelineStageFlags stage, Semaphore& waitSemaphore) { mWaitSemaphores.emplace_back(stage, forward<Semaphore&>(waitSemaphore)); }
-	inline void SignalOnComplete(vk::PipelineStageFlags, shared_ptr<Semaphore> semaphore) { mSignalSemaphores.push_back(semaphore); };
+	inline void wait_semaphore(vk::PipelineStageFlags stage, Semaphore& waitSemaphore) { mWaitSemaphores.emplace_back(stage, forward<Semaphore&>(waitSemaphore)); }
+	inline void signal_semaphore(vk::PipelineStageFlags, const shared_ptr<Semaphore>& semaphore) { mSignalSemaphores.emplace_back(semaphore); };
 
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
-	inline T& HoldResource(const shared_ptr<T>& r) {
+	inline T& hold_resource(const shared_ptr<T>& r) {
 		return *static_cast<T*>(mHeldResources.emplace(static_pointer_cast<DeviceResource>(r)).first->get());
 	}
 	template<typename T>
-	inline const Buffer::View<T>& HoldResource(const Buffer::View<T>& v) {
+	inline const Buffer::View<T>& hold_resource(const Buffer::View<T>& v) {
 		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
 		return v;
 	}
-	inline const Buffer::TexelView& HoldResource(const Buffer::TexelView& v) {
+	inline const Buffer::TexelView& hold_resource(const Buffer::TexelView& v) {
 		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
 		return v;
 	}
-	inline const Buffer::StrideView& HoldResource(const Buffer::StrideView& v) {
+	inline const Buffer::StrideView& hold_resource(const Buffer::StrideView& v) {
 		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
 		return v;
 	}
-	inline const Texture::View& HoldResource(const Texture::View& v) {
+	inline const Texture::View& hold_resource(const Texture::View& v) {
 		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.texture_ptr()));
 		return v;
 	}
 
-	// Label a region for a tool such as RenderDoc
-	STRATUM_API void BeginLabel(const string& label, const Vector4f& color = { 1,1,1,0 });
-	STRATUM_API void EndLabel();
-
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { barrier }, {}, {});
+	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& b) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { b }, {}, {});
 	}
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { barrier }, {});
+	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& b) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { b }, {});
 	}
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& barrier) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { barrier });
+	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& b) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { b });
 	}
-
 	template<typename T>
-	inline void Barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::View<T>& buffer) {
-		Barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcFlags, dstFlags, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *buffer.buffer(), buffer.offset(), buffer.size_bytes()));
+	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::View<T>& buffer) {
+		barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcFlags, dstFlags, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *buffer.buffer(), buffer.offset(), buffer.size_bytes()));
 	}
 
-	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		TransitionBarrier(image, subresourceRange, GuessStage(oldLayout), GuessStage(newLayout), oldLayout, newLayout);
+	inline void transition_barrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+		transition_barrier(image, subresourceRange, guess_stage(oldLayout), guess_stage(newLayout), oldLayout, newLayout);
 	}
-	inline void TransitionBarrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+	inline void transition_barrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 		if (oldLayout == newLayout) return;
-		vk::ImageMemoryBarrier barrier = {};
-		barrier.oldLayout = oldLayout;
-		barrier.newLayout = newLayout;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = image;
-		barrier.subresourceRange = subresourceRange;
-		barrier.srcAccessMask = GuessAccessMask(oldLayout);
-		barrier.dstAccessMask = GuessAccessMask(newLayout);
-		Barrier(srcStage, dstStage, barrier);
+		vk::ImageMemoryBarrier b = {};
+		b.oldLayout = oldLayout;
+		b.newLayout = newLayout;
+		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = image;
+		b.subresourceRange = subresourceRange;
+		b.srcAccessMask = guess_access_flags(oldLayout);
+		b.dstAccessMask = guess_access_flags(newLayout);
+		barrier(srcStage, dstStage, b);
 	}
 
 	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
-	inline void TransitionImageDescriptors(T&... sets) {
+	inline void transition_images(T&... sets) {
 		(sets.FlushWrites(), ...);
 		auto fn = [&](auto& descriptorSet) {
 			for (auto&[idx, entry] : descriptorSet.mBoundDescriptors) {
@@ -103,7 +102,7 @@ public:
 					case vk::DescriptorType::eInputAttachment:
 					case vk::DescriptorType::eSampledImage:
 					case vk::DescriptorType::eStorageImage: {
-						get<Texture::View>(entry).texture().TransitionBarrier(*this, get<vk::ImageLayout>(entry));
+						get<Texture::View>(entry).texture().transition_barrier(*this, get<vk::ImageLayout>(entry));
 						break;
 					}
 				}
@@ -113,53 +112,68 @@ public:
 	}
 
 	template<typename T, typename S>
-	inline const Buffer::View<S>& CopyBuffer(const Buffer::View<T>& src, const Buffer::View<S>& dst) {
+	inline const Buffer::View<S>& copy_buffer(const Buffer::View<T>& src, const Buffer::View<S>& dst) {
 		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must be the same size");
-		mCommandBuffer.copyBuffer(*HoldResource(src.buffer_ptr()), *HoldResource(dst.buffer_ptr()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst.buffer_ptr()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
 	}
 
 	template<typename T>
-	inline Buffer::View<T> CopyBuffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
+	inline Buffer::View<T> copy_buffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
 		auto dst = make_shared<Buffer>(mDevice, src.buffer().name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
-		mCommandBuffer.copyBuffer(*HoldResource(src.buffer_ptr()), *HoldResource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
 		return dst;
 	}
 
-	inline void Dispatch(const vk::Extent2D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, 1); }
-	inline void Dispatch(const vk::Extent3D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, dim.depth); }
-	inline void Dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
-	// Call Dispatch() on ceil(size / workgroupSize)
-	inline void DispatchTiled(const vk::Extent3D& dim) {
+	inline Texture::View copy_image(const Texture::View& src, const Texture::View& dst, uint32_t level = 0) {
+		vector<vk::ImageCopy> copies;
+		if (level == 0) {
+			copies.resize(src.subresource_range().levelCount);
+			for (uint32_t i = 0; i < copies.size(); i++)
+			copies[i] = vk::ImageCopy(src.subresource(i), {}, dst.subresource(i), {}, src.texture().extent());
+		} else
+			copies.emplace_back(src.subresource(level), vk::Offset3D(), dst.subresource(level), vk::Offset3D(), src.texture().extent());
+		src.texture().transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		dst.texture().transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.copyImage(*hold_resource(src.texture_ptr()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.texture_ptr()), vk::ImageLayout::eTransferDstOptimal, copies);
+		return dst;
+	}
+
+	inline void dispatch(const vk::Extent2D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, 1); }
+	inline void dispatch(const vk::Extent3D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, dim.depth); }
+	inline void dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
+	
+	// dispatch on ceil(size / workgroupSize)
+	inline void dispatch_align(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
-			(dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width,
-			(dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 
-			(dim.depth + cp->WorkgroupSize().depth - 1) / cp->WorkgroupSize().depth);
+			(dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width,
+			(dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height, 
+			(dim.depth + cp->workgroup_size().depth - 1) / cp->workgroup_size().depth);
 	}
-	inline void DispatchTiled(const vk::Extent2D& dim) {
+	inline void dispatch_align(const vk::Extent2D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
-		mCommandBuffer.dispatch((dim.width + cp->WorkgroupSize().width - 1) / cp->WorkgroupSize().width, (dim.height + cp->WorkgroupSize().height - 1) / cp->WorkgroupSize().height, 1);
+		mCommandBuffer.dispatch((dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width, (dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height, 1);
 	}
-	inline void DispatchTiled(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return DispatchTiled(vk::Extent3D(x,y,z)); }
+	inline void dispatch_align(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_align(vk::Extent3D(x,y,z)); }
 
-	STRATUM_API void BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> frameBuffer, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents = vk::SubpassContents::eInline);
-	STRATUM_API void NextSubpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
-	STRATUM_API void EndRenderPass();
+	STRATUM_API void begin_render_pass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> frameBuffer, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void end_render_pass();
 
-	inline void BindPipeline(shared_ptr<Pipeline> pipeline) {
+	inline void bind_pipeline(shared_ptr<Pipeline> pipeline) {
 		if (mBoundPipeline == pipeline) return;
-		mCommandBuffer.bindPipeline(pipeline->BindPoint(), **pipeline);
+		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
 		mBoundDescriptorSets.clear(); // TODO: do descriptorsets need to be cleared?
 		mBoundVertexBuffers.clear();
 		mBoundIndexBuffer = {};
-		HoldResource(pipeline);
+		hold_resource(pipeline);
 	}
 	
 	template<typename T>
 	inline void push_constant(const string& name, const T& value) {
-		auto it = mBoundPipeline->PushConstants().find(name);
-		if (it == mBoundPipeline->PushConstants().end()) throw invalid_argument("push constant not found");
+		auto it = mBoundPipeline->push_constants().find(name);
+		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
 		if constexpr (is_same_v<T, byte_blob>) {
 			if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
@@ -172,34 +186,34 @@ public:
 	}
 
 	template<ranges::range R> requires(is_same_v<shared_ptr<DescriptorSet>, ranges::range_value_t<R>>)
-	inline void BindDescriptorSets(uint32_t index, R&& descriptorSets) {
+	inline void bind_descriptor_sets(uint32_t index, R&& descriptorSets) {
 		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 		vector<vk::DescriptorSet> sets;
 		vector<uint32_t> dynamicOffsets;
 		for (const shared_ptr<DescriptorSet>& descriptorSet : descriptorSets) {
 			descriptorSet->FlushWrites();
-			HoldResource(descriptorSet);
-			if (!mBoundFramebuffer) TransitionImageDescriptors(*descriptorSet);
+			hold_resource(descriptorSet);
+			if (!mBoundFramebuffer) transition_images(*descriptorSet);
 
 			if (index + sets.size() >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + sets.size() + 1);
 			mBoundDescriptorSets[index + sets.size()] = descriptorSet;
-			sets.push_back(**descriptorSet);
+			sets.emplace_back(**descriptorSet);
 		}
-		mCommandBuffer.bindDescriptorSets(mBoundPipeline->BindPoint(), mBoundPipeline->layout(), index, sets, dynamicOffsets);
+		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, sets, dynamicOffsets);
 	}
-	inline void BindDescriptorSet(uint32_t index, shared_ptr<DescriptorSet> descriptorSet) {
-		BindDescriptorSets(index, span(&descriptorSet,1));
+	inline void bind_descriptor_set(uint32_t index, shared_ptr<DescriptorSet> descriptorSet) {
+		bind_descriptor_sets(index, span(&descriptorSet,1));
 	}
 
 	template<typename T>
-	inline void BindVertexBuffer(uint32_t index, const Buffer::View<T>& view) {
+	inline void bind_vertex_buffer(uint32_t index, const Buffer::View<T>& view) {
 		if (mBoundVertexBuffers[index] != view) {
 			mBoundVertexBuffers[index] = view;
 			mCommandBuffer.bindVertexBuffers(index, { *view.buffer() }, { view.offset() });
 		}
 	}
 	template<ranges::input_range R>
-	inline void BindVertexBuffers(uint32_t index, const R& views) {
+	inline void bind_vertex_buffers(uint32_t index, const R& views) {
 		vector<vk::Buffer> bufs(views.size());
 		vector<vk::DeviceSize> offsets(views.size());
 		bool needBind = false;
@@ -215,7 +229,7 @@ public:
 		}
 		if (needBind) mCommandBuffer.bindVertexBuffers(index, bufs, offsets);
 	}
-	inline void BindIndexBuffer(const Buffer::StrideView& view) {
+	inline void bind_index_buffer(const Buffer::StrideView& view) {
 		if (mBoundIndexBuffer != view) {
 			mBoundIndexBuffer = view;
 			vk::IndexType type;
@@ -237,12 +251,12 @@ private:
 	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT = 0;
 	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT = 0;
 	
-	STRATUM_API void Clear();
-	inline bool CheckDone() {
+	STRATUM_API void clear();
+	inline bool clear_if_done() {
 		if (mState == CommandBufferState::eInFlight)
 			if (mCompletionFence->status() == vk::Result::eSuccess) {
 				mState = CommandBufferState::eDone;
-				Clear();
+				clear();
 				return true;
 			}
 		return mState == CommandBufferState::eDone;
@@ -277,12 +291,12 @@ public:
 	inline ProfilerRegion(const string& label) : ProfilerRegion(label, nullptr) {}
 	inline ProfilerRegion(const string& label, CommandBuffer& cmd) : ProfilerRegion(label, &cmd) {}
 	inline ProfilerRegion(const string& label, CommandBuffer* cmd) : mCommandBuffer(cmd) {
-		if (mCommandBuffer) mCommandBuffer->BeginLabel(label);
-		Profiler::BeginSample(label);
+		Profiler::begin_sample(label);
+		if (mCommandBuffer) mCommandBuffer->begin_label(label);
 	}
 	inline ~ProfilerRegion() {
-		Profiler::EndSample();
-		if (mCommandBuffer) mCommandBuffer->EndLabel();
+		if (mCommandBuffer) mCommandBuffer->end_label();
+		Profiler::end_sample();
 	}
 };
 

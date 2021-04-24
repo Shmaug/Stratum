@@ -10,7 +10,7 @@ private:
 public:
 	inline Fence(Device& device, const string& name) : DeviceResource(device,name) {
 		mFence = mDevice->createFence({});
-		mDevice.SetObjectName(mFence, name);
+		mDevice.set_debug_name(mFence, name);
 	}
 	inline ~Fence() { mDevice->destroyFence(mFence); }
 	inline const vk::Fence& operator*() const { return mFence; }
@@ -27,7 +27,7 @@ private:
 public:
 	inline Semaphore(Device& device, const string& name) : DeviceResource(device, name) {
 		mSemaphore = mDevice->createSemaphore({});
-		mDevice.SetObjectName(mSemaphore, name);
+		mDevice.set_debug_name(mSemaphore, name);
 	}
 	inline ~Semaphore() { mDevice->destroySemaphore(mSemaphore); }
 	inline const vk::Semaphore& operator*() { return mSemaphore; }

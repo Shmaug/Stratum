@@ -21,14 +21,14 @@ public:
 	inline Buffer(shared_ptr<Device::MemoryAllocation> memory, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
 		: DeviceResource(memory->mDevice, name), mSize(size), mUsage(usage), mSharingMode(sharingMode) {
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
-		mDevice.SetObjectName(mBuffer, name);
+		mDevice.set_debug_name(mBuffer, name);
 		mMemory = memory;
 		vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
 	}
 	inline Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
 		: DeviceResource(device, name), mSize(size), mUsage(usage), mSharingMode(sharingMode)  {
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
-		mDevice.SetObjectName(mBuffer, name);
+		mDevice.set_debug_name(mBuffer, name);
 		mMemory = make_shared<Device::MemoryAllocation>(mDevice, mDevice->getBufferMemoryRequirements(mBuffer), memoryUsage);
 		vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
 	}
@@ -123,7 +123,7 @@ public:
 		TexelView() = default;
 		TexelView(const TexelView&) = default;
 		TexelView(TexelView&&) = default;
-		inline TexelView(const shared_ptr<Buffer>& buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : View<byte>(buf, byteOffset, elementCount == VK_WHOLE_SIZE ? elementCount = VK_WHOLE_SIZE : elementCount*ElementSize(fmt)), mFormat(fmt) {
+		inline TexelView(const shared_ptr<Buffer>& buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : View<byte>(buf, byteOffset, elementCount == VK_WHOLE_SIZE ? elementCount = VK_WHOLE_SIZE : elementCount*texel_size(fmt)), mFormat(fmt) {
 			mHashKey = hash_combine(offset(), size_bytes(), mFormat);
 		}
 		template<typename T> inline TexelView(const View<T>& view, vk::Format fmt) : View<byte>(view.buffer_ptr(), view.offset(), view.size_bytes()), mFormat(fmt) {
@@ -135,7 +135,7 @@ public:
 				return it->second;
 			else {
 				vk::BufferView v = buffer().mDevice->createBufferView(vk::BufferViewCreateInfo({}, *buffer(), mFormat, offset(), size_bytes()));
-				buffer().mDevice.SetObjectName(v, buffer().name()+"/View");
+				buffer().mDevice.set_debug_name(v, buffer().name()+"/View");
 				return buffer().mTexelViews.emplace(mHashKey, v).first->second;
 			}
 		}
@@ -146,7 +146,7 @@ public:
 		inline bool operator==(const TexelView& rhs) const = default;
 
 		inline vk::Format format() const { return mFormat; }
-    inline size_t stride() const { return ElementSize(mFormat); }
+    inline size_t stride() const { return texel_size(mFormat); }
 	};
 };
 
@@ -169,7 +169,7 @@ public:
 
   buffer_vector() = delete;
   buffer_vector(buffer_vector<T>&&) = default;
-  inline buffer_vector(Device& device, size_type size, vk::BufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) : mDevice(device), mSize(0), mBufferUsage(bufferUsage), mMemoryUsage(memoryUsage), mSharingMode(sharingMode) {
+  inline buffer_vector(Device& device, size_type size, vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eTransferSrc, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) : mDevice(device), mSize(0), mBufferUsage(bufferUsage), mMemoryUsage(memoryUsage), mSharingMode(sharingMode) {
 		if (size) resize(size);
 	}
   inline buffer_vector(const buffer_vector<T>& v) : mDevice(v.mDevice), mSize(v.mSize), mBufferUsage(v.mBufferUsage), mMemoryUsage(v.mMemoryUsage), mSharingMode(v.mSharingMode) {
@@ -251,12 +251,6 @@ public:
 	inline reference emplace_back(Args&&... args) {
 		while (mSize + 1 > capacity()) reserve(max(1, capacity()*mSize*2));
 		return *new (data() + (mSize++)) T(forward<Args>(args)...);
-	}
-	inline void push_back(const T& value) {
-		emplace_back(value);
-	}
-	inline void push_back(T&& value) {
-		emplace_back(forward<T>(value));
 	}
 	
 	inline void pop_back() {

@@ -11,8 +11,8 @@ RWBuffer<float2> gOutputRG : register(u4);
 Buffer<float> gInputR : register(t5);
 Buffer<float> gInputG : register(t6);
 
-struct PushConstants { uint Width; };
-[[vk::push_constant]] const PushConstants gPushConstants = {0};
+struct push_constants { uint Width; };
+[[vk::push_constant]] const push_constants gPushConstants = {0};
 
 [numthreads(8, 8, 1)]
 void interleave(uint3 index : SV_DispatchThreadID) {

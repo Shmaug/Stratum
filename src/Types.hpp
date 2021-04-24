@@ -61,6 +61,16 @@ template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_
 template<typename S, typename T> concept stream_extractable = requires(S s, T t) { s >> t; };
 template<typename S, typename T> concept stream_insertable = requires(S s, T t) { s << t; };
 
+template<size_t I, typename T, typename tuple_t>
+constexpr size_t tuple_index_fn() {
+	static_assert(I < tuple_size_v<tuple_t>, "The element is not in the tuple");
+	if constexpr(is_same_v<T, tuple_element_t<I,tuple_t>>)
+		return I;
+	else
+		return tuple_index_fn<I+1,T,tuple_t>();
+}
+template<typename T, typename tuple_t>
+static constexpr size_t tuple_index_v = tuple_index_fn<0, T, tuple_t>();
 
 template<typename T>
 struct remove_const_tuple {
@@ -75,7 +85,6 @@ struct remove_const_tuple<tuple<Types...>> {
 	using type = tuple<remove_const_t<Types>...>;
 };
 template<typename T> using remove_const_tuple_t = typename remove_const_tuple<T>::type;
-
 
 template<typename T>
 struct add_const_tuple {
@@ -192,6 +201,9 @@ template<typename T, int M, int N>
 inline ArrayType<T,M,N> max(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.max(b); }
 template<typename T, int M, int N>
 inline ArrayType<T,M,N> min(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.min(b); }
+
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> saturate(const ArrayType<T,M,N>& v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
 
 template<typename T, int M, int N>
 inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }

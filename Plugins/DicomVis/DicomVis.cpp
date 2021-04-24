@@ -1,6 +1,5 @@
-#include <Core/EnginePlugin.hpp>
-#include <Scene/SceneNode.hpp>
-#include <Scene/Renderers/MeshRenderer.hpp>
+#include <Scene/PluginModule.hpp>
+#include <Scene/RenderNode.hpp>
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -63,7 +62,7 @@ private:
 
 		for (const auto& p : fs::recursive_directory_iterator(dataPath)) {
 			if (!p.is_directory() || p.path().stem() == "_mask" || ImageLoader::FolderStackType(p.path()) == ImageStackType::eNone) continue;
-			mStackFolders.insert(p.path());
+			mStackFolders.emplace(p.path());
 		}
 	}
 	void LoadScene() {
@@ -102,11 +101,11 @@ private:
 
 		// images+materials
 		for (const auto& i : model.images)
-			images.push_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
+			images.emplace_back(make_shared<Texture>(i.name, device, vk::Extent3D(i.width, i.height, 1), gltf2vk(i.pixel_type, i.component), (void*)i.image.data(), i.image.size(), vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, 0));
 		for (const auto& m : model.materials) {
 			auto mat = make_shared<Material>(m.name, device->LoadAsset<Pipeline>("Assets/coreshaders.stmb", "pbr"));
 			// TODO: read materials
-			materials.push_back(mat);
+			materials.emplace_back(mat);
 		}
 
 		// build accessorMap
@@ -156,7 +155,7 @@ private:
 
 		// meshes
 		for (const auto& m : model.meshes) {
-			meshes.push_back({});
+			meshes.emplace_back({});
 			for (const auto& prim : m.primitives) {
 
 				vk::PrimitiveTopology topo = vk::PrimitiveTopology::eTriangleList;
@@ -190,7 +189,7 @@ private:
 				}
 
 				mesh->AddSubmesh(Mesh::Submesh(vertexCount, 0, (uint32_t)model.accessors[prim.indices].count, 0, nullptr));
-				meshes.back().push_back(mesh);
+				meshes.back().emplace_back(mesh);
 			}
 		}
 
@@ -256,12 +255,20 @@ protected:
 			}
 		}
 	}
-	PLUGIN_EXPORT void OnLateUpdate(CommandBuffer& commandBuffer) override { if (mVolume) mVolume->BakeRender(commandBuffer); }
+	PLUGIN_EXPORT void OnLateUpdate(CommandBuffer& commandBuffer) override {
+		if (mVolume) mVolume->BakeRender(commandBuffer);
+	}
 	
+	PLUGIN_EXPORT void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const unordered_set<Camera*>& cameras) override {
+		if (!mVolume) return;
+		for (Camera* camera : cameras)
+			mVolume->draw(commandBuffer, framebuffer, *camera);
+	}
+
 	PLUGIN_EXPORT void OnGui(CommandBuffer& commandBuffer, GuiContext& gui) override {		
 		bool worldSpace = camera.StereoMode() != StereoMode::eNone;
 
-		// Draw performance overlay
+		// draw performance overlay
 		if (mShowPerformance && !worldSpace)
 			Profiler::DrawGui(gui, (uint32_t)mScene->FPS());
 
@@ -279,7 +286,7 @@ protected:
 		
 		for (const auto& folder : mStackFolders)
 			if (gui.LayoutTextButton(folder.stem().string(), TextAnchor::eMin)) {
-				commandBuffer.mDevice.Flush();
+				commandBuffer.mDevice.flush();
 				mVolume = unique_ptr<RenderVolume>(mScene->CreateObject<RenderVolume>("Dicom Volume", commandBuffer.mDevice, folder));
 				mVolume->LocalPosition(mMainCamera->WorldPosition() + mMainCamera->WorldRotation() * Vector3f(0,0,0.5f));
 			}
@@ -290,12 +297,6 @@ protected:
 		if (mVolume) mVolume->DrawGui(commandBuffer, camera, gui);
 
 		gui.EndLayout();
-	}
-
-	PLUGIN_EXPORT void OnPostProcess(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, const unordered_set<Camera*>& cameras) override {
-		if (!mVolume) return;
-		for (Camera* camera : cameras)
-			mVolume->Draw(commandBuffer, framebuffer, *camera);
 	}
 };
 

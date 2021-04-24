@@ -39,7 +39,7 @@ LRESULT CALLBACK Instance::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 	case WM_QUIT:
 	case WM_MOVE:
 	case WM_SIZE:
-		gInstance->HandleMessage(hwnd, message, wParam, lParam);
+		gInstance->handle_message(hwnd, message, wParam, lParam);
 		break;
 	default:
 		return DefWindowProcA(hwnd, message, wParam, lParam);
@@ -72,11 +72,11 @@ Instance::Instance(int argc, char** argv) {
 
 	uint32_t deviceIndex = 0;
 	vk::Rect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
-	if (TryGetOption("deviceIndex", arg)) deviceIndex = stoi(arg);
-	if (TryGetOption("width", arg)) windowPosition.extent.width = stoi(arg);
-	if (TryGetOption("height", arg)) windowPosition.extent.height = stoi(arg);
-	bool fullscreen = TryGetOption("fullscreen", arg);
-	bool debugMessenger = TryGetOption("debugMessenger", arg);
+	if (find_argument("deviceIndex", arg)) deviceIndex = stoi(arg);
+	if (find_argument("width", arg)) windowPosition.extent.width = stoi(arg);
+	if (find_argument("height", arg)) windowPosition.extent.height = stoi(arg);
+	bool fullscreen = find_argument("fullscreen", arg);
+	bool debugMessenger = find_argument("debugMessenger", arg);
 	if (debugMessenger) {
 		mOptions.insert_or_assign("ext_debug_utils", "");
 		mOptions.insert_or_assign("layer_khronos_validation", "");
@@ -85,24 +85,24 @@ Instance::Instance(int argc, char** argv) {
 	vector<const char*> validationLayers;
 	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 
-	if (TryGetOption("layer_khronos_validation", arg)) validationLayers.push_back("VK_LAYER_KHRONOS_validation");
-	if (TryGetOption("layer_renderdoc_capture", arg)) {
-		validationLayers.push_back("VK_LAYER_RENDERDOC_Capture");
+	if (find_argument("layer_khronos_validation", arg)) validationLayers.emplace_back("VK_LAYER_KHRONOS_validation");
+	if (find_argument("layer_renderdoc_capture", arg)) {
+		validationLayers.emplace_back("VK_LAYER_RENDERDOC_Capture");
 		mOptions.insert_or_assign("noPipelineCache", "");
 		mOptions.insert_or_assign("ext_debug_utils", "");
 	}
-	if (TryGetOption("ext_debug_utils", arg)) instanceExtensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	if (find_argument("ext_debug_utils", arg)) instanceExtensions.emplace(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	
 	#ifdef WIN32
-	instanceExtensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#elif defined(__linux)
-	mInstanceExtensions.insert(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-	mInstanceExtensions.insert(VK_KHR_DISPLAY_EXTENSION_NAME);
+	mInstanceExtensions.emplace(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+	mInstanceExtensions.emplace(VK_KHR_DISPLAY_EXTENSION_NAME);
 	#endif
 
 	if (validationLayers.size()) {
 		unordered_set<string> availableLayerSet;
-		for (const auto& layer : vk::enumerateInstanceLayerProperties()) availableLayerSet.insert(layer.layerName);
+		for (const auto& layer : vk::enumerateInstanceLayerProperties()) availableLayerSet.emplace(string(layer.layerName.begin(), layer.layerName.end()));
 		for (auto it = validationLayers.begin(); it != validationLayers.end();)
 			if (availableLayerSet.count(*it)) it++;
 			else {
@@ -121,7 +121,7 @@ Instance::Instance(int argc, char** argv) {
 	mVulkanApiVersion = appInfo.apiVersion;
 
 	vector<const char*> instanceExts;
-	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
+	for (const string& s : instanceExtensions) instanceExts.emplace_back(s.c_str());
 
 	printf("Creating vulkan instance... ");
 	mInstance = vk::createInstance(vk::InstanceCreateInfo({}, &appInfo, validationLayers, instanceExts));
@@ -246,7 +246,7 @@ Instance::~Instance() {
 }
 
 #ifdef WIN32
-void Instance::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+void Instance::handle_message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch (message){
 	case WM_DESTROY:
 	case WM_QUIT:
@@ -282,7 +282,7 @@ void Instance::ProcessEvent(xcb_generic_event_t* event) {
 
 	case XCB_KEY_PRESS:
 		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mWindow->mInputState.mKeys.insert(kc);
+		mWindow->mInputState.mKeys.emplace(kc);
 		if ((kc == KEY_LALT || kc == KEY_ENTER) && mMouseKeyboard->is_key_down(KEY_ENTER) && mMouseKeyboard->is_key_down(KEY_LALT))
 			mWindow->fullscreen(!mWindow->fullscreen());
 		break;
@@ -347,8 +347,8 @@ xcb_generic_event_t* Instance::PollEvent() {
 }
 #endif
 
-bool Instance::PollEvents() {
-	ProfilerRegion ps("Instance::PollEvents");
+bool Instance::poll_events() {
+	ProfilerRegion ps("Instance::poll_events");
 	mWindow->mInputStateLast = mWindow->mInputState;
 	mWindow->mInputState.mScrollDelta = 0;
 	mWindow->mInputState.mCursorDelta = Vector2f::Zero();
@@ -374,15 +374,15 @@ bool Instance::PollEvents() {
 
 			if (raw.header.dwType == RIM_TYPEMOUSE) {
 				mWindow->mInputState.mCursorDelta += Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_LEFT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mWindow->mInputState.mKeys.emplace(MOUSE_LEFT);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mWindow->mInputState.mKeys.erase(MOUSE_LEFT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mInputState.mKeys.insert(MOUSE_RIGHT);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mWindow->mInputState.mKeys.emplace(MOUSE_RIGHT);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mWindow->mInputState.mKeys.erase(MOUSE_RIGHT);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_MIDDLE);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mWindow->mInputState.mKeys.emplace(MOUSE_MIDDLE);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_MIDDLE);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_X1);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mWindow->mInputState.mKeys.emplace(MOUSE_X1);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_X1);
-				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mInputState.mKeys.insert(MOUSE_X2);
+				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mWindow->mInputState.mKeys.emplace(MOUSE_X2);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mWindow->mInputState.mKeys.erase(MOUSE_X2);
 				if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mWindow->mInputState.mScrollDelta += (float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA;
 				if (mWindow->mLockMouse) {
@@ -400,7 +400,7 @@ bool Instance::PollEvents() {
 				if (raw.data.keyboard.Flags & RI_KEY_BREAK)
 					mWindow->mInputState.mKeys.erase((KeyCode)key);
 				else
-					mWindow->mInputState.mKeys.insert((KeyCode)key);
+					mWindow->mInputState.mKeys.emplace((KeyCode)key);
 			}
 			break;
 		}

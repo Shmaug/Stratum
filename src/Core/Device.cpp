@@ -17,11 +17,9 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 
 	mSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)mInstance->getProcAddr("vkSetDebugUtilsObjectNameEXT");
 
-	mMaxMSAASamples = GetMaxUsableSampleCount();
-
 	vector<const char*> deviceExts;
 	for (const string& s : deviceExtensions)
-		deviceExts.push_back(s.c_str());
+		deviceExts.emplace_back(s.c_str());
 
 	#pragma region get queue infos
 	vector<vk::QueueFamilyProperties> queueFamilyProperties = mPhysicalDevice.getQueueFamilyProperties();
@@ -33,7 +31,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 			queueCreateInfo.queueFamilyIndex = i;
 			queueCreateInfo.queueCount = 1;
 			queueCreateInfo.pQueuePriorities = &queuePriority;
-			queueCreateInfos.push_back(queueCreateInfo);
+			queueCreateInfos.emplace_back(queueCreateInfo);
 		}
 	}
 	#pragma endregion
@@ -55,13 +53,13 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	createInfo.pNext = &indexingFeatures;
 	mDevice = mPhysicalDevice.createDevice(createInfo);
 	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
-	SetObjectName(mDevice, name);
+	set_debug_name(mDevice, name);
 	#pragma endregion
 
 	#pragma region Create PipelineCache and DesriptorPool
 	vk::PipelineCacheCreateInfo cacheInfo = {};
 	string tmp;
-	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
+	if (!mInstance.find_argument("noPipelineCache", tmp)) {
 		try {
 			ifstream cacheFile(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary | ios::ate);
 			if (cacheFile.is_open()) {
@@ -92,7 +90,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	{
 		auto descriptorPool = mDescriptorPool.lock();
 		*descriptorPool = mDevice.createDescriptorPool(vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 8192, poolSizes));
-		SetObjectName(*descriptorPool, name);
+		set_debug_name(*descriptorPool, name);
 	}
 	#pragma endregion
 
@@ -103,8 +101,8 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.window().surface());
 		// TODO: create more queues to utilize more parallelization (if necessary?)
 		for (uint32_t i = 0; i < 1; i++) {
-			q.mQueues.push_back(mDevice.getQueue(info.queueFamilyIndex, i));
-			SetObjectName(q.mQueues[i], "DeviceQueue"+to_string(i));
+			q.mQueues.emplace_back(mDevice.getQueue(info.queueFamilyIndex, i));
+			set_debug_name(q.mQueues[i], "DeviceQueue"+to_string(i));
 		}
 		mQueueFamilies.lock()->emplace(q.mFamilyIndex, q);
 	}
@@ -118,7 +116,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	vmaCreateAllocator(&allocatorInfo, &mAllocator);
 }
 Device::~Device() {
-	Flush();
+	flush();
 
 	auto queueFamilies = mQueueFamilies.lock();
 	for (auto& [idx, queueFamily] : *queueFamilies) {
@@ -134,7 +132,7 @@ Device::~Device() {
 	vmaDestroyAllocator(mAllocator);
 
 	string tmp;
-	if (!mInstance.TryGetOption("noPipelineCache", tmp)) {
+	if (!mInstance.find_argument("noPipelineCache", tmp)) {
 		try {
 			auto cacheData = mDevice.getPipelineCacheData(mPipelineCache);
 			ofstream output(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary);
@@ -147,15 +145,7 @@ Device::~Device() {
 	mDevice.destroy();
 }
 
-inline Device::QueueFamily* Device::FindQueueFamily(vk::SurfaceKHR surface) {
-	auto queueFamilies = mQueueFamilies.lock();
-	for (auto& [queueFamilyIndex, queueFamily] : *queueFamilies)
-		if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
-			return &queueFamily;
-	return nullptr;
-}
-
-shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
 	// find most specific queue family
 	QueueFamily* queueFamily = nullptr;
 	auto queueFamilies = mQueueFamilies.lock();
@@ -168,12 +158,12 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::Queue
 	auto& [commandPool,commandBuffers] = queueFamily->mCommandBuffers[this_thread::get_id()];
 	if (!commandPool) {
 		commandPool = mDevice.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamily->mFamilyIndex));
-		SetObjectName(commandPool, "CommandPool");
+		set_debug_name(commandPool, "CommandPool");
 	}
 
 	shared_ptr<CommandBuffer> commandBuffer;
 	if (level == vk::CommandBufferLevel::ePrimary) {
-		auto ret = ranges::remove_if(commandBuffers, &CommandBuffer::CheckDone);
+		auto ret = ranges::remove_if(commandBuffers, &CommandBuffer::clear_if_done);
 		if (!ret.empty()) {
 				auto u = ranges::find(ret, 1, &shared_ptr<CommandBuffer>::use_count);
 				if (u != ret.end()) commandBuffer = *u;
@@ -181,23 +171,23 @@ shared_ptr<CommandBuffer> Device::GetCommandBuffer(const string& name, vk::Queue
 		}
 	}
 	if (commandBuffer) {
-		commandBuffer->Reset(name);
+		commandBuffer->reset(name);
 		return commandBuffer;
 	} else
 		return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
-void Device::Execute(shared_ptr<CommandBuffer> commandBuffer) {
-	ProfilerRegion ps("CommandBuffer::Execute");
+void Device::submit(shared_ptr<CommandBuffer> commandBuffer) {
+	ProfilerRegion ps("CommandBuffer::submit");
 
 	vector<vk::PipelineStageFlags> waitStages;	
 	vector<vk::Semaphore> waitSemaphores;	
 	vector<vk::Semaphore> signalSemaphores;
 	vector<vk::CommandBuffer> commandBuffers { **commandBuffer };
 	for (auto& [stage, semaphore] : commandBuffer->mWaitSemaphores) {
-		waitStages.push_back(stage);
-		waitSemaphores.push_back(*semaphore);
+		waitStages.emplace_back(stage);
+		waitSemaphores.emplace_back(*semaphore);
 	}
-	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.push_back(**semaphore);
+	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.emplace_back(**semaphore);
 	(*commandBuffer)->end();
 	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
@@ -205,25 +195,11 @@ void Device::Execute(shared_ptr<CommandBuffer> commandBuffer) {
 	scoped_lock l(mQueueFamilies.m());
 	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
 }
-void Device::Flush() {
+void Device::flush() {
 	mDevice.waitIdle();
 	auto queueFamilies = mQueueFamilies.lock();
 	for (auto& [idx,queueFamily] : *queueFamilies)
 		for (auto& [tid,p] : queueFamily.mCommandBuffers)
 			for (auto& commandBuffer : p.second)
-				commandBuffer->CheckDone();
-}
-
-vk::SampleCountFlagBits Device::GetMaxUsableSampleCount() {
-	vk::PhysicalDeviceProperties physicalDeviceProperties;
-	mPhysicalDevice.getProperties(&physicalDeviceProperties);
-
-	vk::SampleCountFlags counts = min(physicalDeviceProperties.limits.framebufferColorSampleCounts, physicalDeviceProperties.limits.framebufferDepthSampleCounts);
-	if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; }
-	if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; }
-	if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; }
-	if (counts & vk::SampleCountFlagBits::e8) { return vk::SampleCountFlagBits::e8; }
-	if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; }
-	if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; }
-	return vk::SampleCountFlagBits::e1;
+				commandBuffer->clear_if_done();
 }

@@ -4,56 +4,58 @@
 
 namespace stm {
 
-template<typename Tkey, typename... Args>
-class DelegateMap {
-private:
-	unordered_multimap<weak_ptr<Tkey>, function<void(Args...)>> mCallbacks;
-	
-public:
-	inline bool empty() { mCallbacks.empty(); }
-	inline void clear() { mCallbacks.clear(); }
-	
-	template<invocable<Args...> F> inline void emplace(weak_ptr<Tkey> key, F&& fn) { mCallbacks[key].emplace_back(fn); }
-	template<invocable<Args...> F> inline void operator+=(F&& fn) { mCallbacks[nullptr].emplace_back(fn); }
-	template<invocable<Args...> F> inline void operator-=(F&& fn) { mCallbacks.at(nullptr).erase(fn); }
-	inline void operator-=(Tkey* key) { mCallbacks.erase(key); }
-	
-	inline void operator()(Args&&... args) const {
-		for (auto it = mCallbacks.begin(); it != mCallbacks.end(); it++)
-			if (auto k = it->first.lock()) {
-				invoke(it->second, forward<Args>(args)...);
-			}
-	}
-};
-
 class Scene {
 public:
-	class Node;
-
-private:
-	friend class Node;
-	set<unique_ptr<Node>> mNodes;
-	unordered_map<type_index, vector<Node*>> mTypes;
-	unordered_map<const Node*, Node*> mParentEdges; // child -> parent
-	unordered_multimap<const Node*, Node*> mChildrenEdges; // parent -> child
-	
-public:
-
-	template<typename... Args>
-	using NodeDelegate = DelegateMap<Node, Args...>;
-
 	class Node {
 	public:
-		Scene& mScene;
-		string mName;
-		
-		NodeDelegate<>      OnChangeParent;
-		NodeDelegate<Node*> OnAddChild;
-		NodeDelegate<Node*> OnRemoveChild;
+		template<typename... Args>
+		class Event {
+		public:
+			using function_t = function<void(Args...)>;
+			
+			Event(Event&&) = default;
+			Event(const Event&) = default;
+			inline Event(Node* node) : mNode(*node) {}
 
-		inline Node(Scene& scene, const string& name) : mName(name), mScene(scene) {}
+			inline bool empty() { mCallbacks.empty(); }
+			inline void clear() { mCallbacks.clear(); }
+			
+			template<derived_from<Node> T, typename F>
+			inline void emplace(T& node, F&& nodeFn) {
+				mCallbacks.emplace(static_cast<Node*>(&node), bind_front(nodeFn, &node));
+			}
+			template<derived_from<Node> T>
+			inline void erase(T& node) {
+				mCallbacks.erase(static_cast<Node*>(&node));
+			}
+			
+			inline void operator()(Args&&... args) {
+				for (auto it = mCallbacks.begin(); it != mCallbacks.end();)
+					if (mNode.mScene.contains(it->first)) {
+						invoke(it->second, forward<Args>(args)...);
+						it++;
+					} else
+						it = mCallbacks.erase(it);
+			}
+		
+		private:
+			unordered_multimap<Node*, function_t> mCallbacks;
+			Node& mNode;
+		};
+		
+	private:
+		string mName;
+		Scene& mScene;
+	public:
+		Event<Node&> OnChildAdded;
+		Event<Node&> OnChildRemoved;
+		Event<>      OnParentChanged;
+
+		Node(Node&&) = default;
+		inline Node(Scene& scene, const string& name) : mName(name), mScene(scene), OnChildAdded(this), OnChildRemoved(this), OnParentChanged(this) {}
 		virtual ~Node() = default;
 		inline const string& name() const { return mName; }
+		inline Scene& scene() const { return mScene; }
 
 		inline Node* parent() const {
 			auto it = mScene.mParentEdges.find(this);
@@ -78,7 +80,33 @@ public:
 			}
 			return r;
 		}
+
+		inline void clear_parent() {
+			auto parent_it = mScene.mParentEdges.find(this);
+			if (parent_it != mScene.mParentEdges.end()) {
+				Node& parent = *parent_it->second;
+				mScene.mParentEdges.erase(parent_it);
+				for (auto child_it = mScene.mChildrenEdges.find(parent_it->second); child_it != mScene.mChildrenEdges.end(); child_it++)
+					if (child_it->second == this) {
+						mScene.mChildrenEdges.erase(child_it);
+						break;
+					}
+				parent.OnChildRemoved(*this);
+				OnParentChanged();
+			}
+		}
+		inline void set_parent(Node& parent) {
+			clear_parent();
+			mScene.mParentEdges.emplace(this, &parent);
+			mScene.mChildrenEdges.emplace(&parent, this);
+			parent.OnChildAdded(*this);
+			OnParentChanged();
+		}
 	};
+
+	inline bool contains(Node* ptr) {
+		return ranges::find(mNodes, ptr, &unique_ptr<Node>::get) != mNodes.end();
+	}
 
 	template<derived_from<Node> T>
 	inline auto find_type() const { return ranges::subrange(mTypes.find(typeid(T)), mTypes.end()); }
@@ -86,9 +114,8 @@ public:
 	inline auto find_type<Node>() const { return ranges::subrange(mTypes.begin(), mTypes.end()); }
 	
 	template<derived_from<Node> T, typename... Args> requires(constructible_from<T,Args...>)
-	inline Node& emplace(Args&&... args) {
-		return mTypes[type_index(typeid(T))].emplace_back(
-			mNodes.emplace(make_unique<T>(forward<Args>(args)...)).first->get() );
+	inline T& emplace(Args&&... args) {
+		return *static_cast<T*>(mTypes[type_index(typeid(T))].emplace_back( mNodes.emplace(make_unique<T>(forward<Args>(args)...)).first->get() ));
 	}
 	
 	template<derived_from<Node> T>
@@ -96,23 +123,11 @@ public:
 		auto it = ranges::find(mNodes, &node, &unique_ptr<Node>::get);
 		if (it == mNodes.end()) return false;
 
-		// remove children
-		for (auto child_it = mChildrenEdges.find(&node); child_it != mChildrenEdges.end(); child_it++) {
-			mParentEdges.erase(child_it->second);
-			mChildrenEdges.erase(child_it);
-			node->OnRemoveChild(*child_it);
-			(*child_it)->OnChangeParent();
-		}
-		// remove from parent
-		auto parent_it = mParentEdges.find(&node);
-		if (parent_it != mParentEdges.end()) {
-			mParentEdges.erase(parent_it);
-			mChildrenEdges.erase(ranges::find(mChildrenEdges.find(*parent_it), mChildrenEdges.end(), &node));
-			(*parent_it)->OnRemoveChild(node);
-			node->OnChangeParent();
-		}
+		for (auto child_it = mChildrenEdges.find(&node); child_it != mChildrenEdges.end(); child_it++)
+			child_it->second->clear_parent();
+		node.clear_parent();
 
-		// remove from mTypes by indexing the type directly if possible, otherwise
+		// remove from mTypes by indexing the type directly if possible
 		auto t = mTypes.find(type_index(typeid(T)));
 		if (t == mTypes.end())
 			for (auto[t, nodes] : mTypes) nodes.erase(ranges::find(nodes, &node));
@@ -125,6 +140,13 @@ public:
 		}
 		return mNodes.erase(it);
 	}
+
+private:
+	friend class Node;
+	set<unique_ptr<Node>> mNodes;
+	unordered_map<type_index, vector<Node*>> mTypes;
+	unordered_map<const Node*, Node*> mParentEdges; // child -> parent
+	unordered_multimap<const Node*, Node*> mChildrenEdges; // parent -> child
 };
 
 }

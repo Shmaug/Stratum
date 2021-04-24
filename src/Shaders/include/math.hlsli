@@ -61,6 +61,27 @@ float4 pow3(float4 x) { return pow2(x)*x; }
 float4 pow4(float4 x) { return pow2(x)*pow2(x); }
 float4 pow5(float4 x) { return pow4(x)*x; }
 
+float3 hue_to_rgb(float hue) {
+	float x = 6*hue;
+	return saturate(float3(abs(x-3) - 1, 2 - abs(x-2), 2 - abs(x-4)));
+}
+float3 hsv_to_rgb(float3 hsv) {
+	float3 rgb = hue_to_rgb(hsv[0]);
+	return ((rgb - 1) * hsv[1] + 1) * hsv[2];
+}
+float3 rgb_to_hcv(float3 rgb) {
+	// Based on work by Sam Hocevar and Emil Persson
+	float4 P = (rgb[1] < rgb[2]) ? float4(rgb[2], rgb[1], -1, 2.f/3.f) : float4(rgb[1], rgb[2], 0, -1.f/3.f);
+	float4 Q = (rgb[0] < P[0]) ? float4(P[0], P[1], P[3], rgb[0]) : float4(rgb[0], P[1], P[2], P[0]);
+	float C = Q[0] - min(Q[3], Q[1]);
+	float H = abs((Q[3] - Q[1]) / (6*C + 1e-6f) + Q[2]);
+	return float3(H, C, Q[0]);
+}
+float3 rgb_to_hsv(float3 rgb) {
+	float3 hcv = rgb_to_hcv(rgb);
+	return float3(hcv[0], hcv[1] / (hcv[2] + 1e-6f), hcv[2]);
+}
+
 float acos_safe(float x) {
 	if (x <= -1) return (float)M_PI/2;
 	if (x >= 1) return 0;

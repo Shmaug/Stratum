@@ -22,8 +22,8 @@ public:
 	inline stm::Device& device() const { return *mDevice; }
 	inline stm::Window& window() const { return *mWindow; }
 	
-	inline string TryGetOption(const string& name) const { return mOptions.at(name); }
-	inline bool TryGetOption(const string& name, string& value) const {
+	inline string find_argument(const string& name) const { return mOptions.at(name); }
+	inline bool find_argument(const string& name, string& value) const {
 		if (mOptions.count(name)) {
 			value = mOptions.at(name);
 			return true;
@@ -31,7 +31,7 @@ public:
 		return false;
 	}
 	
-	STRATUM_API bool PollEvents();
+	STRATUM_API bool poll_events();
 
 	#ifdef WIN32
 	inline HINSTANCE hInstance() const { return mHInstance; }
@@ -52,7 +52,7 @@ private:
 	bool mDestroyPending = false;
 	
 	#ifdef WIN32
-	void HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+	void handle_message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;
 	#elif defined(__linux)

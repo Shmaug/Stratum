@@ -20,7 +20,7 @@ private:
 	STRATUM_API static size_t mHistoryCount;
 
 public:
-	inline static void BeginSample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
+	inline static void begin_sample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
 		ProfilerSample s;
 		s.mParent = mCurrentSample;
 		s.mStartTime = chrono::high_resolution_clock::now();
@@ -35,7 +35,7 @@ public:
 				mFrameHistory.pop_back();
 		}
 	}
-	inline static ProfilerSample& EndSample() {
+	inline static ProfilerSample& end_sample() {
 		if (!mCurrentSample) throw logic_error("attempt to end nonexistant profiler sample!");
 		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
 		ProfilerSample* tmp = mCurrentSample;
@@ -43,8 +43,8 @@ public:
 		return *tmp;
 	}
 
-	inline static const list<ProfilerSample>& FrameHistory() { return mFrameHistory; }
-	inline static void ClearHistory() { mFrameHistory.clear(); }
+	inline static const list<ProfilerSample>& history() { return mFrameHistory; }
+	inline static void clear() { mFrameHistory.clear(); }
 };
 
 }

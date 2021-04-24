@@ -7,12 +7,12 @@
 Texture2D<float4> gTexture : register(t0);
 SamplerState gSampler : register(s1);
 
-struct PushConstants {
+struct push_constants {
 	TransformData WorldToCamera;
 	ProjectionData Projection;
 	float EnvironmentGamma;
 };
-[[vk::push_constant]] const PushConstants gPushConstants = { TRANSFORM_I, PROJECTION_I, 1 };
+[[vk::push_constant]] const push_constants gPushConstants = { TRANSFORM_I, PROJECTION_I, 1 };
 
 void vs_skybox(float3 vertex : POSITION, out float4 position : SV_Position, out float3 viewRay : TEXCOORD0) {
 	position = project_point(gPushConstants.Projection, vertex);

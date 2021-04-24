@@ -21,7 +21,7 @@ public:
 	};
 
 	struct Keyframe {
-		float mTime;
+		chrono::milliseconds mTime;
 		T mValue;
 		T mTangentIn;
 		T mTangentOut;
@@ -65,10 +65,9 @@ public:
 		
 		// compute curve
 		mCoefficients.resize(mKeyframes.size());
-		memset(mCoefficients.data(), 0, sizeof(Vector4f) * mCoefficients.size());
 		for (uint32_t i = 0; i < mKeyframes.size() - 1; i++) {
 
-			float ts =  mKeyframes[i + 1].mTime - mKeyframes[i].mTime;
+			auto ts = chrono::duration_cast<chrono::duration<float, chrono::seconds>>(mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
 
 			T p0y = mKeyframes[i].mValue;
 			T p1y = mKeyframes[i + 1].mValue;
@@ -76,11 +75,11 @@ public:
 			T v1 = mKeyframes[i + 1].mTangentIn * ts;
 
 			mCoefficients[i].d = p0y;
-			if (mKeyframes[i].mTangentModeOut == AnimationTangentMode::eStep) continue;
-
-			mCoefficients[i].c = v0;
-			mCoefficients[i].b = 3 * (p1y - p0y) - 2*v0 - v1;
-			mCoefficients[i].a = p1y - p0y - v0 - mCoefficients[i].b;
+			if (mKeyframes[i].mTangentModeOut != AnimationTangentMode::eStep) {
+				mCoefficients[i].c = v0;
+				mCoefficients[i].b = 3 * (p1y - p0y) - 2*v0 - v1;
+				mCoefficients[i].a = p1y - p0y - v0 - mCoefficients[i].b;
+			}
 		}
 	}
 
@@ -146,12 +145,12 @@ public:
 		return u*u*u*c.a + u*u*c.b + u*c.c + c.d + offset;
 	}
 
-	inline ExtrapolateMode ExtrapolateIn() const { return mExtrapolateIn; }
-	inline ExtrapolateMode ExtrapolateOut() const { return mExtrapolateOut; }
-	inline uint32_t KeyframeCount() const { return (uint32_t)mKeyframes.size(); }
+	inline ExtrapolateMode extrapolate_in() const { return mExtrapolateIn; }
+	inline ExtrapolateMode extrapolate_out() const { return mExtrapolateOut; }
 	inline Keyframe Keyframe(uint32_t index) const { return mKeyframes[index]; }
 	inline Vector4f CurveCoefficient(uint32_t index) const { return mCoefficients[index]; }
 
+	inline const vector<Coeff>& keyframes() const { return (uint32_t)mKeyframes; }
 	inline Keyframe& operator[](uint32_t index) {
 		return mKeyframes[index];
 	}

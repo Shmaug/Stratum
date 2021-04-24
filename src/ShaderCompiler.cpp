@@ -24,7 +24,7 @@ public:
 				if (fs::exists(p / requested_source))
 					fullpath = p / requested_source;
 
-		if (mSources.count(fullpath.string()) == 0) mSources.emplace(fullpath.string(), ReadFile<string>(fullpath));
+		if (mSources.count(fullpath.string()) == 0) mSources.emplace(fullpath.string(), read_file<string>(fullpath));
 		auto it = mSources.find(fullpath.string());
 
 		shaderc_include_result* response = new shaderc_include_result();
@@ -139,7 +139,7 @@ void ShaderCompiler::DirectiveCompile(vector<SpirvModule>& modules, word_iterato
 		m.mStage = stageMap.at(*arg);
 		if (++arg == argEnd) throw logic_error("expected an entry point");
 		m.mEntryPoint = *arg;
-		modules.push_back(m);
+		modules.emplace_back(m);
 	}
 }
 
@@ -213,7 +213,7 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 			for (const auto& s : defines) cmd += " -D " + s;
 			cout << cmd << endl;
 			if (system(cmd.c_str()) == 0)
-				return ReadFile<vector<uint32_t>>(tmpfile);
+				return read_file<vector<uint32_t>>(tmpfile);
 		}
 	}
 
@@ -221,7 +221,7 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 	for (const auto& s : defines) cout << " -D" + s;
 	cout << endl;
 
-	string source = ReadFile<string>(filename);
+	string source = read_file<string>(filename);
 
 	// Compile with shaderc
 	CompileOptions options;
@@ -252,7 +252,7 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 		}
 	}
 	vector<uint32_t> spirv;
-	for (const uint32_t& c : result) spirv.push_back(c);
+	for (const uint32_t& c : result) spirv.emplace_back(c);
 	if (result.GetCompilationStatus() != shaderc_compilation_status_success)
 		throw logic_error(result.GetErrorMessage());
 	return spirv;
@@ -371,7 +371,7 @@ int main(int argc, char* argv[]) {
 					continue;
 			}
 		} else
-			inputs.push_back(argv[i]);
+			inputs.emplace_back(argv[i]);
 	}
 
 	vector<SpirvModule> results;

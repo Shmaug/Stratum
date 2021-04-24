@@ -16,7 +16,6 @@ struct LightData {
 	float ShadowBias;
 	uint pad;
 };
-
 struct MaterialData {
 	float4 gTextureST;
 	float4 gBaseColor;
@@ -47,12 +46,12 @@ StructuredBuffer<TransformData> gInstanceTransforms : register(t0, space2);
 
 [[vk::constant_id(0)]] const float gAlphaClip = -1; // set below 0 to disable
 
-struct PushConstants {
+struct push_constants {
 	TransformData WorldToCamera;
 	ProjectionData Projection;
 	uint LightCount;
 };
-[[vk::push_constant]] const PushConstants gPushConstants = { TRANSFORM_I, PROJECTION_I, 0 };
+[[vk::push_constant]] const push_constants gPushConstants = { TRANSFORM_I, PROJECTION_I, 0 };
 
 struct v2f {
 	float4 position : SV_Position;
@@ -86,10 +85,11 @@ float4 SampleLight(LightData light, float3 cameraPos) {
 		r.xyz = rotate_vector(lightToCamera.Rotation, float3(0,0,-1));
 
 	if ((light.Flags & LIGHT_USE_SHADOWMAP) && r.w > 0) {
-		float3 clipCoord = hnormalized(project_point(light.ShadowProjection, lightCoord));
-		clipCoord.y = -clipCoord.y;
-		if (all(clipCoord < 1) && all(clipCoord.xy > -1))
-			r.w *= dot(.25, gShadowAtlas.GatherCmp(gShadowSampler, saturate(clipCoord.xy*.5 + .5)*light.ShadowST.xy + light.ShadowST.zw, clipCoord.z - light.ShadowBias, 0));
+		float3 shadowCoord = hnormalized(project_point(light.ShadowProjection, lightCoord));
+		if (all(abs(shadowCoord.xy) < 1)) {
+			shadowCoord.y = -shadowCoord.y;
+			r.w *= gShadowAtlas.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.ShadowST.xy + light.ShadowST.zw, shadowCoord.z);
+		}
 	}
 	
 	return r;

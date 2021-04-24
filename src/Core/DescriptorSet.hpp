@@ -92,7 +92,7 @@ public:
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &**mLayout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
-		mDevice.SetObjectName(mDescriptorSet, name);
+		mDevice.set_debug_name(mDescriptorSet, name);
 	}
 	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Descriptor>& bindings) : DescriptorSet(layout, name) {
 		for (const auto&[binding, d] : bindings)

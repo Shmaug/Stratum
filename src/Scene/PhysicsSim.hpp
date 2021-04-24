@@ -4,56 +4,51 @@
 
 namespace stm {
 
+template<typename duration_t = chrono::duration<float>> requires(is_specialization_v<duration_t, chrono::duration>)
 class PhysicsSim : public Scene::Node {
 private:
-	float mPhysicsTimeLimitPerFrame = 0.1f;
-	float mFixedAccumulator = 0;
-	float mFixedTimeStep = 1.f/60.f;
+	duration_t mTimeLimit = 30ms;
+	duration_t mFixedTimeStep = 1ms;
+	duration_t mFixedAccumulator = 0;
 
-	float mTotalTime = 0;
-	float mDeltaTime = 0;
+	duration_t mTotalTime = 0;
+	duration_t mDeltaTime = 0;
 
-	chrono::high_resolution_clock mClock;
 	chrono::high_resolution_clock::time_point mStartTime;
 	chrono::high_resolution_clock::time_point mLastFrame;
 
 public:
-  NodeDelegate<CommandBuffer&> OnFixedUpdate;
-  NodeDelegate<CommandBuffer&> OnUpdate;
+  Event<CommandBuffer&> OnFixedUpdate;
+  Event<CommandBuffer&> OnUpdate;
 	
-	inline PhysicsSim(Scene& scene, const string& name) : Scene::Node(scene, name) {
-		mStartTime = mLastFrame = mClock.now();
+	inline PhysicsSim(Scene& scene, const string& name) : Scene::Node(scene, name), OnFixedUpdate(this), OnUpdate(this) {
+		mStartTime = mLastFrame = chrono::high_resolution_clock::now();
 	}
 
-  inline void Update(CommandBuffer& commandBuffer) {
-		ProfilerRegion ps("PhysicsSim::Update");
-		auto t1 = mClock.now();
-		mDeltaTime = (t1 - mLastFrame).count() * 1e-9f;
-		mTotalTime = (t1 - mStartTime).count() * 1e-9f;
+	inline void fixed_time_step(const auto& step) { mFixedTimeStep = step; }
+	inline const auto& fixed_time_step() const { return mFixedTimeStep; }
+	inline void time_limit(const auto& t) { mTimeLimit = t; }
+	inline const auto& time_limit() const { return mTimeLimit; }
+	inline const auto& total_time() const { return mTotalTime; }
+	inline const auto& delta_time() const { return mDeltaTime; }
+
+  inline void update(CommandBuffer& commandBuffer) {
+		ProfilerRegion ps("PhysicsSim::update", commandBuffer);
+		
+		auto t1 = chrono::high_resolution_clock::now();
+		mDeltaTime = duration_cast<duration_t>(t1 - mLastFrame);
+		mTotalTime = duration_cast<duration_t>(t1 - mStartTime);
 		mLastFrame = t1;
 
-		{
-			ProfilerRegion ps("Fixed Update");
-			mFixedAccumulator += mDeltaTime;
-			float fixedTime = 0;
-			t1 = mClock.now();
-			while (mFixedAccumulator > mFixedTimeStep && fixedTime < mFixedTimeLimitPerFrame) {
-				OnFixedUpdate(commandBuffer);
-				mFixedAccumulator -= mFixedTimeStep;
-				fixedTime = (mClock.now() - t1).count() * 1e-9f;
-			}
+		mFixedAccumulator += mDeltaTime;
+		while (mFixedAccumulator > mFixedTimeStep) {
+			OnFixedUpdate(commandBuffer);
+			mFixedAccumulator -= mFixedTimeStep;
+			if (mTimeLimit < chrono::high_resolution_clock::now() - mLastFrame) break;
 		}
+
 		OnUpdate(commandBuffer);
 	}
-
-	inline void FixedTimeStep(float step) { mFixedTimeStep = step; }
-	inline void PhysicsTimeLimitPerFrame(float t) { mPhysicsTimeLimitPerFrame = t; }
-	
-	inline float FixedTimeStep() const { return mFixedTimeStep; }
-	inline float FixedTimeLimitPerFrame() const { return mPhysicsTimeLimitPerFrame; }
-
-	inline float TotalTime() const { return mTotalTime; }
-	inline float DeltaTime() const { return mDeltaTime; }
 };
 
 }

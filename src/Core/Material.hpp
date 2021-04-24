@@ -127,16 +127,16 @@ public:
 		return mDescriptors.at(name).at(arrayIndex);
 	}
 
-	inline void TransitionTextures(CommandBuffer& commandBuffer) {
+	inline void transition_images(CommandBuffer& commandBuffer) {
 		for (auto& [name, darray] : mDescriptors)
 			for (auto& [arrayIndex, d] : darray)
 				if (d.index() == 0)
 					if (Texture::View view = get<Texture::View>(d))
-						view.texture().TransitionBarrier(commandBuffer, get<vk::ImageLayout>(d));
+						view.texture().transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
 	}
 
-	STRATUM_API virtual shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, const GeometryData& g = {});
-	inline shared_ptr<GraphicsPipeline> Bind(CommandBuffer& commandBuffer, vk::PrimitiveTopology topo) { return Bind(commandBuffer, GeometryData { topo, {}, {}}); }
+	STRATUM_API virtual shared_ptr<GraphicsPipeline> bind(CommandBuffer& commandBuffer, const GeometryData& g = {});
+	inline shared_ptr<GraphicsPipeline> bind(CommandBuffer& commandBuffer, vk::PrimitiveTopology topo) { return bind(commandBuffer, GeometryData { topo, {}, {}}); }
 };
 
 }

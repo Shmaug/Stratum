@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Scene.hpp"
+#include "Stratum.hpp"
 
 #ifdef __linux
 #include <dlfcn.h>
@@ -8,19 +8,19 @@
 
 namespace stm {
 
-struct PluginModule {
+struct dynamic_library {
 private:
 #ifdef WIN32
-  HMODULE
+  using handle_t = HMODULE;
 #elif defined(__linux)
-  void* 
+  using handle_t = void*; 
 #endif
-  mHandle;
 
+  handle_t mHandle;
   unordered_map<string, void*> mFunctionPtrs;
 
 public:
-  inline PluginModule(const fs::path& filename) {
+  inline dynamic_library(const fs::path& filename) {
 #ifdef WIN32
     char* msgBuf;
     mHandle = LoadLibraryW(filename.c_str());
@@ -32,14 +32,14 @@ public:
     mHandle = dlsym(filename.c_str(), RTLD_NOW);
 #endif
   }
-  inline ~PluginModule() {
+  inline ~dynamic_library() {
 #ifdef WIN32
     FreeLibrary(mHandle);
 #endif
   };
 
-  template<typename Ret, typename... Args>
-  inline Ret invoke(const string& name, Args&&... args) {
+  template<typename Tr, typename... Args>
+  inline Tr invoke(const string& name, Args&&... args) {
     auto it = mFunctionPtrs.find(name);
     if (it == mFunctionPtrs.end()) {
 #ifdef WIN32
@@ -48,10 +48,9 @@ public:
       it = mFunctionPtrs.emplace(name, dlsym(mHandle, name.c_str())).first;
 #endif
     }
-    typedef Ret (*fn_ptr) (Args...);
+    typedef Tr (*fn_ptr) (Args...);
     return invoke((fn_ptr)it->second, forward<Args>(args)...);
   }
-
 };
 
 }

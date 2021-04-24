@@ -14,14 +14,14 @@ RWByteAddressBuffer BlendTarget3 : register(u4);
 RWStructuredBuffer<VertexWeight> Weights : register(u5);
 RWStructuredBuffer<float4x4> Pose : register(u6);
 
-struct PushConstants {
+struct push_constants {
 	uint VertexCount;
 	uint VertexStride;
 	uint NormalOffset;
 	uint TangentOffset;
 	float4 BlendFactors;
 };
-[[vk::push_constant]] const PushConstants gPushConstants = { 0, 0, 0, 0, float4(0,0,0,0) };
+[[vk::push_constant]] const push_constants gPushConstants = { 0, 0, 0, 0, float4(0,0,0,0) };
 
 [numthreads(64, 1, 1)]
 void skin_vertices(uint3 index : SV_DispatchThreadID) {

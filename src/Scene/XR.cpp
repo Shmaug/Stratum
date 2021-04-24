@@ -118,7 +118,7 @@ unordered_set<string> XR::InstanceExtensionsRequired() {
 	unordered_set<string> result;
 	stringstream t(extensions);
 	string e;
-	while (t >> e) result.insert(e);
+	while (t >> e) result.emplace(e);
 	return result;
 }
 unordered_set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
@@ -134,7 +134,7 @@ unordered_set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	unordered_set<string> result;
 	stringstream t(extensions);
 	string e;
-	while (t >> e) result.insert(e);
+	while (t >> e) result.emplace(e);
 	return result;
 }
 

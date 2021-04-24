@@ -6,10 +6,10 @@
 
 namespace stm {
 
-// TODO: DescriptorSetLayouts have no way of being passed into a pipeline
+// TODO: descriptor_set_layouts have no way of being passed into a pipeline
 
 using VertexInputBindingData = pair< vector<vk::VertexInputAttributeDescription>, vector<vk::VertexInputBindingDescription> >;
-inline VertexInputBindingData CreateInputBindings(const GeometryData& geometry, const SpirvModule& vs) {
+inline VertexInputBindingData create_bindings(const GeometryData& geometry, const SpirvModule& vs) {
 	VertexInputBindingData d = {};
 	for (auto& [id, attrib] : geometry.mAttributes) {
 		auto it = ranges::find_if(vs.mStageInputs, [&](const auto& p) { return p.second.mAttributeId == id; });
@@ -40,7 +40,7 @@ protected:
 
 	// requires mSpirvModules to be set. Will generate mDescriptorSetLayouts if empty
 	// populates mPushConstants, mDescriptorBindings; hashes spirv into mHash
-	inline vk::PipelineLayout CreatePipelineLayout(const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) {
+	inline vk::PipelineLayout create_layout(const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) {
 		vector<vk::PushConstantRange> pushConstantRanges;
 
 		// generate mPushConstants + mDescriptorBindings
@@ -87,7 +87,7 @@ protected:
 				if (b.mSet >= mDescriptorSetLayouts.size()) mDescriptorSetLayouts.resize(b.mSet + 1);
 				setBindings[b.mSet][b.mBinding] = DescriptorSetLayout::Binding(b.mDescriptorType, b.mStageFlags, b.mDescriptorCount);
 				if (auto it = immutableSamplers.find(name); it != immutableSamplers.end())
-					setBindings[b.mSet][b.mBinding].mImmutableSamplers.push_back(it->second);
+					setBindings[b.mSet][b.mBinding].mImmutableSamplers.emplace_back(it->second);
 			}
 			for (uint32_t set = 0; set < mDescriptorSetLayouts.size(); set++)
 				if (setBindings.count(set))
@@ -99,7 +99,7 @@ protected:
 		for (const auto& l : mDescriptorSetLayouts)
 			for (const auto&[i,b] : l->bindings())
 				for (const auto& s : b.mImmutableSamplers)
-					mHash = hash_combine(mHash, s->CreateInfo()); // only have to hash the immutable samplers; hashing the spir-v takes care of bindings/etc
+					mHash = hash_combine(mHash, s->create_info()); // only have to hash the immutable samplers; hashing the spir-v takes care of bindings/etc
 	
 		vector<vk::DescriptorSetLayout> tmp(mDescriptorSetLayouts.size());
 		ranges::transform(mDescriptorSetLayouts, tmp.begin(), &DescriptorSetLayout::operator const vk::DescriptorSetLayout &);
@@ -115,21 +115,21 @@ public:
 		if (mPipeline) mDevice->destroyPipeline(mPipeline);
 	}
 
-	virtual vk::PipelineBindPoint BindPoint() const = 0;
+	virtual vk::PipelineBindPoint bind_point() const = 0;
 	
 	inline const vk::Pipeline& operator*() const { return mPipeline; }
 	inline const vk::Pipeline* operator->() const { return &mPipeline; }
 	inline operator bool() const { return mPipeline; }
 
 	inline bool operator==(const Pipeline& rhs) const { return rhs.mPipeline == mPipeline; }
-	inline size_t Hash() const { return mHash; }
+	inline size_t hash() const { return mHash; }
 	inline vk::PipelineLayout layout() const { return mLayout; }
-	inline const auto& SpirvModules() const { return mSpirvModules; };
-	inline const auto& DescriptorSetLayouts() const { return mDescriptorSetLayouts; };
+	inline const auto& modules() const { return mSpirvModules; };
+	inline const auto& descriptor_set_layouts() const { return mDescriptorSetLayouts; };
 	// most of the time, a pipeline wont have named descriptors with different bindings, so there is usually only one item in this range
-	inline const auto& DescriptorBindings() { return mDescriptorBindings; };
+	inline const auto& descriptor_bindings() { return mDescriptorBindings; };
 	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
-	inline const auto& PushConstants() { return mPushConstants; };
+	inline const auto& push_constants() { return mPushConstants; };
 
 	inline const DescriptorBinding& binding(const string& name) const {
 		auto it = mDescriptorBindings.find(name);
@@ -141,9 +141,9 @@ public:
 class ComputePipeline : public Pipeline {
 public:
 	inline ComputePipeline(Device& device, const string& name, shared_ptr<SpirvModule> spirv, const unordered_map<string, byte_blob>& specializationConstants = {}, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {}) : Pipeline(device, name) {
-		mSpirvModules.push_back(spirv);
+		mSpirvModules.emplace_back(spirv);
 		mSpecializationConstants = specializationConstants;
-		CreatePipelineLayout(immutableSamplers);
+		create_layout(immutableSamplers);
 
 		vector<vk::SpecializationMapEntry> mapEntries;
 		byte_blob specData;
@@ -157,11 +157,11 @@ public:
 			vk::ComputePipelineCreateInfo({},
 				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, spirv->mShaderModule, spirv->mEntryPoint.c_str(), mapEntries.size() ? &specInfo : nullptr),
 				mLayout)).value;
-		mDevice.SetObjectName(mPipeline, name);
+		mDevice.set_debug_name(mPipeline, name);
 	}
 
-	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eCompute; }
-	inline vk::Extent3D WorkgroupSize() const { return mSpirvModules[0]->mWorkgroupSize; }
+	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eCompute; }
+	inline vk::Extent3D workgroup_size() const { return mSpirvModules[0]->mWorkgroupSize; }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -185,13 +185,13 @@ public:
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = {},
 		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name) {
 		
-		if (vs) mSpirvModules.push_back(vs);
-		if (fs) mSpirvModules.push_back(fs);
+		if (vs) mSpirvModules.emplace_back(vs);
+		if (fs) mSpirvModules.emplace_back(fs);
 		mSpecializationConstants = specializationConstants;
-		CreatePipelineLayout(immutableSamplers);
+		create_layout(immutableSamplers);
 
 		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
-		for (const auto&[desc,type,blendState] : renderPass.subpasses()[subpassIndex].mAttachmentDescriptions | views::values) {
+		for (const auto&[type,desc,blendState] : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
 			if (type == RenderPass::AttachmentType::eColor || type == RenderPass::AttachmentType::eDepthStencil)
 				sampleCount = desc.samples;
 			if (blendStates.empty() && type == RenderPass::AttachmentType::eColor)
@@ -203,13 +203,13 @@ public:
 		for (const auto state : mBlendStates) mHash = hash_combine(mHash, state);
 		for (const auto state : dynamicStates) mHash = hash_combine(mHash, state);
 
-		for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].mAttachmentDescriptions)
+		for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].attachments())
 			if (get<RenderPass::AttachmentType>(desc) & (RenderPass::AttachmentType::eColor | RenderPass::AttachmentType::eDepthStencil)) {
 				mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
 				break;
 			}
 
-		auto vertexInput = CreateInputBindings(geometry, *vs);
+		auto vertexInput = create_bindings(geometry, *vs);
 		if (!vertexInput.first.empty()) mHash = hash_combine(mHash, vertexInput);
 		vk::PipelineVertexInputStateCreateInfo vertexInfo({}, vertexInput.second, vertexInput.first);
 
@@ -241,10 +241,10 @@ public:
 		mPipeline = mDevice->createGraphicsPipeline(mDevice.pipeline_cache(), 
 			vk::GraphicsPipelineCreateInfo({}, stages, &vertexInfo, &mInputAssemblyState, nullptr, &mViewportState,
 			&mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex)).value;
-		mDevice.SetObjectName(mPipeline, name);
+		mDevice.set_debug_name(mPipeline, name);
 	}
 	
-	inline vk::PipelineBindPoint BindPoint() const override { return vk::PipelineBindPoint::eGraphics; }
+	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eGraphics; }
 };
 
 }
@@ -252,6 +252,6 @@ public:
 namespace std {
 template<class T> requires(is_base_of_v<stm::Pipeline,T>)
 struct hash<T> {
-	inline size_t operator()(const T& pipeline) { return pipeline.Hash(); }
+	inline size_t operator()(const T& pipeline) { return pipeline.hash(); }
 };
 }

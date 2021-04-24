@@ -21,11 +21,11 @@ Mesh::Mesh(CommandBuffer& commandBuffer, const fs::path& filename) : Mesh(filena
 	static_assert(sizeof(aiVector3D) == sizeof(float)*3);
 	static_assert(sizeof(std::array<aiVector3D,4>) == sizeof(float)*12);
 
-	buffer_vector<aiVector3D> vertices(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
-	buffer_vector<aiVector3D> normals(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
-	buffer_vector<aiVector3D> tangents(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
-	buffer_vector<aiVector3D> texcoords(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
-	buffer_vector<uint32_t> indices(device, 0, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<aiVector3D> vertices(device, 0);
+	buffer_vector<aiVector3D> normals(device, 0);
+	buffer_vector<aiVector3D> tangents(device, 0);
+	buffer_vector<aiVector3D> texcoords(device, 0);
+	buffer_vector<uint32_t> indices(device, 0);
 
 	for (const aiMesh* m : span(scene->mMeshes, scene->mNumMeshes)) {
 		size_t vertsPerFace;
@@ -55,13 +55,14 @@ Mesh::Mesh(CommandBuffer& commandBuffer, const fs::path& filename) : Mesh(filena
 		}
 	}
 
-	mIndices = commandBuffer.CopyBuffer<uint32_t>(indices, vk::BufferUsageFlagBits::eIndexBuffer);
+	ProfilerRegion ps("load " + filename.stem().string(), commandBuffer);
+	mIndices = commandBuffer.copy_buffer<uint32_t>(indices, vk::BufferUsageFlagBits::eIndexBuffer);
 
 	mGeometry.mBindings.resize(4);
-	mGeometry.mBindings[0].first = commandBuffer.CopyBuffer<aiVector3D>(vertices, vk::BufferUsageFlagBits::eVertexBuffer);
-	mGeometry.mBindings[1].first = commandBuffer.CopyBuffer<aiVector3D>(normals, vk::BufferUsageFlagBits::eVertexBuffer);
-	mGeometry.mBindings[2].first = commandBuffer.CopyBuffer<aiVector3D>(tangents, vk::BufferUsageFlagBits::eVertexBuffer);
-	mGeometry.mBindings[3].first = commandBuffer.CopyBuffer<aiVector3D>(texcoords, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[0].first = commandBuffer.copy_buffer<aiVector3D>(vertices, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[1].first = commandBuffer.copy_buffer<aiVector3D>(normals, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[2].first = commandBuffer.copy_buffer<aiVector3D>(tangents, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry.mBindings[3].first = commandBuffer.copy_buffer<aiVector3D>(texcoords, vk::BufferUsageFlagBits::eVertexBuffer);
 
 	mGeometry[VertexAttributeType::ePosition][0] = GeometryData::Attribute(0, vk::Format::eR32G32B32Sfloat, 0);
 	mGeometry[VertexAttributeType::eNormal][0]   = GeometryData::Attribute(1, vk::Format::eR32G32B32Sfloat, 0);

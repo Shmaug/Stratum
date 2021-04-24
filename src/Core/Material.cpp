@@ -17,8 +17,8 @@ shared_ptr<GraphicsPipeline> Material::CreatePipeline(RenderPass& renderPass, ui
 	return make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, geometry, vert, frag, mSpecializationConstants, mImmutableSamplers, mCullMode, mPolygonMode, mSampleShading, mDepthStencilState, mBlendStates);
 }
 
-shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, const GeometryData& geometry) {
-	ProfilerRegion ps("Material::Bind");
+shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const GeometryData& geometry) {
+	ProfilerRegion ps(mName + "::bind", commandBuffer);
 
 	size_t key = hash_combine(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry.mPrimitiveTopology, geometry.mAttributes | views::values);
 
@@ -30,23 +30,23 @@ shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, const 
 		else pipeline = p_it->second;
 	}
 
-	commandBuffer.BindPipeline(pipeline);
+	commandBuffer.bind_pipeline(pipeline);
 
 	unordered_map<uint32_t, shared_ptr<DescriptorSet>> descriptorSets;
 
 	for (auto& [name, entries] : mDescriptors) {
-		auto it = pipeline->DescriptorBindings().find(name);
-		if (it == pipeline->DescriptorBindings().end()) continue;
+		auto it = pipeline->descriptor_bindings().find(name);
+		if (it == pipeline->descriptor_bindings().end()) continue;
 
 		uint32_t setIndex = it->second.mSet;
 		if (descriptorSets.count(setIndex) == 0)
-			descriptorSets.emplace(setIndex, make_shared<DescriptorSet>(pipeline->DescriptorSetLayouts()[setIndex], mName+"/DescriptorSet"+to_string(setIndex)));
+			descriptorSets.emplace(setIndex, make_shared<DescriptorSet>(pipeline->descriptor_set_layouts()[setIndex], mName+"/DescriptorSet"+to_string(setIndex)));
 		for (const auto&[arrayIndex,entry] : entries)
 			if (descriptorSets.at(setIndex)->find(it->second.mBinding, arrayIndex) != entry)
 				descriptorSets.at(setIndex)->insert_or_assign(it->second.mBinding, arrayIndex, entry);
 	}
 	
-	for (const auto&[index, descriptorSet] : descriptorSets) commandBuffer.BindDescriptorSet(index, descriptorSet);
+	for (const auto&[index, descriptorSet] : descriptorSets) commandBuffer.bind_descriptor_set(index, descriptorSet);
 	for (const auto&[name, data] : mPushConstants) commandBuffer.push_constant(name, data);
 
 	return pipeline;

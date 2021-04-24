@@ -65,6 +65,16 @@ template<> struct tuplefier<vk::Rect2D> {
 		return forward_as_tuple(v.extent, v.offset);
 	}
 };
+template<> struct tuplefier<vk::ImageSubresourceLayers> {
+	inline auto operator()(vk::ImageSubresourceLayers&& v) const {
+		return forward_as_tuple(v.aspectMask, v.mipLevel, v.baseArrayLayer, v.layerCount);
+	}
+};
+template<> struct tuplefier<vk::ImageSubresourceRange> {
+	inline auto operator()(vk::ImageSubresourceRange&& v) const {
+		return forward_as_tuple(v.aspectMask, v.baseMipLevel, v.levelCount, v.baseArrayLayer, v.layerCount);
+	}
+};
 template<> struct tuplefier<vk::SamplerCreateInfo> {
 	inline auto operator()(vk::SamplerCreateInfo&& rhs) const {
 		return forward_as_tuple(

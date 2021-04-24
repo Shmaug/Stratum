@@ -34,20 +34,21 @@ public:
 		else
 			return baseVertex + i;
 	}
-	inline void Draw(CommandBuffer& commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0) {
+	
+	inline void draw(CommandBuffer& commandBuffer, uint32_t instanceCount = 1, uint32_t firstInstance = 0) {
 		auto pipeline = dynamic_pointer_cast<GraphicsPipeline>(commandBuffer.bound_pipeline());
 		if (!pipeline) throw logic_error("cannot draw a mesh without a bound graphics pipeline\n");
 
 		for (uint32_t i = 0; i < mGeometry.mBindings.size(); i++)
-			commandBuffer.BindVertexBuffer(i, get<0>(mGeometry.mBindings[i]));
-		if (mIndices) commandBuffer.BindIndexBuffer(mIndices);
+			commandBuffer.bind_vertex_buffer(i, get<0>(mGeometry.mBindings[i]));
+		if (mIndices) commandBuffer.bind_index_buffer(mIndices);
 
 		uint32_t primCount = 0;
 		for (const Submesh& s : mSubmeshes) {
 			if (mIndices)
-				commandBuffer->drawIndexed(s.mPrimitiveCount*PrimitiveDegree(mGeometry.mPrimitiveTopology), instanceCount, s.mFirstIndex, s.mFirstVertex, firstInstance);
+				commandBuffer->drawIndexed(s.mPrimitiveCount*verts_per_prim(mGeometry.mPrimitiveTopology), instanceCount, s.mFirstIndex, s.mFirstVertex, firstInstance);
 			 else
-				commandBuffer->draw(s.mPrimitiveCount*PrimitiveDegree(mGeometry.mPrimitiveTopology), instanceCount, s.mFirstVertex, firstInstance);
+				commandBuffer->draw(s.mPrimitiveCount*verts_per_prim(mGeometry.mPrimitiveTopology), instanceCount, s.mFirstVertex, firstInstance);
 			primCount += s.mPrimitiveCount;
 		}
 		commandBuffer.mPrimitiveCount += instanceCount * primCount;

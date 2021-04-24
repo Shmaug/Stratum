@@ -290,26 +290,26 @@ public:
 
 	inline uint32_t back_buffer_count() const { return (uint32_t)mSwapchainImages.size(); }
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
-	inline Texture::View back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
-	inline Texture::View back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
+	inline const Texture::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
+	inline const Texture::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
 
 
 #ifdef WIN32
-	inline HWND hWnd() const { return mHwnd; }
+	inline HWND handle() const { return mHwnd; }
 #elif defined(__linux)
-	inline xcb_window_t window() const { return mXCBWindow; }
+	inline xcb_window_t handle() const { return mXCBWindow; }
 #endif
 
-	STRATUM_API void Resize(uint32_t w, uint32_t h);
+	STRATUM_API void resize(uint32_t w, uint32_t h);
 
-	STRATUM_API void AcquireNextImage(CommandBuffer& commandBuffer);
+	STRATUM_API const Texture::View& acquire_image(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
-	STRATUM_API void Present(const vector<vk::Semaphore>& waitSemaphores);
-	// Number of times Present has been called
-	inline size_t PresentCount() const { return mPresentCount; }
+	STRATUM_API void present(const vector<vk::Semaphore>& waitSemaphores);
+	// Number of times present has been called
+	inline size_t present_count() const { return mPresentCount; }
 
-	STRATUM_API void LockMouse(bool l);
-	inline bool LockMouse() const { return mLockMouse; }
+	STRATUM_API void lock_mouse(bool l);
+	inline bool lock_mouse() const { return mLockMouse; }
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
 	inline Vector2f cursor_pos() const { return mInputState.mCursorPos; }
@@ -321,10 +321,10 @@ public:
 	inline bool is_key_down_redge(KeyCode key) const { return mInputState.mKeys.count(key) && !mInputStateLast.mKeys.count(key); }
 	inline bool is_key_up_redge(KeyCode key) const { return mInputStateLast.mKeys.count(key) && !mInputState.mKeys.count(key); }
 
-	inline Vector2f ClipToWindow(const Vector2f& clip) const {
+	inline Vector2f clip_to_window(const Vector2f& clip) const {
 		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
 	}
-	inline Vector2f WindowToClip(const Vector2f& screen) const {
+	inline Vector2f window_to_clip(const Vector2f& screen) const {
 		Vector2f r = screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones();
 		r.y() = -r.y();
 		return r;
@@ -333,8 +333,8 @@ public:
 private:
 	friend class Instance;
 
-	STRATUM_API void CreateSwapchain(CommandBuffer& commandBUffer);
-	STRATUM_API void DestroySwapchain();
+	STRATUM_API void create_swapchain(CommandBuffer& commandBUffer);
+	STRATUM_API void destroy_swapchain();
 	
 	vk::SurfaceKHR mSurface;
 	Device* mSwapchainDevice = nullptr;

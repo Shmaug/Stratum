@@ -13,21 +13,20 @@ private:
 	vector<Texture::View> mAttachments;
 
 public:
-	inline Framebuffer(const string& name, stm::RenderPass& renderPass, const vk::ArrayProxy<const Texture::View>& attachments) : DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass) {
-		mAttachments.resize(renderPass.attachments().size());
-		vector<vk::ImageView> views(mAttachments.size());
-		for (const auto& view : attachments) {
-			size_t idx = renderPass.find(view.texture().name());
-			mAttachments[idx] = view;
-			views[idx] = *view;
-			mExtent = vk::Extent2D(max(mExtent.width , view.texture().extent().width), max(mExtent.height, view.texture().extent().height) );
-		}
-		mFramebuffer = renderPass.mDevice->createFramebuffer(vk::FramebufferCreateInfo({}, *mRenderPass, views, mExtent.width, mExtent.height, 1));
-		renderPass.mDevice.SetObjectName(mFramebuffer, name);
-	}
-	template<convertible_to<Texture::View>... Args>
-	inline Framebuffer(const string& name, stm::RenderPass& renderPass, Args&&... attachments) : Framebuffer(name, renderPass, { forward<Args>(attachments)... }) {}
+	template<ranges::range R>
+	inline Framebuffer(stm::RenderPass& renderPass, const string& name, const R& attachments) : DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass) {
+		mAttachments.resize(attachments.size());
+		vector<vk::ImageView> views(attachments.size());
 
+		ranges::copy(attachments, mAttachments.begin());
+		ranges::transform(attachments, views.begin(), &Texture::View::operator*);
+		
+		for (uint32_t i = 0; i < attachments.size(); i++)
+			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].texture().extent().width), max(mExtent.height, mAttachments[i].texture().extent().height) );
+
+		mFramebuffer = renderPass.mDevice->createFramebuffer(vk::FramebufferCreateInfo({}, *mRenderPass, views, mExtent.width, mExtent.height, 1));
+		renderPass.mDevice.set_debug_name(mFramebuffer, name);
+	}
 	inline ~Framebuffer() { mDevice->destroyFramebuffer(mFramebuffer); }
 	
 	inline const vk::Framebuffer& operator*() const { return mFramebuffer; };
@@ -40,8 +39,10 @@ public:
 	inline auto begin() const { return mAttachments.begin(); }
 	inline auto end() const { return mAttachments.end(); }
 
-	inline const Texture::View& operator[](size_t index) const { return mAttachments[index]; }
-	inline const Texture::View& operator[](const RenderAttachmentId& id) const { return mAttachments[mRenderPass.find(id)]; }
+	inline const Texture::View& at(size_t index) const { return mAttachments.at(index); }
+	inline const Texture::View& at(const RenderAttachmentId& id) const { return mAttachments.at(mRenderPass.find(id)); }
+	inline const Texture::View& operator[](size_t index) const { return at(index); }
+	inline const Texture::View& operator[](const RenderAttachmentId& id) const { return at(mRenderPass.find(id)); }
 };
 
 }

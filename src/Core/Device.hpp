@@ -71,6 +71,7 @@ public:
 
 	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers, uint32_t frameInUseCount);
 	STRATUM_API ~Device();
+
 	inline const vk::Device& operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
 	
@@ -78,12 +79,17 @@ public:
 	inline const vk::PhysicalDeviceLimits& limits() const { return mLimits; }
 	inline vk::PipelineCache pipeline_cache() const { return mPipelineCache; }
 	inline VmaAllocator allocator() const { return mAllocator; }
-	
-	STRATUM_API QueueFamily* FindQueueFamily(vk::SurfaceKHR surface);
-	STRATUM_API vk::SampleCountFlagBits GetMaxUsableSampleCount();
+
+	inline QueueFamily* find_queue_family(vk::SurfaceKHR surface) {
+		auto queueFamilies = mQueueFamilies.lock();
+		for (auto& [queueFamilyIndex, queueFamily] : *queueFamilies)
+			if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
+				return &queueFamily;
+		return nullptr;
+	}
 
 	template<typename T> requires(convertible_to<decltype(T::objectType), vk::ObjectType>)
-	inline T& SetObjectName(T& object, const string& name) {
+	inline T& set_debug_name(T& object, const string& name) {
 		if (mSetDebugUtilsObjectNameEXT) {
 			vk::DebugUtilsObjectNameInfoEXT info = {};
 			info.objectHandle = *reinterpret_cast<const uint64_t*>(&object);
@@ -94,15 +100,14 @@ public:
 		return object;
 	}
 	
-	STRATUM_API shared_ptr<CommandBuffer> GetCommandBuffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void Execute(shared_ptr<CommandBuffer> commandBuffer);
-	STRATUM_API void Flush();
+	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer);
+	STRATUM_API void flush();
 
 private:
 	friend class Instance;
 	friend class DescriptorSet;
-	
-	STRATUM_API void PrintAllocations();
+	friend class CommandBuffer;
 
 	vk::Device mDevice;
  	vk::PhysicalDevice mPhysicalDevice;
@@ -110,7 +115,6 @@ private:
 	vk::PipelineCache mPipelineCache;
 	
 	vk::PhysicalDeviceLimits mLimits;
-	vk::SampleCountFlagBits mMaxMSAASamples;
 	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;

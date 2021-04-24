@@ -40,6 +40,14 @@ constexpr size_t hash_array(const T(& arr)[N], size_t n = N-1) {
 
 namespace std {
 
+template<typename T>
+struct hash<weak_ptr<T>> {
+	constexpr size_t operator()(const weak_ptr<T>& p) const {
+		shared_ptr<T> s = p.lock();
+		return hash<shared_ptr<T>>()(s);
+	}
+};
+
 template<stm::Hashable Tx, stm::Hashable Ty>
 struct hash<pair<Tx, Ty>> {
 	constexpr size_t operator()(const pair<Tx, Ty>& p) const { return stm::hash_combine(p.first, p.second); }
