@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Stratum.hpp"
+#include "../Common/common.hpp"
 
 namespace stm {
 
@@ -33,7 +33,7 @@ struct DescriptorBinding {
 	vk::DescriptorType mDescriptorType = vk::DescriptorType::eSampler;
 	vk::ShaderStageFlags mStageFlags = {};
 };
-
+ 
 class SpirvModule {
 public:
 	vk::ShaderModule mShaderModule; // created when the SpirvModule is used to create a Pipeline
@@ -53,46 +53,28 @@ public:
 	inline ~SpirvModule() { if (mShaderModule) mDevice.destroyShaderModule(mShaderModule); }
 };
 
-template<> struct tuplefier<RasterStageVariable> {
-	inline auto operator()(RasterStageVariable&& m) {
-		return forward_as_tuple(m.mLocation, m.mFormat, m.mAttributeId);
-	}
-};
-template<> struct tuplefier<VertexAttributeId> {
-	inline auto operator()(VertexAttributeId&& m) {
-		return forward_as_tuple(m.mType, m.mTypeIndex);
-	}
-};
-template<> struct tuplefier<DescriptorBinding> {
-
-	inline auto operator()(stm::DescriptorBinding&& m) {
-		return forward_as_tuple(
-			m.mSet,
-			m.mBinding,
-			m.mDescriptorCount,
-			m.mDescriptorType,
-			m.mStageFlags);
-	}
-};
-template<> struct tuplefier<SpirvModule> {
-	inline auto operator()(SpirvModule&& m) {
-		return forward_as_tuple(
-			m.mSpirv,
-			m.mStage,
-			m.mEntryPoint,
-			m.mSpecializationMap,
-			m.mStageInputs,
-			m.mStageOutputs,
-			m.mDescriptorBindings,
-			m.mPushConstants,
-			m.mWorkgroupSize);
-	}
-};
-
-static_assert(tuplefiable<DescriptorBinding>);
-static_assert(tuplefiable<SpirvModule>);
-static_assert(Hashable<SpirvModule>);
-static_assert(Hashable<unordered_map<string,RasterStageVariable>>);
+inline void binary_read(istream& lhs, SpirvModule& m) {
+	binary_read(lhs, m.mSpirv);
+	binary_read(lhs, m.mStage);
+	binary_read(lhs, m.mEntryPoint);
+	binary_read(lhs, m.mSpecializationMap);
+	binary_read(lhs, m.mStageInputs);
+	binary_read(lhs, m.mStageOutputs);
+	binary_read(lhs, m.mDescriptorBindings);
+	binary_read(lhs, m.mPushConstants);
+	binary_read(lhs, m.mWorkgroupSize);
+}
+inline void binary_write(ostream& lhs, const SpirvModule& m) {
+	binary_write(lhs, m.mSpirv);
+	binary_write(lhs, m.mStage);
+	binary_write(lhs, m.mEntryPoint);
+	binary_write(lhs, m.mSpecializationMap);
+	binary_write(lhs, m.mStageInputs);
+	binary_write(lhs, m.mStageOutputs);
+	binary_write(lhs, m.mDescriptorBindings);
+	binary_write(lhs, m.mPushConstants);
+	binary_write(lhs, m.mWorkgroupSize);
+}
 
 }
 
@@ -115,4 +97,11 @@ namespace std {
 	inline string to_string(const stm::VertexAttributeId& value) {
 		return to_string(value.mType) + "[" + to_string(value.mTypeIndex) + "]";
 	}
+
+	template<>
+	struct hash<stm::VertexAttributeId> {
+		inline size_t operator()(const stm::VertexAttributeId& v) const {
+			return stm::hash_args(v.mType, v.mTypeIndex);
+		}
+	};
 }

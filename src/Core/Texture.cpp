@@ -128,14 +128,11 @@ void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 	commandBuffer.transition_barrier(mImage, { mAspect, 1, mMipLevels - 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferDstOptimal);
 
 	vk::ImageBlit blit = {};
-	blit.srcOffsets[0] = vk::Offset3D(0, 0, 0);
+	blit.srcOffsets[0] = blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
 	blit.srcSubresource.baseArrayLayer = 0;
 	blit.srcSubresource.layerCount = mArrayLayers;
 	blit.srcSubresource.aspectMask = mAspect;
-	blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
-	blit.dstSubresource.baseArrayLayer = 0;
-	blit.dstSubresource.layerCount = mArrayLayers;
-	blit.dstSubresource.aspectMask = mAspect;
+	blit.dstSubresource = blit.srcSubresource;
 
 	blit.srcOffsets[1] = vk::Offset3D((int32_t)mExtent.width, (int32_t)mExtent.height, (int32_t)mExtent.depth);
 
@@ -162,7 +159,7 @@ void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 	mTrackedAccessFlags = vk::AccessFlagBits::eTransferRead;
 }
 
-Texture::View::View(shared_ptr<Texture> texture, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components)
+Texture::View::View(const shared_ptr<Texture>& texture, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components)
 	: mTexture(texture), mSubresource(subresource), mComponents(components) {
 	if (mSubresource.aspectMask == (vk::ImageAspectFlags)0) mSubresource.aspectMask = texture->aspect();
 	if (mSubresource.levelCount == 0) mSubresource.levelCount = texture->mip_levels();

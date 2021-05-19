@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Scene/SceneNode.hpp>
-#include <Scene/Camera.hpp>
+#include <NodeGraph/SceneNode.hpp>
+#include <NodeGraph/Camera.hpp>
 
 #include "ImageLoader.hpp"
 
@@ -26,7 +26,7 @@ enum class OrganMaskBits : uint32_t {
 };
 using OrganMask = vk::Flags<OrganMaskBits>;
 
-class RenderVolume : public Scene::Node {
+class RenderVolume : public NodeGraph::Node {
 	private:
 	// The volume loaded directly from the folder
 	shared_ptr<Texture> mRawVolume = nullptr;
@@ -57,7 +57,7 @@ public:
 	ShadingMode mShadingMode = {};
 	OrganMask mOrganMask = {};
 
-	PLUGIN_EXPORT RenderVolume(const string& name, Scene* scene, Device& device, const fs::path& imageStackFolder);
+	PLUGIN_EXPORT RenderVolume(const string& name, NodeGraph* scene, Device& device, const fs::path& imageStackFolder);
 
 	PLUGIN_EXPORT void BakeRender(CommandBuffer& commandBuffer);
 

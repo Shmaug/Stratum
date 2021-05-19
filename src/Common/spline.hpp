@@ -1,9 +1,11 @@
 #pragma once
 
+#include "includes.hpp"
+
 namespace stm {
 
 template<typename T>
-class Spline {
+class spline {
 public:
 	enum class ExtrapolateMode {
 		eConstant,
@@ -20,7 +22,7 @@ public:
 		eStep,
 	};
 
-	struct Keyframe {
+	struct keyframe_t {
 		chrono::milliseconds mTime;
 		T mValue;
 		T mTangentIn;
@@ -29,8 +31,10 @@ public:
 		TangentMode mTangentModeOut = TangentMode::eSmooth;
 	};
 
-	Spline() = default;
-	inline Spline(const vector<Keyframe>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
+	spline() = default;
+	spline(const spline&) = default;
+	spline(spline&&) = default;
+	inline spline(const vector<keyframe_t>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
 		: mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
 
 		if (!mKeyframes.size()) return;
@@ -38,23 +42,23 @@ public:
 		// compute tangents
 		for (uint32_t i = 0; i < mKeyframes.size(); i++) {
 			switch (mKeyframes[i].mTangentModeIn) {
-			case AnimationTangentMode::eSmooth:
+			case TangentMode::eSmooth:
 				if (i > 0 && i < mKeyframes.size()-1) {
 					mKeyframes[i].mTangentIn = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
 					break;
 				}
-			case AnimationTangentMode::eLinear:
+			case TangentMode::eLinear:
 				if (i > 0) mKeyframes[i].mTangentIn = (mKeyframes[i].mValue - mKeyframes[i-1].mValue) / (mKeyframes[i].mTime - mKeyframes[i - 1].mTime);
 				break;
 			}
 
 			switch (mKeyframes[i].mTangentModeOut) {
-			case AnimationTangentMode::eSmooth:
+			case TangentMode::eSmooth:
 				if (i > 0 && i < mKeyframes.size() - 1) {
 					mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
 					break;
 				}
-			case AnimationTangentMode::eLinear:
+			case TangentMode::eLinear:
 				if (i < mKeyframes.size() - 1) mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
 				break;
 			}
@@ -75,7 +79,7 @@ public:
 			T v1 = mKeyframes[i + 1].mTangentIn * ts;
 
 			mCoefficients[i].d = p0y;
-			if (mKeyframes[i].mTangentModeOut != AnimationTangentMode::eStep) {
+			if (mKeyframes[i].mTangentModeOut != TangentMode::eStep) {
 				mCoefficients[i].c = v0;
 				mCoefficients[i].b = 3 * (p1y - p0y) - 2*v0 - v1;
 				mCoefficients[i].a = p1y - p0y - v0 - mCoefficients[i].b;
@@ -83,12 +87,12 @@ public:
 		}
 	}
 
-	inline T Sample(float t) const {
+	inline T sample(float t) const {
 		if (mKeyframes.size() == 0) return 0;
 		if (mKeyframes.size() == 1) return mKeyframes[0].mValue;
 
-		const Keyframe& first = mKeyframes[0];
-		const Keyframe& last = mKeyframes[mKeyframes.size() - 1];
+		const keyframe_t& first = mKeyframes[0];
+		const keyframe_t& last = mKeyframes[mKeyframes.size() - 1];
 
 		float length = last.mTime - first.mTime;
 		float ts = first.mTime - t;
@@ -97,16 +101,16 @@ public:
 		
 		if (tl > 0) {
 			switch (mExtrapolateOut) {
-			case AnimationExtrapolateMode::eConstant:
+			case ExtrapolateMode::eConstant:
 				return last.mValue;
-			case AnimationExtrapolateMode::eLinear:
+			case ExtrapolateMode::eLinear:
 				return last.mValue + last.mTangentOut * tl;
-			case AnimationExtrapolateMode::eCycleOffset:
+			case ExtrapolateMode::eCycleOffset:
 				offset += (last.mValue - first.mValue) * (floorf(tl / length) + 1);
-			case AnimationExtrapolateMode::eCycle:
+			case ExtrapolateMode::eCycle:
 				t = fmodf(tl, length);
 				break;
-			case AnimationExtrapolateMode::eBounce:
+			case ExtrapolateMode::eBounce:
 				t = fmodf(tl, 2 * length);
 				if (t > length) t = 2 * length - t;
 				break;
@@ -115,16 +119,16 @@ public:
 		}
 		if (ts > 0) {
 			switch (mExtrapolateIn) {
-			case AnimationExtrapolateMode::eConstant:
+			case ExtrapolateMode::eConstant:
 				return first.mValue;
-			case AnimationExtrapolateMode::eLinear:
+			case ExtrapolateMode::eLinear:
 				return first.mValue - first.mTangentIn * ts;
-			case AnimationExtrapolateMode::eCycleOffset:
+			case ExtrapolateMode::eCycleOffset:
 				offset += (first.mValue - last.mValue) * (floorf(ts / length) + 1);
-			case AnimationExtrapolateMode::eCycle:
+			case ExtrapolateMode::eCycle:
 				t = fmodf(ts, length);
 				break;
-			case AnimationExtrapolateMode::eBounce:
+			case ExtrapolateMode::eBounce:
 				t = fmodf(ts, 2 * length);
 				if (t > length) t = 2 * length - t;
 				break;
@@ -141,27 +145,25 @@ public:
 			}
 
 		float u = (t - mKeyframes[i].mTime) / (mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
-		Coeff c = mCoefficients[i];
+		coeff_t c = mCoefficients[i];
 		return u*u*u*c.a + u*u*c.b + u*c.c + c.d + offset;
 	}
 
 	inline ExtrapolateMode extrapolate_in() const { return mExtrapolateIn; }
 	inline ExtrapolateMode extrapolate_out() const { return mExtrapolateOut; }
-	inline Keyframe Keyframe(uint32_t index) const { return mKeyframes[index]; }
-	inline Vector4f CurveCoefficient(uint32_t index) const { return mCoefficients[index]; }
+	inline keyframe_t keyframe(uint32_t index) const { return mKeyframes[index]; }
+	inline Vector4f coefficient(uint32_t index) const { return mCoefficients[index]; }
 
-	inline const vector<Coeff>& keyframes() const { return (uint32_t)mKeyframes; }
-	inline Keyframe& operator[](uint32_t index) {
-		return mKeyframes[index];
-	}
+	inline const vector<keyframe_t>& keyframes() const { return (uint32_t)mKeyframes; }
+	inline keyframe_t& operator[](uint32_t index) { return mKeyframes[index]; }
 
 private:
-	struct Coeff { T a, b, c, d; };
+	struct coeff_t { T a, b, c, d; };
 
 	ExtrapolateMode mExtrapolateIn  = ExtrapolateMode::eConstant;
 	ExtrapolateMode mExtrapolateOut = ExtrapolateMode::eConstant;
-	vector<Coeff> mCoefficients;
-	vector<Keyframe> mKeyframes;
+	vector<coeff_t> mCoefficients;
+	vector<keyframe_t> mKeyframes;
 };
 
 }

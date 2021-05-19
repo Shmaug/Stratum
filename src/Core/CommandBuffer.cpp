@@ -37,8 +37,6 @@ void CommandBuffer::end_label() {
 
 void CommandBuffer::clear() {
 	mHeldResources.clear();
-	mSignalSemaphores.clear();
-	mWaitSemaphores.clear();
 	mPrimitiveCount = 0;
 	mBoundFramebuffer.reset();
 	mSubpassIndex = 0;

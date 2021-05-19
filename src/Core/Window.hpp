@@ -5,7 +5,8 @@
 
 #ifdef WIN32
 #include <vulkan/vulkan_win32.h>
-#elif defined(__linux)
+#endif
+#ifdef __linux
 #include <xcb/xcb.h>
 #include <vulkan/vulkan_xcb.h>
 namespace x11 {
@@ -20,239 +21,238 @@ namespace stm {
 
 enum KeyCode {
 #ifdef WIN32
-	KEY_NONE = 0x00,
+	eNone = 0x00,
 
-	MOUSE_LEFT = 0x01,
-	MOUSE_RIGHT = 0x02,
-	KEY_CANCEL = 0x03,
-	MOUSE_MIDDLE = 0x04,
-	MOUSE_X1 = 0x05,
-	MOUSE_X2 = 0x06,
+	eMouse1 = VK_LBUTTON,
+	eMouse2 = VK_RBUTTON,
+	eMouse3 = VK_MBUTTON,
+	eMouse4 = VK_XBUTTON1,
+	eMouse5 = VK_XBUTTON2,
 
-	KEY_BACKSPACE = 0x08,
-	KEY_TAB = 0x09,
-	KEY_ENTER = 0x0d,
-	KEY_LOCK_CAPS = 0x14,
-	KEY_ESCAPE = 0x1b,
+	eCancel = VK_CANCEL,
+	
+	eKeyBackspace = VK_BACK,
+	eKeyTab = VK_TAB,
+	eKeyEnter = VK_RETURN,
+	eKeyCapsLock = VK_CAPITAL,
+	eKeyEscape = VK_ESCAPE,
 
-	KEY_SPACE = 0x20,
-	KEY_PAGEUP = 0x21,
-	KEY_PAGEDOWN = 0x22,
-	KEY_END = 0x23,
-	KEY_HOME = 0x24,
-	KEY_LEFT = 0x25,
-	KEY_UP = 0x26,
-	KEY_RIGHT = 0x27,
-	KEY_DOWN = 0x28,
-	KEY_PRINTSCREEN = 0x2c,
-	KEY_INSERT = 0X2d,
-	KEY_DELETE = 0X2e,
-	KEY_D0 = 0x30,
-	KEY_D1 = 0x31,
-	KEY_D2 = 0x32,
-	KEY_D3 = 0x33,
-	KEY_D4 = 0x34,
-	KEY_D5 = 0x35,
-	KEY_D6 = 0x36,
-	KEY_D7 = 0x37,
-	KEY_D8 = 0x38,
-	KEY_D9 = 0x39,
-	KEY_A = 0x41,
-	KEY_B = 0x42,
-	KEY_C = 0x43,
-	KEY_D = 0x44,
-	KEY_E = 0x45,
-	KEY_F = 0x46,
-	KEY_G = 0x47,
-	KEY_H = 0x48,
-	KEY_I = 0x49,
-	KEY_J = 0x4a,
-	KEY_K = 0x4b,
-	KEY_L = 0x4c,
-	KEY_M = 0x4d,
-	KEY_N = 0x4e,
-	KEY_O = 0x4f,
-	KEY_P = 0x50,
-	KEY_Q = 0x51,
-	KEY_R = 0x52,
-	KEY_S = 0x53,
-	KEY_T = 0x54,
-	KEY_U = 0x55,
-	KEY_V = 0x56,
-	KEY_W = 0x57,
-	KEY_X = 0x58,
-	KEY_Y = 0x59,
-	KEY_Z = 0x5a,
-	KEY_NUMPAD0 = 0x60,
-	KEY_NUMPAD1 = 0x61,
-	KEY_NUMPAD2 = 0x62,
-	KEY_NUMPAD3 = 0x63,
-	KEY_NUMPAD4 = 0x64,
-	KEY_NUMPAD5 = 0x65,
-	KEY_NUMPAD6 = 0x66,
-	KEY_NUMPAD7 = 0x67,
-	KEY_NUMPAD8 = 0x68,
-	KEY_NUMPAD9 = 0x69,
-	KEY_MULTIPLY = 0x6a,
-	KEY_ADD = 0x6b,
-	KEY_SEPARATOR = 0x6c,
-	KEY_SUBTRACT = 0x6d,
-	KEY_DECIMAL = 0x6e,
-	KEY_DIVIDE = 0x6f,
-	KEY_F1 = 0x70,
-	KEY_F2 = 0x71,
-	KEY_F3 = 0x72,
-	KEY_F4 = 0x73,
-	KEY_F5 = 0x74,
-	KEY_F6 = 0x75,
-	KEY_F7 = 0x76,
-	KEY_F8 = 0x77,
-	KEY_F9 = 0x78,
-	KEY_F10 = 0x79,
-	KEY_F11 = 0x7a,
-	KEY_F12 = 0x7b,
-	KEY_NUM_LOCK = 0x90,
-	KEY_SCROLL_LOCK = 0x91,
-	KEY_LSHIFT = 0xa0,
-	KEY_RSHIFT = 0xa1,
-	KEY_LCONTROL = 0xa2,
-	KEY_RCONTROL = 0xa3,
-	KEY_LALT = 0xa4,
-	KEY_RALT = 0xa5,
+	eKeySpace = VK_SPACE,
+	eKeyPageUp = VK_PRIOR,
+	eKeyPageDown = VK_NEXT,
+	eKeyEnd = VK_END,
+	eKeyHome = VK_HOME,
+	eKeyLeft = VK_LEFT,
+	eKeyUp = VK_UP,
+	eKeyRight = VK_RIGHT,
+	eKeyDown = VK_DOWN,
+	eKeyPrintScreen = VK_SNAPSHOT,
+	eKeyInsert = VK_INSERT,
+	eKeyDelete = VK_DELETE,
+	eKey0 = 0x30,
+	eKey1 = 0x31,
+	eKey2 = 0x32,
+	eKey3 = 0x33,
+	eKey4 = 0x34,
+	eKey5 = 0x35,
+	eKey6 = 0x36,
+	eKey7 = 0x37,
+	eKey8 = 0x38,
+	eKey9 = 0x39,
+	eKeyA = 0x41,
+	eKeyB = 0x42,
+	eKeyC = 0x43,
+	eKeyD = 0x44,
+	eKeyE = 0x45,
+	eKeyF = 0x46,
+	eKeyG = 0x47,
+	eKeyH = 0x48,
+	eKeyI = 0x49,
+	eKeyJ = 0x4a,
+	eKeyK = 0x4b,
+	eKeyL = 0x4c,
+	eKeyM = 0x4d,
+	eKeyN = 0x4e,
+	eKeyO = 0x4f,
+	eKeyP = 0x50,
+	eKeyQ = 0x51,
+	eKeyR = 0x52,
+	eKeyS = 0x53,
+	eKeyT = 0x54,
+	eKeyU = 0x55,
+	eKeyV = 0x56,
+	eKeyW = 0x57,
+	eKeyX = 0x58,
+	eKeyY = 0x59,
+	eKeyZ = 0x5a,
+	eKeyNumpad0 = VK_NUMPAD0,
+	eKeyNumpad1 = VK_NUMPAD1,
+	eKeyNumpad2 = VK_NUMPAD2,
+	eKeyNumpad3 = VK_NUMPAD3,
+	eKeyNumpad4 = VK_NUMPAD4,
+	eKeyNumpad5 = VK_NUMPAD5,
+	eKeyNumpad6 = VK_NUMPAD6,
+	eKeyNumpad7 = VK_NUMPAD7,
+	eKeyNumpad8 = VK_NUMPAD8,
+	eKeyNumpad9 = VK_NUMPAD9,
+	eKeyNumpadEnter = VK_SEPARATOR,
+	eKeyDecimal = VK_DECIMAL,
+	eKeyAdd = VK_ADD,
+	eKeySubtract = VK_SUBTRACT,
+	eKeyMultiply = VK_MULTIPLY,
+	eKeyDivide = VK_DIVIDE,
+	eKeyF1  = VK_F1,
+	eKeyF2  = VK_F2,
+	eKeyF3  = VK_F3,
+	eKeyF4  = VK_F4,
+	eKeyF5  = VK_F5,
+	eKeyF6  = VK_F6,
+	eKeyF7  = VK_F7,
+	eKeyF8  = VK_F8,
+	eKeyF9  = VK_F9,
+	eKeyF10 = VK_F10,
+	eKeyF11 = VK_F11,
+	eKeyF12 = VK_F12,
+	eKeyNumLock = VK_NUMLOCK,
+	eKeyScrollLock = VK_SCROLL,
+	eKeyShift = VK_SHIFT,
+	eKeyControl = VK_CONTROL,
+	eKeyAlt = VK_MENU,
 
-	KEY_SEMICOLON = 0xba, // Used for miscellaneous characters; it can vary by keyboard.  For the US standard keyboard, the ';:' key
-	KEY_EQUAL = 0xbb, // For any country/region, the '+' key
-	KEY_COMMA = 0xbc, // For any country/region, the ',' key
-	KEY_MINUS = 0xbd, // For any country/region, the '-' key
-	KEY_PERIOD = 0xbe, // For any country/region, the '.' key
-	KEY_SLASH = 0xbf, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the '/?' key
-	KEY_TILDE = 0xc0, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the '`~' key
-	KEY_BRACKET_L = 0xdb, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the '[{' key
-	KEY_BACKSLASH = 0xdc, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the '\|' key
-	KEY_BRACKET_R = 0xdd, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the ']}' key
-	KEY_QUOTE = 0xde, // Used for miscellaneous characters; it can vary by keyboard. For the US standard keyboard, the 'single-quote/double-quote' key
-#elif defined(__linux)
-	KEY_NONE = 0x0000,
+	eKeySemicolon = VK_OEM_1,
+	eKeyEqual = VK_OEM_PLUS,
+	eKeyComma = VK_OEM_COMMA,
+	eKeyMinus = VK_OEM_MINUS,
+	eKeyPeriod = VK_OEM_PERIOD,
+	eKeySlash = VK_OEM_2,
+	eKeyTilde = VK_OEM_3,
+	eKeyLBracket = VK_OEM_4,
+	eKeyRBracket = VK_OEM_6,
+	eKeyQuote = VK_OEM_7,
+	eKeyBackslash = VK_OEM_5,
+#endif
+#ifdef __linux
+	eNone = 0x0000,
 
-	MOUSE_LEFT = 0x001,
-	MOUSE_RIGHT = 0x002,
-	KEY_CANCEL = 0x003,
-	MOUSE_MIDDLE = 0x004,
-	MOUSE_X1 = 0x005,
-	MOUSE_X2 = 0x006,
+	eMouse1 = 0x001,
+	eMouse2 = 0x002,
+	eMouse3 = 0x003,
+	eMouse4 = 0x004,
+	eMouse5 = 0x005,
+	
+	eCancel = 0x006,
 
-	KEY_BACKSPACE = x11::XK_BackSpace,
-	KEY_TAB = x11::XK_Tab,
-	KEY_ENTER = x11::XK_Return,
-	KEY_LOCK_CAPS = x11::XK_Caps_Lock,
-	KEY_ESCAPE = x11::XK_Escape,
+	eKeyBackspace = x11::XK_BackSpace,
+	eKeyTab = x11::XK_Tab,
+	eKeyEnter = x11::XK_Return,
+	eKeyCapsLock = x11::XK_Caps_Lock,
+	eKeyEscape = x11::XK_Escape,
 
-	KEY_SPACE = x11::XK_space,
-	KEY_PAGEUP = x11::XK_Page_Up,
-	KEY_PAGEDOWN = x11::XK_Page_Down,
-	KEY_END = x11::XK_End,
-	KEY_HOME = x11::XK_Home,
-	KEY_LEFT = x11::XK_Left,
-	KEY_UP = x11::XK_Up,
-	KEY_RIGHT = x11::XK_Right,
-	KEY_DOWN = x11::XK_Down,
-	KEY_INSERT = x11::XK_Insert,
-	KEY_DELETE = x11::XK_Delete,
-	KEY_D0 = x11::XK_0,
-	KEY_D1 = x11::XK_1,
-	KEY_D2 = x11::XK_2,
-	KEY_D3 = x11::XK_3,
-	KEY_D4 = x11::XK_4,
-	KEY_D5 = x11::XK_5,
-	KEY_D6 = x11::XK_6,
-	KEY_D7 = x11::XK_7,
-	KEY_D8 = x11::XK_8,
-	KEY_D9 = x11::XK_9,
-	KEY_A = x11::XK_a,
-	KEY_B = x11::XK_b,
-	KEY_C = x11::XK_c,
-	KEY_D = x11::XK_d,
-	KEY_E = x11::XK_e,
-	KEY_F = x11::XK_f,
-	KEY_G = x11::XK_g,
-	KEY_H = x11::XK_h,
-	KEY_I = x11::XK_i,
-	KEY_J = x11::XK_j,
-	KEY_K = x11::XK_k,
-	KEY_L = x11::XK_l,
-	KEY_M = x11::XK_m,
-	KEY_N = x11::XK_n,
-	KEY_O = x11::XK_o,
-	KEY_P = x11::XK_p,
-	KEY_Q = x11::XK_q,
-	KEY_R = x11::XK_r,
-	KEY_S = x11::XK_s,
-	KEY_T = x11::XK_t,
-	KEY_U = x11::XK_u,
-	KEY_V = x11::XK_v,
-	KEY_W = x11::XK_w,
-	KEY_X = x11::XK_x,
-	KEY_Y = x11::XK_y,
-	KEY_Z = x11::XK_z,
-	KEY_NUMPAD0 = x11::XK_KP_Insert,
-	KEY_NUMPAD1 = x11::XK_KP_End,
-	KEY_NUMPAD2 = x11::XK_KP_Down,
-	KEY_NUMPAD3 = x11::XK_KP_Page_Down,
-	KEY_NUMPAD4 = x11::XK_KP_Left,
-	KEY_NUMPAD5 = x11::XK_KP_Begin,
-	KEY_NUMPAD6 = x11::XK_KP_Right,
-	KEY_NUMPAD7 = x11::XK_KP_Home,
-	KEY_NUMPAD8 = x11::XK_KP_Up,
-	KEY_NUMPAD9 = x11::XK_KP_Page_Up,
-	KEY_MULTIPLY = x11::XK_KP_Multiply,
-	KEY_ADD = x11::XK_KP_Add,
-	KEY_NUMPAD_ENTER = x11::XK_KP_Enter,
-	KEY_SUBTRACT = x11::XK_KP_Subtract,
-	KEY_DECIMAL = x11::XK_KP_Delete,
-	KEY_DIVIDE = x11::XK_KP_Divide,
-	KEY_F1 = x11::XK_F1,
-	KEY_F2 = x11::XK_F2,
-	KEY_F3 = x11::XK_F3,
-	KEY_F4 = x11::XK_F4,
-	KEY_F5 = x11::XK_F5,
-	KEY_F6 = x11::XK_F6,
-	KEY_F7 = x11::XK_F7,
-	KEY_F8 = x11::XK_F8,
-	KEY_F9 = x11::XK_F9,
-	KEY_F10 = x11::XK_F10,
-	KEY_F11 = x11::XK_F11,
-	KEY_F12 = x11::XK_F12,
-	KEY_NUM_LOCK = x11::XK_Num_Lock,
-	KEY_SCROLL_LOCK = x11::XK_Scroll_Lock,
-	KEY_LSHIFT = x11::XK_Shift_L,
-	KEY_RSHIFT = x11::XK_Shift_R,
-	KEY_LCONTROL = x11::XK_Control_L,
-	KEY_RCONTROL = x11::XK_Control_R,
-	KEY_LALT = x11::XK_Alt_L,
-	KEY_RALT = x11::XK_Alt_R,
+	eKeySpace = x11::XK_space,
+	eKeyPageUp = x11::XK_Page_Up,
+	eKeyPageDown = x11::XK_Page_Down,
+	eKeyEnd = x11::XK_End,
+	eKeyHome = x11::XK_Home,
+	eKeyLeft = x11::XK_Left,
+	eKeyUp = x11::XK_Up,
+	eKeyRight = x11::XK_Right,
+	eKeyDown = x11::XK_Down,
+	eKeyInsert = x11::XK_Insert,
+	eKeyDelete = x11::XK_Delete,
+	eKey0 = x11::XK_0,
+	eKey1 = x11::XK_1,
+	eKey2 = x11::XK_2,
+	eKey3 = x11::XK_3,
+	eKey4 = x11::XK_4,
+	eKey5 = x11::XK_5,
+	eKey6 = x11::XK_6,
+	eKey7 = x11::XK_7,
+	eKey8 = x11::XK_8,
+	eKey9 = x11::XK_9,
+	eKeyA = x11::XK_a,
+	eKeyB = x11::XK_b,
+	eKeyC = x11::XK_c,
+	eKeyD = x11::XK_d,
+	eKeyE = x11::XK_e,
+	eKeyF = x11::XK_f,
+	eKeyG = x11::XK_g,
+	eKeyH = x11::XK_h,
+	eKeyI = x11::XK_i,
+	eKeyJ = x11::XK_j,
+	eKeyK = x11::XK_k,
+	eKeyL = x11::XK_l,
+	eKeyM = x11::XK_m,
+	eKeyN = x11::XK_n,
+	eKeyO = x11::XK_o,
+	eKeyP = x11::XK_p,
+	eKeyQ = x11::XK_q,
+	eKeyR = x11::XK_r,
+	eKeyS = x11::XK_s,
+	eKeyT = x11::XK_t,
+	eKeyU = x11::XK_u,
+	eKeyV = x11::XK_v,
+	eKeyW = x11::XK_w,
+	eKeyX = x11::XK_x,
+	eKeyY = x11::XK_y,
+	eKeyZ = x11::XK_z,
+	eKeyNumpad0 = x11::XK_KP_Insert,
+	eKeyNumpad1 = x11::XK_KP_End,
+	eKeyNumpad2 = x11::XK_KP_Down,
+	eKeyNumpad3 = x11::XK_KP_Page_Down,
+	eKeyNumpad4 = x11::XK_KP_Left,
+	eKeyNumpad5 = x11::XK_KP_Begin,
+	eKeyNumpad6 = x11::XK_KP_Right,
+	eKeyNumpad7 = x11::XK_KP_Home,
+	eKeyNumpad8 = x11::XK_KP_Up,
+	eKeyNumpad9 = x11::XK_KP_Page_Up,
+	eKeyNumpadEnter = x11::XK_KP_Enter,
+	eKeyDecimal = x11::XK_KP_Delete,
+	eKeyAdd = x11::XK_KP_Add,
+	eKeySubtract = x11::XK_KP_Subtract,
+	eKeyMultiply = x11::XK_KP_Multiply,
+	eKeyDivide = x11::XK_KP_Divide,
+	eKeyF1 = x11::XK_F1,
+	eKeyF2 = x11::XK_F2,
+	eKeyF3 = x11::XK_F3,
+	eKeyF4 = x11::XK_F4,
+	eKeyF5 = x11::XK_F5,
+	eKeyF6 = x11::XK_F6,
+	eKeyF7 = x11::XK_F7,
+	eKeyF8 = x11::XK_F8,
+	eKeyF9 = x11::XK_F9,
+	eKeyF10 = x11::XK_F10,
+	eKeyF11 = x11::XK_F11,
+	eKeyF12 = x11::XK_F12,
+	eKeyNumLock = x11::XK_Num_Lock,
+	eKeyScrollLock = x11::XK_Scroll_Lock,
+	eKeyLShift = x11::XK_Shift_L,
+	eKeyRShift = x11::XK_Shift_R,
+	eKeyLControl = x11::XK_Control_L,
+	eKeyRControl = x11::XK_Control_R,
+	eKeyLAlt = x11::XK_Alt_L,
+	eKeyRAlt = x11::XK_Alt_R,
 
-	KEY_SEMICOLON = x11::XK_semicolon,
-	KEY_EQUAL = x11::XK_equal,
-	KEY_COMMA = x11::XK_comma,
-	KEY_MINUS = x11::XK_minus,
-	KEY_PERIOD = x11::XK_period,
-	KEY_SLASH = x11::XK_slash,
-	KEY_TILDE = x11::XK_grave,
-	KEY_BRACKET_L = x11::XK_bracketleft,
-	KEY_BRACKET_R = x11::XK_bracketright,
-	KEY_QUOTE = x11::XK_quotedbl,
-	KEY_BACKSLASH = x11::XK_backslash,
+	eKeySemicolon = x11::XK_semicolon,
+	eKeyEqual = x11::XK_equal,
+	eKeyComma = x11::XK_comma,
+	eKeyMinus = x11::XK_minus,
+	eKeyPeriod = x11::XK_period,
+	eKeySlash = x11::XK_slash,
+	eKeyTilde = x11::XK_grave,
+	eKeyLBracket = x11::XK_bracketleft,
+	eKeyRBracket = x11::XK_bracketright,
+	eKeyQuote = x11::XK_quotedbl,
+	eKeyBackslash = x11::XK_backslash,
 #endif
 };
 
 class MouseKeyboardState : public InputState {
+private:
+	Vector2f mCursorPos;
+	Vector2f mCursorDelta;
+	float mScrollDelta;
+	unordered_set<KeyCode> mButtons;
 public:
-	Vector2f mCursorPos = Vector2f::Zero();
-	Vector2f mCursorDelta = Vector2f::Zero();
-	float mScrollDelta = 0;
-	unordered_set<KeyCode> mKeys;
-	bool mLockMouse = false;
-
 	MouseKeyboardState(const MouseKeyboardState& ms) = default;
 	MouseKeyboardState(MouseKeyboardState&& ms) = default;
 	inline MouseKeyboardState() : InputState("MouseKeyboard") {};
@@ -260,10 +260,34 @@ public:
 		mCursorPos = rhs.mCursorPos;
 		mCursorDelta = rhs.mCursorDelta;
 		mScrollDelta = rhs.mScrollDelta;
-		mKeys = rhs.mKeys;
-		mLockMouse = rhs.mLockMouse;
+		mButtons = rhs.mButtons;
 		return *this;
 	};
+	
+	inline void clear_deltas() {
+		mCursorDelta = Vector2f::Zero();
+		mScrollDelta = 0;
+	}
+	inline void add_cursor_delta(const Vector2f& delta) {
+		mCursorDelta += delta;
+	}
+	inline void add_scroll_delta(float delta) {
+		mScrollDelta += delta;
+	}
+	inline Vector2f& cursor_pos() { return mCursorPos; }
+
+	inline const Vector2f& cursor_pos() const { return mCursorPos; }
+	inline const Vector2f& cursor_delta() const { return mCursorDelta; }
+	inline float scroll_delta() const { return mScrollDelta; }
+	inline bool pressed(KeyCode key) const {
+		return mButtons.count(key);
+	}
+	inline void set_button(KeyCode key) {
+		mButtons.emplace(key);
+	}
+	inline void unset_button(KeyCode key) {
+		mButtons.erase(key);
+	}
 };
 
 class Window {
@@ -296,7 +320,8 @@ public:
 
 #ifdef WIN32
 	inline HWND handle() const { return mHwnd; }
-#elif defined(__linux)
+#endif
+#ifdef __linux
 	inline xcb_window_t handle() const { return mXCBWindow; }
 #endif
 
@@ -312,14 +337,16 @@ public:
 	inline bool lock_mouse() const { return mLockMouse; }
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
-	inline Vector2f cursor_pos() const { return mInputState.mCursorPos; }
-	inline Vector2f cursor_pos_last() const { return mInputStateLast.mCursorPos; }
-	inline Vector2f cursor_delta() const { return mInputState.mCursorDelta; }
-	inline float scroll_delta() const { return mInputState.mScrollDelta; }
-	inline bool is_key_down(KeyCode key) const { return mInputState.mKeys.count(key); }
-	inline bool is_key_up(KeyCode key) const { return !mInputState.mKeys.count(key); }
-	inline bool is_key_down_redge(KeyCode key) const { return mInputState.mKeys.count(key) && !mInputStateLast.mKeys.count(key); }
-	inline bool is_key_up_redge(KeyCode key) const { return mInputStateLast.mKeys.count(key) && !mInputState.mKeys.count(key); }
+	// position reported by the OS
+	inline const Vector2f& cursor_pos() const { return mInputState.cursor_pos(); }
+	inline const Vector2f& cursor_pos_last() const { return mInputStateLast.cursor_pos(); }
+	// Note that cursor_delta != cursor_pos_last - cursor_pos, as cursor_delta comes from raw input
+	inline const Vector2f& cursor_delta() const { return mInputState.cursor_delta(); }
+	inline float scroll_delta() const { return mInputState.scroll_delta(); }
+	inline bool pressed(KeyCode key) const { return mInputState.pressed(key); }
+	inline bool released(KeyCode key) const { return !mInputState.pressed(key); }
+	inline bool pressed_redge(KeyCode key) const { return mInputState.pressed(key) && !mInputStateLast.pressed(key); }
+	inline bool released_redge(KeyCode key) const { return mInputStateLast.pressed(key) && !mInputState.pressed(key); }
 
 	inline Vector2f clip_to_window(const Vector2f& clip) const {
 		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
@@ -331,8 +358,6 @@ public:
 	}
 
 private:
-	friend class Instance;
-
 	STRATUM_API void create_swapchain(CommandBuffer& commandBUffer);
 	STRATUM_API void destroy_swapchain();
 	
@@ -353,20 +378,23 @@ private:
 	vk::Rect2D mClientRect;
 	string mTitle;
 
-	MouseKeyboardState mInputState = {};
-	MouseKeyboardState mInputStateLast = {};
+	MouseKeyboardState mInputState;
+	MouseKeyboardState mInputStateLast;
 	bool mLockMouse = false;
 
 #ifdef WIN32
-	HWND mHwnd = 0;
+	friend class Instance;
+	HWND mHwnd = NULL;
 	RECT mWindowedRect;
-#elif defined(__linux)
-	xcb_connection_t* mXCBConnection = nullptr;
-	xcb_screen_t* mXCBScreen = nullptr;
+	STRATUM_API void handle_message(UINT message, WPARAM wParam, LPARAM lParam);
+#endif
+#ifdef __linux
 	xcb_window_t mXCBWindow;
 	xcb_atom_t mXCBProtocols;
 	xcb_atom_t mXCBDeleteWin;
 	vk::Rect2D mWindowedRect;
+	STRATUM_API void process_event(xcb_generic_event_t* event);
+	STRATUM_API xcb_generic_event_t* poll_event();
 #endif
 };
 

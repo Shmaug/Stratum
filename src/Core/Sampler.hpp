@@ -17,6 +17,9 @@ public:
 	inline ~Sampler() {
 		mDevice->destroySampler(mSampler);
 	}
+
+	inline vk::Sampler& operator*() { return mSampler; }
+	inline vk::Sampler* operator->() { return &mSampler; }
 	inline const vk::Sampler& operator*() const { return mSampler; }
 	inline const vk::Sampler* operator->() const { return &mSampler; }
 

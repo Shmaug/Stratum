@@ -8,17 +8,20 @@ using RenderAttachmentId = string;
 
 class RenderPass : public DeviceResource {
 public:
-	enum AttachmentType {
-		eInput,
-		eColor,
-		eResolve,
-		eDepthStencil,
-		ePreserve
+	enum AttachmentTypeFlags {
+		eInput = 1,
+		eColor = 2,
+		eResolve = 4,
+		eDepthStencil = 8,
+		ePreserve = 16
 	};
+
 	struct SubpassDescription {
+	public:
+		using AttachmentInfo = tuple<AttachmentTypeFlags, vk::PipelineColorBlendAttachmentState, vk::AttachmentDescription>;
 	private:
 		vk::PipelineBindPoint mBindPoint;
-		unordered_map<RenderAttachmentId, tuple<AttachmentType, vk::AttachmentDescription, vk::PipelineColorBlendAttachmentState>> mAttachmentDescriptions;
+		unordered_map<RenderAttachmentId, AttachmentInfo> mAttachmentDescriptions;
 	public:
 		inline void bind_point(const vk::PipelineBindPoint& bindPoint) { mBindPoint = bindPoint; }
 		inline const auto& bind_point() const { return mBindPoint; }
@@ -38,7 +41,7 @@ public:
 	inline RenderPass(Device& device, const string& name, const R& subpassDescriptions)
 		: DeviceResource(device, name), mSubpassDescriptions(subpassDescriptions) {
 
-		mHash = hash_combine(mSubpassDescriptions);
+		mHash = 0;
 		
 		struct SubpassData {
 			vector<vk::AttachmentReference> mInputAttachments;
@@ -54,6 +57,8 @@ public:
 
 		for (uint32_t i = 0; i < subpasses.size(); i++) {
 			auto& sd = subpassData[i];
+
+			mHash = hash_combine(mHash, hash_args(subpassDescriptions[i].bind_point(), subpassDescriptions[i].attachments()));
 
 			for (const auto& [attachmentName,attachmentData] : mSubpassDescriptions[i].attachments()) {
 				uint32_t attachmentIndex;
@@ -71,20 +76,20 @@ public:
 					mAttachmentDescriptions.emplace_back(make_pair(vkdesc, attachmentName));
 					attachments.emplace_back(vkdesc);
 				}
-				switch (get<AttachmentType>(attachmentData)) {
-					case AttachmentType::eColor:
+				switch (get<AttachmentTypeFlags>(attachmentData)) {
+					case AttachmentTypeFlags::eColor:
 						sd.mColorAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
-					case AttachmentType::eDepthStencil:
+					case AttachmentTypeFlags::eDepthStencil:
 						sd.mDepthAttachment = vk::AttachmentReference(attachmentIndex, vkdesc.initialLayout);
 						break;
-					case AttachmentType::eResolve:
+					case AttachmentTypeFlags::eResolve:
 						sd.mResolveAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
-					case AttachmentType::eInput:
+					case AttachmentTypeFlags::eInput:
 						sd.mInputAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
-					case AttachmentType::ePreserve:
+					case AttachmentTypeFlags::ePreserve:
 						sd.mPreserveAttachments.emplace_back(attachmentIndex);
 						break;
 				}
@@ -94,8 +99,8 @@ public:
 				uint32_t srcSubpass = i;
 				for (int32_t j = i - 1; j >= 0; j--)
 					if (mSubpassDescriptions[j].count(attachmentName)) {
-						AttachmentType t = get<AttachmentType>(mSubpassDescriptions[j].at(attachmentName));
-						if (t == AttachmentType::eColor || t == AttachmentType::eDepthStencil || t == AttachmentType::eResolve) {
+						AttachmentTypeFlags t = get<AttachmentTypeFlags>(mSubpassDescriptions[j].at(attachmentName));
+						if (t == AttachmentTypeFlags::eColor || t == AttachmentTypeFlags::eDepthStencil || t == AttachmentTypeFlags::eResolve) {
 							srcSubpass = j;
 							break;
 						}
@@ -105,20 +110,20 @@ public:
 					const auto& srcAttachment = mSubpassDescriptions[srcSubpass].at(attachmentName);
 					vk::SubpassDependency dep(srcSubpass, i);
 					dep.dependencyFlags =  vk::DependencyFlagBits::eByRegion;
-					switch (get<AttachmentType>(srcAttachment)) {
-					case AttachmentType::eColor:
+					switch (get<AttachmentTypeFlags>(srcAttachment)) {
+					case AttachmentTypeFlags::eColor:
 						dep.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
 							throw invalid_argument("Color attachment " + attachmentName + " must use vk::AttachmentStoreOp::eStore");
 						break;
-					case AttachmentType::eDepthStencil:
+					case AttachmentTypeFlags::eDepthStencil:
 						dep.srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
 							throw invalid_argument("DepthStencil attachment " + attachmentName + " must use vk::AttachmentStoreOp::eStore");
 						break;
-					case AttachmentType::eResolve:
+					case AttachmentTypeFlags::eResolve:
 						dep.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 						dep.srcStageMask = vk::PipelineStageFlagBits::eTransfer;
 						if (get<vk::AttachmentDescription>(srcAttachment).storeOp != vk::AttachmentStoreOp::eStore)
@@ -127,24 +132,24 @@ public:
 					default:
 						throw invalid_argument("Attachment " + attachmentName + " cannot act as a dependency source");
 					}
-					switch (get<AttachmentType>(attachmentData)) {
-						case AttachmentType::eColor:
+					switch (get<AttachmentTypeFlags>(attachmentData)) {
+						case AttachmentTypeFlags::eColor:
 							dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
 							dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 							break;
-						case AttachmentType::eDepthStencil:
+						case AttachmentTypeFlags::eDepthStencil:
 							dep.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
 							dep.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests;
 							break;
-						case AttachmentType::eResolve:
+						case AttachmentTypeFlags::eResolve:
 							dep.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 							dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 							break;
-						case AttachmentType::eInput:
+						case AttachmentTypeFlags::eInput:
 							dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 							dep.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader;
 							break;
-						case AttachmentType::ePreserve:
+						case AttachmentTypeFlags::ePreserve:
 							dep.dstAccessMask = vk::AccessFlagBits::eShaderRead;
 							dep.dstStageMask = vk::PipelineStageFlagBits::eTopOfPipe;
 							break;
@@ -169,12 +174,14 @@ public:
 		mDevice->destroyRenderPass(mRenderPass);
 	}
 
+	inline vk::RenderPass& operator*() { return mRenderPass; }
+	inline vk::RenderPass* operator->() { return &mRenderPass; }
 	inline const vk::RenderPass& operator*() const { return mRenderPass; }
 	inline const vk::RenderPass* operator->() const { return &mRenderPass; }
 
 	inline const auto& subpasses() const { return mSubpassDescriptions; }
 	inline const auto& attachments() const { return mAttachmentDescriptions; }
-	inline uint32_t find(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
+	inline uint32_t attachment_index(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
 
 private:
  	friend class CommandBuffer;
@@ -189,16 +196,14 @@ private:
 	size_t mHash;
 };
 
-template<> struct tuplefier<stm::RenderPass::SubpassDescription> {
-	inline auto operator()(stm::RenderPass::SubpassDescription&& rhs) const {
-		return forward_as_tuple(rhs.bind_point(), rhs.attachments());
-	}
-};
-
 }
 
 namespace std {
+
 template<> struct hash<stm::RenderPass> {
-	inline size_t operator()(const stm::RenderPass& rp) { return rp.mHash; }
+	inline size_t operator()(const stm::RenderPass& rp) {
+		return rp.mHash;
+	}
 };
+
 }

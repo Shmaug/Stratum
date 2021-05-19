@@ -3,7 +3,7 @@
 #include "Fence.hpp"
 #include "Framebuffer.hpp"
 #include "Pipeline.hpp"
-#include "Profiler.hpp"
+#include "../Common/Profiler.hpp"
 
 namespace stm {
 
@@ -13,20 +13,23 @@ public:
 	STRATUM_API CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	inline ~CommandBuffer() {
 		if (mState == CommandBufferState::eInFlight)
-			fprintf_color(ConsoleColorBits::eYellow, stderr, "destroying CommandBuffer %s that is in-flight\n", name().c_str());
+			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Destroying CommandBuffer [%s] that is in-flight!\n", name().c_str());
 		clear();
 		mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 	}
 
+	inline vk::CommandBuffer& operator*() { return mCommandBuffer; }
+	inline vk::CommandBuffer* operator->() { return &mCommandBuffer; }
 	inline const vk::CommandBuffer& operator*() const { return mCommandBuffer; }
 	inline const vk::CommandBuffer* operator->() const { return &mCommandBuffer; }
 
 	inline Fence& completion_fence() const { return *mCompletionFence; }
-	inline Device::QueueFamily* QueueFamily() const { return mQueueFamily; }
+	inline Device::QueueFamily* queue_family() const { return mQueueFamily; }
 	
 	inline shared_ptr<Framebuffer> bound_framebuffer() const { return mBoundFramebuffer; }
 	inline uint32_t subpass_index() const { return mSubpassIndex; }
 	inline shared_ptr<Pipeline> bound_pipeline() const { return mBoundPipeline; }
+	inline shared_ptr<DescriptorSet> bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
 
 	// Label a region for a tool such as RenderDoc
 	STRATUM_API void begin_label(const string& label, const Vector4f& color = { 1,1,1,0 });
@@ -34,31 +37,32 @@ public:
 
 	STRATUM_API void reset(const string& name = "Command Buffer");
 
-	// cause a stage to delay execution until waitSemaphore signals
-	inline void wait_semaphore(vk::PipelineStageFlags stage, Semaphore& waitSemaphore) { mWaitSemaphores.emplace_back(stage, forward<Semaphore&>(waitSemaphore)); }
-	inline void signal_semaphore(vk::PipelineStageFlags, const shared_ptr<Semaphore>& semaphore) { mSignalSemaphores.emplace_back(semaphore); };
-
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
 	inline T& hold_resource(const shared_ptr<T>& r) {
-		return *static_cast<T*>(mHeldResources.emplace(static_pointer_cast<DeviceResource>(r)).first->get());
+		return *static_cast<T*>(mHeldResources.emplace( static_pointer_cast<DeviceResource>(r) ).first->get());
 	}
 	template<typename T>
 	inline const Buffer::View<T>& hold_resource(const Buffer::View<T>& v) {
-		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
+		hold_resource(v.buffer_ptr());
 		return v;
 	}
 	inline const Buffer::TexelView& hold_resource(const Buffer::TexelView& v) {
-		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
+		hold_resource(v.buffer_ptr());
 		return v;
 	}
 	inline const Buffer::StrideView& hold_resource(const Buffer::StrideView& v) {
-		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.buffer_ptr()));
+		hold_resource(v.buffer_ptr());
 		return v;
 	}
 	inline const Texture::View& hold_resource(const Texture::View& v) {
-		mHeldResources.emplace(static_pointer_cast<DeviceResource>(v.texture_ptr()));
+		hold_resource(v.texture_ptr());
 		return v;
+	}
+
+	template<derived_from<DeviceResource> T, typename...Args> requires(constructible_from<T,Args...>)
+	inline auto& hold_resource(Args&&...args) {
+		return hold_resource(make_shared<T>(forward<Args>(args)...));
 	}
 
 	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& b) {
@@ -94,37 +98,43 @@ public:
 
 	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
 	inline void transition_images(T&... sets) {
-		(sets.FlushWrites(), ...);
 		auto fn = [&](auto& descriptorSet) {
-			for (auto&[idx, entry] : descriptorSet.mBoundDescriptors) {
+			for (auto&[idx, entry] : descriptorSet.mDescriptors)
 				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
 					case vk::DescriptorType::eCombinedImageSampler:
 					case vk::DescriptorType::eInputAttachment:
 					case vk::DescriptorType::eSampledImage:
-					case vk::DescriptorType::eStorageImage: {
+					case vk::DescriptorType::eStorageImage:
 						get<Texture::View>(entry).texture().transition_barrier(*this, get<vk::ImageLayout>(entry));
 						break;
-					}
 				}
-			}
 		};
+		(sets.flush_writes(), ...);
 		(fn(sets), ...);
 	}
 
-	template<typename T, typename S>
+	template<typename T = byte, typename S = T>
 	inline const Buffer::View<S>& copy_buffer(const Buffer::View<T>& src, const Buffer::View<S>& dst) {
 		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must be the same size");
 		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst.buffer_ptr()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
-	}
-
-	template<typename T>
-	inline Buffer::View<T> copy_buffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
-		auto dst = make_shared<Buffer>(mDevice, src.buffer().name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
-		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
 		return dst;
 	}
 
-	inline Texture::View copy_image(const Texture::View& src, const Texture::View& dst, uint32_t level = 0) {
+	template<typename T = byte>
+	inline Buffer::View<T> copy_buffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
+		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer().name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
+		return Buffer::View<T>(dst);
+	}
+	
+	template<typename T = byte>
+	inline Buffer::View<T> copy_buffer(const buffer_vector<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
+		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer()->name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst), { vk::BufferCopy(0, 0, src.size_bytes()) });
+		return Buffer::View<T>(dst);
+	}
+
+	inline const Texture::View& copy_image(const Texture::View& src, const Texture::View& dst, uint32_t level = 0) {
 		vector<vk::ImageCopy> copies;
 		if (level == 0) {
 			copies.resize(src.subresource_range().levelCount);
@@ -160,14 +170,15 @@ public:
 	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void end_render_pass();
 
-	inline void bind_pipeline(shared_ptr<Pipeline> pipeline) {
-		if (mBoundPipeline == pipeline) return;
+	inline bool bind_pipeline(shared_ptr<Pipeline> pipeline) {
+		if (mBoundPipeline == pipeline) return false;
 		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
 		mBoundDescriptorSets.clear(); // TODO: do descriptorsets need to be cleared?
 		mBoundVertexBuffers.clear();
 		mBoundIndexBuffer = {};
 		hold_resource(pipeline);
+		return true;
 	}
 	
 	template<typename T>
@@ -184,25 +195,20 @@ public:
 			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, &value);
 		}
 	}
-
-	template<ranges::range R> requires(is_same_v<shared_ptr<DescriptorSet>, ranges::range_value_t<R>>)
-	inline void bind_descriptor_sets(uint32_t index, R&& descriptorSets) {
+	
+	inline void bind_descriptor_set(uint32_t index, shared_ptr<DescriptorSet> descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets = {}) {
 		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
+		hold_resource(descriptorSet);
+		
 		vector<vk::DescriptorSet> sets;
-		vector<uint32_t> dynamicOffsets;
-		for (const shared_ptr<DescriptorSet>& descriptorSet : descriptorSets) {
-			descriptorSet->FlushWrites();
-			hold_resource(descriptorSet);
-			if (!mBoundFramebuffer) transition_images(*descriptorSet);
+		vector<uint32_t> offsets;
+		descriptorSet->flush_writes();
+		if (!mBoundFramebuffer) transition_images(*descriptorSet);
 
-			if (index + sets.size() >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + sets.size() + 1);
-			mBoundDescriptorSets[index + sets.size()] = descriptorSet;
-			sets.emplace_back(**descriptorSet);
-		}
-		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, sets, dynamicOffsets);
-	}
-	inline void bind_descriptor_set(uint32_t index, shared_ptr<DescriptorSet> descriptorSet) {
-		bind_descriptor_sets(index, span(&descriptorSet,1));
+		if (index + sets.size() >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + sets.size() + 1);
+		mBoundDescriptorSets[index + sets.size()] = descriptorSet;
+		sets.emplace_back(**descriptorSet);
+		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
 	}
 
 	template<typename T>
@@ -233,9 +239,9 @@ public:
 		if (mBoundIndexBuffer != view) {
 			mBoundIndexBuffer = view;
 			vk::IndexType type;
-			if      (view.stride() == sizeof(uint32_t)) type = vk::IndexType::eUint32;
-			else if (view.stride() == sizeof(uint16_t)) type = vk::IndexType::eUint16;
-			else if (view.stride() == sizeof(uint8_t))  type = vk::IndexType::eUint8EXT;
+			if      (view.stride() == sizeof(uint32_t)) type = vk::IndexTypeValue<uint32_t>::value;
+			else if (view.stride() == sizeof(uint16_t)) type = vk::IndexTypeValue<uint16_t>::value;
+			else if (view.stride() == sizeof(uint8_t))  type = vk::IndexTypeValue<uint8_t>::value;
 			else throw invalid_argument("invalid stride for index buffer");
 			mCommandBuffer.bindIndexBuffer(*view.buffer(), view.offset(), type);
 		}
@@ -269,9 +275,6 @@ private:
 	CommandBufferState mState;
 	
 	unique_ptr<Fence> mCompletionFence;
-
-	vector<shared_ptr<Semaphore>> mSignalSemaphores;
-	vector<pair<vk::PipelineStageFlags, Semaphore&>> mWaitSemaphores;
 
 	unordered_set<shared_ptr<DeviceResource>> mHeldResources;
 

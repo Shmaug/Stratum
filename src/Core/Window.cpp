@@ -35,9 +35,9 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	GetClientRect(mHwnd, &cr);
 	mClientRect.offset = vk::Offset2D((int32_t)cr.top, (int32_t)cr.left);
 	mClientRect.extent = vk::Extent2D((uint32_t)(cr.right - cr.left), (uint32_t)(cr.bottom - cr.top));
+	#endif
 
-	#elif defined(__linux)
-
+	#ifdef __linux
 	xcbConnection = mInstance.XCBConnection();
 	xcbScreen = mInstance->XCBScreen();
 	mXCBWindow = xcb_generate_id(xcbConnection);
@@ -85,7 +85,6 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	info.connection = xcbConnection;
 	info.window = mXCBWindow;
 	mSurface = mInstance->vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface);
-
 	#endif
 }
 Window::~Window() {
@@ -93,7 +92,8 @@ Window::~Window() {
 	mInstance->destroySurfaceKHR(mSurface);
 
 #ifdef WIN32
-	::DestroyWindow(mHwnd);
+	if (mHwnd)
+		DestroyWindow(mHwnd);
 #elif defined(__linux)
 	if (mInstance.XCBConnection() && mXCBWindow)
  		xcb_destroy_window(mInstance.XCBConnection(), mXCBWindow);
@@ -102,15 +102,18 @@ Window::~Window() {
 
 const Texture::View& Window::acquire_image(CommandBuffer& commandBuffer) {
 	ProfilerRegion ps("Window::acquire_image", commandBuffer);
-	if (!mSwapchain) create_swapchain(commandBuffer);
 	
+	if (!mSwapchain) {
+		create_swapchain(commandBuffer);
+		if (!mSwapchain) Texture::View();
+	}
+
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
 
 	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
-		create_swapchain(commandBuffer);
-		if (!mSwapchain) return Texture::View(); // swapchain failed to create (happens when window is minimized, etc)
-		result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
+		destroy_swapchain();
+		return Texture::View(); // swapchain failed to create (happens when window is minimized, etc)
 	}
 	mBackBufferIndex = result.value;
 	return back_buffer();
@@ -122,15 +125,6 @@ void Window::present(const vector<vk::Semaphore>& waitSemaphores) {
 	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, swapchains, imageIndices));
 	mPresentCount++;
 }
-
-#ifdef __linux
-xcb_atom_t getReplyAtomFromCookie(xcb_connection_t* connection, xcb_intern_atom_cookie_t cookie) {
-	xcb_generic_error_t * error;
-	xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection, cookie, &error);
-	if (error) throw runtime_error("Could not set XCB screen: %d" + to_string(error->error_code));
-	return reply->atom;
-}
-#endif
 
 void Window::resize(uint32_t w, uint32_t h) {
 #ifdef WIN32
@@ -149,7 +143,6 @@ void Window::resize(uint32_t w, uint32_t h) {
 
 void Window::fullscreen(bool fs) {
 	#ifdef WIN32
-	
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
 
@@ -183,9 +176,9 @@ void Window::fullscreen(bool fs) {
 
 		mFullscreen = false;
 	}
+	#endif
 
-	#elif defined(__linux)
-
+	#ifdef __linux
 	if (fs == mFullscreen) return;
 	mFullscreen = fs;
 
@@ -255,7 +248,7 @@ void Window::create_swapchain(CommandBuffer& commandBuffer) {
 	createInfo.clipped = VK_TRUE;
 	mSwapchain = (*mSwapchainDevice)->createSwapchainKHR(createInfo);
 	mSwapchainDevice->set_debug_name(mSwapchain, "Window/Swapchain");
-
+	
 	// get the back buffers
 	vector<vk::Image> images = (*mSwapchainDevice)->getSwapchainImagesKHR(mSwapchain);
 	mSwapchainImages.resize(images.size());
@@ -294,3 +287,148 @@ void Window::lock_mouse(bool l) {
 
 	mLockMouse = l;
 }
+
+#ifdef WIN32
+void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
+	byte_blob lpb;
+	switch (message) {
+	case WM_DESTROY:
+	case WM_QUIT:
+		mHwnd = NULL;
+		break;
+	case WM_SIZE:
+	case WM_MOVE: {
+		RECT cr;
+		GetClientRect(mHwnd, &cr);
+		mClientRect.offset = vk::Offset2D( (int32_t)cr.top, (int32_t)cr.left );
+		mClientRect.extent = vk::Extent2D( (uint32_t)((int32_t)cr.right - (int32_t)cr.left), (uint32_t)((int32_t)cr.bottom - (int32_t)cr.top) );
+		break;
+	}
+	case WM_INPUT: {
+		uint32_t dwSize = 0;
+		GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
+		lpb.resize(dwSize);
+		if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, lpb.data(), &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) break;
+		const RAWINPUT& raw = *reinterpret_cast<const RAWINPUT*>(lpb.data());
+		if (raw.header.dwType == RIM_TYPEMOUSE) {
+			mInputState.add_cursor_delta(Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY));
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mInputState.set_button  (KeyCode::eMouse1);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mInputState.unset_button(KeyCode::eMouse1);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mInputState.set_button  (KeyCode::eMouse2);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mInputState.unset_button(KeyCode::eMouse2);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mInputState.set_button  (KeyCode::eMouse3);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mInputState.unset_button(KeyCode::eMouse3);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mInputState.set_button  (KeyCode::eMouse4);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mInputState.unset_button(KeyCode::eMouse4);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mInputState.set_button  (KeyCode::eMouse5);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mInputState.unset_button(KeyCode::eMouse5);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mInputState.add_scroll_delta((float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA);
+			if (mLockMouse) {
+				RECT rect;
+				GetWindowRect(mHwnd, &rect);
+				SetCursorPos((rect.right + rect.left) / 2, (rect.bottom + rect.top) / 2);
+			}
+		}
+		if (raw.header.dwType == RIM_TYPEKEYBOARD) {
+			USHORT key = raw.data.keyboard.VKey;
+			if (key == VK_LMENU || key == VK_RMENU) key = VK_MENU;
+			else if (key == VK_LCONTROL || key == VK_RCONTROL) key = VK_CONTROL;
+			else if (key == VK_LSHIFT || key == VK_RSHIFT) key = VK_SHIFT;
+			
+			if (raw.data.keyboard.Flags & RI_KEY_BREAK)
+				mInputState.unset_button((KeyCode)key);
+			else {
+				mInputState.set_button((KeyCode)key);
+				if (key == KeyCode::eKeyEnter && mInputState.pressed(KeyCode::eKeyAlt))
+					fullscreen(!fullscreen());
+			}
+		}
+		POINT pt;
+		GetCursorPos(&pt);
+		ScreenToClient(mHwnd, &pt);
+		mInputState.cursor_pos() = Vector2f((float)pt.x, (float)pt.y);
+		break;
+	}
+	}
+}
+#endif
+
+#ifdef __linux
+bool Window::process_event(xcb_generic_event_t* event) {
+	xcb_motion_notify_event_t* mn = (xcb_motion_notify_event_t*)event;
+	xcb_resize_request_event_t* rr = (xcb_resize_request_event_t*)event;
+	xcb_button_press_event_t* bp = (xcb_button_press_event_t*)event;
+	xcb_key_press_event_t* kp = (xcb_key_press_event_t*)event;
+	xcb_key_release_event_t* kr = (xcb_key_release_event_t*)event;
+	xcb_client_message_event_t* cm = (xcb_client_message_event_t*)event;
+
+	KeyCode kc;
+
+	switch (event->response_type & ~0x80) {
+	case XCB_MOTION_NOTIFY:
+		if (mn->same_screen)
+			mInputState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
+		break;
+
+	case XCB_KEY_PRESS:
+		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
+		mInputState.mButtons.emplace(kc);
+		if (kc == KeyCode::eKeyEnter && (mInputState.pressed(KeyCode::eKeyLAlt) || mInputState.pressed(KeyCode::eKeyRAlt)))
+			fullscreen(!fullscreen());
+		break;
+	case XCB_KEY_RELEASE:
+		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
+		mInputState.mButtons.erase(kc);
+		break;
+
+	case XCB_BUTTON_PRESS:
+		if (bp->detail == 4){
+			mInputState.mScrollDelta += 1.0f;
+			break;
+		}
+		if (bp->detail == 5){
+			mInputState.mScrollDelta =- 1.0f;
+			break;
+		}
+	case XCB_BUTTON_RELEASE:
+		switch (bp->detail){
+		case 1:
+			mInputState.mButtons[KeyCode::eMouse1] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboard->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			break;
+		case 2:
+			mInputState.mButtons[KeyCode::eMouse3] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			break;
+		case 3:
+			mInputState.mButtons[KeyCode::eMouse2] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			mMouseKeyboard->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			break;
+		}
+		break;
+
+	case XCB_CLIENT_MESSAGE:
+		if (cm->data.data32[0] == mXCBDeleteWin)
+			return false;
+		break;
+	}
+	return true;
+}
+xcb_generic_event_t* Window::poll_event() {
+	xcb_generic_event_t* cur = xcb_poll_for_event(mXCBConnection);
+	xcb_generic_event_t* nxt = xcb_poll_for_event(mXCBConnection);
+	if (cur && (cur->response_type & ~0x80) == XCB_KEY_RELEASE && nxt && (nxt->response_type & ~0x80) == XCB_KEY_PRESS) {
+		xcb_key_press_event_t* kp = (xcb_key_press_event_t*)cur;
+		xcb_key_press_event_t* nkp = (xcb_key_press_event_t*)nxt;
+		if (nkp->time == kp->time && nkp->detail == kp->detail) {
+			free(cur);
+			free(nxt);
+			return PollEvent(); // ignore repeat key press events
+		}
+	}
+	if (cur) {
+		process_event(cur);
+		free(cur);
+	}
+	return nxt;
+}
+#endif

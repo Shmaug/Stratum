@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Stratum.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
@@ -14,6 +14,8 @@ public:
 	STRATUM_API Instance(int argc, char** argv);
 	STRATUM_API ~Instance();
 
+	inline vk::Instance& operator*() { return mInstance; }
+	inline vk::Instance* operator->() { return &mInstance; }
 	inline const vk::Instance& operator*() const { return mInstance; }
 	inline const vk::Instance* operator->() const { return &mInstance; }
 
@@ -22,42 +24,43 @@ public:
 	inline stm::Device& device() const { return *mDevice; }
 	inline stm::Window& window() const { return *mWindow; }
 	
-	inline string find_argument(const string& name) const { return mOptions.at(name); }
-	inline bool find_argument(const string& name, string& value) const {
-		if (mOptions.count(name)) {
-			value = mOptions.at(name);
-			return true;
-		}
-		return false;
+	inline bool find_argument(const string& name) const {
+		return mOptions.find(name) != mOptions.end();
 	}
-	
-	STRATUM_API bool poll_events();
+	inline auto find_arguments(const string& name) const {
+		auto[first,last] = mOptions.equal_range(name);
+		return ranges::subrange(first,last) | views::values;
+	}
 
 	#ifdef WIN32
 	inline HINSTANCE hInstance() const { return mHInstance; }
-	#elif defined(__linux)
-	inline xcb_window_t XCBScreen() const { return mXCBScreen; }
 	#endif
+	#ifdef __linux
+	inline xcb_connection_t* xcb_connection() const { return mXCBConnection; }
+	inline xcb_screen_t* xcb_screen() const { return mXCBScreen; }
+	inline x11::Display* x_display() const { return mXDisplay; }
+	#endif
+
+	STRATUM_API void poll_events();
 
 private:
 	vk::Instance mInstance;
 	unique_ptr<stm::Device> mDevice;
 	unique_ptr<stm::Window> mWindow;
 	vector<string> mCommandLine;
-	unordered_map<string, string> mOptions;
+	unordered_multimap<string, string> mOptions;
 	uint32_t mVulkanApiVersion;
 
 	vk::DebugUtilsMessengerEXT mDebugMessenger;
 
 	bool mDestroyPending = false;
+
+	friend class Window;
 	
 	#ifdef WIN32
-	void handle_message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
-	static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+	static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;
 	#elif defined(__linux)
-	STRATUM_API void ProcessEvent(xcb_generic_event_t* event);
-	STRATUM_API xcb_generic_event_t* PollEvent();
 	x11::Display* mXDisplay;
 	xcb_connection_t* mXCBConnection;
 	xcb_key_symbols_t* mXCBKeySymbols;

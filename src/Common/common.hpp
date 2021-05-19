@@ -1,13 +1,119 @@
 #pragma once
 
-#include "byte_stream.hpp"
-#include "hash_combine.hpp"
-#include "Platform.hpp"
+#include "hash.hpp"
 
 namespace stm {
 
-template<typename T> inline void safe_delete(T*& x)       { if (x) { delete   x; x = nullptr; } }
-template<typename T> inline void safe_delete_array(T*& x) { if (x) { delete[] x; x = nullptr; } }
+using fRay = ParametrizedLine<float,3>;
+using dRay = ParametrizedLine<double,3>;
+
+using byte_blob = vector<byte>;
+
+namespace hlsl {
+
+using uint = uint32_t;
+
+template<typename T, int M, int N = 1> using ArrayType  = Eigen::Array<T, M, N, Eigen::ColMajor, M, N>;
+
+using int2    	= ArrayType<int32_t, 2>;
+using int3    	= ArrayType<int32_t, 3>;
+using int4    	= ArrayType<int32_t, 4>;
+using uint2   	= ArrayType<int32_t, 2>;
+using uint3   	= ArrayType<int32_t, 3>;
+using uint4   	= ArrayType<int32_t, 4>;
+using float2  	= ArrayType<float, 2>;
+using float3  	= ArrayType<float, 3>;
+using float4  	= ArrayType<float, 4>;
+using double2 	= ArrayType<double, 2>;
+using double3 	= ArrayType<double, 3>;
+using double4 	= ArrayType<double, 4>;
+using int2x2    = ArrayType<int32_t, 2, 2>;
+using int3x2    = ArrayType<int32_t, 3, 2>;
+using int4x2    = ArrayType<int32_t, 4, 2>;
+using uint2x2   = ArrayType<int32_t, 2, 2>;
+using uint3x2   = ArrayType<int32_t, 3, 2>;
+using uint4x2   = ArrayType<int32_t, 4, 2>;
+using float2x2  = ArrayType<float, 2, 2>;
+using float3x2  = ArrayType<float, 3, 2>;
+using float4x2  = ArrayType<float, 4, 2>;
+using double2x2 = ArrayType<double, 2, 2>;
+using double3x2 = ArrayType<double, 3, 2>;
+using double4x2 = ArrayType<double, 4, 2>;
+using int2x3    = ArrayType<int32_t, 2, 3>;
+using int3x3    = ArrayType<int32_t, 3, 3>;
+using int4x3    = ArrayType<int32_t, 4, 3>;
+using uint2x3   = ArrayType<int32_t, 2, 3>;
+using uint3x3   = ArrayType<int32_t, 3, 3>;
+using uint4x3   = ArrayType<int32_t, 4, 3>;
+using float2x3  = ArrayType<float, 2, 3>;
+using float3x3  = ArrayType<float, 3, 3>;
+using float4x3  = ArrayType<float, 4, 3>;
+using double2x3 = ArrayType<double, 2, 3>;
+using double3x3 = ArrayType<double, 3, 3>;
+using double4x3 = ArrayType<double, 4, 3>;
+using int2x4    = ArrayType<int32_t, 2, 4>;
+using int3x4    = ArrayType<int32_t, 3, 4>;
+using int4x4    = ArrayType<int32_t, 4, 4>;
+using uint2x4   = ArrayType<int32_t, 2, 4>;
+using uint3x4   = ArrayType<int32_t, 3, 4>;
+using uint4x4   = ArrayType<int32_t, 4, 4>;
+using float2x4  = ArrayType<float, 2, 4>;
+using float3x4  = ArrayType<float, 3, 4>;
+using float4x4  = ArrayType<float, 4, 4>;
+using double2x4 = ArrayType<double, 2, 4>;
+using double3x4 = ArrayType<double, 3, 4>;
+using double4x4 = ArrayType<double, 4, 4>;
+
+using quatf = Quaternion<float>;
+using quatd = Quaternion<double>;
+
+#define QUATF_I Quaternionf::Identity()
+
+template<typename T, int M, int N, int K>
+inline ArrayType<T,M,K> mul(const ArrayType<T,M,N>& a, const ArrayType<T,N,K>& b) {
+	return (a.matrix()*b.matrix()).array();
+}
+
+template<typename T> inline const T& min(const T& a, const T& b) { return std::min(a,b); }
+template<typename T> inline const T& max(const T& a, const T& b) { return std::max(a,b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> max(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.max(b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> min(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.min(b); }
+
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> saturate(const ArrayType<T,M,N>& v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
+
+template<typename T, int M, int N>
+inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int M, int N>
+inline T length(const ArrayType<T,M,N>& a) { return a.matrix().norm(); }
+template<typename T, int M, int N>
+inline ArrayType<T,M,N> normalize(const ArrayType<T,M,N>& a) { return a.matrix().normalized().array(); }
+template<typename T>
+inline ArrayType<T,3> cross(const T& a, const T& b) { return a.matrix().cross(b.matrix()).array(); }
+
+template<typename T> inline T max3(const ArrayType<T,3,1>& x) { return max(max(x[0], x[1]), x[2]); }
+template<typename T> inline T max4(const ArrayType<T,4,1>& x) { return max(max(x[0], x[1]), max(x[2], x[3])); }
+template<typename T> inline T min3(const ArrayType<T,3,1>& x) { return min(min(x[0], x[1]), x[2]); }
+template<typename T> inline T min4(const ArrayType<T,4,1>& x) { return min(min(x[0], x[1]), min(x[2], x[3])); }
+
+template<typename T> inline T pow2(const T& x) { return x*x; }
+template<typename T> inline T pow3(const T& x) { return pow2(x)*x; }
+template<typename T> inline T pow4(const T& x) { return pow2(x)*pow2(x); }
+template<typename T> inline T pow5(const T& x) { return pow4(x)*x; }
+
+template<typename T, int M, int N = 1>
+inline ArrayType<T,M-1,N> hnormalized(const ArrayType<T,M,N>& a) { return a.matrix().hnormalized().array(); }
+template<typename T, int M, int N = 1>
+inline ArrayType<T,M+1,N> homogeneous(const ArrayType<T,M,N>& a) { return a.matrix().homogeneous().array(); }
+
+template<typename T>
+inline Quaternion<T> qmul(const Quaternion<T>& q1, const Quaternion<T>& q2) { return q1*q2; }
+template<typename T>
+inline Quaternion<T> inverse(const Quaternion<T>& q) { return q.inverse(); }
+template<typename T>
+inline ArrayType<T,3> rotate_vector(const Quaternion<T>& q, const ArrayType<T,3>& v) { return q*v; }
+
+}
 
 #pragma region misc math expressions
 
@@ -83,7 +189,9 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 	fprintf(str, "\x1B[0m");
 	#endif
 }
-template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { fprintf_color(color, stdout, format, forward<Args>(a)...); }
+template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { 
+	fprintf_color(color, stdout, format, forward<Args>(a)...);
+}
 
 inline wstring s2ws(const string &str) {
     if (str.empty()) return wstring();
@@ -111,15 +219,18 @@ inline R read_file(const fs::path& filename) {
 	ifstream file(filename, ios::ate | ios::binary);
 	if (!file.is_open()) return {};
 	R dst;
-	dst.resize((size_t)file.tellg()/sizeof(ranges::range_value_t<R>), '\0');
+	dst.resize((size_t)file.tellg()/sizeof(ranges::range_value_t<R>));
 	if (dst.empty()) return dst;
 	file.seekg(0);
 	file.clear();
 	file.read(reinterpret_cast<char*>(dst.data()), dst.size()*sizeof(ranges::range_value_t<R>));
 	return dst;
 }
-
-constexpr vk::MemoryPropertyFlags host_visible_coherent = vk::MemoryPropertyFlagBits::eHostVisible|vk::MemoryPropertyFlagBits::eHostCoherent;
+template<ranges::contiguous_range R>
+inline void write_file(const fs::path& filename, const R& r) {
+	ofstream file(filename, ios::ate | ios::binary);
+	file.write(reinterpret_cast<char*>(r.data()), r.size()*sizeof(ranges::range_value_t<R>));
+}
 
 inline constexpr bool is_depth_stencil(vk::Format format) {
 	return
@@ -133,7 +244,8 @@ inline constexpr bool is_depth_stencil(vk::Format format) {
 }
 
 // Size of an element of format, in bytes
-inline constexpr vk::DeviceSize texel_size(vk::Format format) {
+template<typename T = uint32_t> requires(is_arithmetic_v<T>)
+inline constexpr T texel_size(vk::Format format) {
 	switch (format) {
 	case vk::Format::eR4G4UnormPack8:
 	case vk::Format::eR8Unorm:
@@ -287,7 +399,9 @@ inline constexpr vk::DeviceSize texel_size(vk::Format format) {
 	}
 	return 0;
 }
-inline constexpr uint32_t channel_count(vk::Format format) {
+
+template<typename T = uint32_t> requires(is_arithmetic_v<T>)
+inline constexpr T channel_count(vk::Format format) {
 	switch (format) {
 		case vk::Format::eR8Unorm:
 		case vk::Format::eR8Snorm:
@@ -430,26 +544,6 @@ inline constexpr uint32_t channel_count(vk::Format format) {
 		
 	}
 	return 0;
-}
-
-inline constexpr uint32_t verts_per_prim(vk::PrimitiveTopology topo) {
-	switch (topo) {
-		default:
-		case vk::PrimitiveTopology::ePatchList:
-		case vk::PrimitiveTopology::ePointList:
-			return 1;
-		case vk::PrimitiveTopology::eLineList:
-		case vk::PrimitiveTopology::eLineStrip:
-		case vk::PrimitiveTopology::eLineListWithAdjacency:
-		case vk::PrimitiveTopology::eLineStripWithAdjacency:
-			return 2;
-		case vk::PrimitiveTopology::eTriangleList:
-		case vk::PrimitiveTopology::eTriangleStrip:
-		case vk::PrimitiveTopology::eTriangleFan:
-		case vk::PrimitiveTopology::eTriangleListWithAdjacency:
-		case vk::PrimitiveTopology::eTriangleStripWithAdjacency:
-			return 3;
-	}
 }
 
 }

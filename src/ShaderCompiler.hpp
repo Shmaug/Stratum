@@ -15,6 +15,7 @@ inline VertexAttributeId stovertexattribute(const string& semantic) {
     { "psize", 			    VertexAttributeType::ePointSize },
     { "sv_position", 	  VertexAttributeType::ePosition },
     { "position", 	    VertexAttributeType::ePosition },
+    { "vertex", 	      VertexAttributeType::ePosition },
     { "tangent", 		    VertexAttributeType::eTangent },
     { "texcoord", 	    VertexAttributeType::eTexcoord }
   };
@@ -36,7 +37,7 @@ inline VertexAttributeId stovertexattribute(const string& semantic) {
       id.mType = VertexAttributeType::eSystemGenerated;
     else {
       id.mType = VertexAttributeType::eTexcoord;
-      cout << "Warning: Unknown semantic " << ls << endl;
+      cout << "Warning: Unknown attribute type " << ls << endl;
     }
   return id;
 };
@@ -45,12 +46,6 @@ class ShaderCompiler {
 private:
   set<fs::path> mIncludePaths;
 
-	typedef vector<string>::iterator word_iterator;
-	typedef void (ShaderCompiler::*DirectiveFunc)(vector<SpirvModule>& modules, word_iterator begin, const word_iterator& end);
-
-  void DirectiveCompile(vector<SpirvModule>& modules, word_iterator begin, const word_iterator& end);
-	inline static const unordered_map<string, DirectiveFunc> gCompilerDirectives { { "compile", &ShaderCompiler::DirectiveCompile } };
-
 	vector<SpirvModule> ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth = 0);
 	vector<uint32_t> CompileSpirv(const fs::path& filename, const string& entryPoint, vk::ShaderStageFlagBits stage, const unordered_set<string>& defines);
 	void SpirvReflection(SpirvModule& shaderModule);
@@ -58,6 +53,7 @@ private:
 public:
   template<ranges::range R> requires(convertible_to<ranges::range_value_t<R>, fs::path>)
 	inline ShaderCompiler(const R& includePaths) : mIncludePaths(set<fs::path>(includePaths.begin(), includePaths.end())) {}
+  
   inline vector<SpirvModule> operator()(const fs::path& filename) {
     string source = read_file<string>(filename);
     if (source.empty()) throw logic_error("failed to open file for reading");

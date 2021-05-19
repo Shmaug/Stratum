@@ -6,6 +6,8 @@
 using namespace stm;
 using namespace shaderc;
 
+unordered_map<string, fs::path> gTextOutputs;
+
 class Includer : public CompileOptions::IncluderInterface {
 private:
 	set<fs::path> mIncludePaths;
@@ -108,7 +110,9 @@ size_t SizeOf(spvc_type type, spvc_compiler compiler) {
 	return sz;
 }
 
-void ShaderCompiler::DirectiveCompile(vector<SpirvModule>& modules, word_iterator arg, const word_iterator& argEnd) {
+typedef vector<string>::iterator word_iterator;
+
+void DirectiveCompile(vector<SpirvModule>& modules, word_iterator arg, const word_iterator& argEnd) {
 	static const unordered_map<string, vk::ShaderStageFlagBits> stageMap {
     { "vertex", vk::ShaderStageFlagBits::eVertex },
     { "tess_control", vk::ShaderStageFlagBits::eTessellationControl }, { "hull", vk::ShaderStageFlagBits::eTessellationControl }, // TODO: idk if 'tess_control' == 'hull'
@@ -133,15 +137,23 @@ void ShaderCompiler::DirectiveCompile(vector<SpirvModule>& modules, word_iterato
     { "miss_nv", vk::ShaderStageFlagBits::eMissNV },
     { "raygen_nv", vk::ShaderStageFlagBits::eRaygenNV }
 	};
-	while (++arg != argEnd) {
+	while (arg != argEnd) {
 		SpirvModule m;
 		if (!stageMap.count(*arg)) throw logic_error("unknown shader stage: " + *arg);
 		m.mStage = stageMap.at(*arg);
 		if (++arg == argEnd) throw logic_error("expected an entry point");
 		m.mEntryPoint = *arg;
 		modules.emplace_back(m);
+		if (++arg == argEnd) break;
+		if (arg->starts_with("/ascii:")) {
+			gTextOutputs.emplace(m.mEntryPoint, arg->substr(7));
+			++arg;
+		}
 	}
 }
+
+typedef void (*DirectiveFunc)(vector<SpirvModule>& modules, word_iterator begin, const word_iterator& end);
+const unordered_map<string, DirectiveFunc> gCompilerDirectives { { "compile", &DirectiveCompile } };
 
 vector<SpirvModule> ShaderCompiler::ParseCompilerDirectives(const fs::path& filename, const string& source, uint32_t includeDepth) {
 	uint32_t lineNumber = 0;
@@ -162,7 +174,7 @@ vector<SpirvModule> ShaderCompiler::ParseCompilerDirectives(const fs::path& file
 			if (!gCompilerDirectives.count(directive))
 				throw logic_error(filename.string() + "(" + to_string(lineNumber) + "): Error: Unknown directive '" + words[1] + "'");
 			try {
-				(this->*gCompilerDirectives.at(directive))(modules, words.begin() + 1, words.end());
+				gCompilerDirectives.at(directive)(modules, words.begin() + 2, words.end());
 			} catch (logic_error e) {
 				throw logic_error(filename.string() + "(" + to_string(lineNumber) + "): " + directive + " Error: " + e.what());
 			}
@@ -189,7 +201,7 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 	if (hlsl) {
 		fs::path vk_sdk = fs::path(std::getenv("VULKAN_SDK"));
 		if (fs::exists(vk_sdk)) {
-			fs::path tmpfile =  fs::temp_directory_path()/fs::path(entryPoint).replace_extension("spv");
+			fs::path tmpfile = fs::path(entryPoint).replace_extension("spvasm");
 			string cmd = (vk_sdk/fs::path("Bin")/fs::path("dxc")).string();
 			cmd.reserve(1024); // overkill lol
 			cmd += " -nologo -spirv -fspv-target-env=vulkan1.2 -fspv-reflect -Zpr -Zi ";
@@ -212,8 +224,16 @@ vector<uint32_t> ShaderCompiler::CompileSpirv(const fs::path& filename, const st
 			for (const auto& p : mIncludePaths) cmd += " -I " + p.string();
 			for (const auto& s : defines) cmd += " -D " + s;
 			cout << cmd << endl;
-			if (system(cmd.c_str()) == 0)
+			if (system(cmd.c_str()) == 0) {
+				auto ascii_it = gTextOutputs.find(entryPoint);
+				if (ascii_it != gTextOutputs.end()) {
+					cmd = (vk_sdk/fs::path("Bin")/fs::path("spirv-dis")).string();
+					cmd += " " + tmpfile.string() + " -o " + fs::absolute(ascii_it->second).string();
+					cout << cmd << endl;
+					system(cmd.c_str());
+				}
 				return read_file<vector<uint32_t>>(tmpfile);
+			}
 		}
 	}
 
@@ -269,10 +289,9 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 	spvc_resources resources;
 	spvc_compiler compiler;
 	spvc_context_create_compiler(context, SPVC_BACKEND_GLSL, ir, SPVC_CAPTURE_MODE_TAKE_OWNERSHIP, &compiler);
-	spvc_variable_id sid;
-	spvc_compiler_build_dummy_sampler_for_combined_images(compiler, &sid);
+	//spvc_compiler_build_combined_image_samplers(compiler);
 	spvc_compiler_create_shader_resources(compiler, &resources);
-	
+
 	size_t count;
 	const spvc_specialization_constant* constants;
 	const spvc_reflected_resource* resource_list;
@@ -298,14 +317,16 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		}
 	}
 
+	//cout << shaderModule.mEntryPoint << endl;
+
 	static const unordered_map<spvc_resource_type, vk::DescriptorType> typeMap {
-		{ SPVC_RESOURCE_TYPE_SAMPLED_IMAGE, vk::DescriptorType::eSampledImage },
+		{ SPVC_RESOURCE_TYPE_SAMPLED_IMAGE,  vk::DescriptorType::eSampledImage },
 		{ SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, vk::DescriptorType::eSampledImage },
-		{ SPVC_RESOURCE_TYPE_STORAGE_IMAGE, vk::DescriptorType::eStorageImage },
+		{ SPVC_RESOURCE_TYPE_STORAGE_IMAGE,  vk::DescriptorType::eStorageImage },
 		{ SPVC_RESOURCE_TYPE_STORAGE_BUFFER, vk::DescriptorType::eStorageBuffer },
 		{ SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, vk::DescriptorType::eUniformBuffer },
 		{ SPVC_RESOURCE_TYPE_SEPARATE_SAMPLERS, vk::DescriptorType::eSampler },
-		{ SPVC_RESOURCE_TYPE_SUBPASS_INPUT, vk::DescriptorType::eInputAttachment },
+		{ SPVC_RESOURCE_TYPE_SUBPASS_INPUT, 		vk::DescriptorType::eInputAttachment },
 		{ SPVC_RESOURCE_TYPE_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
 	};
 	for (const auto&[spvtype,descriptorType] : typeMap) {
@@ -316,14 +337,16 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 			binding.mSet = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationDescriptorSet);
 			binding.mBinding = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationBinding);
 			binding.mStageFlags |= shaderModule.mStage;
-			if (spvc_type_get_image_dimension(spirType) == SpvDimBuffer)
+			if ((spvtype == SPVC_RESOURCE_TYPE_SAMPLED_IMAGE || spvtype == SPVC_RESOURCE_TYPE_SEPARATE_IMAGE) && spvc_type_get_image_dimension(spirType) == SpvDimBuffer)
 				binding.mDescriptorType = spvc_type_get_image_is_storage(spirType) ? vk::DescriptorType::eStorageTexelBuffer : vk::DescriptorType::eUniformTexelBuffer;
 			else
 				binding.mDescriptorType = descriptorType;
+			
 			binding.mDescriptorCount = 1;
 			uint32_t n = spvc_type_get_num_array_dimensions(spirType);
 			for (uint32_t i = 0; i < n; i++)
 				binding.mDescriptorCount *= spvc_type_get_array_dimension(spirType, i);
+			//cout << "\t" << spvc_compiler_get_name(compiler, r.id) << " [" << binding.mSet << "." << binding.mBinding << "] " << to_string(binding.mDescriptorType) << " " << to_string(binding.mStageFlags) << endl;
 		};
 	}
 
@@ -332,7 +355,13 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		auto& var = vars[spvc_compiler_get_name(compiler, r.id)];
 		var.mLocation = spvc_compiler_get_decoration(compiler, r.id, SpvDecorationLocation);
 		var.mFormat = gFormatMap.at(spvc_type_get_basetype(spirType))[spvc_type_get_vector_size(spirType)-1];
-		var.mAttributeId = stovertexattribute(spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE));
+
+		string semantic = spvc_compiler_get_decoration_string(compiler, r.id, SpvDecorationHlslSemanticGOOGLE);
+		if (semantic.empty())
+			var.mAttributeId = stovertexattribute(spvc_compiler_get_name(compiler, r.id));
+		else
+			var.mAttributeId = stovertexattribute(semantic);
+
 		// ensure unique typeindex
 		while (ranges::count(vars | views::values, var.mAttributeId, &RasterStageVariable::mAttributeId) > 1)
 			var.mAttributeId.mTypeIndex++;
@@ -347,6 +376,7 @@ void ShaderCompiler::SpirvReflection(SpirvModule& shaderModule) {
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 0), 
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 1), 
 		spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionMode::SpvExecutionModeLocalSize, 2));
+
 	spvc_context_destroy(context);
 }
 
@@ -388,8 +418,9 @@ int main(int argc, char* argv[]) {
 
 	if (!output.empty()) {
 		try {
-			byte_stream<ofstream>(output, ios::binary) << results;
-			printf(output.string().c_str());
+			ofstream s(output, ios::binary);
+			binary_write(s, results);
+			cout << output.string() << endl;
 		} catch (exception e) {
 			fprintf_color(ConsoleColorBits::eRed, stderr, "Error: %s\n\tWhile writing %s\n", e.what(), output.string().c_str());
 			return EXIT_FAILURE;

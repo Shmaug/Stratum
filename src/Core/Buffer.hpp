@@ -18,8 +18,13 @@ private:
 	friend class TexelView;
 
 public:
-	inline Buffer(shared_ptr<Device::MemoryAllocation> memory, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
-		: DeviceResource(memory->mDevice, name), mSize(size), mUsage(usage), mSharingMode(sharingMode) {
+	inline Buffer(Buffer&& v) : DeviceResource(v.mDevice,v.name()), mBuffer(v.mBuffer), mMemory(move(v.mMemory)), mSize(v.mSize), mUsage(v.mUsage), mSharingMode(v.mSharingMode), mTexelViews(move(v.mTexelViews)) {
+		v.mBuffer = nullptr;
+		v.mSize = 0;
+	}
+	inline Buffer(const Buffer&) = delete;
+	inline Buffer(const shared_ptr<Device::MemoryAllocation>& memory, const string& name, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
+		: DeviceResource(memory->mDevice, name), mSize(memory->size()), mUsage(usage), mSharingMode(sharingMode) {
 		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
 		mDevice.set_debug_name(mBuffer, name);
 		mMemory = memory;
@@ -38,13 +43,15 @@ public:
 		mDevice->destroyBuffer(mBuffer);
 	}
 	
+	inline vk::Buffer& operator*() { return mBuffer; }
+	inline vk::Buffer* operator->() { return &mBuffer; }
 	inline const vk::Buffer& operator*() const { return mBuffer; }
 	inline const vk::Buffer* operator->() const { return &mBuffer; }
 	inline operator bool() const { return mBuffer; }
 
+	inline const shared_ptr<Device::MemoryAllocation>& memory() const { return mMemory; }
 	inline vk::BufferUsageFlags usage() const { return mUsage; }
 	inline vk::SharingMode sharing_mode() const { return mSharingMode; }
-	inline const auto& memory() const { return mMemory; }
 
 	inline vk::DeviceSize size() const { return mSize; }
 	inline byte* data() const { return mMemory->data(); }
@@ -63,21 +70,27 @@ public:
 		using iterator = T*;
 
 		View() = default;
+		View(View&&) = default;
 		View(const View&) = default;
-		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-			: mBuffer(buffer), mOffset(byteOffset), mSize(elementCount == VK_WHOLE_SIZE ? (buffer->size() - byteOffset)/sizeof(T) : elementCount) {
-			if (!buffer) throw invalid_argument("buffer cannot be null");
-			if (mOffset + mSize > buffer->size()) throw out_of_range("view size out of bounds");
+		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
+			if (mBuffer) {
+				mSize = elementCount == VK_WHOLE_SIZE ? (mBuffer->size() - byteOffset)/sizeof(T) : elementCount;
+				if (mOffset + mSize > mBuffer->size()) throw out_of_range("view size out of bounds");
+			}
+		}
+
+		inline operator View<byte>() const {
+			return View<byte>(mBuffer, mOffset, size_bytes());
 		}
 
 		View& operator=(const View&) = default;
 		View& operator=(View&&) = default;
-		bool operator==(const View& rhs) const = default;
+		bool operator==(const View&) const = default;
 
 		inline operator bool() const { return !empty(); }
 		
 		inline Buffer& buffer() const { return *mBuffer; }
-		inline shared_ptr<Buffer> buffer_ptr() const { return mBuffer; }
+		inline const shared_ptr<Buffer>& buffer_ptr() const { return mBuffer; }
     inline vk::DeviceSize offset() const { return mOffset; }
 
     inline bool empty() const { return !mBuffer || mSize == 0; }
@@ -100,16 +113,17 @@ public:
 		vk::DeviceSize mStride;
 	public:
 		StrideView() = default;
-		StrideView(const StrideView&) = default;
 		StrideView(StrideView&&) = default;
+		StrideView(const StrideView&) = default;
 		inline StrideView(const View<byte>& view, vk::DeviceSize stride) : View<byte>(view), mStride(stride) {}
-		inline StrideView(const shared_ptr<Buffer>& buffer, vk::DeviceSize stride, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) 
-			: View<byte>(buffer, byteOffset, elementCount*stride), mStride(stride) {}
-		template<typename T> inline StrideView(const View<T>& v) : View<byte>(v.buffer_ptr(), v.offset(), v.size_bytes()), mStride(sizeof(T)) {}
+		template<typename T>
+		inline StrideView(const View<T>& v) : View<byte>(v.buffer_ptr(), v.offset(), v.size_bytes()), mStride(sizeof(T)) {}
+		inline StrideView(const shared_ptr<Buffer>& buffer, vk::DeviceSize stride, vk::DeviceSize byteOffset = 0, vk::DeviceSize byteLength = VK_WHOLE_SIZE) 
+			: View<byte>(buffer, byteOffset, byteLength), mStride(stride) {}
     
 		StrideView& operator=(const StrideView&) = default;
 		StrideView& operator=(StrideView&&) = default;
-		bool operator==(const StrideView& rhs) const = default;
+		bool operator==(const StrideView&) const = default;
 
     inline size_t stride() const { return mStride; }
 	};
@@ -121,13 +135,16 @@ public:
 
 	public:
 		TexelView() = default;
-		TexelView(const TexelView&) = default;
 		TexelView(TexelView&&) = default;
-		inline TexelView(const shared_ptr<Buffer>& buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : View<byte>(buf, byteOffset, elementCount == VK_WHOLE_SIZE ? elementCount = VK_WHOLE_SIZE : elementCount*texel_size(fmt)), mFormat(fmt) {
-			mHashKey = hash_combine(offset(), size_bytes(), mFormat);
+		TexelView(const TexelView&) = default;
+		template<typename T>
+		inline TexelView(const View<T>& view, vk::Format fmt)
+			: View<byte>(view.buffer_ptr(), view.offset(), view.size_bytes()), mFormat(fmt) {
+			mHashKey = hash_args(offset(), size_bytes(), mFormat);
 		}
-		template<typename T> inline TexelView(const View<T>& view, vk::Format fmt) : View<byte>(view.buffer_ptr(), view.offset(), view.size_bytes()), mFormat(fmt) {
-			mHashKey = hash_combine(offset(), size_bytes(), mFormat);
+		inline TexelView(const shared_ptr<Buffer>& buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
+			: View<byte>(buf, byteOffset, elementCount == VK_WHOLE_SIZE ? elementCount = VK_WHOLE_SIZE : elementCount*texel_size(fmt)), mFormat(fmt) {
+			mHashKey = hash_args(offset(), size_bytes(), mFormat);
 		}
 		
 		inline const vk::BufferView& operator*() const {
@@ -142,8 +159,8 @@ public:
 		inline const vk::BufferView* operator->() const { return &operator*(); }
 
 		TexelView& operator=(const TexelView&) = default;
-		TexelView& operator=(TexelView&& v) = default;
-		inline bool operator==(const TexelView& rhs) const = default;
+		TexelView& operator=(TexelView&&) = default;
+		bool operator==(const TexelView&) const = default;
 
 		inline vk::Format format() const { return mFormat; }
     inline size_t stride() const { return texel_size(mFormat); }
@@ -156,27 +173,25 @@ public:
 	using value_type = T;
 	using size_type = vk::DeviceSize;
 	using reference = value_type&;
+	using const_reference = const value_type&;
 	using pointer = value_type*;
+	using const_pointer = const value_type*;
 	using iterator = T*;
-private:
-	shared_ptr<Buffer> mBuffer;
-	size_type mSize;
-	vk::BufferUsageFlags mBufferUsage;
-	VmaMemoryUsage mMemoryUsage;
-	vk::SharingMode mSharingMode;
-public:
+	using const_iterator = const T*;
+	
 	Device& mDevice;
 
   buffer_vector() = delete;
-  buffer_vector(buffer_vector<T>&&) = default;
-  inline buffer_vector(Device& device, size_type size, vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eTransferSrc, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU, vk::SharingMode sharingMode = vk::SharingMode::eExclusive) : mDevice(device), mSize(0), mBufferUsage(bufferUsage), mMemoryUsage(memoryUsage), mSharingMode(sharingMode) {
+  inline buffer_vector(Device& device, size_type size = 0, vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eTransferSrc, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
+		: mDevice(device), mSize(0), mBufferUsage(bufferUsage), mMemoryUsage(memoryUsage), mSharingMode(sharingMode) {
 		if (size) resize(size);
 	}
-  inline buffer_vector(const buffer_vector<T>& v) : mDevice(v.mDevice), mSize(v.mSize), mBufferUsage(v.mBufferUsage), mMemoryUsage(v.mMemoryUsage), mSharingMode(v.mSharingMode) {
-		if (mSize) {
-			reserve(mSize);
-			for (size_type i = 0; i < mSize; i++)
+  inline buffer_vector(const buffer_vector<T>& v) : mDevice(v.mDevice), mSize(0), mBufferUsage(v.mBufferUsage), mMemoryUsage(v.mMemoryUsage), mSharingMode(v.mSharingMode) {
+		if (v.mSize) {
+			reserve(v.mSize);
+			for (size_type i = 0; i < v.mSize; i++)
 				new (data() + i) T(v[i]);
+			mSize = v.mSize;
 		}
 	}
 	inline ~buffer_vector() {
@@ -184,8 +199,7 @@ public:
 			at(i).~T();
 	}
 
-	inline operator Buffer::View<byte>() const { return Buffer::View<byte>(mBuffer, 0, size_bytes()); }
-	inline operator Buffer::View<T>() const { return Buffer::View<T>(mBuffer, 0, size()); }
+	inline const shared_ptr<Buffer>& buffer() const { return mBuffer; }
 
 	inline size_type empty() const { return mSize == 0; }
 	inline size_type size() const { return mSize; }
@@ -196,6 +210,7 @@ public:
 	inline vk::SharingMode sharing_mode() const { return mSharingMode; }
 
 	inline pointer data() { return reinterpret_cast<pointer>(mBuffer->data()); }
+	inline const_pointer data() const { return reinterpret_cast<const pointer>(mBuffer->data()); }
 
 	inline void reserve(size_type newcap) {
 		if ((!mBuffer && newcap > 0) || newcap*sizeof(T) > mBuffer->size()) {
@@ -208,8 +223,8 @@ public:
 				requirements = mDevice->getBufferMemoryRequirements(tmp);
 				mDevice->destroyBuffer(tmp);
 			}
-			requirements.alignment = max(requirements.alignment, alignment_of_v<T>);
-			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector", requirements.size, mBufferUsage, mSharingMode);
+			requirements.alignment = max(requirements.alignment, alignof(T));
+			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector", mBufferUsage, mSharingMode);
 			if (mBuffer) memcpy(b->data(), mBuffer->data(), mBuffer->size());
 			mBuffer = b;
 		}
@@ -236,9 +251,15 @@ public:
 	inline reference back() { return *(data() + (mSize - 1)); }
 
 	inline iterator begin() { return data(); }
+	inline const_iterator begin() const { return data(); }
 	inline iterator end() { return data() + mSize; }
+	inline const_iterator end() const { return data() + mSize; }
 
 	inline reference at(size_type index) {
+		if (index >= mSize) throw out_of_range("index out of bounds");
+		return data()[index];
+	}
+	inline const_reference at(size_type index) const {
 		if (index >= mSize) throw out_of_range("index out of bounds");
 		return data()[index];
 	}
@@ -246,10 +267,14 @@ public:
 		if (index >= mSize) throw out_of_range("index out of bounds");
 		return data()[index];
 	}
+	inline const_reference operator[](size_type index) const {
+		if (index >= mSize) throw out_of_range("index out of bounds");
+		return data()[index];
+	}
 
 	template<typename... Args> requires(constructible_from<T, Args...>)
 	inline reference emplace_back(Args&&... args) {
-		while (mSize + 1 > capacity()) reserve(max(1, capacity()*mSize*2));
+		while (mSize + 1 > capacity()) reserve(max<size_t>(1, capacity()*mSize*2));
 		return *new (data() + (mSize++)) T(forward<Args>(args)...);
 	}
 	
@@ -264,6 +289,13 @@ public:
 			memcpy(pos, ++pos, sizeof(T));
 		mSize--;
 	}
+
+private:
+	shared_ptr<Buffer> mBuffer;
+	size_type mSize;
+	vk::BufferUsageFlags mBufferUsage;
+	VmaMemoryUsage mMemoryUsage;
+	vk::SharingMode mSharingMode;
 };
 
 }

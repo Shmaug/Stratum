@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Stratum.hpp"
+#include "common.hpp"
 
 namespace stm {
 

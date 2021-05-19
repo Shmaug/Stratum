@@ -3,7 +3,7 @@
 
 using namespace dcmvs;
 
-RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, const fs::path& imageStackFolder) : Object(mName, scene) {
+RenderVolume::RenderVolume(const string& name, NodeGraph* scene, Device& device, const fs::path& imageStackFolder) : Object(mName, scene) {
   mPrecomputePipeline = device->LoadAsset<Pipeline>("Assets/Shaders/precompute.stmb", "precompute");
   mRenderPipeline = device->LoadAsset<Pipeline>("Assets/Shaders/volume.stmb", "volume");
 

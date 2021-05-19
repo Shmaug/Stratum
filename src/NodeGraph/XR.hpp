@@ -9,7 +9,7 @@ public:
     STRATUM_API XR();
     STRATUM_API ~XR();
     
-    STRATUM_API bool Init(Scene* scene);
+    STRATUM_API bool Init(NodeGraph* NodeGraph);
 
     STRATUM_API unordered_set<string> InstanceExtensionsRequired();
     STRATUM_API unordered_set<string> DeviceExtensionsRequired(vk::PhysicalDevice device);
@@ -45,7 +45,7 @@ private:
 
     XrSystemProperties mSystemProperties;
 
-    Scene* mScene = nullptr;
+    NodeGraph* mNodeGraph = nullptr;
     Framebuffer* mHmdFramebuffer = nullptr;
     Camera* mHmdCamera = nullptr;
 

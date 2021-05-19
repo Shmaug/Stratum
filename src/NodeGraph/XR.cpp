@@ -15,7 +15,7 @@ bool XR::FailMsg(XrResult result, const string& errmsg) {
 }
 
 XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(XR_NULL_HANDLE), mActionSet(XR_NULL_HANDLE),
-	mGrabAction(XR_NULL_HANDLE), mPoseAction(XR_NULL_HANDLE), mScene(nullptr), mHmdCamera(nullptr) {
+	mGrabAction(XR_NULL_HANDLE), mPoseAction(XR_NULL_HANDLE), mNodeGraph(nullptr), mHmdCamera(nullptr) {
 
 	uint32_t tmp;
 	uint32_t apiLayerCount;
@@ -26,10 +26,11 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 			apiLayerProperties[i].type = XR_TYPE_API_LAYER_PROPERTIES;
 		xrEnumerateApiLayerProperties(apiLayerCount, &tmp, apiLayerProperties.data());
 
-		printf("Found %u OpenXR API layers:\n", apiLayerCount);
+		cout << "Found " << apiLayerCount << " OpenXR API layers:" << endl;
 		for (uint32_t i = 0; i < apiLayerCount; i++)
-			printf("\t%s\n", apiLayerProperties[i].layerName);
-	} else printf("Found 0 OpenXR API layers.\n");
+			cout << "\t" << apiLayerProperties[i].layerName << endl;
+	} else
+		cout << "No OpenXR API layers" << endl;
 	
 	vector<const char*> enabledExtensions { XR_KHR_VULKAN_ENABLE_EXTENSION_NAME };
 	XrInstanceCreateInfo instanceinfo = {};
@@ -138,10 +139,10 @@ unordered_set<string> XR::DeviceExtensionsRequired(vk::PhysicalDevice device) {
 	return result;
 }
 
-bool XR::Init(Scene* scene) {
+bool XR::Init(NodeGraph* NodeGraph) {
 	if (!mInitialized) return false;
 	
-	mScene = scene;
+	mNodeGraph = NodeGraph;
 
 	#pragma region View configuration enumeration
 	uint32_t viewConfigurationCount, tmp;
@@ -366,7 +367,7 @@ bool XR::Init(Scene* scene) {
 	}
 	#pragma endregion
 
-	mHmdCamera = mScene->CreateObject<Camera>(mSystemProperties.systemName, unordered_set<RenderAttachmentId> { "OpenXR HMD" });
+	mHmdCamera = mNodeGraph->CreateObject<Camera>(mSystemProperties.systemName, unordered_set<RenderAttachmentId> { "OpenXR HMD" });
 	mHmdCamera->StereoMode(StereoMode::eHorizontal);
 
 	return true;
@@ -375,10 +376,10 @@ bool XR::Init(Scene* scene) {
 void XR::CreateSession() {
 	XrGraphicsBindingVulkanKHR binding = {};
 	binding.type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR;
-	binding.instance = *mScene->mInstance;
-	binding.physicalDevice = mScene->mInstance.device().physical();
-	binding.device = *mScene->mInstance.device();
-	binding.queueFamilyIndex = mScene->mInstance.window().present_queue_family()->mFamilyIndex;
+	binding.instance = *mNodeGraph->mInstance;
+	binding.physicalDevice = mNodeGraph->mInstance.device().physical();
+	binding.device = *mNodeGraph->mInstance.device();
+	binding.queueFamilyIndex = mNodeGraph->mInstance.window().present_queue_family()->mFamilyIndex;
 	binding.queueIndex = 0;
 
 	XrSessionCreateInfo sessioninfo = {};

@@ -4,8 +4,8 @@
 
 #include "include/transform.hlsli"
 
-Texture2D<float4> gTexture : register(t0);
-SamplerState gSampler : register(s1);
+Texture2D<float4> gTexture;
+SamplerState gSampler;
 
 struct push_constants {
 	TransformData WorldToCamera;

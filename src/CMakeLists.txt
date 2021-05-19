@@ -10,12 +10,12 @@ target_link_libraries(ShaderCompiler PUBLIC Eigen3::Eigen Vulkan::Vulkan PRIVATE
 
 # Stratum
 
-file(GLOB_RECURSE STRATUM_HPP "Core/*.hpp" "Scene/*.hpp")
-file(GLOB_RECURSE STRATUM_CPP "Core/*.cpp" "Scene/*.cpp")
+file(GLOB_RECURSE STRATUM_HPP "Common/*.hpp" "Core/*.hpp" "NodeGraph/*.hpp")
+file(GLOB_RECURSE STRATUM_CPP "Common/*.cpp" "Core/*.cpp" "NodeGraph/*.cpp")
 
 add_executable(Stratum main.cpp ${STRATUM_CPP} stratum.rc)
 target_compile_definitions(Stratum PUBLIC ${STM_COMPILE_DEFINITIONS} STRATUM_CORE)
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader PRIVATE assimp::assimp)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader)
 
 set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
 

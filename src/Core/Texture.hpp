@@ -2,6 +2,16 @@
 
 #include "Buffer.hpp"
 
+namespace std {
+	
+template<>
+struct hash<pair<vk::ImageSubresourceRange, vk::ComponentMapping>> {
+	inline size_t operator()(const pair<vk::ImageSubresourceRange, vk::ComponentMapping>& v) const {
+		return stm::hash_args(v.first, v.second);
+	}
+};
+
+}
 namespace stm {
 
 // TODO: Texture::View object for Swapchain images, to allow for the swapchain to be used directly in a renderpass
@@ -102,7 +112,7 @@ public:
 		vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
 	}
 
-	inline Texture(Device& device, const string& name, const vk::AttachmentDescription& description, const vk::Extent3D& extent, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, 
+	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, const vk::AttachmentDescription& description, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, 
 		vk::ImageCreateFlags createFlags = {}, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_UNKNOWN, vk::ImageTiling tiling = vk::ImageTiling::eOptimal)
 		: DeviceResource(device, name), mExtent(extent), mFormat(description.format), mArrayLayers(1), mSampleCount(description.samples), mUsage(usage), 
 			mMipLevels(1), mCreateFlags(createFlags), mTiling(tiling) {
@@ -143,6 +153,8 @@ public:
 		if (mMemory) mDevice->destroyImage(mImage); // if mMemory isn't set, then the image object isn't owned by this object (ie swapchain images)
 	}
 
+	inline vk::Image& operator*() { return mImage; }
+	inline vk::Image* operator->() { return &mImage; }
 	inline const vk::Image& operator*() const { return mImage; }
 	inline const vk::Image* operator->() const { return &mImage; }
 	inline operator bool() const { return mImage; }
@@ -157,7 +169,7 @@ public:
 	inline vk::ImageAspectFlags aspect() const { return mAspect; }
 	inline vk::ImageCreateFlags create_flags() const { return mCreateFlags; }
 
-	// Texture must support vk::ImageAspect::eColor and vk::ImageLayout::eTransferDstOptimal
+	// Texture must support vk::ImageLayout::eTransferSrcOptimal and vk::ImageLayout::eTransferDstOptimal
 	STRATUM_API void generate_mip_maps(CommandBuffer& commandBuffer);
 	
 	STRATUM_API void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
@@ -181,9 +193,8 @@ public:
 	public:
 		View() = default;
 		View(const View&) = default;
-		View(View&&) = default;
-		STRATUM_API View(shared_ptr<Texture> texture, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components);
-		inline View(shared_ptr<Texture> texture, uint32_t baseMip=0, uint32_t mipCount=0, uint32_t baseLayer=0, uint32_t layerCount=0, vk::ImageAspectFlags aspect=(vk::ImageAspectFlags)0, const vk::ComponentMapping& components={})
+		STRATUM_API View(const shared_ptr<Texture>& texture, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components);
+		inline View(const shared_ptr<Texture>& texture, uint32_t baseMip=0, uint32_t mipCount=0, uint32_t baseLayer=0, uint32_t layerCount=0, vk::ImageAspectFlags aspect=(vk::ImageAspectFlags)0, const vk::ComponentMapping& components={})
 			: View(texture, vk::ImageSubresourceRange(aspect, baseMip, mipCount, baseLayer, layerCount), components) {};
 
 		View& operator=(const View&) = default;
@@ -194,7 +205,7 @@ public:
 		inline const vk::ImageView& operator*() const { return mView; }
 		inline const vk::ImageView* operator->() const { return &mView; }
 		inline Texture& texture() const { return *mTexture; }
-		inline shared_ptr<Texture> texture_ptr() const { return mTexture; }
+		inline const shared_ptr<Texture>& texture_ptr() const { return mTexture; }
 		inline const vk::ImageSubresourceRange& subresource_range() const { return mSubresource; }
 		inline vk::ImageSubresourceLayers subresource(uint32_t mipLevel) const { return vk::ImageSubresourceLayers(mSubresource.aspectMask, mSubresource.baseMipLevel + mipLevel, mSubresource.baseArrayLayer, mSubresource.layerCount); }
 	};

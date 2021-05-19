@@ -74,7 +74,4 @@ build_target() {
 
 build_target eigen "Release"
 
-build_target assimp "Debug" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF"
-build_target assimp "Release" "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF"
-
 build_target OpenXR-SDK $cfg

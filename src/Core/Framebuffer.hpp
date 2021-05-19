@@ -15,20 +15,24 @@ private:
 public:
 	template<ranges::range R>
 	inline Framebuffer(stm::RenderPass& renderPass, const string& name, const R& attachments) : DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass) {
-		mAttachments.resize(attachments.size());
-		vector<vk::ImageView> views(attachments.size());
 
+		mAttachments.resize(attachments.size());
 		ranges::copy(attachments, mAttachments.begin());
-		ranges::transform(attachments, views.begin(), &Texture::View::operator*);
 		
-		for (uint32_t i = 0; i < attachments.size(); i++)
+		for (uint32_t i = 0; i < mAttachments.size(); i++)
 			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].texture().extent().width), max(mExtent.height, mAttachments[i].texture().extent().height) );
 
+		vector<vk::ImageView> views(mAttachments.size());
+		ranges::transform(mAttachments, views.begin(), &Texture::View::operator*);
 		mFramebuffer = renderPass.mDevice->createFramebuffer(vk::FramebufferCreateInfo({}, *mRenderPass, views, mExtent.width, mExtent.height, 1));
 		renderPass.mDevice.set_debug_name(mFramebuffer, name);
 	}
-	inline ~Framebuffer() { mDevice->destroyFramebuffer(mFramebuffer); }
+	inline ~Framebuffer() {
+		mDevice->destroyFramebuffer(mFramebuffer);
+	}
 	
+	inline vk::Framebuffer& operator*() { return mFramebuffer; };
+	inline vk::Framebuffer* operator->() { return &mFramebuffer; };
 	inline const vk::Framebuffer& operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };
 	
@@ -40,9 +44,9 @@ public:
 	inline auto end() const { return mAttachments.end(); }
 
 	inline const Texture::View& at(size_t index) const { return mAttachments.at(index); }
-	inline const Texture::View& at(const RenderAttachmentId& id) const { return mAttachments.at(mRenderPass.find(id)); }
+	inline const Texture::View& at(const RenderAttachmentId& id) const { return mAttachments.at(mRenderPass.attachment_index(id)); }
 	inline const Texture::View& operator[](size_t index) const { return at(index); }
-	inline const Texture::View& operator[](const RenderAttachmentId& id) const { return at(mRenderPass.find(id)); }
+	inline const Texture::View& operator[](const RenderAttachmentId& id) const { return at(mRenderPass.attachment_index(id)); }
 };
 
 }

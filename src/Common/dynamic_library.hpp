@@ -1,10 +1,6 @@
 #pragma once
 
-#include "Stratum.hpp"
-
-#ifdef __linux
-#include <dlfcn.h>
-#endif
+#include "common.hpp"
 
 namespace stm {
 

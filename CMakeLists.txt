@@ -12,7 +12,6 @@ list(APPEND CMAKE_PREFIX_PATH ${EXTERN_DIR})
 find_package(Vulkan REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenXR CONFIG REQUIRED)
-find_package(assimp CONFIG REQUIRED)
 
 set(STRATUM_VERSION_MAJOR 1)
 set(STRATUM_VERSION_MINOR 2)

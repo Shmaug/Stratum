@@ -1,10 +1,7 @@
 #define VMA_IMPLEMENTATION
 #include "Device.hpp"
+#undef VMA_IMPLEMENTATION
 
-#include "Buffer.hpp"
-#include "CommandBuffer.hpp"
-#include "DescriptorSet.hpp"
-#include "Texture.hpp"
 #include "Window.hpp"
 
 using namespace stm;
@@ -20,6 +17,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	vector<const char*> deviceExts;
 	for (const string& s : deviceExtensions)
 		deviceExts.emplace_back(s.c_str());
+
 
 	#pragma region get queue infos
 	vector<vk::QueueFamilyProperties> queueFamilyProperties = mPhysicalDevice.getQueueFamilyProperties();
@@ -37,7 +35,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	#pragma endregion
 
 	#pragma region Create logical device
-	vk::PhysicalDeviceFeatures deviceFeatures = {};
+	vk::PhysicalDeviceFeatures deviceFeatures = {};	
 	deviceFeatures.fillModeNonSolid = VK_TRUE;
 	deviceFeatures.sparseBinding = VK_TRUE;
 	deviceFeatures.samplerAnisotropy = VK_TRUE;
@@ -46,12 +44,11 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	deviceFeatures.wideLines = VK_TRUE;
 	deviceFeatures.largePoints = VK_TRUE;
 	deviceFeatures.sampleRateShading = VK_TRUE;
-	vk::PhysicalDeviceDescriptorIndexingFeatures indexingFeatures;
-	indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
-	indexingFeatures.runtimeDescriptorArray = VK_TRUE;
-	vk::DeviceCreateInfo createInfo({}, queueCreateInfos, validationLayers, deviceExts, &deviceFeatures);
-	createInfo.pNext = &indexingFeatures;
-	mDevice = mPhysicalDevice.createDevice(createInfo);
+	deviceFeatures.shaderUniformBufferArrayDynamicIndexing = VK_TRUE;
+	deviceFeatures.shaderSampledImageArrayDynamicIndexing = VK_TRUE;
+	deviceFeatures.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
+	deviceFeatures.shaderStorageImageArrayDynamicIndexing = VK_TRUE;
+	mDevice = mPhysicalDevice.createDevice(vk::DeviceCreateInfo({}, queueCreateInfos, validationLayers, deviceExts, &deviceFeatures));
 	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
 	set_debug_name(mDevice, name);
 	#pragma endregion
@@ -59,7 +56,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	#pragma region Create PipelineCache and DesriptorPool
 	vk::PipelineCacheCreateInfo cacheInfo = {};
 	string tmp;
-	if (!mInstance.find_argument("noPipelineCache", tmp)) {
+	if (!mInstance.find_argument("noPipelineCache")) {
 		try {
 			ifstream cacheFile(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary | ios::ate);
 			if (cacheFile.is_open()) {
@@ -131,11 +128,10 @@ Device::~Device() {
 
 	vmaDestroyAllocator(mAllocator);
 
-	string tmp;
-	if (!mInstance.find_argument("noPipelineCache", tmp)) {
+	if (!mInstance.find_argument("noPipelineCache")) {
 		try {
 			auto cacheData = mDevice.getPipelineCacheData(mPipelineCache);
-			ofstream output(fs::temp_directory_path() / "stm_pipeline_cache", ios::binary);
+			ofstream output(fs::temp_directory_path()/"stm_pipeline_cache", ios::binary);
 			output.write((const char*)cacheData.data(), cacheData.size());
 		} catch (exception& e) {
 			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Failed to write pipeline cache: %s\n", e.what());
@@ -176,20 +172,11 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 	} else
 		return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
-void Device::submit(shared_ptr<CommandBuffer> commandBuffer) {
+void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vector<vk::Semaphore>& waitSemaphores, const vector<vk::PipelineStageFlags>& waitStages, const vector<vk::Semaphore>& signalSemaphores) {
 	ProfilerRegion ps("CommandBuffer::submit");
 
-	vector<vk::PipelineStageFlags> waitStages;	
-	vector<vk::Semaphore> waitSemaphores;	
-	vector<vk::Semaphore> signalSemaphores;
-	vector<vk::CommandBuffer> commandBuffers { **commandBuffer };
-	for (auto& [stage, semaphore] : commandBuffer->mWaitSemaphores) {
-		waitStages.emplace_back(stage);
-		waitSemaphores.emplace_back(*semaphore);
-	}
-	for (auto& semaphore : commandBuffer->mSignalSemaphores) signalSemaphores.emplace_back(**semaphore);
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, commandBuffers, signalSemaphores) }, **commandBuffer->mCompletionFence);
+	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, **commandBuffer, signalSemaphores) }, **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 	
 	scoped_lock l(mQueueFamilies.m());

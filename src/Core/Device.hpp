@@ -3,9 +3,12 @@
 #include "Instance.hpp"
 #include "vk_mem_alloc.h"
 
+#include "../Common/locked_object.hpp"
+
 namespace stm {
 
 class CommandBuffer;
+class Semaphore;
 
 class DeviceResource {
 private:
@@ -72,6 +75,8 @@ public:
 	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers, uint32_t frameInUseCount);
 	STRATUM_API ~Device();
 
+	inline vk::Device& operator*() { return mDevice; }
+	inline vk::Device* operator->() { return &mDevice; }
 	inline const vk::Device& operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
 	
@@ -79,6 +84,10 @@ public:
 	inline const vk::PhysicalDeviceLimits& limits() const { return mLimits; }
 	inline vk::PipelineCache pipeline_cache() const { return mPipelineCache; }
 	inline VmaAllocator allocator() const { return mAllocator; }
+
+	template<typename T> inline vk::DeviceSize min_uniform_buffer_offset_alignment() {
+		return (sizeof(T) + mLimits.minUniformBufferOffsetAlignment - 1) & ~(mLimits.minUniformBufferOffsetAlignment - 1);
+	}
 
 	inline QueueFamily* find_queue_family(vk::SurfaceKHR surface) {
 		auto queueFamilies = mQueueFamilies.lock();
@@ -101,7 +110,7 @@ public:
 	}
 	
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer);
+	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer, const vector<vk::Semaphore>& waitSemaphores = {}, const vector<vk::PipelineStageFlags>& waitStages = {}, const vector<vk::Semaphore>& signalSemaphores = {});
 	STRATUM_API void flush();
 
 private:
@@ -119,6 +128,7 @@ private:
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
 	locked_object<vk::DescriptorPool> mDescriptorPool;
+
 };
 
 }

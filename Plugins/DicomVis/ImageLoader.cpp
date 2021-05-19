@@ -8,7 +8,7 @@
 
 using namespace dcmvs;
 
-unordered_multimap<string, ImageStackType> ExtensionMap {
+unordered_multimap<string, ImageStackType> gExtensionMap {
 	{ ".dcm", eDicom },
 	{ ".raw", eRaw },
 	{ ".png", eStandard },
@@ -128,13 +128,13 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 			}
 		}));
 	}
-	printf("Loading stack");
+	cout << "Loading stack";
 	while (done < images.size()) {
-		printf("\rLoading stack: %u/%u    ", done, (uint32_t)images.size());
+		cout << "\rLoading stack: " << done << "/" << images.size() << "    ";
 		this_thread::sleep_for(10ms);
 	}
 	for (thread& t : threads) t.join();
-	printf("\rLoading stack: Done           \n");
+	cout << "\rLoading stack: Done           \n";
 
 	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, sliceSize*extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
@@ -253,13 +253,13 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& de
 			}
 		}));
 	}
-	printf("Loading stack");
+	cout << "Loading stack";
 	while (done < images.size()) {
-		printf("\rLoading stack: %u/%u    ", done, (uint32_t)images.size());
+		cout << "\rLoading stack: " << done << "/" << images.size();
 		this_thread::sleep_for(10ms);
 	}
 	for (thread& t : threads) t.join();
-	printf("\rLoading stack: Done           \n");
+	cout << "\rLoading stack: Done           \n";
 
 	auto volume = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR8G8B8A8Unorm, pixels, sliceSize * extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;
