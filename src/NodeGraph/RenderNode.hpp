@@ -11,7 +11,6 @@ using SubpassIdentifier = string;
 class RenderNode {
 private:
   NodeGraph::Node& mNode;
-  string mName;
   vector<pair<SubpassIdentifier, RenderPass::SubpassDescription>> mSubpasses;
   shared_ptr<RenderPass> mRenderPass;
 
@@ -20,7 +19,7 @@ private:
       ProfilerRegion ps("RenderNode::validate_renderpass");
       vector<RenderPass::SubpassDescription> subpasses(mSubpasses.size());
       ranges::transform(mSubpasses, subpasses.begin(), &pair<SubpassIdentifier, RenderPass::SubpassDescription>::second);
-      mRenderPass = make_shared<RenderPass>(device, name()+"/RenderPass", subpasses);
+      mRenderPass = make_shared<RenderPass>(device, mNode.name()+"/RenderPass", subpasses);
     }
   }
 
@@ -29,20 +28,19 @@ public:
   NodeGraph::Event<CommandBuffer&> OnRender;
 
   RenderNode(RenderNode&&) = default;
-  inline RenderNode(NodeGraph::Node& node, const string& name, const unordered_map<SubpassIdentifier, RenderPass::SubpassDescription>& subpasses = {}) : mNode(node), mName(name) {
+  inline RenderNode(NodeGraph::Node& node, const unordered_map<SubpassIdentifier, RenderPass::SubpassDescription>& subpasses = {}) : mNode(node) {
     mSubpasses.resize(subpasses.size());
     ranges::copy(subpasses, mSubpasses.begin());
   }
 
 	inline NodeGraph::Node& node() const { return mNode; }
-	inline const string& name() const { return mName; }
-
+\
   template<ranges::range R>
   inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const R& renderTargets, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}) {
     validate_renderpass(commandBuffer.mDevice);
     
     ProfilerRegion ps("RenderNode::render", commandBuffer);
-    auto framebuffer = make_shared<Framebuffer>(*mRenderPass, name()+"/Framebuffer", renderTargets);
+    auto framebuffer = make_shared<Framebuffer>(*mRenderPass, mNode.name()+"/Framebuffer", renderTargets);
 
     PreRender(mNode.node_graph(), commandBuffer);
     

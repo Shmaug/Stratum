@@ -3,20 +3,6 @@
 #include "CommandBuffer.hpp"
 #include "InputState.hpp"
 
-#ifdef WIN32
-#include <vulkan/vulkan_win32.h>
-#endif
-#ifdef __linux
-#include <xcb/xcb.h>
-#include <vulkan/vulkan_xcb.h>
-namespace x11 {
-#include <X11/Xlib.h>
-#include <X11/extensions/Xrandr.h>
-#include <X11/keysym.h>
-#include <vulkan/vulkan_xlib_xrandr.h>
-};
-#endif
-
 namespace stm {
 
 enum KeyCode {
@@ -142,107 +128,107 @@ enum KeyCode {
 	
 	eCancel = 0x006,
 
-	eKeyBackspace = x11::XK_BackSpace,
-	eKeyTab = x11::XK_Tab,
-	eKeyEnter = x11::XK_Return,
-	eKeyCapsLock = x11::XK_Caps_Lock,
-	eKeyEscape = x11::XK_Escape,
+	eKeyBackspace = XK_BackSpace,
+	eKeyTab = XK_Tab,
+	eKeyEnter = XK_Return,
+	eKeyCapsLock = XK_Caps_Lock,
+	eKeyEscape = XK_Escape,
 
-	eKeySpace = x11::XK_space,
-	eKeyPageUp = x11::XK_Page_Up,
-	eKeyPageDown = x11::XK_Page_Down,
-	eKeyEnd = x11::XK_End,
-	eKeyHome = x11::XK_Home,
-	eKeyLeft = x11::XK_Left,
-	eKeyUp = x11::XK_Up,
-	eKeyRight = x11::XK_Right,
-	eKeyDown = x11::XK_Down,
-	eKeyInsert = x11::XK_Insert,
-	eKeyDelete = x11::XK_Delete,
-	eKey0 = x11::XK_0,
-	eKey1 = x11::XK_1,
-	eKey2 = x11::XK_2,
-	eKey3 = x11::XK_3,
-	eKey4 = x11::XK_4,
-	eKey5 = x11::XK_5,
-	eKey6 = x11::XK_6,
-	eKey7 = x11::XK_7,
-	eKey8 = x11::XK_8,
-	eKey9 = x11::XK_9,
-	eKeyA = x11::XK_a,
-	eKeyB = x11::XK_b,
-	eKeyC = x11::XK_c,
-	eKeyD = x11::XK_d,
-	eKeyE = x11::XK_e,
-	eKeyF = x11::XK_f,
-	eKeyG = x11::XK_g,
-	eKeyH = x11::XK_h,
-	eKeyI = x11::XK_i,
-	eKeyJ = x11::XK_j,
-	eKeyK = x11::XK_k,
-	eKeyL = x11::XK_l,
-	eKeyM = x11::XK_m,
-	eKeyN = x11::XK_n,
-	eKeyO = x11::XK_o,
-	eKeyP = x11::XK_p,
-	eKeyQ = x11::XK_q,
-	eKeyR = x11::XK_r,
-	eKeyS = x11::XK_s,
-	eKeyT = x11::XK_t,
-	eKeyU = x11::XK_u,
-	eKeyV = x11::XK_v,
-	eKeyW = x11::XK_w,
-	eKeyX = x11::XK_x,
-	eKeyY = x11::XK_y,
-	eKeyZ = x11::XK_z,
-	eKeyNumpad0 = x11::XK_KP_Insert,
-	eKeyNumpad1 = x11::XK_KP_End,
-	eKeyNumpad2 = x11::XK_KP_Down,
-	eKeyNumpad3 = x11::XK_KP_Page_Down,
-	eKeyNumpad4 = x11::XK_KP_Left,
-	eKeyNumpad5 = x11::XK_KP_Begin,
-	eKeyNumpad6 = x11::XK_KP_Right,
-	eKeyNumpad7 = x11::XK_KP_Home,
-	eKeyNumpad8 = x11::XK_KP_Up,
-	eKeyNumpad9 = x11::XK_KP_Page_Up,
-	eKeyNumpadEnter = x11::XK_KP_Enter,
-	eKeyDecimal = x11::XK_KP_Delete,
-	eKeyAdd = x11::XK_KP_Add,
-	eKeySubtract = x11::XK_KP_Subtract,
-	eKeyMultiply = x11::XK_KP_Multiply,
-	eKeyDivide = x11::XK_KP_Divide,
-	eKeyF1 = x11::XK_F1,
-	eKeyF2 = x11::XK_F2,
-	eKeyF3 = x11::XK_F3,
-	eKeyF4 = x11::XK_F4,
-	eKeyF5 = x11::XK_F5,
-	eKeyF6 = x11::XK_F6,
-	eKeyF7 = x11::XK_F7,
-	eKeyF8 = x11::XK_F8,
-	eKeyF9 = x11::XK_F9,
-	eKeyF10 = x11::XK_F10,
-	eKeyF11 = x11::XK_F11,
-	eKeyF12 = x11::XK_F12,
-	eKeyNumLock = x11::XK_Num_Lock,
-	eKeyScrollLock = x11::XK_Scroll_Lock,
-	eKeyLShift = x11::XK_Shift_L,
-	eKeyRShift = x11::XK_Shift_R,
-	eKeyLControl = x11::XK_Control_L,
-	eKeyRControl = x11::XK_Control_R,
-	eKeyLAlt = x11::XK_Alt_L,
-	eKeyRAlt = x11::XK_Alt_R,
+	eKeySpace = XK_space,
+	eKeyPageUp = XK_Page_Up,
+	eKeyPageDown = XK_Page_Down,
+	eKeyEnd = XK_End,
+	eKeyHome = XK_Home,
+	eKeyLeft = XK_Left,
+	eKeyUp = XK_Up,
+	eKeyRight = XK_Right,
+	eKeyDown = XK_Down,
+	eKeyInsert = XK_Insert,
+	eKeyDelete = XK_Delete,
+	eKey0 = XK_0,
+	eKey1 = XK_1,
+	eKey2 = XK_2,
+	eKey3 = XK_3,
+	eKey4 = XK_4,
+	eKey5 = XK_5,
+	eKey6 = XK_6,
+	eKey7 = XK_7,
+	eKey8 = XK_8,
+	eKey9 = XK_9,
+	eKeyA = XK_a,
+	eKeyB = XK_b,
+	eKeyC = XK_c,
+	eKeyD = XK_d,
+	eKeyE = XK_e,
+	eKeyF = XK_f,
+	eKeyG = XK_g,
+	eKeyH = XK_h,
+	eKeyI = XK_i,
+	eKeyJ = XK_j,
+	eKeyK = XK_k,
+	eKeyL = XK_l,
+	eKeyM = XK_m,
+	eKeyN = XK_n,
+	eKeyO = XK_o,
+	eKeyP = XK_p,
+	eKeyQ = XK_q,
+	eKeyR = XK_r,
+	eKeyS = XK_s,
+	eKeyT = XK_t,
+	eKeyU = XK_u,
+	eKeyV = XK_v,
+	eKeyW = XK_w,
+	eKeyX = XK_x,
+	eKeyY = XK_y,
+	eKeyZ = XK_z,
+	eKeyNumpad0 = XK_KP_Insert,
+	eKeyNumpad1 = XK_KP_End,
+	eKeyNumpad2 = XK_KP_Down,
+	eKeyNumpad3 = XK_KP_Page_Down,
+	eKeyNumpad4 = XK_KP_Left,
+	eKeyNumpad5 = XK_KP_Begin,
+	eKeyNumpad6 = XK_KP_Right,
+	eKeyNumpad7 = XK_KP_Home,
+	eKeyNumpad8 = XK_KP_Up,
+	eKeyNumpad9 = XK_KP_Page_Up,
+	eKeyNumpadEnter = XK_KP_Enter,
+	eKeyDecimal = XK_KP_Delete,
+	eKeyAdd = XK_KP_Add,
+	eKeySubtract = XK_KP_Subtract,
+	eKeyMultiply = XK_KP_Multiply,
+	eKeyDivide = XK_KP_Divide,
+	eKeyF1 = XK_F1,
+	eKeyF2 = XK_F2,
+	eKeyF3 = XK_F3,
+	eKeyF4 = XK_F4,
+	eKeyF5 = XK_F5,
+	eKeyF6 = XK_F6,
+	eKeyF7 = XK_F7,
+	eKeyF8 = XK_F8,
+	eKeyF9 = XK_F9,
+	eKeyF10 = XK_F10,
+	eKeyF11 = XK_F11,
+	eKeyF12 = XK_F12,
+	eKeyNumLock = XK_Num_Lock,
+	eKeyScrollLock = XK_Scroll_Lock,
+	eKeyLShift = XK_Shift_L,
+	eKeyRShift = XK_Shift_R,
+	eKeyLControl = XK_Control_L,
+	eKeyRControl = XK_Control_R,
+	eKeyLAlt = XK_Alt_L,
+	eKeyRAlt = XK_Alt_R,
 
-	eKeySemicolon = x11::XK_semicolon,
-	eKeyEqual = x11::XK_equal,
-	eKeyComma = x11::XK_comma,
-	eKeyMinus = x11::XK_minus,
-	eKeyPeriod = x11::XK_period,
-	eKeySlash = x11::XK_slash,
-	eKeyTilde = x11::XK_grave,
-	eKeyLBracket = x11::XK_bracketleft,
-	eKeyRBracket = x11::XK_bracketright,
-	eKeyQuote = x11::XK_quotedbl,
-	eKeyBackslash = x11::XK_backslash,
+	eKeySemicolon = XK_semicolon,
+	eKeyEqual = XK_equal,
+	eKeyComma = XK_comma,
+	eKeyMinus = XK_minus,
+	eKeyPeriod = XK_period,
+	eKeySlash = XK_slash,
+	eKeyTilde = XK_grave,
+	eKeyLBracket = XK_bracketleft,
+	eKeyRBracket = XK_bracketright,
+	eKeyQuote = XK_quotedbl,
+	eKeyBackslash = XK_backslash,
 #endif
 };
 
@@ -317,7 +303,6 @@ public:
 	inline const Texture::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
 	inline const Texture::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
 
-
 #ifdef WIN32
 	inline HWND handle() const { return mHwnd; }
 #endif
@@ -327,7 +312,7 @@ public:
 
 	STRATUM_API void resize(uint32_t w, uint32_t h);
 
-	STRATUM_API const Texture::View& acquire_image(CommandBuffer& commandBuffer);
+	STRATUM_API Texture::View acquire_image(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void present(const vector<vk::Semaphore>& waitSemaphores);
 	// Number of times present has been called
@@ -358,7 +343,7 @@ public:
 	}
 
 private:
-	STRATUM_API void create_swapchain(CommandBuffer& commandBUffer);
+	STRATUM_API void create_swapchain(Device& device);
 	STRATUM_API void destroy_swapchain();
 	
 	vk::SurfaceKHR mSurface;
@@ -382,8 +367,8 @@ private:
 	MouseKeyboardState mInputStateLast;
 	bool mLockMouse = false;
 
-#ifdef WIN32
 	friend class Instance;
+#ifdef WIN32
 	HWND mHwnd = NULL;
 	RECT mWindowedRect;
 	STRATUM_API void handle_message(UINT message, WPARAM wParam, LPARAM lParam);
@@ -393,7 +378,7 @@ private:
 	xcb_atom_t mXCBProtocols;
 	xcb_atom_t mXCBDeleteWin;
 	vk::Rect2D mWindowedRect;
-	STRATUM_API void process_event(xcb_generic_event_t* event);
+	STRATUM_API bool process_event(xcb_generic_event_t* event);
 	STRATUM_API xcb_generic_event_t* poll_event();
 #endif
 };

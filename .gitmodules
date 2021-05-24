@@ -1,9 +1,3 @@
-[submodule "extern/src/eigen"]
-	path = extern/src/eigen
-	url = https://gitlab.com/libeigen/eigen.git
-[submodule "extern/src/OpenXR-SDK"]
-	path = extern/src/OpenXR-SDK
-	url = https://github.com/KhronosGroup/OpenXR-SDK
 [submodule "extern/include/imgui"]
 	path = extern/include/imgui
 	url = https://github.com/ocornut/imgui

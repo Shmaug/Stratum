@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <locale>
 #include <mutex>
@@ -56,21 +57,18 @@
 #define PLUGIN_EXPORT __declspec(dllexport)
 #endif
 #endif
+
 #ifdef __linux
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <dlfcn.h>
+#pragma GCC diagnostic ignored "-Wformat-security"
 #define STRATUM_API
 #define PLUGIN_EXPORT
 #endif
 
-#define EIGEN_HAS_STD_RESULT_OF 0
-#include <Eigen/Geometry>
-#include <Eigen/LU>
-#include <unsupported/Eigen/BVH>
-#include <unsupported/Eigen/CXX11/Tensor>
-
+#include <eigen3/Eigen/Geometry>
 #include <vulkan/vulkan.hpp>
 
 namespace stm {

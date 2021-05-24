@@ -13,7 +13,7 @@ public:
 	STRATUM_API CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	inline ~CommandBuffer() {
 		if (mState == CommandBufferState::eInFlight)
-			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Destroying CommandBuffer [%s] that is in-flight!\n", name().c_str());
+			fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Destroying CommandBuffer [%s] that is in-flight!\n", name().c_str());
 		clear();
 		mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 	}

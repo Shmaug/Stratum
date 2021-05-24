@@ -1,0 +1,112 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "fs_skybox",
+            "mode" : "frag"
+        }
+    ],
+    "types" : {
+        "_13" : {
+            "name" : "quatf",
+            "members" : [
+                {
+                    "name" : "coeffs",
+                    "type" : "vec4",
+                    "offset" : 0
+                }
+            ]
+        },
+        "_12" : {
+            "name" : "TransformData",
+            "members" : [
+                {
+                    "name" : "Translation",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Scale",
+                    "type" : "float",
+                    "offset" : 12
+                },
+                {
+                    "name" : "Rotation",
+                    "type" : "_13",
+                    "offset" : 16
+                }
+            ]
+        },
+        "_14" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_11" : {
+            "name" : "type.PushConstant.push_constants",
+            "members" : [
+                {
+                    "name" : "WorldToCamera",
+                    "type" : "_12",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Projection",
+                    "type" : "_14",
+                    "offset" : 32
+                },
+                {
+                    "name" : "EnvironmentGamma",
+                    "type" : "float",
+                    "offset" : 48
+                }
+            ]
+        }
+    },
+    "inputs" : [
+        {
+            "type" : "vec3",
+            "name" : "in.var.TEXCOORD0",
+            "location" : 0
+        }
+    ],
+    "outputs" : [
+        {
+            "type" : "vec4",
+            "name" : "out.var.SV_Target0",
+            "location" : 0
+        }
+    ],
+    "separate_images" : [
+        {
+            "type" : "texture2D",
+            "name" : "gTexture",
+            "set" : 0,
+            "binding" : 0
+        }
+    ],
+    "separate_samplers" : [
+        {
+            "type" : "sampler",
+            "name" : "gSampler",
+            "set" : 0,
+            "binding" : 1
+        }
+    ],
+    "push_constants" : [
+        {
+            "type" : "_11",
+            "name" : "gPushConstants",
+            "push_constant" : true
+        }
+    ]
+}

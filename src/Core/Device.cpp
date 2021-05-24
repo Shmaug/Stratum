@@ -67,11 +67,11 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 				printf("Read pipeline cache (%.2f kb)\n", cacheInfo.initialDataSize/(float)1_mB);
 			}
 		} catch (exception& e) {
-			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Failed to read pipeline cache: %s\n", e.what());
+			fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Failed to read pipeline cache: %s\n", e.what());
 		}
 	}
 	mPipelineCache = mDevice.createPipelineCache(cacheInfo);
-	if (cacheInfo.pInitialData) delete cacheInfo.pInitialData;
+	if (cacheInfo.pInitialData) delete reinterpret_cast<const byte*>(cacheInfo.pInitialData);
 	
 	vector<vk::DescriptorPoolSize> poolSizes {
 		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(1024u, mLimits.maxDescriptorSetSamplers)),
@@ -134,7 +134,7 @@ Device::~Device() {
 			ofstream output(fs::temp_directory_path()/"stm_pipeline_cache", ios::binary);
 			output.write((const char*)cacheData.data(), cacheData.size());
 		} catch (exception& e) {
-			fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Failed to write pipeline cache: %s\n", e.what());
+			fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Failed to write pipeline cache: %s\n", e.what());
 		}
 	}
 	mDevice.destroyPipelineCache(mPipelineCache);

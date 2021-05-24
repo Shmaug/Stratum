@@ -1,5 +1,5 @@
-#pragma compile compute skin_vertices
-#pragma compile compute blend_vertices
+#pragma compile cs_6_6 skin
+#pragma compile cs_6_6 blend
 
 struct VertexWeight {
 	float4 Weights;
@@ -24,7 +24,7 @@ struct push_constants {
 [[vk::push_constant]] const push_constants gPushConstants = { 0, 0, 0, 0, float4(0,0,0,0) };
 
 [numthreads(64, 1, 1)]
-void skin_vertices(uint3 index : SV_DispatchThreadID) {
+void skin(uint3 index : SV_DispatchThreadID) {
 	if (index.x >= gPushConstants.VertexCount) return;
 	
 	VertexWeight w = Weights[index.x];
@@ -50,7 +50,7 @@ void skin_vertices(uint3 index : SV_DispatchThreadID) {
 }
 
 [numthreads(64, 1, 1)]
-void blend_vertices(uint3 index : SV_DispatchThreadID) {
+void blend(uint3 index : SV_DispatchThreadID) {
 	if (index.x >= gPushConstants.VertexCount) return;
 	
 	uint address = index.x * gPushConstants.VertexStride;

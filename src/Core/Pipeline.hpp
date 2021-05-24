@@ -1,8 +1,7 @@
 #pragma once
 
 #include "RenderPass.hpp"
-#include "DescriptorSet.hpp"
-#include "Geometry.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
@@ -14,19 +13,17 @@ inline VertexInputBindingData create_vertex_bindings(const Geometry& geometry, c
 	vector<vk::VertexInputAttributeDescription> attributes;
 	vector<vk::VertexInputBindingDescription> bindings;
 
-	for (const auto& [id, attrib] : geometry) {
-		auto stageInput = ranges::find_if(vertexShader.mStageInputs, [&](const auto& p) { return p.second.mAttributeId == id; });
-		if (stageInput != vertexShader.mStageInputs.end()) {
-			uint32_t index;
-			for (index = 0; index < bindings.size(); index++)
-				if (buffers[index] == attrib.buffer_view() && bindings[index].stride == attrib.stride() && bindings[index].inputRate == attrib.input_rate())
-					break;
-			if (index == bindings.size()) {
-				bindings.emplace_back(index, attrib.stride(), attrib.input_rate());
-				buffers.emplace_back(attrib.buffer_view());
-			}
-			attributes.emplace_back(stageInput->second.mLocation, index, attrib.format(), attrib.offset());
+	for (const auto& [n, v] : vertexShader.stage_inputs()) {
+		const Geometry::Attribute& attrib = geometry[v.mAttributeType][v.mAttributeIndex];
+		uint32_t bindingindex;
+		for (bindingindex = 0; bindingindex < bindings.size(); bindingindex++)
+			if (buffers[bindingindex] == attrib.buffer_view() && bindings[bindingindex].stride == attrib.stride() && bindings[bindingindex].inputRate == attrib.input_rate())
+				break;
+		if (bindingindex == bindings.size()) {
+			bindings.emplace_back(bindingindex, attrib.stride(), attrib.input_rate());
+			buffers.emplace_back(attrib.buffer_view());
 		}
+		attributes.emplace_back(v.mLocation, bindingindex, attrib.format(), attrib.offset());
 	}
 	return make_pair(move(attributes), move(bindings));
 }
@@ -40,29 +37,23 @@ protected:
 	vector<shared_ptr<SpirvModule>> mSpirvModules;
 	vector<shared_ptr<DescriptorSetLayout>> mDescriptorSetLayouts;
 	unordered_map<string, byte_blob> mSpecializationConstants;
-	unordered_map<string, DescriptorBinding> mDescriptorBindings;
 	unordered_map<string, vk::PushConstantRange> mPushConstants;
-
-	// extract metadata (ie mPushConstants + mDescriptorBindings)
+	
 	inline void set_spirv(const vk::ArrayProxy<const shared_ptr<SpirvModule>>& modules) {
 		for (const shared_ptr<SpirvModule>& spirv : modules) {
-			if (!spirv->mShaderModule) {
-				spirv->mDevice = *mDevice;
-				spirv->mShaderModule = mDevice->createShaderModule(vk::ShaderModuleCreateInfo({}, spirv->mSpirv));
-			}
 			mSpirvModules.emplace_back(spirv);
 		
-			for (const auto& [id, p] : spirv->mPushConstants) {
+			for (const auto& [id, p] : spirv->push_constants()) {
 				auto it = mPushConstants.find(id);
 				if (it == mPushConstants.end())
-					mPushConstants.emplace(id, vk::PushConstantRange(spirv->mStage, p.first, p.second));
+					mPushConstants.emplace(id, vk::PushConstantRange(spirv->stage(), p.first, p.second));
 				else {
 					if (it->second.offset != p.first || it->second.size != p.second) throw runtime_error("spirv modules share the same push constant names with different offsets/sizes"); 
-					it->second.stageFlags |= spirv->mStage;
+					it->second.stageFlags |= spirv->stage();
 				}
 			}
 
-			for (const auto& [id, binding] : spirv->mDescriptorBindings)
+			for (const auto& [id, binding] : spirv->descriptors())
 				if (auto it = mDescriptorBindings.find(id); it != mDescriptorBindings.end()) {
 					if (it->second.mBinding == binding.mBinding && it->second.mSet == binding.mSet) {
 						if (it->second.mDescriptorType != binding.mDescriptorType) throw invalid_argument("spirv modules share the same descriptor binding with different descriptor types");
@@ -95,11 +86,11 @@ protected:
 		for (const auto& spirv : mSpirvModules) {
 			uint32_t first = ~0;
 			uint32_t last = 0;
-			for (const auto& [id, p] : spirv->mPushConstants) {
+			for (const auto& [id, p] : spirv->push_constants()) {
 				first = min(first, p.first);
 				last = max(last, p.first + p.second);
 			}
-			pushConstantRanges.emplace_back(spirv->mStage, first, last - first);
+			pushConstantRanges.emplace_back(spirv->stage(), first, last - first);
 			mHash = hash_args(mHash, spirv);
 		}
 		mHash = hash_args(mHash, mSpecializationConstants);	
@@ -141,7 +132,7 @@ public:
 	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
 	inline const auto& push_constants() { return mPushConstants; };
 
-	inline const DescriptorBinding& binding(const string& name) const {
+	inline const DescriptorSetLayout::Binding& binding(const string& name) const {
 		auto it = mDescriptorBindings.find(name);
 		if (it == mDescriptorBindings.end()) throw invalid_argument("no descriptor named " + name);
 		return it->second;
@@ -161,20 +152,20 @@ public:
 		vector<vk::SpecializationMapEntry> mapEntries;
 		byte_blob specData;
 		for (const auto&[name,data] : mSpecializationConstants)
-			if (auto it = spirv->mSpecializationMap.find(name); it != spirv->mSpecializationMap.end()) {
+			if (auto it = spirv->specialization_map().find(name); it != spirv->specialization_map().end()) {
 				specData.resize(max(specData.size(), it->second.offset + it->second.size));
 				memcpy(specData.data() + it->second.offset, data.data(), min(data.size(), it->second.size));
 			}
 		vk::SpecializationInfo specInfo((uint32_t)mapEntries.size(), mapEntries.data(), (uint32_t)specData.size(), specData.data());
 		mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(),
 			vk::ComputePipelineCreateInfo({},
-				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, spirv->mShaderModule, spirv->mEntryPoint.c_str(), mapEntries.size() ? &specInfo : nullptr),
+				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, **spirv, spirv->entry_point().c_str(), mapEntries.size() ? &specInfo : nullptr),
 				mLayout)).value;
 		mDevice.set_debug_name(mPipeline, name);
 	}
 
 	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eCompute; }
-	inline vk::Extent3D workgroup_size() const { return mSpirvModules[0]->mWorkgroupSize; }
+	inline vk::Extent3D workgroup_size() const { return mSpirvModules[0]->workgroup_size(); }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -241,13 +232,13 @@ public:
 			auto& mapEntries = specMapEntries.emplace_front(vector<vk::SpecializationMapEntry>());
 			auto& specData = specDatas.emplace_front(byte_blob());
 			for (const auto&[name,data] : mSpecializationConstants)
-				if (auto it = spirv->mSpecializationMap.find(name); it != spirv->mSpecializationMap.end()) {
+				if (auto it = spirv->specialization_map().find(name); it != spirv->specialization_map().end()) {
 					auto& entry = mapEntries.emplace_back(it->second.constantID, (uint32_t)specData.size(), it->second.size);
 					specData.resize(entry.offset + entry.size);
 					memcpy(specData.data() + entry.offset, data.data(), min(data.size(), it->second.size));
 				}
 			vk::SpecializationInfo specInfo((uint32_t)mapEntries.size(), mapEntries.data(), (uint32_t)specData.size(), specData.data());
-			return vk::PipelineShaderStageCreateInfo({}, spirv->mStage, spirv->mShaderModule, spirv->mEntryPoint.c_str(), specInfo.dataSize ? &specInfo : nullptr);
+			return vk::PipelineShaderStageCreateInfo({}, spirv->stage(), **spirv, spirv->entry_point().c_str(), specInfo.dataSize ? &specInfo : nullptr);
 		});
 
 		mPipeline = mDevice->createGraphicsPipeline(mDevice.pipeline_cache(), 

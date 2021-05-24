@@ -126,6 +126,12 @@ public:
 		bool operator==(const StrideView&) const = default;
 
     inline size_t stride() const { return mStride; }
+		
+		template<typename T>
+		inline operator View<T>() const {
+			if (sizeof(T) != mStride) throw logic_error("sizeof(T) must match stride");
+			return Buffer::View<T>(buffer_ptr(), offset(), size_bytes()/sizeof(T));
+		}
 	};
 
 	class TexelView : public View<byte> {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Instance.hpp"
-#include "vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 
 #include "../Common/locked_object.hpp"
 

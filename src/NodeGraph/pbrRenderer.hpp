@@ -25,7 +25,6 @@ public:
 	struct PrimitiveSet {
 		Geometry mGeometry;
 		Buffer::StrideView mIndices;
-		hlsl::MaterialData mMaterialData;
 
 		uint32_t mIndexCount;
 		uint32_t mVertexOffset;

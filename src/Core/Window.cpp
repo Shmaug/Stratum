@@ -2,7 +2,7 @@
 
 using namespace stm;
 
-Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
+stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
 	#ifdef WIN32
 
 	mWindowedRect = {};
@@ -38,8 +38,8 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	#endif
 
 	#ifdef __linux
-	xcbConnection = mInstance.XCBConnection();
-	xcbScreen = mInstance->XCBScreen();
+	xcb_connection_t* xcbConnection = mInstance.xcb_connection();
+	xcb_screen_t* xcbScreen = mInstance.xcb_screen();
 	mXCBWindow = xcb_generate_id(xcbConnection);
 
 	uint32_t valueList[] {
@@ -81,30 +81,26 @@ Window::Window(Instance& instance, const string& title, vk::Rect2D position) : m
 	xcb_map_window(xcbConnection, mXCBWindow);
 	xcb_flush(xcbConnection);
 
-	VkXcbSurfaceCreateInfoKHR info = {};
-	info.connection = xcbConnection;
-	info.window = mXCBWindow;
-	mSurface = mInstance->vkCreateXcbSurfaceKHR(*mInstance, &info, nullptr, &mSurface);
+	mSurface = instance->createXcbSurfaceKHR(vk::XcbSurfaceCreateInfoKHR({}, xcbConnection, mXCBWindow));
 	#endif
 }
-Window::~Window() {
+stm::Window::~Window() {
 	destroy_swapchain();
 	mInstance->destroySurfaceKHR(mSurface);
-
 #ifdef WIN32
-	if (mHwnd)
-		DestroyWindow(mHwnd);
-#elif defined(__linux)
-	if (mInstance.XCBConnection() && mXCBWindow)
- 		xcb_destroy_window(mInstance.XCBConnection(), mXCBWindow);
+	if (mHwnd) DestroyWindow(mHwnd);
+#endif
+#ifdef __linux
+	if (mInstance.xcb_connection() && mXCBWindow)
+ 		xcb_destroy_window(mInstance.xcb_connection(), mXCBWindow);
 #endif
 }
 
-const Texture::View& Window::acquire_image(CommandBuffer& commandBuffer) {
+Texture::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	ProfilerRegion ps("Window::acquire_image", commandBuffer);
 	
 	if (!mSwapchain) {
-		create_swapchain(commandBuffer);
+		create_swapchain(commandBuffer.mDevice);
 		if (!mSwapchain) Texture::View();
 	}
 
@@ -118,7 +114,7 @@ const Texture::View& Window::acquire_image(CommandBuffer& commandBuffer) {
 	mBackBufferIndex = result.value;
 	return back_buffer();
 }
-void Window::present(const vector<vk::Semaphore>& waitSemaphores) {
+void stm::Window::present(const vector<vk::Semaphore>& waitSemaphores) {
 	ProfilerRegion ps("Window::present");
 	vector<vk::SwapchainKHR> swapchains { mSwapchain };
 	vector<uint32_t> imageIndices { mBackBufferIndex };
@@ -126,7 +122,7 @@ void Window::present(const vector<vk::Semaphore>& waitSemaphores) {
 	mPresentCount++;
 }
 
-void Window::resize(uint32_t w, uint32_t h) {
+void stm::Window::resize(uint32_t w, uint32_t h) {
 #ifdef WIN32
 	RECT r;
 	GetWindowRect(mHwnd, &r);
@@ -136,12 +132,10 @@ void Window::resize(uint32_t w, uint32_t h) {
 	r.bottom = r.top + h;
 	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	SetWindowPos(mHwnd, HWND_TOPMOST, x, y, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
-#else
-	throw exception("Window::resize not implemented");
 #endif
 }
 
-void Window::fullscreen(bool fs) {
+void stm::Window::fullscreen(bool fs) {
 	#ifdef WIN32
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
@@ -182,16 +176,16 @@ void Window::fullscreen(bool fs) {
 	if (fs == mFullscreen) return;
 	mFullscreen = fs;
 
-   	struct {
-        unsigned long flags;
-        unsigned long functions;
-        unsigned long decorations;
-        long input_mode;
-        unsigned long status;
-    } hints = {0};
+	struct {
+			unsigned long flags;
+			unsigned long functions;
+			unsigned long decorations;
+			long input_mode;
+			unsigned long status;
+	} hints = {0};
 
-    //hints.flags = MWM_HINTS_DECORATIONS;
-    //hints.decorations = mFullscreen ? 0 : MWM_DECOR_ALL;
+	//hints.flags = MWM_HINTS_DECORATIONS;
+	//hints.decorations = mFullscreen ? 0 : MWM_DECOR_ALL;
 
 	//xcb_intern_atom_cookie_t cookie = xcb_intern_atom(mInstance.XCBConnection(), 0, 16, "_MOTIF_WM_HINTS");
 	//xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(mInstance.XCBConnection(), cookie, NULL);
@@ -200,9 +194,9 @@ void Window::fullscreen(bool fs) {
 	#endif
 }
 
-void Window::create_swapchain(CommandBuffer& commandBuffer) {
+void stm::Window::create_swapchain(Device& device) {
 	if (mSwapchain) destroy_swapchain();
-	mSwapchainDevice = &commandBuffer.mDevice;
+	mSwapchainDevice = &device;
 	mSwapchainDevice->set_debug_name(mSurface, "WindowSurface");
 	
 	mPresentQueueFamily = mSwapchainDevice->find_queue_family(mSurface);
@@ -263,11 +257,10 @@ void Window::create_swapchain(CommandBuffer& commandBuffer) {
 		mSwapchainImages[i] = Texture::View(
 			make_shared<Texture>(images[i], *mSwapchainDevice, "swapchain_image", vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
 			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
-		mSwapchainImages[i].texture().transition_barrier(commandBuffer, vk::ImageLayout::ePresentSrcKHR);
 		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
 	}
 }
-void Window::destroy_swapchain() {
+void stm::Window::destroy_swapchain() {
 	mSwapchainDevice->flush();
 	mSwapchainImages.clear();
 	mImageAvailableSemaphores.clear();
@@ -275,16 +268,13 @@ void Window::destroy_swapchain() {
 	mSwapchain = nullptr;
 }
 
-void Window::lock_mouse(bool l) {
+void stm::Window::lock_mouse(bool l) {
 	#ifdef WIN32
 	if (mLockMouse && !l)
 		ShowCursor(TRUE);
 	else if (!mLockMouse && l)
 		ShowCursor(FALSE);
-	#else
-	// TODO: hide cursor on linux
 	#endif
-
 	mLockMouse = l;
 }
 
@@ -354,7 +344,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 #endif
 
 #ifdef __linux
-bool Window::process_event(xcb_generic_event_t* event) {
+bool stm::Window::process_event(xcb_generic_event_t* event) {
 	xcb_motion_notify_event_t* mn = (xcb_motion_notify_event_t*)event;
 	xcb_resize_request_event_t* rr = (xcb_resize_request_event_t*)event;
 	xcb_button_press_event_t* bp = (xcb_button_press_event_t*)event;
@@ -367,41 +357,48 @@ bool Window::process_event(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen)
-			mInputState.mCursorPos = Vector2f((float)mn->event_x, (float)mn->event_y);
+			mInputState.cursor_pos() = Vector2f((float)mn->event_x, (float)mn->event_y);
 		break;
 
 	case XCB_KEY_PRESS:
-		kc = (KeyCode)xcb_key_press_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mInputState.mButtons.emplace(kc);
+		kc = (KeyCode)xcb_key_press_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		mInputState.set_button(kc);
 		if (kc == KeyCode::eKeyEnter && (mInputState.pressed(KeyCode::eKeyLAlt) || mInputState.pressed(KeyCode::eKeyRAlt)))
 			fullscreen(!fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
-		kc = (KeyCode)xcb_key_release_lookup_keysym(mXCBKeySymbols, kp, 0);
-		mInputState.mButtons.erase(kc);
+		kc = (KeyCode)xcb_key_release_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		mInputState.unset_button(kc);
 		break;
 
 	case XCB_BUTTON_PRESS:
-		if (bp->detail == 4){
-			mInputState.mScrollDelta += 1.0f;
+		if (bp->detail == 4) {
+			mInputState.add_scroll_delta(1.f);
 			break;
 		}
-		if (bp->detail == 5){
-			mInputState.mScrollDelta =- 1.0f;
+		if (bp->detail == 5) {
+			mInputState.add_scroll_delta(-1.f);
 			break;
 		}
 	case XCB_BUTTON_RELEASE:
 		switch (bp->detail){
 		case 1:
-			mInputState.mButtons[KeyCode::eMouse1] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mMouseKeyboard->mMousePointer.mPrimaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			if ((event->response_type & ~0x80) == XCB_BUTTON_PRESS)
+				mInputState.set_button(KeyCode::eMouse1);
+			else
+				mInputState.unset_button(KeyCode::eMouse1);
 			break;
 		case 2:
-			mInputState.mButtons[KeyCode::eMouse3] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			if ((event->response_type & ~0x80) == XCB_BUTTON_PRESS)
+				mInputState.set_button(KeyCode::eMouse3);
+			else
+				mInputState.unset_button(KeyCode::eMouse3);
 			break;
 		case 3:
-			mInputState.mButtons[KeyCode::eMouse2] = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
-			mMouseKeyboard->mMousePointer.mSecondaryButton = (event->response_type & ~0x80) == XCB_BUTTON_PRESS;
+			if ((event->response_type & ~0x80) == XCB_BUTTON_PRESS)
+				mInputState.set_button(KeyCode::eMouse2);
+			else
+				mInputState.unset_button(KeyCode::eMouse2);
 			break;
 		}
 		break;
@@ -413,20 +410,23 @@ bool Window::process_event(xcb_generic_event_t* event) {
 	}
 	return true;
 }
-xcb_generic_event_t* Window::poll_event() {
-	xcb_generic_event_t* cur = xcb_poll_for_event(mXCBConnection);
-	xcb_generic_event_t* nxt = xcb_poll_for_event(mXCBConnection);
+xcb_generic_event_t* stm::Window::poll_event() {
+	xcb_generic_event_t* cur = xcb_poll_for_event(mInstance.xcb_connection());
+	xcb_generic_event_t* nxt = xcb_poll_for_event(mInstance.xcb_connection());
 	if (cur && (cur->response_type & ~0x80) == XCB_KEY_RELEASE && nxt && (nxt->response_type & ~0x80) == XCB_KEY_PRESS) {
 		xcb_key_press_event_t* kp = (xcb_key_press_event_t*)cur;
 		xcb_key_press_event_t* nkp = (xcb_key_press_event_t*)nxt;
 		if (nkp->time == kp->time && nkp->detail == kp->detail) {
 			free(cur);
 			free(nxt);
-			return PollEvent(); // ignore repeat key press events
+			return poll_event(); // ignore repeat key press events
 		}
 	}
 	if (cur) {
-		process_event(cur);
+		if (!process_event(cur)) {
+ 			xcb_destroy_window(mInstance.xcb_connection(), mXCBWindow);
+		 mXCBWindow = 0;
+		}
 		free(cur);
 	}
 	return nxt;

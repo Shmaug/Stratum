@@ -3,7 +3,6 @@
 #include "Buffer.hpp"
 
 namespace stm {
-
 class Geometry {
 public:
 	struct Attribute {
@@ -38,22 +37,28 @@ public:
 		inline uint32_t stride() const { return texel_size(mFormat);}
 		inline const vk::VertexInputRate& input_rate() const { return mInputRate; }
 	};
-	struct VertexAttributeArrayView {
-		// helper object to allow Geometry[attrib][idx] to work
-		Geometry& mGeometry;
-		VertexAttributeType mAttributeType;
-		inline Attribute& at(uint32_t idx) { return mGeometry.mAttributes.at(VertexAttributeId(mAttributeType, idx)); }
-		inline Attribute& operator[](uint32_t idx) { return mGeometry.mAttributes[VertexAttributeId(mAttributeType,idx)]; }
+	enum class AttributeType {
+		eSystemGenerated,
+		ePosition,
+		eNormal,
+		eTangent,
+		eBinormal,
+		eBlendIndices,
+		eBlendWeight,
+		eColor,
+		ePointSize,
+		eTexcoord
 	};
-	
-	using iterator = unordered_map<VertexAttributeId, Attribute>::iterator;
-	using const_iterator = unordered_map<VertexAttributeId, Attribute>::const_iterator;
+
+	using attribute_map_t = unordered_map<AttributeType, vector<Attribute>>;
+	using iterator = attribute_map_t::iterator;
+	using const_iterator = attribute_map_t::const_iterator;
 
 	Geometry() = default;
 	Geometry(Geometry&&) = default;
 	Geometry(const Geometry&) = default;
 	inline Geometry(vk::PrimitiveTopology topology) : mTopology(topology) {}
-	inline Geometry(vk::PrimitiveTopology topology, const unordered_map<VertexAttributeId, Attribute>& attributes) : mTopology(topology), mAttributes(attributes) {}
+	inline Geometry(vk::PrimitiveTopology topology, const unordered_map<AttributeType, vector<Attribute>>& attributes) : mTopology(topology), mAttributes(attributes) {}
 
 	Geometry& operator=(const Geometry&) = default;
 	Geometry& operator=(Geometry&&) = default;
@@ -61,15 +66,15 @@ public:
 	inline vk::PrimitiveTopology& topology() { return mTopology; }
 	inline const vk::PrimitiveTopology& topology() const { return mTopology; }
 
-	inline Attribute& operator[](const VertexAttributeId& id) { return mAttributes[id]; }
-	inline VertexAttributeArrayView operator[](const VertexAttributeType& type) { return VertexAttributeArrayView(*this, type); }
-	inline Attribute& at(const VertexAttributeId& id) { return mAttributes.at(id); }
-	inline Attribute& at(const VertexAttributeType& type, uint32_t idx = 0) { return mAttributes.at(VertexAttributeId(type, idx)); }
-
 	inline iterator begin() { return mAttributes.begin(); }
 	inline iterator end() { return mAttributes.end(); }
 	inline const_iterator begin() const { return mAttributes.begin(); }
 	inline const_iterator end() const { return mAttributes.end(); }
+
+	inline const vector<Attribute>& at(const AttributeType& t) const { return mAttributes.at(t); }
+	
+	inline vector<Attribute>& operator[](const AttributeType& t) { return mAttributes[t]; }
+	inline const vector<Attribute>& operator[](const AttributeType& t) const { return mAttributes.at(t); }
 
 	STRATUM_API void bind(CommandBuffer& commandBuffer) const;
 	STRATUM_API void draw(CommandBuffer& commandBuffer, uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0) const;
@@ -77,13 +82,12 @@ public:
 
 private:
 	vk::PrimitiveTopology mTopology;
-	unordered_map<VertexAttributeId, Attribute> mAttributes;
+	attribute_map_t mAttributes;
 };
 
 }
 
 namespace std {
-	
 template<>
 struct hash<stm::Geometry::Attribute> {
 	inline size_t operator()(const stm::Geometry::Attribute& v) const {
@@ -91,4 +95,19 @@ struct hash<stm::Geometry::Attribute> {
 	}
 };
 
+inline string to_string(const stm::Geometry::AttributeType& value) {
+	switch (value) {
+		case stm::Geometry::AttributeType::eSystemGenerated: return "SystemGenerated";
+		case stm::Geometry::AttributeType::ePosition: return "Position";
+		case stm::Geometry::AttributeType::eNormal: return "Normal";
+		case stm::Geometry::AttributeType::eTangent: return "Tangent";
+		case stm::Geometry::AttributeType::eBinormal: return "Binormal";
+		case stm::Geometry::AttributeType::eBlendIndices: return "BlendIndices";
+		case stm::Geometry::AttributeType::eBlendWeight: return "BlendWeight";
+		case stm::Geometry::AttributeType::eColor: return "Color";
+		case stm::Geometry::AttributeType::ePointSize: return "PointSize";
+		case stm::Geometry::AttributeType::eTexcoord: return "Texcoord";
+		default: return "invalid ( " + vk::toHexString( static_cast<uint32_t>( value ) ) + " )";
+	}
+}
 }

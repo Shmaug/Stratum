@@ -22,19 +22,17 @@ shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const 
 	descriptorSets.clear();
 
 	// update descriptor set entries
-	for (auto& [name, entries] : mDescriptors) {
-		auto b_it = pipeline->descriptor_bindings().find(name);
-		if (b_it == pipeline->descriptor_bindings().end()) continue;
-		auto& b = b_it->second;
-
+	for (auto& [id, entries] : mDescriptors) {
+		const DescriptorSetLayout::Binding& b = pipeline->descriptor_binding(id);
 		uint32_t setIndex = b.mSet;
 		auto ds_it = descriptorSets.find(setIndex);
 		if (ds_it == descriptorSets.end())
 			ds_it = descriptorSets.emplace(setIndex, make_shared<DescriptorSet>(pipeline->descriptor_set_layouts()[setIndex], mName+"/DescriptorSet"+to_string(setIndex))).first;
 
-		for (const auto&[arrayIndex,entry] : entries)
-			if (ds_it->second->find(b.mBinding, arrayIndex) != entry)
-				ds_it->second->insert_or_assign(b.mBinding, arrayIndex, entry);
+		for (const auto&[arrayIndex,entry] : entries) {
+			const Descriptor* d = ds_it->second->find(b.mBinding, arrayIndex);
+			if (!d || *d != entry) ds_it->second->insert_or_assign(b.mBinding, arrayIndex, entry);
+		}
 	}
 
 	return pipeline;
@@ -43,7 +41,7 @@ shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const 
 void Material::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) const {
 	unordered_map<uint32_t, vector<pair<uint32_t, uint32_t>>> offsets;
 	for (const auto&[id,offset] : dynamicOffsets) {
-		const DescriptorBinding& b = commandBuffer.bound_pipeline()->descriptor_bindings().find(id)->second;
+		const DescriptorSetLayout::Binding& b = commandBuffer.bound_pipeline()->descriptor_binding(id);
 		offsets[b.mSet].emplace_back(make_pair(b.mBinding, offset));
 	}
 	vector<uint32_t> tmp;

@@ -1,6 +1,20 @@
 #pragma once
 
-#include "SpirvModule.hpp"
+#include "../Common/common.hpp"
+
+#ifdef WIN32
+#include <vulkan/vulkan_win32.h>
+#endif
+#ifdef __linux
+#include <xcb/xcb.h>
+#include <xcb/xcb_keysyms.h>
+#include <vulkan/vulkan_xcb.h>
+namespace x11 {
+#include <X11/Xlib.h>
+#include <X11/extensions/Xrandr.h>
+#include <vulkan/vulkan_xlib_xrandr.h>
+};
+#endif
 
 namespace stm {
 
@@ -37,6 +51,7 @@ public:
 	#endif
 	#ifdef __linux
 	inline xcb_connection_t* xcb_connection() const { return mXCBConnection; }
+	inline xcb_key_symbols_t* xcb_key_symbols() const { return mXCBKeySymbols; }
 	inline xcb_screen_t* xcb_screen() const { return mXCBScreen; }
 	inline x11::Display* x_display() const { return mXDisplay; }
 	#endif
@@ -55,16 +70,18 @@ private:
 
 	bool mDestroyPending = false;
 
-	friend class Window;
+	friend class stm::Window;
 	
 	#ifdef WIN32
 	static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;
-	#elif defined(__linux)
-	x11::Display* mXDisplay;
+	#endif
+
+	#ifdef __linux
 	xcb_connection_t* mXCBConnection;
-	xcb_key_symbols_t* mXCBKeySymbols;
 	xcb_screen_t* mXCBScreen = nullptr;
+	x11::Display* mXDisplay;
+	xcb_key_symbols_t* mXCBKeySymbols;
 	#endif
 };
 

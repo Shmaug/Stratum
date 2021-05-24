@@ -3,6 +3,10 @@
 #include "Window.hpp"
 #include "CommandBuffer.hpp"
 
+#ifdef __linux
+#include <xcb/xcb_util.h>
+#endif
+
 using namespace stm;
 
 bool Instance::sDisableDebugCallback = false;
@@ -12,13 +16,13 @@ Instance* gInstance = nullptr;
 VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
 	if (Instance::sDisableDebugCallback) return VK_FALSE;
 
-	ConsoleColorBits c = ConsoleColorBits::eWhite;
+	ConsoleColor c = ConsoleColor::eWhite;
 
 	if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		fprintf_color(ConsoleColor::eRed, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 		throw logic_error(pCallbackData->pMessage);
 	} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
+		fprintf_color(ConsoleColor::eYellow, stderr, "%s: %s\n", pCallbackData->pMessageIdName, pCallbackData->pMessage);
 	else
 		cout << pCallbackData->pMessageIdName << ": " << pCallbackData->pMessage << endl;
 
@@ -90,8 +94,8 @@ Instance::Instance(int argc, char** argv) {
 	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
 	#ifdef __linux
-	mInstanceExtensions.emplace(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-	mInstanceExtensions.emplace(VK_KHR_DISPLAY_EXTENSION_NAME);
+	instanceExtensions.emplace(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+	instanceExtensions.emplace(VK_KHR_DISPLAY_EXTENSION_NAME);
 	#endif
 
 	// remove unsupported layers
@@ -100,7 +104,7 @@ Instance::Instance(int argc, char** argv) {
 		for (const auto& layer : vk::enumerateInstanceLayerProperties()) available.emplace(layer.layerName.data());
 		for (auto it = validationLayers.begin(); it != validationLayers.end();)
 			if (available.find(*it) == available.end()) {
-				fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Removing unsupported validation layer: %s\n", it->c_str());
+				fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Removing unsupported validation layer: %s\n", it->c_str());
 				it = validationLayers.erase(it);
 			} else 
 				it++;
@@ -141,7 +145,7 @@ Instance::Instance(int argc, char** argv) {
 	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
 	if (devices.empty()) throw runtime_error("no vulkan devices found");
 	if (deviceIndex >= devices.size()) {
-		fprintf_color(ConsoleColorBits::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to 0\n", deviceIndex);
+		fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to 0\n", deviceIndex);
 		deviceIndex = 0;
 	}
 	vk::PhysicalDevice physicalDevice = devices[deviceIndex];
@@ -185,7 +189,7 @@ Instance::Instance(int argc, char** argv) {
 
 	#ifdef __linux
 	// create xcb connection
-	mXCBConnection = xcb_connect(nullptr, nullptr);
+	mXCBConnection = xcb_connect(":0", NULL);
 	if (int err = xcb_connection_has_error(mXCBConnection)) throw runtime_error("Failed to connect to xcb: " + to_string(err));
 	mXCBKeySymbols = xcb_key_symbols_alloc(mXCBConnection);
 
@@ -194,20 +198,15 @@ Instance::Instance(int argc, char** argv) {
 		xcb_screen_t* screen = iter.data;
 
 		// find suitable physical device
-		uint32_t queueFamilyCount;
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-		vector<vk::QueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-		for (uint32_t q = 0; q < queueFamilyCount; q++)
+		vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+		for (uint32_t q = 0; q < queueFamilyProperties.size(); q++)
 			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
 				mXCBScreen = screen;
 				break;
 			}
 		if (mXCBScreen) break;
 	}
-	if (!mXCBScreen) throw runtime_error("Failed to find a device with XCB presentation support!")
-
+	if (!mXCBScreen) throw runtime_error("Failed to find a device with XCB presentation support!");
 	#endif
 
 	vk::Rect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
@@ -223,6 +222,7 @@ Instance::Instance(int argc, char** argv) {
 		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
 	};
 	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, layers, mWindow->back_buffer_count());
+	mWindow->create_swapchain(*mDevice);
 }
 Instance::~Instance() {
 	mWindow.reset();
@@ -258,9 +258,9 @@ void Instance::poll_events() {
 
 	#ifdef __linux
 	xcb_generic_event_t* event;
-	while (event = poll_event()) {
+	while (event = mWindow->poll_event()) {
 		if (!event) break;
-		if (!mWindow->process_event(event)) return false;
+		mWindow->process_event(event);
 		free(event);
 	}
 
@@ -272,6 +272,6 @@ void Instance::poll_events() {
 		free(reply);
 	}
 
-	mWindow->mInputState.mCursorDelta = mWindow->mInputState.mCursorPos - mWindow->mMouseKeyboard->mLast.mCursorPos;
+	mWindow->mInputState.add_cursor_delta(mWindow->mInputState.cursor_pos() - mWindow->mInputStateLast.cursor_pos());
 	#endif
 }

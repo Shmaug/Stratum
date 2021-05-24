@@ -81,6 +81,30 @@ inline vk::PipelineStageFlags guess_stage(vk::ImageLayout layout) {
 	}
 }
 
+
+class Sampler : public DeviceResource {
+private:
+	vk::Sampler mSampler;
+	vk::SamplerCreateInfo mInfo;
+
+public:
+	inline Sampler(Device& device, const string& name, const vk::SamplerCreateInfo& samplerInfo) : DeviceResource(device, name), mInfo(samplerInfo) {
+		mSampler = mDevice->createSampler(mInfo);
+		mDevice.set_debug_name(mSampler, name);
+	}
+	inline ~Sampler() {
+		mDevice->destroySampler(mSampler);
+	}
+
+	inline vk::Sampler& operator*() { return mSampler; }
+	inline vk::Sampler* operator->() { return &mSampler; }
+	inline const vk::Sampler& operator*() const { return mSampler; }
+	inline const vk::Sampler* operator->() const { return &mSampler; }
+
+	inline const vk::SamplerCreateInfo& create_info() const { return mInfo; }
+};
+
+
 class Texture : public DeviceResource {
 public:
 	static constexpr uint32_t max_mips(const vk::Extent3D& extent) {
@@ -213,7 +237,7 @@ public:
 private:
 	friend class CommandBuffer;
 	friend class Texture::View;
-	friend class Window;
+	friend class stm::Window;
 
 	STRATUM_API void create();
 

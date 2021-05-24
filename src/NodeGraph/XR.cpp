@@ -8,7 +8,7 @@ bool XR::FailMsg(XrResult result, const string& errmsg) {
 	if (XR_FAILED(result)) {
 		char resultString[XR_MAX_RESULT_STRING_SIZE];
 		xrResultToString(mInstance, result, resultString);
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s: %s\n", errmsg.c_str(), resultString);
+		fprintf_color(ConsoleColor::eRed, stderr, "%s: %s\n", errmsg.c_str(), resultString);
 		return true;
 	}
 	return false;
@@ -54,7 +54,7 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 		mInitialized = false;
 		return;
 	}
-	printf_color(ConsoleColorBits::eGreen, "OpenXR Instance created: %s.\n", instanceProperties.runtimeName);
+	printf_color(ConsoleColor::eGreen, "OpenXR Instance created: %s.\n", instanceProperties.runtimeName);
 
 	XrSystemGetInfo systeminfo = {};
 	systeminfo.type = XR_TYPE_SYSTEM_GET_INFO;
@@ -70,7 +70,7 @@ XR::XR() : mInstance(XR_NULL_HANDLE), mSession(XR_NULL_HANDLE), mReferenceSpace(
 		mInitialized = false;
 		return;
 	}
-	printf_color(ConsoleColorBits::eGreen, "OpenXR system found: %s.\n", mSystemProperties.systemName);
+	printf_color(ConsoleColor::eGreen, "OpenXR system found: %s.\n", mSystemProperties.systemName);
 }
 XR::~XR() { Cleanup(); }
 
@@ -165,7 +165,7 @@ bool XR::Init(NodeGraph* NodeGraph) {
 	if (mViewCount != 2 ||
 		views[0].recommendedSwapchainSampleCount != views[1].recommendedSwapchainSampleCount ||
 		views[0].recommendedImageRectWidth != views[1].recommendedImageRectWidth || views[0].recommendedImageRectHeight != views[1].recommendedImageRectHeight) {
-		fprintf_color(ConsoleColorBits::eRed, stderr, "%s", "Unsupported OpenXR view configuration.\n");
+		fprintf_color(ConsoleColor::eRed, stderr, "%s", "Unsupported OpenXR view configuration.\n");
 		Cleanup();
 		return false;
 	}
@@ -196,7 +196,7 @@ bool XR::Init(NodeGraph* NodeGraph) {
 			sampleCountInt = 16;
 			break;
 		default:
-			fprintf_color(ConsoleColorBits::eYellow, stderr, "Unsupported OpenXR recommended sample count: %u.\n", views[0].recommendedSwapchainSampleCount);
+			fprintf_color(ConsoleColor::eYellow, stderr, "Unsupported OpenXR recommended sample count: %u.\n", views[0].recommendedSwapchainSampleCount);
 			break;
 	}
 	#pragma endregion
@@ -387,7 +387,7 @@ void XR::CreateSession() {
 	sessioninfo.systemId = mSystem;
 	sessioninfo.next = &binding;
 	if (FailMsg(xrCreateSession(mInstance, &sessioninfo, &mSession), "xrCreateSession failed")) return;
-	printf_color(ConsoleColorBits::eGreen, "%s", "OpenXR Session created.\n");
+	printf_color(ConsoleColor::eGreen, "%s", "OpenXR Session created.\n");
 
 
 	uint32_t spaceCount, tmp;
@@ -468,14 +468,14 @@ void XR::OnFrameStart() {
     	case XR_SESSION_STATE_STOPPING:
     	case XR_SESSION_STATE_EXITING:
 		case XR_SESSION_STATE_LOSS_PENDING:
-			printf_color(ConsoleColorBits::eYellow, "%s", "xrSession state lost\n");
+			printf_color(ConsoleColor::eYellow, "%s", "xrSession state lost\n");
 			Cleanup();
 			return;
 		}
 		break;
 	}
 	case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
-		printf_color(ConsoleColorBits::eYellow, "%s", "xrInstance lost\n");
+		printf_color(ConsoleColor::eYellow, "%s", "xrInstance lost\n");
 		Cleanup();
 		return;
 	}

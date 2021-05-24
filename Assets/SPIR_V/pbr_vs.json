@@ -1,0 +1,183 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "vs",
+            "mode" : "vert"
+        }
+    ],
+    "types" : {
+        "_20" : {
+            "name" : "quatf",
+            "members" : [
+                {
+                    "name" : "coeffs",
+                    "type" : "vec4",
+                    "offset" : 0
+                }
+            ]
+        },
+        "_19" : {
+            "name" : "TransformData",
+            "members" : [
+                {
+                    "name" : "Translation",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Scale",
+                    "type" : "float",
+                    "offset" : 12
+                },
+                {
+                    "name" : "Rotation",
+                    "type" : "_20",
+                    "offset" : 16
+                }
+            ]
+        },
+        "_18" : {
+            "name" : "type.StructuredBuffer.TransformData",
+            "members" : [
+                {
+                    "name" : "_m0",
+                    "type" : "_19",
+                    "array" : [
+                        0
+                    ],
+                    "array_size_is_literal" : [
+                        true
+                    ],
+                    "offset" : 0,
+                    "array_stride" : 32
+                }
+            ]
+        },
+        "_21" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_22" : {
+            "name" : "type.PushConstant.push_constants_t",
+            "members" : [
+                {
+                    "name" : "WorldToCamera",
+                    "type" : "_19",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Projection",
+                    "type" : "_21",
+                    "offset" : 32
+                },
+                {
+                    "name" : "LightCount",
+                    "type" : "uint",
+                    "offset" : 48
+                },
+                {
+                    "name" : "MaterialIndex",
+                    "type" : "uint",
+                    "offset" : 52
+                },
+                {
+                    "name" : "BaseColorTexture",
+                    "type" : "uint",
+                    "offset" : 56
+                },
+                {
+                    "name" : "NormalTexture",
+                    "type" : "uint",
+                    "offset" : 60
+                },
+                {
+                    "name" : "MetallicRoughnessTexture",
+                    "type" : "uint",
+                    "offset" : 64
+                },
+                {
+                    "name" : "OcclusionTexture",
+                    "type" : "uint",
+                    "offset" : 68
+                },
+                {
+                    "name" : "EmissionTexture",
+                    "type" : "uint",
+                    "offset" : 72
+                }
+            ]
+        }
+    },
+    "inputs" : [
+        {
+            "type" : "vec3",
+            "name" : "in.var.POSITION",
+            "location" : 0
+        },
+        {
+            "type" : "vec3",
+            "name" : "in.var.NORMAL",
+            "location" : 1
+        },
+        {
+            "type" : "vec3",
+            "name" : "in.var.TANGENT",
+            "location" : 2
+        },
+        {
+            "type" : "vec2",
+            "name" : "in.var.TEXCOORD",
+            "location" : 3
+        }
+    ],
+    "outputs" : [
+        {
+            "type" : "vec4",
+            "name" : "out.var.NORMAL",
+            "location" : 0
+        },
+        {
+            "type" : "vec4",
+            "name" : "out.var.TANGENT",
+            "location" : 1
+        },
+        {
+            "type" : "vec4",
+            "name" : "out.var.TEXCOORD0",
+            "location" : 2
+        },
+        {
+            "type" : "vec2",
+            "name" : "out.var.TEXCOORD1",
+            "location" : 3
+        }
+    ],
+    "ssbos" : [
+        {
+            "type" : "_18",
+            "name" : "gTransforms",
+            "readonly" : true,
+            "block_size" : 0,
+            "set" : 0,
+            "binding" : 0
+        }
+    ],
+    "push_constants" : [
+        {
+            "type" : "_22",
+            "name" : "gPushConstants",
+            "push_constant" : true
+        }
+    ]
+}

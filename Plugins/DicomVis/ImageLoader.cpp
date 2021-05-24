@@ -100,8 +100,7 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 	}
 
 	size_t sliceSize = extent.width * extent.height * channels;
-	uint8_t* pixels = new uint8_t[sliceSize * extent.depth];
-	memset(pixels, 0, sliceSize * extent.depth);
+	vector<uint8_t> pixels(sliceSize * extent.depth);
 
 	uint32_t done = 0;
 	vector<thread> threads;
@@ -136,9 +135,7 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 	for (thread& t : threads) t.join();
 	cout << "\rLoading stack: Done           \n";
 
-	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, sliceSize*extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
-	delete[] pixels;
-
+	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	if (scale) *scale = Vector3f(.05f, .05f, .05f);
 
 	return volume;

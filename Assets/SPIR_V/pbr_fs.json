@@ -1,0 +1,326 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "fs",
+            "mode" : "frag"
+        }
+    ],
+    "types" : {
+        "_22" : {
+            "name" : "quatf",
+            "members" : [
+                {
+                    "name" : "coeffs",
+                    "type" : "vec4",
+                    "offset" : 0
+                }
+            ]
+        },
+        "_21" : {
+            "name" : "TransformData",
+            "members" : [
+                {
+                    "name" : "Translation",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Scale",
+                    "type" : "float",
+                    "offset" : 12
+                },
+                {
+                    "name" : "Rotation",
+                    "type" : "_22",
+                    "offset" : 16
+                }
+            ]
+        },
+        "_24" : {
+            "name" : "MaterialData",
+            "members" : [
+                {
+                    "name" : "mBaseColor",
+                    "type" : "vec4",
+                    "offset" : 0
+                },
+                {
+                    "name" : "mEmission",
+                    "type" : "vec3",
+                    "offset" : 16
+                },
+                {
+                    "name" : "mMetallic",
+                    "type" : "float",
+                    "offset" : 28
+                },
+                {
+                    "name" : "mRoughness",
+                    "type" : "float",
+                    "offset" : 32
+                },
+                {
+                    "name" : "mNormalScale",
+                    "type" : "float",
+                    "offset" : 36
+                },
+                {
+                    "name" : "mOcclusionScale",
+                    "type" : "float",
+                    "offset" : 40
+                },
+                {
+                    "name" : "pad",
+                    "type" : "uint",
+                    "offset" : 44
+                }
+            ]
+        },
+        "_23" : {
+            "name" : "type.StructuredBuffer.MaterialData",
+            "members" : [
+                {
+                    "name" : "_m0",
+                    "type" : "_24",
+                    "array" : [
+                        0
+                    ],
+                    "array_size_is_literal" : [
+                        true
+                    ],
+                    "offset" : 0,
+                    "array_stride" : 48
+                }
+            ]
+        },
+        "_27" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_26" : {
+            "name" : "LightData",
+            "members" : [
+                {
+                    "name" : "mLightToWorld",
+                    "type" : "_21",
+                    "offset" : 0
+                },
+                {
+                    "name" : "mShadowProjection",
+                    "type" : "_27",
+                    "offset" : 32
+                },
+                {
+                    "name" : "mShadowST",
+                    "type" : "vec4",
+                    "offset" : 48
+                },
+                {
+                    "name" : "mEmission",
+                    "type" : "vec3",
+                    "offset" : 64
+                },
+                {
+                    "name" : "mFlags",
+                    "type" : "uint",
+                    "offset" : 76
+                },
+                {
+                    "name" : "mSpotAngleScale",
+                    "type" : "float",
+                    "offset" : 80
+                },
+                {
+                    "name" : "mSpotAngleOffset",
+                    "type" : "float",
+                    "offset" : 84
+                },
+                {
+                    "name" : "mShadowBias",
+                    "type" : "float",
+                    "offset" : 88
+                },
+                {
+                    "name" : "pad",
+                    "type" : "uint",
+                    "offset" : 92
+                }
+            ]
+        },
+        "_25" : {
+            "name" : "type.StructuredBuffer.LightData",
+            "members" : [
+                {
+                    "name" : "_m0",
+                    "type" : "_26",
+                    "array" : [
+                        0
+                    ],
+                    "array_size_is_literal" : [
+                        true
+                    ],
+                    "offset" : 0,
+                    "array_stride" : 96
+                }
+            ]
+        },
+        "_30" : {
+            "name" : "type.PushConstant.push_constants_t",
+            "members" : [
+                {
+                    "name" : "WorldToCamera",
+                    "type" : "_21",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Projection",
+                    "type" : "_27",
+                    "offset" : 32
+                },
+                {
+                    "name" : "LightCount",
+                    "type" : "uint",
+                    "offset" : 48
+                },
+                {
+                    "name" : "MaterialIndex",
+                    "type" : "uint",
+                    "offset" : 52
+                },
+                {
+                    "name" : "BaseColorTexture",
+                    "type" : "uint",
+                    "offset" : 56
+                },
+                {
+                    "name" : "NormalTexture",
+                    "type" : "uint",
+                    "offset" : 60
+                },
+                {
+                    "name" : "MetallicRoughnessTexture",
+                    "type" : "uint",
+                    "offset" : 64
+                },
+                {
+                    "name" : "OcclusionTexture",
+                    "type" : "uint",
+                    "offset" : 68
+                },
+                {
+                    "name" : "EmissionTexture",
+                    "type" : "uint",
+                    "offset" : 72
+                }
+            ]
+        }
+    },
+    "inputs" : [
+        {
+            "type" : "vec4",
+            "name" : "in.var.NORMAL",
+            "location" : 0
+        },
+        {
+            "type" : "vec4",
+            "name" : "in.var.TANGENT",
+            "location" : 1
+        },
+        {
+            "type" : "vec4",
+            "name" : "in.var.TEXCOORD0",
+            "location" : 2
+        },
+        {
+            "type" : "vec2",
+            "name" : "in.var.TEXCOORD1",
+            "location" : 3
+        }
+    ],
+    "outputs" : [
+        {
+            "type" : "vec4",
+            "name" : "out.var.SV_Target0",
+            "location" : 0
+        }
+    ],
+    "separate_images" : [
+        {
+            "type" : "texture2D",
+            "name" : "gShadowAtlas",
+            "set" : 0,
+            "binding" : 3
+        },
+        {
+            "type" : "texture2D",
+            "name" : "gTextures",
+            "array" : [
+                16
+            ],
+            "array_size_is_literal" : [
+                true
+            ],
+            "set" : 0,
+            "binding" : 6
+        }
+    ],
+    "separate_samplers" : [
+        {
+            "type" : "sampler",
+            "name" : "gSampler",
+            "set" : 0,
+            "binding" : 4
+        },
+        {
+            "type" : "sampler",
+            "name" : "gShadowSampler",
+            "set" : 0,
+            "binding" : 5
+        }
+    ],
+    "ssbos" : [
+        {
+            "type" : "_23",
+            "name" : "gMaterials",
+            "readonly" : true,
+            "block_size" : 0,
+            "set" : 0,
+            "binding" : 1
+        },
+        {
+            "type" : "_25",
+            "name" : "gLights",
+            "readonly" : true,
+            "block_size" : 0,
+            "set" : 0,
+            "binding" : 2
+        }
+    ],
+    "push_constants" : [
+        {
+            "type" : "_30",
+            "name" : "gPushConstants",
+            "push_constant" : true
+        }
+    ],
+    "specialization_constants" : [
+        {
+            "name" : "gAlphaClip",
+            "id" : 0,
+            "type" : "float",
+            "variable_id" : 20,
+            "default_value" : -1.0
+        }
+    ]
+}

@@ -10,24 +10,16 @@ unordered_map<string, shared_ptr<SpirvModule>> gSpirvModules;
 int main(int argc, char** argv) {
 	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
 	{
-		Window& window = instance->window();
+		stm::Window& window = instance->window();
 		Device& device = instance->device();
-		{
-			vector<SpirvModule> modules;
-			{
-				ifstream s("Assets/core_shaders.spvm", ios::binary);
-				if (s.is_open()) binary_read(s, modules);
-			}
-			if (modules.empty()) {
-				ifstream s("../../Assets/core_shaders.spvm", ios::binary);
-				if (s.is_open()) binary_read(s, modules);
-			}
-			for (const SpirvModule& m : modules)
-				gSpirvModules.emplace(m.mEntryPoint, make_shared<SpirvModule>(m));
+
+		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V")) {
+			auto m = make_shared<SpirvModule>(p);
+			cout << gSpirvModules.emplace(p.stem().string()+"/"+m->entry_point(), m).first->first << endl;
 		}
 		
 		NodeGraph nodeGraph;
-		pbrRenderer pbr(nodeGraph, device, gSpirvModules.at("vs_pbr"), gSpirvModules.at("fs_pbr"));
+		pbrRenderer pbr(nodeGraph, device, gSpirvModules.at("pbr/vs"), gSpirvModules.at("pbr/fs"));
 		
 		{
 			auto commandBuffer = device.get_command_buffer("Init");

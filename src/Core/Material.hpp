@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandBuffer.hpp"
+#include "SpirvModule.hpp"
 
 namespace stm {
 
@@ -28,7 +29,7 @@ public:
 	inline Material(const string& name, const shared_ptr<Args>&... args) : Material(name, { args... }) {}
 
 	inline shared_ptr<SpirvModule> stage(vk::ShaderStageFlagBits stage) const { 
-		auto it = ranges::find(mModules, stage, &SpirvModule::mStage);
+		auto it = ranges::find(mModules, stage, &SpirvModule::stage);
 		if (it == mModules.end())
 			return nullptr;
 		else
@@ -40,6 +41,18 @@ public:
 		mImmutableSamplers.emplace(name, sampler);
 		mPipelines.clear();
 	}
+
+	inline void cull_mode(const vk::CullModeFlags& v) { mCullMode = v; }
+	inline const auto& cull_mode() const { return mCullMode; }
+
+	inline void polygon_mode(const vk::PolygonMode& v) { mPolygonMode = v; }
+	inline const auto& polygon_mode() const { return mPolygonMode; }
+
+	inline void sample_shading(bool v) { mSampleShading = v; }
+	inline const auto& sample_shading() const { return mSampleShading; }
+
+	inline auto& depth_stencil() { return mDepthStencilState; }
+	inline const auto& depth_stencil() const { return mDepthStencilState; }
 
 	template<typename T = byte_blob>
 	inline void specialization_constant(const string& name, const T& v) {
@@ -84,7 +97,7 @@ public:
 		size_t sz = 0;
 		if (it == mPushConstants.end()) {
 			for (const auto& m : mModules)
-				if (auto it = m->mPushConstants.find(name); it != m->mPushConstants.end()) {
+				if (auto it = m->push_constants().find(name); it != m->push_constants().end()) {
 					sz = it->second.second;
 					break;
 			}

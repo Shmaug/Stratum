@@ -1,6 +1,6 @@
-#pragma compile compute interleave
-#pragma compile compute average2d
-#pragma compile compute average3d
+#pragma compile cs_6_6 interleave
+#pragma compile cs_6_6 average2d
+#pragma compile cs_6_6 average3d
 
 RWTexture2D<float4> gOutput2 : register(u0);
 RWTexture2D<float4> gInput2  : register(u1);

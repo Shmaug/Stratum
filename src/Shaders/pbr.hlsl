@@ -8,21 +8,21 @@
 #define gTextureCount 16
 
 struct LightData {
+	TransformData mLightToWorld;
+	ProjectionData mShadowProjection;
+	float4 mShadowST;
 	float3 mEmission;
 	uint mFlags;
-	TransformData mLightToWorld;
 	float mSpotAngleScale;  // 1/(cos(InnerAngle) - cos(OuterAngle))
 	float mSpotAngleOffset; // -cos(OuterAngle) * mSpotAngleScale;
 	float mShadowBias;
-	float4 mShadowST;
-	ProjectionData mShadowProjection;
+	uint pad;
 };
 
 struct MaterialData {
   float4 mBaseColor;
   float3 mEmission;
 	float mMetallic;
-  
   float mRoughness;
 	float mNormalScale; // scaledNormal = normalize((<sampled normal texture value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))
 	float mOcclusionScale; // lerp(color, color * <sampled occlusion texture value>, <occlusion strength>)
@@ -31,8 +31,8 @@ struct MaterialData {
 
 #ifndef __cplusplus
 
-#pragma compile vertex vs_pbr
-#pragma compile fragment fs_pbr
+#pragma compile vs_6_6 vs
+#pragma compile ps_6_6 fs
 
 #include "include/bsdf.hlsli"
 
@@ -68,7 +68,7 @@ struct v2f {
 	float2 texcoord : TEXCOORD1;
 };
 
-v2f vs_pbr(
+v2f vs(
 	float3 vertex : POSITION,
 	float3 normal : NORMAL,
 	float3 tangent : TANGENT,
@@ -113,7 +113,7 @@ float4 SampleLight(LightData light, float3 cameraPos) {
 	return r;
 }
 
-float4 fs_pbr(v2f i) : SV_Target0 {
+float4 fs(v2f i) : SV_Target0 {
 	MaterialData material = gMaterials[gPushConstants.MaterialIndex];
 	float4 baseColor = material.mBaseColor;
 	float3 view = normalize(-i.cameraPos.xyz);

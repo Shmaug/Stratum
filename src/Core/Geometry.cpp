@@ -1,5 +1,4 @@
 #include "Geometry.hpp"
-
 #include "CommandBuffer.hpp"
 
 using namespace stm;
@@ -10,7 +9,7 @@ void Geometry::bind(CommandBuffer& commandBuffer) const {
   
   set<const Buffer::View<byte>*> buffers;
   uint32_t i = 0;
-  for (const auto&[id, attrib] : mAttributes)
+  for (const auto&[id, attribs] : mAttributes)
     if (ranges::find(buffers, attrib.buffer_view(), [](const auto* b){return *b;}) == buffers.end()) {
       commandBuffer.bind_vertex_buffer(i++, attrib.buffer_view());
       buffers.emplace(&attrib.buffer_view());

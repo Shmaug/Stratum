@@ -1,17 +1,15 @@
 #pragma once
 
 #include "Texture.hpp"
-#include "Sampler.hpp"
-#include "SpirvModule.hpp"
 
 namespace stm {
 
 using Descriptor = variant<
 	tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
-	Buffer::StrideView,									// storage/uniform buffer, stride used for dynamic offsets to work
-	Buffer::TexelView, 									// texel buffer
+	Buffer::StrideView,											// storage/uniform buffer, stride used for dynamic offsets to work
+	Buffer::TexelView, 											// texel buffer
 	byte_blob, 													// inline buffer data
-	vk::AccelerationStructureKHR 				// acceleration structure
+	vk::AccelerationStructureKHR 								// acceleration structure
 >;
 
 template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
@@ -120,10 +118,10 @@ public:
 	inline auto layout() const { return mLayout; }
 	inline const DescriptorSetLayout::Binding& layout_at(uint32_t binding) const { return mLayout->at(binding); }
 
-	inline const Descriptor& find(uint32_t binding, uint32_t arrayIndex = 0) const {
+	inline const Descriptor* find(uint32_t binding, uint32_t arrayIndex = 0) const {
 		auto it = mDescriptors.find((uint64_t(binding)<<32)|arrayIndex);
-		if (it == mDescriptors.end()) return {};
-		return it->second;
+		if (it == mDescriptors.end()) nullptr;
+		return &it->second;
 	}
 	inline const Descriptor& at(uint32_t binding, uint32_t arrayIndex = 0) const { return mDescriptors.at((uint64_t(binding)<<32)|arrayIndex); }
 	inline const Descriptor& operator[](uint32_t binding) const { return at(binding); }

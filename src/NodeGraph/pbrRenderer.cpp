@@ -1,4 +1,5 @@
 #include "pbrRenderer.hpp"
+#include "../Core/Window.hpp"
 
 #define TINYGLTF_USE_CPP14
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -12,11 +13,11 @@ pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<
 	vk::PipelineColorBlendAttachmentState blendOpaque;
 	blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 
-	mRenderNode = &nodeGraph.emplace("main").emplace<RenderNode>("main");
+	mRenderNode = &nodeGraph.emplace("mainpass").emplace<RenderNode>();
 	(*mRenderNode)[""].bind_point(vk::PipelineBindPoint::eGraphics);
 	(*mRenderNode)[""]["primaryColor"] =  RenderPass::SubpassDescription::AttachmentInfo(
 		RenderPass::AttachmentTypeFlags::eColor, blendOpaque, vk::AttachmentDescription({},
-			vk::Format::eR8G8B8A8Unorm, sampleCount,
+			device.mInstance.window().surface_format().format, sampleCount,
 			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 			vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal));
@@ -28,12 +29,13 @@ pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<
 			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal));
 	(*mRenderNode)[""]["primaryResolve"] =  RenderPass::SubpassDescription::AttachmentInfo(
 		RenderPass::AttachmentTypeFlags::eResolve, blendOpaque, vk::AttachmentDescription({},
-			vk::Format::eR8G8B8A8Unorm, vk::SampleCountFlagBits::e1,
+			device.mInstance.window().surface_format().format, vk::SampleCountFlagBits::e1,
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore,
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 			vk::ImageLayout::eColorAttachmentOptimal, dstLayout));
 			
-	mShadowRenderNode = &mRenderNode->node().emplace<RenderNode>("shadowpass");
+	mShadowRenderNode = &nodeGraph.emplace("shadowpass").emplace<RenderNode>();
+	mShadowRenderNode->node().set_parent(mRenderNode->node());
 	(*mShadowRenderNode)[""].bind_point(vk::PipelineBindPoint::eGraphics);
 	(*mShadowRenderNode)[""]["gShadowAtlas"] = RenderPass::SubpassDescription::AttachmentInfo(
 		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
@@ -87,12 +89,12 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		(filename.extension() == ".glb" && !loader.LoadBinaryFromFile(&model, &err, &warn, filename.string())) ||
 		(filename.extension() == ".gltf" && !loader.LoadASCIIFromFile(&model, &err, &warn, filename.string())) )
 		throw runtime_error(filename.string() + ": " + err);
-	if (!warn.empty()) fprintf_color(ConsoleColorBits::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
+	if (!warn.empty()) fprintf_color(ConsoleColor::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
 	
 	Device& device = commandBuffer.mDevice;
 
 	vector<shared_ptr<Buffer>> buffers(model.buffers.size());
-	vector<hlsl::MaterialData> materials(model.materials.size());
+	buffer_vector<hlsl::MaterialData> materials(commandBuffer.mDevice, model.materials.size());
 	vector<vector<Geometry>> geometries(model.meshes.size());
 	vector<shared_ptr<Texture>> images(model.images.size());
 
@@ -102,6 +104,70 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		memcpy(tmp.data(), buffer.data.data(), tmp.size());
 		commandBuffer.copy_buffer(tmp, dst);
 		return dst.buffer_ptr();
+	});
+	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
+		auto pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		commandBuffer.hold_resource(pixels);
+		memcpy(pixels->data(), image.image.data(), pixels->size());
+		
+		vk::Format fmt = vk::Format::eUndefined;
+		switch (image.pixel_type) {
+			case TINYGLTF_COMPONENT_TYPE_BYTE:
+				fmt = image.component == 1 ? vk::Format::eR8Snorm :
+							image.component == 2 ? vk::Format::eR8G8Snorm :
+							image.component == 3 ? vk::Format::eR8G8B8Snorm :
+							image.component == 4 ? vk::Format::eR8G8B8A8Snorm : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+				fmt = image.component == 1 ? vk::Format::eR8Unorm :
+							image.component == 2 ? vk::Format::eR8G8Unorm :
+							image.component == 3 ? vk::Format::eR8G8B8Unorm :
+							image.component == 4 ? vk::Format::eR8G8B8A8Unorm : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_SHORT:
+				fmt = image.component == 1 ? vk::Format::eR16Snorm :
+							image.component == 2 ? vk::Format::eR16G16Snorm :
+							image.component == 3 ? vk::Format::eR16G16B16Snorm :
+							image.component == 4 ? vk::Format::eR16G16B16A16Snorm : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+				fmt = image.component == 1 ? vk::Format::eR16Unorm :
+							image.component == 2 ? vk::Format::eR16G16Unorm :
+							image.component == 3 ? vk::Format::eR16G16B16Unorm :
+							image.component == 4 ? vk::Format::eR16G16B16A16Unorm : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_INT:
+				fmt = image.component == 1 ? vk::Format::eR32Sint :
+							image.component == 2 ? vk::Format::eR32G32Sint :
+							image.component == 3 ? vk::Format::eR32G32B32Sint :
+							image.component == 4 ? vk::Format::eR32G32B32A32Sint : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+				fmt = image.component == 1 ? vk::Format::eR32Uint :
+							image.component == 2 ? vk::Format::eR32G32Uint :
+							image.component == 3 ? vk::Format::eR32G32B32Uint :
+							image.component == 4 ? vk::Format::eR32G32B32A32Uint : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_FLOAT:
+				fmt = image.component == 1 ? vk::Format::eR32Sfloat :
+							image.component == 2 ? vk::Format::eR32G32Sfloat :
+							image.component == 3 ? vk::Format::eR32G32B32Sfloat :
+							image.component == 4 ? vk::Format::eR32G32B32A32Sfloat : vk::Format::eUndefined;
+				break;
+			case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+				fmt = image.component == 1 ? vk::Format::eR64Sfloat :
+							image.component == 2 ? vk::Format::eR64G64Sfloat :
+							image.component == 3 ? vk::Format::eR64G64B64Sfloat :
+							image.component == 4 ? vk::Format::eR64G64B64A64Sfloat : vk::Format::eUndefined;
+				break;
+		}
+		
+		auto tex = make_shared<Texture>(device, image.name, vk::Extent3D(image.width, image.height, 1), fmt, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+		commandBuffer.hold_resource(tex);
+		tex->transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+		commandBuffer->copyBufferToImage(**pixels, **tex, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->array_layers()), {}, tex->extent()) });
+		tex->generate_mip_maps(commandBuffer);
+		return tex;
 	});
 	ranges::transform(model.materials, materials.begin(), [](const tinygltf::Material& material) {
 		hlsl::MaterialData m;
@@ -194,15 +260,15 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 					typeName = typeName.substr(0, c);
 				}
 				if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
-				static const unordered_map<string, VertexAttributeType> semanticMap {
-					{ "position", VertexAttributeType::ePosition },
-					{ "normal", VertexAttributeType::eNormal },
-					{ "tangent", VertexAttributeType::eTangent },
-					{ "bitangent", VertexAttributeType::eBinormal },
-					{ "texcoord", VertexAttributeType::eTexcoord },
-					{ "color", VertexAttributeType::eColor },
-					{ "psize", VertexAttributeType::ePointSize },
-					{ "pointsize", VertexAttributeType::ePointSize }
+				static const unordered_map<string, Geometry::AttributeType> semanticMap {
+					{ "position", 	Geometry::AttributeType::ePosition },
+					{ "normal", 		Geometry::AttributeType::eNormal },
+					{ "tangent", 		Geometry::AttributeType::eTangent },
+					{ "bitangent", 	Geometry::AttributeType::eBinormal },
+					{ "texcoord", 	Geometry::AttributeType::eTexcoord },
+					{ "color", 			Geometry::AttributeType::eColor },
+					{ "psize", 			Geometry::AttributeType::ePointSize },
+					{ "pointsize", 	Geometry::AttributeType::ePointSize }
 				};
 				
 				geometry[semanticMap.at(typeName)][typeIdx] = Geometry::Attribute(
@@ -213,76 +279,16 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		});
 		return geoms;
 	});
-	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
-		auto pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-		commandBuffer.hold_resource(pixels);
-		memcpy(pixels->data(), image.image.data(), pixels->size());
-		
-		vk::Format fmt = vk::Format::eUndefined;
-		switch (image.pixel_type) {
-			case TINYGLTF_COMPONENT_TYPE_BYTE:
-				fmt = image.component == 1 ? vk::Format::eR8Snorm :
-							image.component == 2 ? vk::Format::eR8G8Snorm :
-							image.component == 3 ? vk::Format::eR8G8B8Snorm :
-							image.component == 4 ? vk::Format::eR8G8B8A8Snorm : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-				fmt = image.component == 1 ? vk::Format::eR8Unorm :
-							image.component == 2 ? vk::Format::eR8G8Unorm :
-							image.component == 3 ? vk::Format::eR8G8B8Unorm :
-							image.component == 4 ? vk::Format::eR8G8B8A8Unorm : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_SHORT:
-				fmt = image.component == 1 ? vk::Format::eR16Snorm :
-							image.component == 2 ? vk::Format::eR16G16Snorm :
-							image.component == 3 ? vk::Format::eR16G16B16Snorm :
-							image.component == 4 ? vk::Format::eR16G16B16A16Snorm : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-				fmt = image.component == 1 ? vk::Format::eR16Unorm :
-							image.component == 2 ? vk::Format::eR16G16Unorm :
-							image.component == 3 ? vk::Format::eR16G16B16Unorm :
-							image.component == 4 ? vk::Format::eR16G16B16A16Unorm : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_INT:
-				fmt = image.component == 1 ? vk::Format::eR32Sint :
-							image.component == 2 ? vk::Format::eR32G32Sint :
-							image.component == 3 ? vk::Format::eR32G32B32Sint :
-							image.component == 4 ? vk::Format::eR32G32B32A32Sint : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-				fmt = image.component == 1 ? vk::Format::eR32Uint :
-							image.component == 2 ? vk::Format::eR32G32Uint :
-							image.component == 3 ? vk::Format::eR32G32B32Uint :
-							image.component == 4 ? vk::Format::eR32G32B32A32Uint : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_FLOAT:
-				fmt = image.component == 1 ? vk::Format::eR32Sfloat :
-							image.component == 2 ? vk::Format::eR32G32Sfloat :
-							image.component == 3 ? vk::Format::eR32G32B32Sfloat :
-							image.component == 4 ? vk::Format::eR32G32B32A32Sfloat : vk::Format::eUndefined;
-				break;
-			case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-				fmt = image.component == 1 ? vk::Format::eR64Sfloat :
-							image.component == 2 ? vk::Format::eR64G64Sfloat :
-							image.component == 3 ? vk::Format::eR64G64B64Sfloat :
-							image.component == 4 ? vk::Format::eR64G64B64A64Sfloat : vk::Format::eUndefined;
-				break;
-		}
-		
-		auto tex = make_shared<Texture>(device, image.name, vk::Extent3D(image.width, image.height, 1), fmt, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
-		commandBuffer.hold_resource(tex);
-		tex->transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
-		commandBuffer->copyBufferToImage(**pixels, **tex, vk::ImageLayout::eTransferDstOptimal, { vk::BufferImageCopy(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->array_layers()), {}, tex->extent()) });
-		tex->generate_mip_maps(commandBuffer);
-		return tex;
-	});
 
 	auto blank = make_shared<Texture>(device, "blank", vk::Extent3D(2, 2, 1), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 	for (uint32_t i = 0; i < images.size(); i++)
 		mMaterial->descriptor("gTextures", i) = sampled_texture_descriptor(images[i]);
 	for (uint32_t i = (uint32_t)images.size(); i < mMaterial->descriptor_count("gTextures"); i++)
 		mMaterial->descriptor("gTextures", i) = sampled_texture_descriptor(blank);
+	
+	mMaterial->descriptor("gMaterials") = commandBuffer.copy_buffer(materials, vk::BufferUsageFlagBits::eStorageBuffer);
+
+	mMaterial->cull_mode(vk::CullModeFlagBits::eFront);
 
 	queue<pair<NodeGraph::Node*, int>> todo;
 	for (const auto& s : model.scenes)
@@ -326,10 +332,10 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				PrimitiveSet& p = dst.emplace<PrimitiveSet>();
 				p.mGeometry = geometry;
 				p.mIndices = Buffer::StrideView(buffers[model.bufferViews[indices.bufferView].buffer], indexStride, model.bufferViews[indices.bufferView].byteOffset, model.bufferViews[indices.bufferView].byteLength);
-				p.mMaterialData = materials[prim.material];
 				p.mIndexCount = (uint32_t)indices.count;
 				p.mVertexOffset = 0;
 				p.mFirstIndex = (uint32_t)(indices.byteOffset/indexStride);
+				p.mMaterialIndex = prim.material;
 				p.mBaseColorTexture = model.materials[prim.material].pbrMetallicRoughness.baseColorTexture.index;
 				p.mNormalTexture = model.materials[prim.material].normalTexture.index;
 				p.mMetallicRoughnessTexture = model.materials[prim.material].pbrMetallicRoughness.metallicRoughnessTexture.index;
@@ -367,9 +373,11 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 
 void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 	ProfilerRegion s("pbrRenderer::pre_render", commandBuffer);
-	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice);
+
+	Buffer::View<hlsl::MaterialData> materialBuffer = get<Buffer::StrideView>(mMaterial->descriptor("gMaterials"));
+
+	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	buffer_vector<hlsl::MaterialData> materials(commandBuffer.mDevice);
 	Texture::View shadowAtlas = make_shared<Texture>(commandBuffer.mDevice, "gShadowAtlas", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowAtlas"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
 	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
@@ -377,25 +385,22 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (PrimitiveSet& p : n.components<PrimitiveSet>()) {
-			p.mMaterialIndex = (uint32_t)materials.size();
-			materials.emplace_back(p.mMaterialData);
-			transforms.emplace_back(transform);
-		}
+		for (const PrimitiveSet& p : n.components<PrimitiveSet>())
+			transforms[p.mMaterialIndex] = transform;
 	}
-	if (materials.empty()) return;
+
+	if (transforms.empty()) return;
 	
 	for (auto& n : mNodeGraph.find_nodes<hlsl::LightData>()) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (hlsl::LightData& l : n.components<hlsl::LightData>())
-			lights.emplace_back(l).mLightToWorld = transform;
+		for (const hlsl::LightData& l : n.components<hlsl::LightData>())
+			lights.emplace_back(l).mLightToWorld = transform; // TODO: assign mShadowST
 	}
 
 	mMaterial->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
-	mMaterial->descriptor("gMaterials") = commandBuffer.copy_buffer(materials, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gShadowAtlas") = sampled_texture_descriptor(shadowAtlas);
 	mMaterial->push_constant("LightCount", (uint32_t)lights.size());
@@ -405,6 +410,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 	for (const hlsl::LightData& light : lights) {		
 		mShadowMaterial->push_constant("WorldToCamera", inverse(light.mLightToWorld));
 		mShadowMaterial->push_constant("Projection", light.mShadowProjection);
+		// TODO: use light.mShadowST to set viewport
 		mShadowRenderNode->render(commandBuffer, { { "gShadowAtlas", shadowAtlas } });
 	}
 

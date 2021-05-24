@@ -1,6 +1,8 @@
-#pragma compile vertex vs_skybox fragment fs_skybox
-#pragma compile vertex vs_axis
-#pragma compile fragment fs_color fragment fs_texture
+#pragma compile vs_6_6 vs_skybox
+#pragma compile vs_6_6 vs_axis
+#pragma compile ps_6_6 fs_skybox
+#pragma compile ps_6_6 fs_color
+#pragma compile ps_6_6 fs_texture
 
 #include "include/transform.hlsli"
 
