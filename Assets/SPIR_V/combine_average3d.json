@@ -1,0 +1,34 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "average3d",
+            "mode" : "comp",
+            "workgroup_size" : [
+                4,
+                4,
+                4
+            ],
+            "workgroup_size_is_spec_constant_id" : [
+                false,
+                false,
+                false
+            ]
+        }
+    ],
+    "images" : [
+        {
+            "type" : "image3D",
+            "name" : "gOutput3",
+            "set" : 0,
+            "binding" : 2,
+            "format" : "rgba32f"
+        },
+        {
+            "type" : "image3D",
+            "name" : "gInput3",
+            "set" : 0,
+            "binding" : 3,
+            "format" : "rgba32f"
+        }
+    ]
+}

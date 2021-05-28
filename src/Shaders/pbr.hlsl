@@ -5,121 +5,150 @@
 #define LIGHT_ATTEN_ANGULAR 2
 #define LIGHT_USE_SHADOWMAP 4
 
+#define gTextureCount 16
+
 struct LightData {
-	float3 Emission;
-	uint Flags;
-	TransformData LightToWorld;
-	ProjectionData ShadowProjection;
-	float4 ShadowST;
-	float SpotAngleScale;  // 1/(cos(InnerAngle) - cos(OuterAngle))
-	float SpotAngleOffset; // -cos(OuterAngle) * SpotAngleScale;
-	float ShadowBias;
+	TransformData mLightToWorld;
+	ProjectionData mShadowProjection;
+	float4 mShadowST;
+	float3 mEmission;
+	uint mFlags;
+	float mSpotAngleScale;  // 1/(cos(InnerAngle) - cos(OuterAngle))
+	float mSpotAngleOffset; // -cos(OuterAngle) * mSpotAngleScale;
+	float mShadowBias;
 	uint pad;
 };
 
 struct MaterialData {
-	float4 gTextureST;
-	float4 gBaseColor;
-	float3 gEmission;
-	float gMetallic;
-	float gRoughness;
-	float gBumpStrength;
-	uint pad[2];
+  float4 mBaseColor;
+  float3 mEmission;
+	float mMetallic;
+  float mRoughness;
+	float mNormalScale; // scaledNormal = normalize((<sampled normal texture value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))
+	float mOcclusionScale; // lerp(color, color * <sampled occlusion texture value>, <occlusion strength>)
+	uint pad;
 };
 
 #ifndef __cplusplus
 
-#pragma compile vertex vs_pbr fragment fs_pbr
+#pragma compile vs_6_6 vs
+#pragma compile ps_6_6 fs
 
 #include "include/bsdf.hlsli"
 
-StructuredBuffer<LightData> gLights					: register(t0, space0);
-Texture2D<float> gShadowAtlas 							: register(t1, space0);
-SamplerComparisonState gShadowSampler 			: register(s2, space0);
-
-StructuredBuffer<MaterialData> gMaterials		: register(t0, space1);
-Texture2D<float4> gBaseColorTexture 				: register(t1, space1);
-Texture2D<float4> gNormalTexture 						: register(t2, space1);
-Texture2D<float2> gMetallicRoughnessTexture : register(t3, space1);
-SamplerState gSampler 											: register(s4, space1);
-
-StructuredBuffer<TransformData> gInstanceTransforms : register(t0, space2);
+StructuredBuffer<TransformData> gTransforms;
+StructuredBuffer<MaterialData> gMaterials;
+StructuredBuffer<LightData> gLights;
+Texture2D<float> gShadowAtlas;
+SamplerState gSampler;
+SamplerComparisonState gShadowSampler;
+Texture2D<float4> gTextures[gTextureCount];
 
 [[vk::constant_id(0)]] const float gAlphaClip = -1; // set below 0 to disable
 
-struct PushConstants {
+struct push_constants_t {
 	TransformData WorldToCamera;
 	ProjectionData Projection;
 	uint LightCount;
+
+	uint MaterialIndex;
+	uint BaseColorTexture;
+	uint NormalTexture;
+	uint MetallicRoughnessTexture;
+	uint OcclusionTexture;
+	uint EmissionTexture;
 };
-[[vk::push_constant]] const PushConstants gPushConstants = { TRANSFORM_I, PROJECTION_I, 0 };
+[[vk::push_constant]] const push_constants_t gPushConstants = { TRANSFORM_I, PROJECTION_I, 0, ~0, ~0, ~0, ~0, ~0, ~0 };
 
 struct v2f {
 	float4 position : SV_Position;
-	float4 pack0 : TEXCOORD0; // normal (xyz) texcoord.x (w)
-	float4 pack1 : TEXCOORD1; // tangent (xyz) texcoord.y (w)
-	float3 cameraPos : TEXCOORD2;
+	float4 normal : NORMAL;
+	float4 tangent : TANGENT;
+	float4 cameraPos : TEXCOORD0; // vertex position in camera space (camera at 0,0,0)
+	float2 texcoord : TEXCOORD1;
 };
 
-v2f vs_pbr(inout uint instanceId : SV_InstanceID, float3 vertex : POSITION, float3 normal : NORMAL, float2 texcoord : TEXCOORD0, float3 tangent : TANGENT) {
+v2f vs(
+	float3 vertex : POSITION,
+	float3 normal : NORMAL,
+	float3 tangent : TANGENT,
+	float2 texcoord : TEXCOORD,
+	uint instanceId : SV_InstanceID) {
 	v2f o;
-	TransformData objectToCamera = tmul(gPushConstants.WorldToCamera, gInstanceTransforms[instanceId]);
-	o.cameraPos = transform_point(objectToCamera, vertex);
-	o.position = project_point(gPushConstants.Projection, o.cameraPos);
-	o.pack0 = float4(transform_vector(objectToCamera, normal ), texcoord.x);
-	o.pack1 = float4(transform_vector(objectToCamera, tangent), texcoord.y);
+	TransformData objectToCamera = tmul(gPushConstants.WorldToCamera, gTransforms[instanceId]);
+	o.cameraPos.xyz = transform_point(objectToCamera, vertex);
+	o.position = project_point(gPushConstants.Projection, o.cameraPos.xyz);
+	o.normal.xyz = transform_vector(objectToCamera, normal);
+	o.tangent.xyz = transform_vector(objectToCamera, tangent);
+	float3 bitangent = cross(o.normal.xyz, o.tangent.xyz);
+	o.cameraPos.w = bitangent.x;
+	o.normal.w = bitangent.y;
+	o.tangent.w = bitangent.z;
+	o.texcoord = texcoord;
 	return o;
 }
 
 float4 SampleLight(LightData light, float3 cameraPos) {
-	TransformData lightToCamera = tmul(gPushConstants.WorldToCamera, light.LightToWorld);
+	TransformData lightToCamera = tmul(gPushConstants.WorldToCamera, light.mLightToWorld);
 	float3 lightCoord = transform_point(inverse(lightToCamera), cameraPos);
 
 	float4 r = float4(0,0,0,1);
 	
-	if (light.Flags & LIGHT_ATTEN_DISTANCE) {
+	if (light.mFlags & LIGHT_ATTEN_DISTANCE) {
 		r.xyz = normalize(lightToCamera.Translation - cameraPos);
 		r.w *= 1/dot(lightCoord,lightCoord);
-		if (light.Flags & LIGHT_ATTEN_ANGULAR)
-			r.w *= pow2(saturate(lightCoord.z/length(lightCoord)) * light.SpotAngleScale + light.SpotAngleOffset);
+		if (light.mFlags & LIGHT_ATTEN_ANGULAR)
+			r.w *= pow2(saturate(lightCoord.z/length(lightCoord)) * light.mSpotAngleScale + light.mSpotAngleOffset);
 	} else
 		r.xyz = rotate_vector(lightToCamera.Rotation, float3(0,0,-1));
 
-	if ((light.Flags & LIGHT_USE_SHADOWMAP) && r.w > 0) {
-		float3 clipCoord = hnormalized(project_point(light.ShadowProjection, lightCoord));
-		clipCoord.y = -clipCoord.y;
-		if (all(clipCoord < 1) && all(clipCoord.xy > -1))
-			r.w *= dot(.25, gShadowAtlas.GatherCmp(gShadowSampler, saturate(clipCoord.xy*.5 + .5)*light.ShadowST.xy + light.ShadowST.zw, clipCoord.z - light.ShadowBias, 0));
+	if ((light.mFlags & LIGHT_USE_SHADOWMAP) && r.w > 0) {
+		float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, lightCoord));
+		if (all(abs(shadowCoord.xy) < 1)) {
+			shadowCoord.y = -shadowCoord.y;
+			r.w *= gShadowAtlas.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z);
+		}
 	}
 	
 	return r;
 }
 
-float4 fs_pbr(v2f i, uint instanceId : SV_InstanceID) : SV_Target0 {
-	MaterialData material = gMaterials[instanceId];
-
-	float2 uv = float2(i.pack0.w, i.pack1.w)*material.gTextureST.xy + material.gTextureST.zw;
-	float4 color = material.gBaseColor * gBaseColorTexture.Sample(gSampler, uv);
-
-	if (gAlphaClip >= 0 && color.a < gAlphaClip) discard;
-
-	float4 bump = gNormalTexture.Sample(gSampler, uv);
+float4 fs(v2f i) : SV_Target0 {
+	MaterialData material = gMaterials[gPushConstants.MaterialIndex];
+	float4 baseColor = material.mBaseColor;
+	float3 view = normalize(-i.cameraPos.xyz);
+	float3 normal = i.normal.xyz;
+	float2 metallicRoughness = float2(material.mMetallic, material.mRoughness);
+	float3 emission = material.mEmission;
 	
-	float3 view 	 = normalize(-i.cameraPos);
-	float3 normal  = normalize(i.pack0.xyz);
-	float3 tangent = normalize(i.pack1.xyz);
-	normal = normalize(mul(float3(1,-1,material.gBumpStrength)*(bump.xyz*2-1), float3x3(tangent, normalize(cross(normal, tangent)), normal)));
+	if (gPushConstants.BaseColorTexture < gTextureCount)
+		baseColor *= gTextures[gPushConstants.BaseColorTexture].Sample(gSampler, i.texcoord);
+	
+	if (gAlphaClip >= 0 && baseColor.a < gAlphaClip) discard;
+	
+	if (gPushConstants.NormalTexture < gTextureCount) {
+		float3 bitangent = float3(i.cameraPos.w, i.normal.w, i.tangent.w);
+		normal = mul((gTextures[gPushConstants.NormalTexture].Sample(gSampler, i.texcoord).xyz*2-1) * float3(material.mNormalScale.xx, 1), float3x3(i.tangent.xyz, bitangent, i.normal.xyz));
+	}
 
-	float2 metallicRoughness = gMetallicRoughnessTexture.Sample(gSampler, uv);
-	BSDF bsdf = make_BSDF(color.rgb, metallicRoughness.x*material.gMetallic, metallicRoughness.y*material.gRoughness, material.gEmission);
+	if (gPushConstants.MetallicRoughnessTexture < gTextureCount)
+		metallicRoughness *= gTextures[gPushConstants.MetallicRoughnessTexture].Sample(gSampler, i.texcoord).rg;
+	if (gPushConstants.EmissionTexture < gTextureCount)
+		emission *= gTextures[gPushConstants.EmissionTexture].Sample(gSampler, i.texcoord).rgb;
+
+	BSDF bsdf = make_BSDF(baseColor.rgb, metallicRoughness.x, metallicRoughness.y, emission);
+
+	normal = normalize(normal);
 
 	float3 eval = bsdf.emission;
 	for (uint l = 0; l < gPushConstants.LightCount; l++) {
-		float4 Li = SampleLight(gLights[l], i.cameraPos);
+		float4 Li = SampleLight(gLights[l], i.cameraPos.xyz);
 		float3 sfc = ShadePoint(bsdf, Li.xyz, view, normal);
-		eval += gLights[l].Emission * Li.w * sfc;
+		eval += gLights[l].mEmission * Li.w * sfc;
 	}
-	return float4(eval, color.a);
+	if (gPushConstants.OcclusionTexture < gTextureCount)
+		eval = lerp(eval, eval * gTextures[gPushConstants.OcclusionTexture].Sample(gSampler, i.texcoord).r, material.mOcclusionScale);
+	return float4(eval, baseColor.a);
 }
 
 #endif

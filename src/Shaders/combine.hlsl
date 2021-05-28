@@ -1,6 +1,6 @@
-#pragma compile compute interleave
-#pragma compile compute average2d
-#pragma compile compute average3d
+#pragma compile cs_6_6 interleave
+#pragma compile cs_6_6 average2d
+#pragma compile cs_6_6 average3d
 
 RWTexture2D<float4> gOutput2 : register(u0);
 RWTexture2D<float4> gInput2  : register(u1);
@@ -11,8 +11,8 @@ RWBuffer<float2> gOutputRG : register(u4);
 Buffer<float> gInputR : register(t5);
 Buffer<float> gInputG : register(t6);
 
-struct PushConstants { uint Width; };
-[[vk::push_constant]] const PushConstants gPushConstants = {0};
+struct push_constants { uint Width; };
+[[vk::push_constant]] const push_constants gPushConstants = {0};
 
 [numthreads(8, 8, 1)]
 void interleave(uint3 index : SV_DispatchThreadID) {

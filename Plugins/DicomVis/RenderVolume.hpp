@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Scene/SceneNode.hpp>
-#include <Scene/Camera.hpp>
+#include <NodeGraph/SceneNode.hpp>
+#include <NodeGraph/Camera.hpp>
 
 #include "ImageLoader.hpp"
 
@@ -26,7 +26,7 @@ enum class OrganMaskBits : uint32_t {
 };
 using OrganMask = vk::Flags<OrganMaskBits>;
 
-class RenderVolume : public Object {
+class RenderVolume : public NodeGraph::Node {
 	private:
 	// The volume loaded directly from the folder
 	shared_ptr<Texture> mRawVolume = nullptr;
@@ -39,7 +39,7 @@ class RenderVolume : public Object {
 	shared_ptr<Texture> mGradient = nullptr;
 	bool mGradientDirty = false;
 	
-	shared_ptr<Buffer> mUniformBuffer;
+	device_vector<VolumeUniformBuffer> mUniformBuffer;
 	shared_ptr<Pipeline> mPrecomputePipeline;
 	shared_ptr<Pipeline> mRenderPipeline;
 
@@ -57,12 +57,12 @@ public:
 	ShadingMode mShadingMode = {};
 	OrganMask mOrganMask = {};
 
-	PLUGIN_EXPORT RenderVolume(const string& name, Scene* scene, Device& device, const fs::path& imageStackFolder);
+	PLUGIN_EXPORT RenderVolume(const string& name, NodeGraph* scene, Device& device, const fs::path& imageStackFolder);
 
 	PLUGIN_EXPORT void BakeRender(CommandBuffer& commandBuffer);
 
 	PLUGIN_EXPORT void DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui);
-	PLUGIN_EXPORT void Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera);
+	PLUGIN_EXPORT void draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera);
 };
 
 }

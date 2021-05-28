@@ -1,53 +1,56 @@
 #include "Material.hpp"
-#include "Profiler.hpp"
 
 using namespace stm;
 
-shared_ptr<GraphicsPipeline> Material::CreatePipeline(RenderPass& renderPass, uint32_t subpassIndex, const GeometryData& geometry) {
-	shared_ptr<SpirvModule> vert, frag;
-	for (uint32_t i = 0; i < mModules.size(); i++) {
-		auto& spirv = mModules[i];
-		if (!spirv->mShaderModule) {
-			spirv->mDevice = *renderPass.mDevice;
-			spirv->mShaderModule = renderPass.mDevice->createShaderModule(vk::ShaderModuleCreateInfo({}, spirv->mSpirv));
-		}
-		if (mModules[i]->mStage == vk::ShaderStageFlagBits::eFragment) frag = mModules[i];
-		else if (mModules[i]->mStage == vk::ShaderStageFlagBits::eVertex) vert = mModules[i];
-	}
-	return make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, geometry, vert, frag, mSpecializationConstants, mImmutableSamplers, mCullMode, mPolygonMode, mSampleShading, mDepthStencilState, mBlendStates);
-}
+shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const Geometry& geometry) {
 
-shared_ptr<GraphicsPipeline> Material::Bind(CommandBuffer& commandBuffer, const GeometryData& geometry) {
-	ProfilerRegion ps("Material::Bind");
+	size_t key = hash_args(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry.topology(), geometry | views::values);
 
-	size_t key = hash_combine(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry.mPrimitiveTopology, geometry.mAttributes | views::values);
-
-	shared_ptr<GraphicsPipeline> pipeline;
-	{
-		auto pipelines = mPipelines.lock();
-		auto p_it = pipelines->find(key);
-		if (p_it == pipelines->end()) pipeline = pipelines->emplace(key, CreatePipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry)).first->second;
-		else pipeline = p_it->second;
-	}
-
-	commandBuffer.BindPipeline(pipeline);
-
-	unordered_map<uint32_t, shared_ptr<DescriptorSet>> descriptorSets;
-
-	for (auto& [name, entries] : mDescriptors) {
-		auto it = pipeline->DescriptorBindings().find(name);
-		if (it == pipeline->DescriptorBindings().end()) continue;
-
-		uint32_t setIndex = it->second.mSet;
-		if (descriptorSets.count(setIndex) == 0)
-			descriptorSets.emplace(setIndex, make_shared<DescriptorSet>(pipeline->DescriptorSetLayouts()[setIndex], mName+"/DescriptorSet"+to_string(setIndex)));
-		for (const auto&[arrayIndex,entry] : entries)
-			if (descriptorSets.at(setIndex)->find(it->second.mBinding, arrayIndex) != entry)
-				descriptorSets.at(setIndex)->insert_or_assign(it->second.mBinding, arrayIndex, entry);
-	}
+	auto p_it = mPipelines.find(key);
+	if (p_it == mPipelines.end())
+		p_it = mPipelines.emplace(key, make_shared<GraphicsPipeline>(mName,
+				commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
+				geometry, mModules, mSpecializationConstants, mImmutableSamplers,
+				mCullMode, mPolygonMode, mSampleShading, mDepthStencilState, mBlendStates) ).first;
 	
-	for (const auto&[index, descriptorSet] : descriptorSets) commandBuffer.BindDescriptorSet(index, descriptorSet);
-	for (const auto&[name, data] : mPushConstants) commandBuffer.push_constant(name, data);
+	const auto& pipeline = p_it->second;
+	commandBuffer.bind_pipeline(pipeline);
+	
+	ProfilerRegion ps("Material::bind", commandBuffer);
+
+	auto& descriptorSets = mDescriptorSets[pipeline.get()];
+	descriptorSets.clear();
+
+	// update descriptor set entries
+	for (auto& [id, entries] : mDescriptors) {
+		const DescriptorSetLayout::Binding& b = pipeline->descriptor_binding(id);
+		uint32_t setIndex = b.mSet;
+		auto ds_it = descriptorSets.find(setIndex);
+		if (ds_it == descriptorSets.end())
+			ds_it = descriptorSets.emplace(setIndex, make_shared<DescriptorSet>(pipeline->descriptor_set_layouts()[setIndex], mName+"/DescriptorSet"+to_string(setIndex))).first;
+
+		for (const auto&[arrayIndex,entry] : entries) {
+			const Descriptor* d = ds_it->second->find(b.mBinding, arrayIndex);
+			if (!d || *d != entry) ds_it->second->insert_or_assign(b.mBinding, arrayIndex, entry);
+		}
+	}
 
 	return pipeline;
+}
+
+void Material::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) const {
+	unordered_map<uint32_t, vector<pair<uint32_t, uint32_t>>> offsets;
+	for (const auto&[id,offset] : dynamicOffsets) {
+		const DescriptorSetLayout::Binding& b = commandBuffer.bound_pipeline()->descriptor_binding(id);
+		offsets[b.mSet].emplace_back(make_pair(b.mBinding, offset));
+	}
+	vector<uint32_t> tmp;
+	for (const auto&[index, ds] : mDescriptorSets.at(commandBuffer.bound_pipeline().get())) {
+		tmp.clear();
+		if (auto it = offsets.find(index); it != offsets.end()) {
+			tmp.resize(it->second.size());
+			ranges::transform(it->second, tmp.begin(), &pair<uint32_t,uint32_t>::second);
+		}
+		commandBuffer.bind_descriptor_set(index, ds, tmp);
+	}
 }

@@ -1,0 +1,96 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "vs_skybox",
+            "mode" : "vert"
+        }
+    ],
+    "types" : {
+        "_12" : {
+            "name" : "quatf",
+            "members" : [
+                {
+                    "name" : "coeffs",
+                    "type" : "vec4",
+                    "offset" : 0
+                }
+            ]
+        },
+        "_11" : {
+            "name" : "TransformData",
+            "members" : [
+                {
+                    "name" : "Translation",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Scale",
+                    "type" : "float",
+                    "offset" : 12
+                },
+                {
+                    "name" : "Rotation",
+                    "type" : "_12",
+                    "offset" : 16
+                }
+            ]
+        },
+        "_13" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_10" : {
+            "name" : "type.PushConstant.push_constants",
+            "members" : [
+                {
+                    "name" : "WorldToCamera",
+                    "type" : "_11",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Projection",
+                    "type" : "_13",
+                    "offset" : 32
+                },
+                {
+                    "name" : "EnvironmentGamma",
+                    "type" : "float",
+                    "offset" : 48
+                }
+            ]
+        }
+    },
+    "inputs" : [
+        {
+            "type" : "vec3",
+            "name" : "in.var.POSITION",
+            "location" : 0
+        }
+    ],
+    "outputs" : [
+        {
+            "type" : "vec3",
+            "name" : "out.var.TEXCOORD0",
+            "location" : 0
+        }
+    ],
+    "push_constants" : [
+        {
+            "type" : "_10",
+            "name" : "gPushConstants",
+            "push_constant" : true
+        }
+    ]
+}

@@ -15,15 +15,14 @@ CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFa
 	allocInfo.level = level;
 	allocInfo.commandBufferCount = 1;
 	mCommandBuffer = mDevice->allocateCommandBuffers({ allocInfo })[0];
-	mDevice.SetObjectName(mCommandBuffer, name);
+	mDevice.set_debug_name(mCommandBuffer, name);
 	
-	Clear();
+	clear();
 	mCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 	mState = CommandBufferState::eRecording;
 }
 
-
-void CommandBuffer::BeginLabel(const string& text, const Vector4f& color) {
+void CommandBuffer::begin_label(const string& text, const Vector4f& color) {
 	if (vkCmdBeginDebugUtilsLabelEXT) {
 		vk::DebugUtilsLabelEXT label = {};
 		memcpy(label.color, &color, sizeof(color));
@@ -31,15 +30,13 @@ void CommandBuffer::BeginLabel(const string& text, const Vector4f& color) {
 		vkCmdBeginDebugUtilsLabelEXT(mCommandBuffer, reinterpret_cast<VkDebugUtilsLabelEXT*>(&label));
 	}
 }
-void CommandBuffer::EndLabel() {
+void CommandBuffer::end_label() {
 	if (vkCmdEndDebugUtilsLabelEXT)
 		vkCmdEndDebugUtilsLabelEXT(mCommandBuffer);
 }
 
-void CommandBuffer::Clear() {
+void CommandBuffer::clear() {
 	mHeldResources.clear();
-	mSignalSemaphores.clear();
-	mWaitSemaphores.clear();
 	mPrimitiveCount = 0;
 	mBoundFramebuffer.reset();
 	mSubpassIndex = 0;
@@ -48,40 +45,52 @@ void CommandBuffer::Clear() {
 	mBoundIndexBuffer = {};
 	mBoundDescriptorSets.clear();
 }
-void CommandBuffer::Reset(const string& name) {
-	Clear();
+void CommandBuffer::reset(const string& name) {
+	clear();
 	
 	mCommandBuffer.reset({});
 	mDevice->resetFences({ **mCompletionFence });
-	mDevice.SetObjectName(mCommandBuffer, name);
+	mDevice.set_debug_name(mCommandBuffer, name);
 
 	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 	mState = CommandBufferState::eRecording;
 }
 
-void CommandBuffer::BeginRenderPass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents) {
+void CommandBuffer::begin_render_pass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, const vk::ArrayProxy<const vk::ClearValue>& clearValues, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
-	for (uint32_t i = 0; i < renderPass->attachments().size(); i++)
-		(*framebuffer)[i].texture().TransitionBarrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
+	for (uint32_t i = 0; i < framebuffer->size(); i++)
+		(*framebuffer)[i].texture().transition_barrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
 
-	vk::RenderPassBeginInfo info = {};
-	info.renderPass = **renderPass;
-	info.framebuffer = **framebuffer;
-	info.renderArea = vk::Rect2D({ 0, 0 }, framebuffer->extent());
-	info.setClearValues(clearValues);
-	mCommandBuffer.beginRenderPass(&info, contents);
+	vector<vk::ClearValue> vals(framebuffer->size());
+	if (clearValues.empty()) {
+		for (uint32_t i = 0; i < framebuffer->size(); i++)
+			if (is_depth_stencil(framebuffer->at(i).texture().format()))
+				vals[i] = vk::ClearValue( vk::ClearDepthStencilValue(1.f, 0) );
+			else
+				vals[i] = vk::ClearValue( vk::ClearColorValue(std::array<uint32_t,4>{0,0,0,0}) );
+	} else
+		ranges::copy(clearValues, vals.begin());
+
+	mCommandBuffer.beginRenderPass(vk::RenderPassBeginInfo(**renderPass, **framebuffer, vk::Rect2D({}, framebuffer->extent()), vals), contents);
 
 	mBoundFramebuffer = framebuffer;
 	mSubpassIndex = 0;
-	HoldResource(renderPass);
-	HoldResource(framebuffer);
+	hold_resource(renderPass);
+	hold_resource(framebuffer);
 }
-void CommandBuffer::NextSubpass(vk::SubpassContents contents) {
+void CommandBuffer::next_subpass(vk::SubpassContents contents) {
 	mCommandBuffer.nextSubpass(contents);
 	mSubpassIndex++;
+	for (uint32_t i = 0; i < mBoundFramebuffer->size(); i++) {
+		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().subpasses()[mSubpassIndex].at(mBoundFramebuffer->render_pass().attachments()[i].second)).initialLayout;
+		auto& attachment = (*mBoundFramebuffer)[i];
+		attachment.texture().mTrackedLayout = layout;
+		attachment.texture().mTrackedStageFlags = guess_stage(layout);
+		attachment.texture().mTrackedAccessFlags = guess_access_flags(layout);
+	}
 }
-void CommandBuffer::EndRenderPass() {
+void CommandBuffer::end_render_pass() {
 	mCommandBuffer.endRenderPass();
 
 	// Update tracked image layouts
@@ -89,8 +98,8 @@ void CommandBuffer::EndRenderPass() {
 		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().attachments()[i]).finalLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
 		attachment.texture().mTrackedLayout = layout;
-		attachment.texture().mTrackedStageFlags = GuessStage(layout);
-		attachment.texture().mTrackedAccessFlags = GuessAccessMask(layout);
+		attachment.texture().mTrackedStageFlags = guess_stage(layout);
+		attachment.texture().mTrackedAccessFlags = guess_access_flags(layout);
 	}
 	
 	mBoundFramebuffer = nullptr;

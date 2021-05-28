@@ -3,7 +3,7 @@
 
 using namespace dcmvs;
 
-RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, const fs::path& imageStackFolder) : Object(mName, scene) {
+RenderVolume::RenderVolume(const string& name, NodeGraph* scene, Device& device, const fs::path& imageStackFolder) : Object(mName, scene) {
   mPrecomputePipeline = device->LoadAsset<Pipeline>("Assets/Shaders/precompute.stmb", "precompute");
   mRenderPipeline = device->LoadAsset<Pipeline>("Assets/Shaders/volume.stmb", "volume");
 
@@ -33,8 +33,6 @@ RenderVolume::RenderVolume(const string& name, Scene* scene, Device& device, con
 
 	//mGradient = new Texture("Gradient", device, mRawVolume->extent(), vk::Format::eR8G8B8A8Snorm, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage);
 	//mGradientDirty = true;
-
-  mUniformBuffer = make_shared<Buffer>("Volume Uniforms", device, sizeof(VolumeUniformBuffer), vk::BufferUsageFlagBits::eUniformBuffer, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 }
 
 void RenderVolume::DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui) {
@@ -68,7 +66,7 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
 
   unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
-  if (ChannelCount(mRawVolume->format()) == 1) {
+  if (channel_count(mRawVolume->format()) == 1) {
     defines.emplace("SINGLE_CHANNEL");
     if (mColorize) defines.emplace("COLORIZE");
   }
@@ -77,25 +75,25 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
   // Bake the volume if necessary
   if (mBakeDirty && mBakedVolume) {
     ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeVolume", defines);
-    commandBuffer.BindPipeline(pipeline);
+    commandBuffer.bind_pipeline(pipeline);
 
     auto ds = commandBuffer.GetDescriptorSet("BakeVolume", pipeline->mDescriptorSetLayouts[0]);
     ds->WriteTexture("Volume", mRawVolume, pipeline);
     if (mRawMask) ds->WriteTexture("RawMask", mRawMask, pipeline);
     ds->WriteTexture("Output", mBakedVolume, pipeline);
     ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
-    commandBuffer.BindDescriptorSet(ds, 0);
+    commandBuffer.bind_descriptor_set(ds, 0);
 
-    commandBuffer.DispatchTiled(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
+    commandBuffer.dispatch_align(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
 
-    commandBuffer.Barrier(*mBakedVolume);
+    commandBuffer.barrier(*mBakedVolume);
     mBakeDirty = false;
   }
 
   // Bake the gradient if necessary
   if (mGradientDirty && mGradient) {
     ComputePipeline* pipeline = mPrecomputePipeline->GetCompute("BakeGradient", defines);
-    commandBuffer.BindPipeline(pipeline);
+    commandBuffer.bind_pipeline(pipeline);
 
     auto ds = commandBuffer.GetDescriptorSet("BakeGradient", pipeline->mDescriptorSetLayouts[0]);
     if (mBakedVolume)
@@ -106,16 +104,16 @@ void RenderVolume::BakeRender(CommandBuffer& commandBuffer) {
     }
     ds->WriteTexture("Output", mGradient, pipeline);
     ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
-    commandBuffer.BindDescriptorSet(ds, 0);
+    commandBuffer.bind_descriptor_set(ds, 0);
 
-    commandBuffer.DispatchTiled(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
+    commandBuffer.dispatch_align(mRawVolume->extent().width, mRawVolume->extent().height, mRawVolume->extent().depth);
 
-    commandBuffer.Barrier(*mBakedVolume);
+    commandBuffer.barrier(*mBakedVolume);
     mGradientDirty = false;
   }
 }
 
-void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera) {
+void RenderVolume::draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera) {
   if (!mRawVolume && !mBakedVolume) return;
 
   VolumeUniformBuffer* uniforms = (VolumeUniformBuffer*)mUniformBuffer->data();
@@ -134,7 +132,7 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   unordered_set<string> defines;
   if (mRawMask) defines.emplace("MASK");
   if (mBakedVolume) defines.emplace("BAKED");
-  else if (ChannelCount(mRawVolume->format()) == 1) {
+  else if (channel_count(mRawVolume->format()) == 1) {
     defines.emplace("SINGLE_CHANNEL");
     if (mColorize) defines.emplace("COLORIZE");
   }
@@ -152,17 +150,17 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
 
 
   ComputePipeline* pipeline = mRenderPipeline->GetCompute("Render", defines);
-  commandBuffer.BindPipeline(pipeline);
+  commandBuffer.bind_pipeline(pipeline);
   auto renderTarget = framebuffer->Attachment("stm_main_resolve");
 
-  auto ds = commandBuffer.GetDescriptorSet("Draw Volume", pipeline->mDescriptorSetLayouts[0]);
+  auto ds = commandBuffer.GetDescriptorSet("draw Volume", pipeline->mDescriptorSetLayouts[0]);
   ds->WriteTexture("RenderTarget", renderTarget, pipeline);
   ds->WriteTexture("DepthBuffer", framebuffer->Attachment("stm_main_depth"), pipeline, 0, vk::ImageLayout::eShaderReadOnlyOptimal);
   ds->WriteBuffer("VolumeUniforms", mUniformBuffer, pipeline);
   ds->WriteTexture("Volume", mBakedVolume ? mBakedVolume : mRawVolume, pipeline);
   if (mRawMask) ds->WriteTexture("RawMask", mRawMask, pipeline);
   if (mGradient) ds->WriteTexture("Gradient", mGradient, pipeline);
-  commandBuffer.BindDescriptorSet(ds, 0);
+  commandBuffer.bind_descriptor_set(ds, 0);
 
   commandBuffer.PushConstantRef("CameraPosition", camPos[0]);
   commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eLeft));
@@ -173,29 +171,29 @@ void RenderVolume::Draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> fr
   switch (camera.StereoMode()) {
   case StereoMode::eNone:
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchTiled(res);
+    commandBuffer.dispatch_align(res);
     break;
   case StereoMode::eHorizontal:
     res.x /= 2;
     // left eye
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchTiled(res);
+    commandBuffer.dispatch_align(res);
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
     commandBuffer.PushConstantRef("WriteOffset", Vector2i(res.x, 0));
-    commandBuffer.DispatchTiled(res);
+    commandBuffer.dispatch_align(res);
     break;
   case StereoMode::eVertical:
     res.y /= 2;
     // left eye
     commandBuffer.PushConstantRef("ScreenResolution", res);
-    commandBuffer.DispatchTiled(res);
+    commandBuffer.dispatch_align(res);
     // right eye
     commandBuffer.PushConstantRef("InvViewProj", camera.InverseViewProjection(StereoEye::eRight));
     commandBuffer.PushConstantRef("CameraPosition", camPos[1]);
     commandBuffer.PushConstantRef("WriteOffset", Vector2i(0, res.y));
-    commandBuffer.DispatchTiled(res);
+    commandBuffer.dispatch_align(res);
     break;
   }
 }

@@ -1,18 +1,20 @@
-#pragma compile vertex vs_skybox fragment fs_skybox
-#pragma compile vertex vs_axis
-#pragma compile fragment fs_color fragment fs_texture
+#pragma compile vs_6_6 vs_skybox
+#pragma compile vs_6_6 vs_axis
+#pragma compile ps_6_6 fs_skybox
+#pragma compile ps_6_6 fs_color
+#pragma compile ps_6_6 fs_texture
 
 #include "include/transform.hlsli"
 
-Texture2D<float4> gTexture : register(t0);
-SamplerState gSampler : register(s1);
+Texture2D<float4> gTexture;
+SamplerState gSampler;
 
-struct PushConstants {
+struct push_constants {
 	TransformData WorldToCamera;
 	ProjectionData Projection;
 	float EnvironmentGamma;
 };
-[[vk::push_constant]] const PushConstants gPushConstants = { TRANSFORM_I, PROJECTION_I, 1 };
+[[vk::push_constant]] const push_constants gPushConstants = { TRANSFORM_I, PROJECTION_I, 1 };
 
 void vs_skybox(float3 vertex : POSITION, out float4 position : SV_Position, out float3 viewRay : TEXCOORD0) {
 	position = project_point(gPushConstants.Projection, vertex);

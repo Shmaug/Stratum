@@ -11,7 +11,7 @@
 
 using namespace stm;
 
-Texture::PixelData Texture::LoadPixels(Device& device, const fs::path& filename, bool srgb) {
+Texture::PixelData Texture::load(Device& device, const fs::path& filename, bool srgb) {
 	int x,y,channels;
 	stbi_info(filename.string().c_str(), &x, &y, &channels);
 
@@ -48,13 +48,13 @@ Texture::PixelData Texture::LoadPixels(Device& device, const fs::path& filename,
 	if (!pixels) throw invalid_argument("could not load " + filename.string());
 	if (desiredChannels) channels = desiredChannels;
 
-	Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*ElementSize(format), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eUniformTexelBuffer|vk::BufferUsageFlagBits::eStorageTexelBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU));
+	Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*texel_size(format), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eUniformTexelBuffer|vk::BufferUsageFlagBits::eStorageTexelBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU));
 	memcpy(buf.data(), pixels, buf.size());
 	stbi_image_free(pixels);
 	return make_pair(Buffer::TexelView(buf, format), vk::Extent3D(x,y,1));
 }
 
-void Texture::Create() {
+void Texture::create() {
 	vk::ImageCreateInfo imageInfo = {};
 	imageInfo.imageType = mExtent.depth > 1 ? vk::ImageType::e3D
 		: (mExtent.height > 1 || (mExtent.width == 1 && mExtent.height == 1 && mExtent.depth == 1)) ? vk::ImageType::e2D // special 1x1 case: force 2D
@@ -72,7 +72,7 @@ void Texture::Create() {
 	imageInfo.sharingMode = vk::SharingMode::eExclusive;
 	imageInfo.flags = mCreateFlags;
 	mImage = mDevice->createImage(imageInfo);
-	mDevice.SetObjectName(mImage, name());
+	mDevice.set_debug_name(mImage, name());
 
 	switch (mFormat) {
 	default:
@@ -94,7 +94,7 @@ void Texture::Create() {
 	}
 }
 
-void Texture::TransitionBarrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
+void Texture::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
 	if (oldLayout == newLayout) return;
 	if (newLayout == vk::ImageLayout::eUndefined) {
 		mTrackedLayout = newLayout;
@@ -113,29 +113,26 @@ void Texture::TransitionBarrier(CommandBuffer& commandBuffer, vk::PipelineStageF
 	barrier.subresourceRange.baseArrayLayer = 0;
 	barrier.subresourceRange.layerCount = array_layers();
 	barrier.srcAccessMask = mTrackedAccessFlags;
-	barrier.dstAccessMask = GuessAccessMask(newLayout);
+	barrier.dstAccessMask = guess_access_flags(newLayout);
 	barrier.subresourceRange.aspectMask = mAspect;
-	commandBuffer.Barrier(srcStage, dstStage, barrier);
+	commandBuffer.barrier(srcStage, dstStage, barrier);
 	mTrackedLayout = newLayout;
 	mTrackedStageFlags = dstStage;
 	mTrackedAccessFlags = barrier.dstAccessMask;
 }
 
-void Texture::GenerateMipMaps(CommandBuffer& commandBuffer) {
+void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 	// Transition mip 0 to vk::ImageLayout::eTransferSrcOptimal
-	commandBuffer.TransitionBarrier(mImage, { mAspect, 0, 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferSrcOptimal);
+	commandBuffer.transition_barrier(mImage, { mAspect, 0, 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferSrcOptimal);
 	// Transition all other mips to vk::ImageLayout::eTransferDstOptimal
-	commandBuffer.TransitionBarrier(mImage, { mAspect, 1, mMipLevels - 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferDstOptimal);
+	commandBuffer.transition_barrier(mImage, { mAspect, 1, mMipLevels - 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferDstOptimal);
 
 	vk::ImageBlit blit = {};
-	blit.srcOffsets[0] = vk::Offset3D(0, 0, 0);
+	blit.srcOffsets[0] = blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
 	blit.srcSubresource.baseArrayLayer = 0;
 	blit.srcSubresource.layerCount = mArrayLayers;
 	blit.srcSubresource.aspectMask = mAspect;
-	blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
-	blit.dstSubresource.baseArrayLayer = 0;
-	blit.dstSubresource.layerCount = mArrayLayers;
-	blit.dstSubresource.aspectMask = mAspect;
+	blit.dstSubresource = blit.srcSubresource;
 
 	blit.srcOffsets[1] = vk::Offset3D((int32_t)mExtent.width, (int32_t)mExtent.height, (int32_t)mExtent.depth);
 
@@ -154,7 +151,7 @@ void Texture::GenerateMipMaps(CommandBuffer& commandBuffer) {
 		blit.srcOffsets[1] = blit.dstOffsets[1];
 		
 		// Transition this mip level to vk::ImageLayout::eTransferSrcOptimal
-		commandBuffer.TransitionBarrier(mImage, { mAspect, i, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
+		commandBuffer.transition_barrier(mImage, { mAspect, i, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
 	}
 
 	mTrackedLayout = vk::ImageLayout::eTransferSrcOptimal;
@@ -162,15 +159,20 @@ void Texture::GenerateMipMaps(CommandBuffer& commandBuffer) {
 	mTrackedAccessFlags = vk::AccessFlagBits::eTransferRead;
 }
 
-Texture::View::View(shared_ptr<Texture> texture, uint32_t baseMip, uint32_t mipCount, uint32_t baseLayer, uint32_t layerCount, vk::ImageAspectFlags aspect, vk::ComponentMapping components)
-	: mTexture(texture), mBaseMip(baseMip), mMipCount(mipCount ? mipCount : mMipCount = texture->mip_levels()), mBaseLayer(baseLayer), mLayerCount(layerCount ? layerCount : texture->array_layers()), mAspect(aspect) {
-	if (mAspect == (vk::ImageAspectFlags)0) mAspect = texture->aspect();
-
-	size_t key = hash_combine(mBaseMip, mMipCount, mBaseLayer, mLayerCount, mAspect, components);
-	if (texture->mViews.count(key))
-		mView = texture->mViews.at(key);
+Texture::View::View(const shared_ptr<Texture>& texture, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components)
+	: mTexture(texture), mSubresource(subresource), mComponents(components) {
+	if (mSubresource.aspectMask == (vk::ImageAspectFlags)0) mSubresource.aspectMask = texture->aspect();
+	if (mSubresource.levelCount == 0) mSubresource.levelCount = texture->mip_levels();
+	if (mSubresource.layerCount == 0) mSubresource.layerCount = texture->array_layers();
+	auto key = make_pair(mSubresource, mComponents);
+	if (auto it = texture->mViews.find(key); it != texture->mViews.end())
+		mView = it->second;
 	else {
 		vk::ImageViewCreateInfo info = {};
+		info.image = **mTexture;
+		info.format = mTexture->format();
+		info.subresourceRange = mSubresource;
+		info.components = components;
 		if (mTexture->create_flags() & vk::ImageCreateFlagBits::eCubeCompatible)
 			info.viewType = vk::ImageViewType::eCube;
 		else if (mTexture->extent().depth > 1)
@@ -179,18 +181,7 @@ Texture::View::View(shared_ptr<Texture> texture, uint32_t baseMip, uint32_t mipC
 			info.viewType = vk::ImageViewType::e2D;
 		else
 			info.viewType = vk::ImageViewType::e1D;
-		
-		info.image = **mTexture;
-		info.format = mTexture->format();
-		info.subresourceRange.aspectMask = mAspect;
-		info.subresourceRange.baseArrayLayer = mBaseLayer;
-		info.subresourceRange.layerCount = mLayerCount;
-		info.subresourceRange.baseMipLevel = mBaseMip;
-		info.subresourceRange.levelCount = mMipCount;
-		info.components = components;
-		mView = mTexture->mDevice->createImageView(info);
-		mTexture->mDevice.SetObjectName(mView, mTexture->name() + "/Texture::View");
-
-		texture->mViews.emplace(key, mView);
+		mView = texture->mViews.emplace(key, mTexture->mDevice->createImageView(info)).first->second;
+		mTexture->mDevice.set_debug_name(mView, mTexture->name() + "/View");
 	}
 }

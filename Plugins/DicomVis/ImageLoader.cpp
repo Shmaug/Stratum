@@ -8,7 +8,7 @@
 
 using namespace dcmvs;
 
-unordered_multimap<string, ImageStackType> ExtensionMap {
+unordered_multimap<string, ImageStackType> gExtensionMap {
 	{ ".dcm", eDicom },
 	{ ".raw", eRaw },
 	{ ".png", eStandard },
@@ -33,7 +33,7 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			vector<fs::path> images;
 			for (const auto& p : fs::directory_iterator(folder))
 				if (ExtensionMap.count(p.path().extension().string()))
-					images.push_back(p.path());
+					images.emplace_back(p.path());
 			ranges::sort(images, [](const fs::path& a, const fs::path& b) {
 				return a.stem().string() < b.stem().string();
 			});
@@ -65,7 +65,7 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 	vector<fs::path> images;
 	for (const auto& p : fs::directory_iterator(folder))
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eStandard)
-			images.push_back(p.path());
+			images.emplace_back(p.path());
 	if (images.empty()) return nullptr;
 	ranges::sort(images, [reverse](const fs::path& a, const fs::path& b) {
 		string astr = a.stem().string();
@@ -100,14 +100,13 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 	}
 
 	size_t sliceSize = extent.width * extent.height * channels;
-	uint8_t* pixels = new uint8_t[sliceSize * extent.depth];
-	memset(pixels, 0, sliceSize * extent.depth);
+	vector<uint8_t> pixels(sliceSize * extent.depth);
 
 	uint32_t done = 0;
 	vector<thread> threads;
 	uint32_t threadCount = thread::hardware_concurrency();
 	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.push_back(thread([=, &done]() {
+		threads.emplace_back(thread([=, &done]() {
 			int xt, yt, ct;
 			for (uint32_t i = j; i < images.size(); i += threadCount) {
 				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, 0);
@@ -128,17 +127,15 @@ shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Devic
 			}
 		}));
 	}
-	printf("Loading stack");
+	cout << "Loading stack";
 	while (done < images.size()) {
-		printf("\rLoading stack: %u/%u    ", done, (uint32_t)images.size());
+		cout << "\rLoading stack: " << done << "/" << images.size() << "    ";
 		this_thread::sleep_for(10ms);
 	}
 	for (thread& t : threads) t.join();
-	printf("\rLoading stack: Done           \n");
+	cout << "\rLoading stack: Done           \n";
 
-	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, sliceSize*extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
-	delete[] pixels;
-
+	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	if (scale) *scale = Vector3f(.05f, .05f, .05f);
 
 	return volume;
@@ -171,7 +168,7 @@ shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& 
 	vector<DcmSlice> images = {};
 	for (const auto& p : fs::directory_iterator(folder))
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eDicom) {
-			images.push_back(ReadDicomSlice(p.path().string()));
+			images.emplace_back(ReadDicomSlice(p.path().string()));
 			maxSpacing = max(maxSpacing, images[images.size() - 1].spacing);
 		}
 
@@ -219,7 +216,7 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& de
 	vector<fs::path> images;
 	for (const auto& p : fs::directory_iterator(folder))
 		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eRaw)
-			images.push_back(p.path());
+			images.emplace_back(p.path());
 	if (images.empty()) return nullptr;
 	ranges::sort(images, [](auto a, auto b) { return a.string() < b.string(); });
 
@@ -234,10 +231,10 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& de
 	vector<thread> threads;
 	uint32_t threadCount = thread::hardware_concurrency();
 	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.push_back(thread([=, &done]() {
+		threads.emplace_back(thread([=, &done]() {
 			for (uint32_t i = j; i < images.size(); i += threadCount) {
 				vector<uint8_t> slice;
-				if (!ReadFile(images[i].string(), slice))
+				if (!read_file(images[i].string(), slice))
 					throw invalid_argument("failed to read" + images[i].string());
 
 				uint8_t* sliceStart = pixels + sliceSize * i;
@@ -253,13 +250,13 @@ shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& de
 			}
 		}));
 	}
-	printf("Loading stack");
+	cout << "Loading stack";
 	while (done < images.size()) {
-		printf("\rLoading stack: %u/%u    ", done, (uint32_t)images.size());
+		cout << "\rLoading stack: " << done << "/" << images.size();
 		this_thread::sleep_for(10ms);
 	}
 	for (thread& t : threads) t.join();
-	printf("\rLoading stack: Done           \n");
+	cout << "\rLoading stack: Done           \n";
 
 	auto volume = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR8G8B8A8Unorm, pixels, sliceSize * extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 	delete[] pixels;

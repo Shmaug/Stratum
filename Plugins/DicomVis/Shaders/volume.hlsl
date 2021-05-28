@@ -1,46 +1,128 @@
+struct VolumeData {
+	float4 Rotation;
+	float4 InvRotation;
+	float3 Scale;
+	float Density;
+	float3 InvScale;
+	uint Mask;
+	float3 Position;
+	uint FrameIndex;
+	float2 RemapRange;
+	float2 HueRange;
+	uint3 Resolution;
+	uint pad;
+};
+
+#ifndef __cplusplus
+
+#pragma compile compute BakeVolume
+#pragma compile compute BakeGradient
 #pragma compile compute Render
 
-[[vl::constant_id(3)]] const bool gColorize = false;
-[[vl::constant_id(4)]] const bool gBaked = false;
-[[vl::constant_id(5)]] const bool gLocalShading = false;
+#include <math.hlsli>
 
-#include "common.hlsli"
-#include <sampling.hlsli>
+[[vl::constant_id(0)]] const bool gBakedColor = false;
+[[vk::constant_id(1)]] const bool gBakedGradient = false;
+[[vl::constant_id(2)]] const bool gColorize = false;
+[[vl::constant_id(3)]] const bool gLocalShading = false;
+[[vk::constant_id(4)]] const bool gMaskColored = false; // Is the mask colored?
+[[vk::constant_id(5)]] const bool gSingleChannel = true;
+
+RWTexture3D<float4> gBakedGradient : register(u1);
+RWTexture3D<uint> gMask : register(u2);
+RWTexture3D<float4> Output : register(u4);
+
+RWTexture3D<float4> gOutputVolume : register(u0);
+
+ConstantBuffer<VolumeData> gVolume : register(b0);
 
 RWTexture2D<float4> RenderTarget : register(u0);
-Texture2DMS<float> DepthBuffer : register(t0);
+Texture2DMS<float> DepthBuffer : register(t1);
 Texture2D<float4> gEnvironmentTexture	: register(t2);
-SamplerState Sampler : register(s0);
+SamplerState Sampler : register(s3);
 
-[[vk::push_constant]] cbuffer PushConstants : register(b0) {
+[[vk::push_constant]] cbuffer gPushConstants : register(b0) {
 	float4x4 InvViewProj;
 	uint2 ScreenResolution;
 	uint2 WriteOffset;
 	float3 gCameraPosition;
-	float SampleRate;
-	uint gStereoEye;
 }
 
-float2 RayBox(float3 rayOrigin, float3 inverseRayDirection, float3 mn, float3 mx) {
-	float3 t0 = (mn - rayOrigin) * inverseRayDirection;
-	float3 t1 = (mx - rayOrigin) * inverseRayDirection;
-	float3 tmin = min(t0, t1);
-	float3 tmax = max(t0, t1);
-	return float2(max(max(tmin.x, tmin.y), tmin.z), min(min(tmax.x, tmax.y), tmax.z));
+float chroma_key(float3 hsv, float3 key) {
+	float3 d = abs(hsv - key) / float3(0.1, 0.5, 0.5);
+	return saturate(length(d) - 1);
 }
-float3 qmul(float4 q, float3 vec) {
-	return 2 * dot(q.xyz, vec) * q.xyz + (q.w * q.w - dot(q.xyz, q.xyz)) * vec + 2 * q.w * cross(q.xyz, vec);
+
+float4 sample_volume(uint3 index){
+	float4 c = RWVolume[index];
+
+	if (!gBakedColor) {
+	// non-baked volume, do processing
+
+		if (gColorize) {
+			c.rgb = hsv_to_rgb(float3(HueRange.x + c.a * (HueRange.y - HueRange.x), .5, 1));
+
+			#elif defined(NON_BAKED_RGBA)
+			// chroma-key blue out (for visible human dataset)
+			float3 hsv = rgb_to_hsv(c.rgb);
+			c.a *= chroma_key(hsv, rgb_to_hsv(float3(0.07059, 0.07843, 0.10589))) * saturate(4 * hsv.z);
+			#endif
+
+			c.a *= saturate((c.a - RemapRange.x) / (RemapRange.y - RemapRange.x));
+		}
+
+	if (gMaskColored) {
+		static const float3 maskColors[8] = {
+			float3(1.0, 0.1, 0.1),
+			float3(0.1, 1.0, 0.1),
+			float3(0.1, 0.1, 1.0),
+
+			float3(1.0, 1.0, 0.0),
+			float3(1.0, 0.1, 1.0),
+			float3(0.1, 1.0, 1.0),
+
+			float3(1.0, 0.5, 0.1),
+			float3(1.0, 0.1, 0.5),
+		};
+		uint value = RawMask[index] & MaskValue;
+		if (value) c.rgb = maskColors[firstbitlow(value)];
+	}
+
+	return c;
+}
+float3 sample_gradient(uint3 index) {
+	if (gBakedGradient)
+		return gBakedGradient[index].xyz;
+	else
+		return float3(
+			sample_volume(uint3(next.x , index.y, index.z)).a - sample_volume(uint3(prev.x , index.y, index.z)).a,
+			sample_volume(uint3(index.x, next.y , index.z)).a - sample_volume(uint3(index.x, prev.y , index.z)).a,
+			sample_volume(uint3(index.x, index.y, next.z )).a - sample_volume(uint3(index.x, index.y, prev.z )).a);
+}
+
+
+[numthreads(4, 4, 4)]
+void BakeVolume(uint3 index : SV_DispatchThreadID) {
+	if (any(index >= VolumeResolution)) return;
+	gOutputVolume[index] = sample_volume(index);
+}
+
+[numthreads(4, 4, 4)]
+void BakeGradient(uint3 index : SV_DispatchThreadID) {
+	if (any(index >= VolumeResolution)) return;
+	gOutputVolume[index] = float4(sample_gradient(index), 0);
 }
 
 [numthreads(8, 8, 1)]
 void Render(uint3 index : SV_DispatchThreadID) {
-	if (any(index.xy >= ScreenResolution)) return;
-	uint2 coord = WriteOffset + index.xy;
-	float4 screenPos = float4(2*(coord + 0.5)/float2(ScreenResolution)-1, DepthBuffer.Load(coord, 1), 1);
-	float4 projPos = mul(InvViewProj, screenPos);
+	if (any(index.xy >= gPushConstants.ScreenResolution)) return;
+
+	uint2 coord = gPushConstants.WriteOffset + index.xy;
+	float4 screenPos = float4(2*(coord + 0.5)/float2(gPushConstants.ScreenResolution)-1, DepthBuffer.Load(coord, 1), 1);
+	float4 projPos = mul(gPushConstants.InvViewProj, screenPos);
 	projPos /= projPos.w;
 	float3 rayDirection = normalize(projPos.xyz);
-	float3 rayOrigin = gCameraPosition;
+	float3 rayOrigin = gPushConstants.gCameraPosition;
 	float3 depthRay = projPos.xyz;
 
 	// world -> uvw
@@ -70,20 +152,20 @@ void Render(uint3 index : SV_DispatchThreadID) {
 		float dt = ti.y - ti.x;
 		if (dt <= 0) break;
 
-		float4 localSample = SampleColor(idx);
+		float4 localSample = sample_volume(idx);
 
 		if (localSample.a > 0.001) {
-			float3 gradient = SampleGradient(idx);
+			float3 gradient = sample_gradient(idx);
 			float3 worldPos = qmul(VolumeRotation, uvw-0.5) * VolumeScale + VolumePosition;
 			float3 worldGradient = qmul(VolumeRotation, gradient) * VolumeScale;
 
-			#ifdef SHADING_LOCAL
+			if (gLocalShading)
 				localSample.rgb *= saturate(dot(normalize(worldGradient), normalize(float3(1,1,-1))));
-			#endif
-				// front-to-back alpha blending
-				localSample.a = saturate(localSample.a*Density);
-				localSample.rgb *= localSample.a;
-				sum += (1 - sum.a) * localSample;
+			
+			// front-to-back alpha blending
+			localSample.a = saturate(localSample.a*Density);
+			localSample.rgb *= localSample.a;
+			sum += (1 - sum.a) * localSample;
 		}
 
 		t = ti.y + eps;
@@ -93,3 +175,5 @@ void Render(uint3 index : SV_DispatchThreadID) {
 	float4 src = RenderTarget[coord];
 	RenderTarget[coord] = float4(src.rgb * (1 - sum.a) + sum.rgb * sum.a, 1);
 }
+
+#endif

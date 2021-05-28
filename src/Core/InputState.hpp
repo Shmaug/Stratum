@@ -1,12 +1,12 @@
 #pragma once
 
-#include "../Stratum.hpp"
+#include "../Common/common.hpp"
 
 namespace stm {
 
 // Generalization of a mouse+keyboard state, or a pose from a tracked device, etc.
 class InputState {
-protected:
+private:
 	string mName; // should be globally unique
 public:
 	InputState() = default;
