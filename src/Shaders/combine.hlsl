@@ -1,22 +1,23 @@
-#pragma compile cs_6_6 interleave
-#pragma compile cs_6_6 average2d
-#pragma compile cs_6_6 average3d
+#pragma compile -D -S comp -e interleave
+#pragma compile -D -S comp -e average2d
+#pragma compile -D -S comp -e average3d
 
-RWTexture2D<float4> gOutput2 : register(u0);
-RWTexture2D<float4> gInput2  : register(u1);
-RWTexture3D<float4> gOutput3 : register(u2);
-RWTexture3D<float4> gInput3  : register(u3);
+[[vk::binding(0)]] RWTexture2D<float4> gOutput2;
+[[vk::binding(1)]] RWTexture2D<float4> gInput2;
+[[vk::binding(2)]] RWTexture3D<float4> gOutput3;
+[[vk::binding(3)]] RWTexture3D<float4> gInput3;
 
-RWBuffer<float2> gOutputRG : register(u4);
-Buffer<float> gInputR : register(t5);
-Buffer<float> gInputG : register(t6);
+[[vk::binding(4)]] RWBuffer<float2> gOutputRG;
+[[vk::binding(5)]] Buffer<float> gInputR;
+[[vk::binding(6)]] Buffer<float> gInputG;
 
-struct push_constants { uint Width; };
-[[vk::push_constant]] const push_constants gPushConstants = {0};
+[[vk::push_constant]] cbuffer {
+  uint gWidth;
+};
 
 [numthreads(8, 8, 1)]
 void interleave(uint3 index : SV_DispatchThreadID) {
-  uint addr = index.x + index.y*gPushConstants.Width;
+  uint addr = index.x + index.y*gWidth;
   gOutputRG[addr] = float2(gInputR[addr], gInputG[addr]);
 }
 

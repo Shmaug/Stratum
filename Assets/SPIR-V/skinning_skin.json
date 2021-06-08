@@ -16,44 +16,57 @@
         }
     ],
     "types" : {
-        "_8" : {
-            "name" : "type.RWByteAddressBuffer",
+        "_20" : {
+            "name" : "_20",
             "members" : [
                 {
-                    "name" : "_m0",
+                    "name" : "gVertexCount",
                     "type" : "uint",
-                    "array" : [
-                        0
-                    ],
-                    "array_size_is_literal" : [
-                        true
-                    ],
-                    "offset" : 0,
-                    "array_stride" : 4
+                    "offset" : 0
+                },
+                {
+                    "name" : "gVertexStride",
+                    "type" : "uint",
+                    "offset" : 4
+                },
+                {
+                    "name" : "gNormalOffset",
+                    "type" : "uint",
+                    "offset" : 8
+                },
+                {
+                    "name" : "gTangentOffset",
+                    "type" : "uint",
+                    "offset" : 12
+                },
+                {
+                    "name" : "gBlendFactors",
+                    "type" : "vec4",
+                    "offset" : 16
                 }
             ]
         },
-        "_10" : {
+        "_37" : {
             "name" : "VertexWeight",
             "members" : [
                 {
-                    "name" : "Weights",
+                    "name" : "weights",
                     "type" : "vec4",
                     "offset" : 0
                 },
                 {
-                    "name" : "Indices",
+                    "name" : "indices",
                     "type" : "uvec4",
                     "offset" : 16
                 }
             ]
         },
-        "_9" : {
-            "name" : "type.RWStructuredBuffer.VertexWeight",
+        "_39" : {
+            "name" : "gWeights",
             "members" : [
                 {
-                    "name" : "_m0",
-                    "type" : "_10",
+                    "name" : "@data",
+                    "type" : "_37",
                     "array" : [
                         0
                     ],
@@ -65,11 +78,11 @@
                 }
             ]
         },
-        "_11" : {
-            "name" : "type.RWStructuredBuffer.mat4v4float",
+        "_61" : {
+            "name" : "gPose",
             "members" : [
                 {
-                    "name" : "_m0",
+                    "name" : "@data",
                     "type" : "mat4",
                     "array" : [
                         0
@@ -79,68 +92,58 @@
                     ],
                     "offset" : 0,
                     "array_stride" : 64,
-                    "matrix_stride" : 16
+                    "matrix_stride" : 16,
+                    "row_major" : true
                 }
             ]
         },
-        "_12" : {
-            "name" : "type.PushConstant.push_constants",
+        "_168" : {
+            "name" : "gVertices",
             "members" : [
                 {
-                    "name" : "VertexCount",
+                    "name" : "@data",
                     "type" : "uint",
-                    "offset" : 0
-                },
-                {
-                    "name" : "VertexStride",
-                    "type" : "uint",
-                    "offset" : 4
-                },
-                {
-                    "name" : "NormalOffset",
-                    "type" : "uint",
-                    "offset" : 8
-                },
-                {
-                    "name" : "TangentOffset",
-                    "type" : "uint",
-                    "offset" : 12
-                },
-                {
-                    "name" : "BlendFactors",
-                    "type" : "vec4",
-                    "offset" : 16
+                    "array" : [
+                        0
+                    ],
+                    "array_size_is_literal" : [
+                        true
+                    ],
+                    "offset" : 0,
+                    "array_stride" : 4
                 }
             ]
         }
     },
     "ssbos" : [
         {
-            "type" : "_8",
-            "name" : "Vertices",
-            "block_size" : 0,
-            "set" : 0,
-            "binding" : 0
-        },
-        {
-            "type" : "_9",
-            "name" : "Weights",
+            "type" : "_39",
+            "name" : "gWeights",
+            "readonly" : true,
             "block_size" : 0,
             "set" : 0,
             "binding" : 5
         },
         {
-            "type" : "_11",
-            "name" : "Pose",
+            "type" : "_61",
+            "name" : "gPose",
+            "readonly" : true,
             "block_size" : 0,
             "set" : 0,
             "binding" : 6
+        },
+        {
+            "type" : "_168",
+            "name" : "gVertices",
+            "block_size" : 0,
+            "set" : 0,
+            "binding" : 0
         }
     ],
     "push_constants" : [
         {
-            "type" : "_12",
-            "name" : "gPushConstants",
+            "type" : "_20",
+            "name" : "_22",
             "push_constant" : true
         }
     ]

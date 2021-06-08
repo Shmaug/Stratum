@@ -280,7 +280,7 @@ void stm::Window::lock_mouse(bool l) {
 
 #ifdef WIN32
 void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
-	byte_blob lpb;
+	vector<byte> lpb;
 	switch (message) {
 	case WM_DESTROY:
 	case WM_QUIT:

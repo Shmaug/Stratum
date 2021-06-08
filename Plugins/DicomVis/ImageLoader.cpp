@@ -34,9 +34,11 @@ ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
 			for (const auto& p : fs::directory_iterator(folder))
 				if (ExtensionMap.count(p.path().extension().string()))
 					images.emplace_back(p.path());
-			ranges::sort(images, [](const fs::path& a, const fs::path& b) {
+			auto ass_fuck = [](const fs::path& a, const fs::path& b) {
 				return a.stem().string() < b.stem().string();
-			});
+			};
+			cout << ass_fuck("shit", "cock");
+			ranges::sort(images, ass_fuck);
 
 			int x, y, c;
 			if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return ImageStackType::eNone;

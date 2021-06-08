@@ -3,6 +3,8 @@
 #include "Buffer.hpp"
 
 namespace stm {
+
+
 class Geometry {
 public:
 	struct Attribute {
@@ -30,7 +32,7 @@ public:
 		
 		inline operator bool() const { return !mBuffer.empty(); }
 		
-		inline const auto& buffer_view() const { return mBuffer; }
+		inline const auto& buffer() const { return mBuffer; }
 
 		inline vk::Format format() const { return mFormat; }
     inline uint32_t offset() const { return mOffset; }
@@ -38,16 +40,15 @@ public:
 		inline const vk::VertexInputRate& input_rate() const { return mInputRate; }
 	};
 	enum class AttributeType {
-		eSystemGenerated,
 		ePosition,
 		eNormal,
 		eTangent,
 		eBinormal,
-		eBlendIndices,
-		eBlendWeight,
 		eColor,
+		eTexcoord,
 		ePointSize,
-		eTexcoord
+		eBlendIndices,
+		eBlendWeight
 	};
 
 	using attribute_map_t = unordered_map<AttributeType, vector<Attribute>>;
@@ -97,7 +98,6 @@ struct hash<stm::Geometry::Attribute> {
 
 inline string to_string(const stm::Geometry::AttributeType& value) {
 	switch (value) {
-		case stm::Geometry::AttributeType::eSystemGenerated: return "SystemGenerated";
 		case stm::Geometry::AttributeType::ePosition: return "Position";
 		case stm::Geometry::AttributeType::eNormal: return "Normal";
 		case stm::Geometry::AttributeType::eTangent: return "Tangent";

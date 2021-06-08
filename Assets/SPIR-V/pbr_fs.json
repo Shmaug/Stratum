@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_22" : {
+        "_639" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_21" : {
+        "_640" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,77 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_22",
+                    "type" : "_639",
                     "offset" : 16
                 }
             ]
         },
-        "_24" : {
+        "_641" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_642" : {
+            "name" : "_642",
+            "members" : [
+                {
+                    "name" : "gWorldToCamera",
+                    "type" : "_640",
+                    "offset" : 0
+                },
+                {
+                    "name" : "gProjection",
+                    "type" : "_641",
+                    "offset" : 32
+                },
+                {
+                    "name" : "gLightCount",
+                    "type" : "uint",
+                    "offset" : 48
+                },
+                {
+                    "name" : "gMaterialIndex",
+                    "type" : "uint",
+                    "offset" : 52
+                },
+                {
+                    "name" : "gBaseColorTexture",
+                    "type" : "uint",
+                    "offset" : 56
+                },
+                {
+                    "name" : "gNormalTexture",
+                    "type" : "uint",
+                    "offset" : 60
+                },
+                {
+                    "name" : "gMetallicRoughnessTexture",
+                    "type" : "uint",
+                    "offset" : 64
+                },
+                {
+                    "name" : "gOcclusionTexture",
+                    "type" : "uint",
+                    "offset" : 68
+                },
+                {
+                    "name" : "gEmissionTexture",
+                    "type" : "uint",
+                    "offset" : 72
+                }
+            ]
+        },
+        "_806" : {
             "name" : "MaterialData",
             "members" : [
                 {
@@ -76,12 +141,12 @@
                 }
             ]
         },
-        "_23" : {
-            "name" : "type.StructuredBuffer.MaterialData",
+        "_808" : {
+            "name" : "gMaterials",
             "members" : [
                 {
-                    "name" : "_m0",
-                    "type" : "_24",
+                    "name" : "@data",
+                    "type" : "_806",
                     "array" : [
                         0
                     ],
@@ -93,32 +158,17 @@
                 }
             ]
         },
-        "_27" : {
-            "name" : "ProjectionData",
-            "members" : [
-                {
-                    "name" : "Scale",
-                    "type" : "vec3",
-                    "offset" : 0
-                },
-                {
-                    "name" : "OffsetZ",
-                    "type" : "float",
-                    "offset" : 12
-                }
-            ]
-        },
-        "_26" : {
+        "_1006" : {
             "name" : "LightData",
             "members" : [
                 {
                     "name" : "mLightToWorld",
-                    "type" : "_21",
+                    "type" : "_640",
                     "offset" : 0
                 },
                 {
                     "name" : "mShadowProjection",
-                    "type" : "_27",
+                    "type" : "_641",
                     "offset" : 32
                 },
                 {
@@ -158,12 +208,12 @@
                 }
             ]
         },
-        "_25" : {
-            "name" : "type.StructuredBuffer.LightData",
+        "_1008" : {
+            "name" : "gLights",
             "members" : [
                 {
-                    "name" : "_m0",
-                    "type" : "_26",
+                    "name" : "@data",
+                    "type" : "_1006",
                     "array" : [
                         0
                     ],
@@ -174,91 +224,41 @@
                     "array_stride" : 96
                 }
             ]
-        },
-        "_30" : {
-            "name" : "type.PushConstant.push_constants_t",
-            "members" : [
-                {
-                    "name" : "WorldToCamera",
-                    "type" : "_21",
-                    "offset" : 0
-                },
-                {
-                    "name" : "Projection",
-                    "type" : "_27",
-                    "offset" : 32
-                },
-                {
-                    "name" : "LightCount",
-                    "type" : "uint",
-                    "offset" : 48
-                },
-                {
-                    "name" : "MaterialIndex",
-                    "type" : "uint",
-                    "offset" : 52
-                },
-                {
-                    "name" : "BaseColorTexture",
-                    "type" : "uint",
-                    "offset" : 56
-                },
-                {
-                    "name" : "NormalTexture",
-                    "type" : "uint",
-                    "offset" : 60
-                },
-                {
-                    "name" : "MetallicRoughnessTexture",
-                    "type" : "uint",
-                    "offset" : 64
-                },
-                {
-                    "name" : "OcclusionTexture",
-                    "type" : "uint",
-                    "offset" : 68
-                },
-                {
-                    "name" : "EmissionTexture",
-                    "type" : "uint",
-                    "offset" : 72
-                }
-            ]
         }
     },
     "inputs" : [
         {
             "type" : "vec4",
-            "name" : "in.var.NORMAL",
+            "name" : "i.normal",
             "location" : 0
         },
         {
             "type" : "vec4",
-            "name" : "in.var.TANGENT",
+            "name" : "i.tangent",
             "location" : 1
         },
         {
             "type" : "vec4",
-            "name" : "in.var.TEXCOORD0",
+            "name" : "i.cameraPos",
             "location" : 2
         },
         {
             "type" : "vec2",
-            "name" : "in.var.TEXCOORD1",
+            "name" : "i.texcoord",
             "location" : 3
         }
     ],
     "outputs" : [
         {
             "type" : "vec4",
-            "name" : "out.var.SV_Target0",
+            "name" : "@entryPointOutput",
             "location" : 0
         }
     ],
     "separate_images" : [
         {
             "type" : "texture2D",
-            "name" : "gShadowAtlas",
+            "name" : "gShadowMap",
             "set" : 0,
             "binding" : 3
         },
@@ -266,10 +266,10 @@
             "type" : "texture2D",
             "name" : "gTextures",
             "array" : [
-                16
+                856
             ],
             "array_size_is_literal" : [
-                true
+                false
             ],
             "set" : 0,
             "binding" : 6
@@ -278,20 +278,20 @@
     "separate_samplers" : [
         {
             "type" : "sampler",
-            "name" : "gSampler",
-            "set" : 0,
-            "binding" : 4
-        },
-        {
-            "type" : "sampler",
             "name" : "gShadowSampler",
             "set" : 0,
             "binding" : 5
+        },
+        {
+            "type" : "sampler",
+            "name" : "gSampler",
+            "set" : 0,
+            "binding" : 4
         }
     ],
     "ssbos" : [
         {
-            "type" : "_23",
+            "type" : "_808",
             "name" : "gMaterials",
             "readonly" : true,
             "block_size" : 0,
@@ -299,7 +299,7 @@
             "binding" : 1
         },
         {
-            "type" : "_25",
+            "type" : "_1008",
             "name" : "gLights",
             "readonly" : true,
             "block_size" : 0,
@@ -309,17 +309,24 @@
     ],
     "push_constants" : [
         {
-            "type" : "_30",
-            "name" : "gPushConstants",
+            "type" : "_642",
+            "name" : "_644",
             "push_constant" : true
         }
     ],
     "specialization_constants" : [
         {
-            "name" : "gAlphaClip",
+            "name" : "gTextureCount",
             "id" : 0,
+            "type" : "uint",
+            "variable_id" : 856,
+            "default_value" : 16
+        },
+        {
+            "name" : "gAlphaClip",
+            "id" : 1,
             "type" : "float",
-            "variable_id" : 20,
+            "variable_id" : 878,
             "default_value" : -1.0
         }
     ]

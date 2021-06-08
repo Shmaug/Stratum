@@ -12,7 +12,7 @@ struct BSDF {
 
 static const float gDielectricSpecular = 0.04f;
 
-BSDF make_BSDF(float3 baseColor, float metallic, float roughness, float3 emission = 0) {
+inline BSDF make_BSDF(float3 baseColor, float metallic, float roughness, float3 emission = 0) {
 	BSDF bsdf;
 	bsdf.specular = lerp(gDielectricSpecular, baseColor, metallic);
 	bsdf.diffuse = baseColor * (1 - gDielectricSpecular) * (1 - metallic) / max(1 - max3(bsdf.specular), 1e-6f);
@@ -21,20 +21,20 @@ BSDF make_BSDF(float3 baseColor, float metallic, float roughness, float3 emissio
 	return bsdf;
 }
 
-float3 fresnel(float3 specular, float VdotH) {
+inline float3 fresnel(float3 specular, float VdotH) {
   return lerp(specular, 50*max3(specular), pow5(1 - VdotH));
 }
-float visibilityOcclusion(float NdotL, float NdotV, float alphaRoughnessSq) {
+inline float visibilityOcclusion(float NdotL, float NdotV, float alphaRoughnessSq) {
 	float GGXV = NdotL * sqrt(NdotV * NdotV * (1 - alphaRoughnessSq) + alphaRoughnessSq);
 	float GGXL = NdotV * sqrt(NdotL * NdotL * (1 - alphaRoughnessSq) + alphaRoughnessSq);
 	float GGX = GGXV + GGXL;
 	return GGX > 0 ? 0.5 / GGX : 0;
 }
-float microfacetDistribution(float NdotH, float alphaRoughnessSq) {
+inline float microfacetDistribution(float NdotH, float alphaRoughnessSq) {
 	return alphaRoughnessSq / (M_PI * pow2(1 + NdotH*(NdotH*alphaRoughnessSq - NdotH)) + 0.000001);
 }
 
-float3 ShadePoint(BSDF bsdf, float3 Li, float3 Lo, float3 normal) {
+inline float3 ShadePoint(BSDF bsdf, float3 Li, float3 Lo, float3 normal) {
 	float alphaRoughness = pow2(bsdf.roughness);
 	float alphaRoughnessSq = pow2(alphaRoughness);
 	float NdotL = saturate(dot(normal, Li));

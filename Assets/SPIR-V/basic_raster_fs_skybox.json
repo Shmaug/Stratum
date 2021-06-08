@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_13" : {
+        "_58" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_12" : {
+        "_59" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_13",
+                    "type" : "_58",
                     "offset" : 16
                 }
             ]
         },
-        "_14" : {
+        "_60" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,21 +51,21 @@
                 }
             ]
         },
-        "_11" : {
-            "name" : "type.PushConstant.push_constants",
+        "_61" : {
+            "name" : "_61",
             "members" : [
                 {
-                    "name" : "WorldToCamera",
-                    "type" : "_12",
+                    "name" : "gWorldToCamera",
+                    "type" : "_59",
                     "offset" : 0
                 },
                 {
-                    "name" : "Projection",
-                    "type" : "_14",
+                    "name" : "gProjection",
+                    "type" : "_60",
                     "offset" : 32
                 },
                 {
-                    "name" : "EnvironmentGamma",
+                    "name" : "gEnvironmentGamma",
                     "type" : "float",
                     "offset" : 48
                 }
@@ -75,14 +75,14 @@
     "inputs" : [
         {
             "type" : "vec3",
-            "name" : "in.var.TEXCOORD0",
+            "name" : "viewRay",
             "location" : 0
         }
     ],
     "outputs" : [
         {
             "type" : "vec4",
-            "name" : "out.var.SV_Target0",
+            "name" : "@entryPointOutput",
             "location" : 0
         }
     ],
@@ -104,8 +104,8 @@
     ],
     "push_constants" : [
         {
-            "type" : "_11",
-            "name" : "gPushConstants",
+            "type" : "_61",
+            "name" : "_63",
             "push_constant" : true
         }
     ]

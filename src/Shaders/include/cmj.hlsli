@@ -3,7 +3,7 @@
 
 #define CMJ_DIM 16
 
-uint permute(uint i, uint l, uint p) {
+inline uint permute(uint i, uint l, uint p) {
 	uint w = l - 1;
 	w |= w >> 1;
 	w |= w >> 2;
@@ -32,7 +32,7 @@ uint permute(uint i, uint l, uint p) {
 	} while (i >= l);
 	return (i + p) % l;
 }
-float randfloat(uint i, uint p) {
+inline float randfloat(uint i, uint p) {
 	i ^= p;
 	i ^= i >> 17;
 	i ^= i >> 10;
@@ -52,7 +52,7 @@ class SamplerCMJ {
 	uint scramble;
 	uint pad;
 
-	float2 Sample() {
+	inline float2 Sample() {
 		uint p = dimension * scramble;
 		dimension++;
 		uint idx = permute(index, CMJ_DIM * CMJ_DIM, 0xa399d265 * p);
@@ -64,11 +64,11 @@ class SamplerCMJ {
 	}
 };
 
-float2 MapToDisk(float2 uv) {
+inline float2 MapToDisk(float2 uv) {
 	float theta = 2*M_PI*uv.y;
 	return sqrt(uv.x) * float2(cos(theta), sin(theta));
 }
-float2 MapToDiskConcentric(float2 uv) {
+inline float2 MapToDiskConcentric(float2 uv) {
 	float2 offset = 2*uv - 1;
 	if (all(offset == 0)) return 0;
 	float theta, r;
@@ -81,13 +81,13 @@ float2 MapToDiskConcentric(float2 uv) {
 	}
 	return r * float2(cos(theta), sin(theta));
 }
-float3 MapToHemisphere(float2 uv) {
+inline float3 MapToHemisphere(float2 uv) {
 	float phi = 2*M_PI*uv.y;
 	float cosTheta = sqrt(uv.x);
 	float sinTheta = sqrt(1 - cosTheta*cosTheta);
 	return float3(cos(phi)*sinTheta, cosTheta, sin(phi)*sinTheta);
 }
-float3 MapToSphere(float2 uv) {
+inline float3 MapToSphere(float2 uv) {
 	float theta = uv.x*2-1;
 	float phi = 2*M_PI*uv.y;
 	float sinTheta = sin(theta);

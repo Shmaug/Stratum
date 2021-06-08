@@ -5,8 +5,6 @@
 #define LIGHT_ATTEN_ANGULAR 2
 #define LIGHT_USE_SHADOWMAP 4
 
-#define gTextureCount 16
-
 struct LightData {
 	TransformData mLightToWorld;
 	ProjectionData mShadowProjection;
@@ -31,34 +29,34 @@ struct MaterialData {
 
 #ifndef __cplusplus
 
-#pragma compile vs_6_6 vs
-#pragma compile ps_6_6 fs
+#pragma compile -D -S vert -e vs
+#pragma compile -D -S frag -e fs
 
 #include "include/bsdf.hlsli"
 
-StructuredBuffer<TransformData> gTransforms;
-StructuredBuffer<MaterialData> gMaterials;
-StructuredBuffer<LightData> gLights;
-Texture2D<float> gShadowAtlas;
-SamplerState gSampler;
-SamplerComparisonState gShadowSampler;
-Texture2D<float4> gTextures[gTextureCount];
+[[vk::constant_id(0)]] const uint gTextureCount = 16;
+[[vk::constant_id(1)]] const float gAlphaClip = -1; // set below 0 to disable
 
-[[vk::constant_id(0)]] const float gAlphaClip = -1; // set below 0 to disable
+[[vk::binding(0)]] StructuredBuffer<TransformData> gTransforms;
+[[vk::binding(1)]] StructuredBuffer<MaterialData> gMaterials;
+[[vk::binding(2)]] StructuredBuffer<LightData> gLights;
+[[vk::binding(3)]] Texture2D<float> gShadowMap;
+[[vk::binding(4)]] SamplerState gSampler;
+[[vk::binding(5)]] SamplerComparisonState gShadowSampler;
+[[vk::binding(6)]] Texture2D<float4> gTextures[gTextureCount];
 
-struct push_constants_t {
-	TransformData WorldToCamera;
-	ProjectionData Projection;
-	uint LightCount;
+[[vk::push_constant]] cbuffer {
+	TransformData gWorldToCamera;
+	ProjectionData gProjection;
+	uint gLightCount;
 
-	uint MaterialIndex;
-	uint BaseColorTexture;
-	uint NormalTexture;
-	uint MetallicRoughnessTexture;
-	uint OcclusionTexture;
-	uint EmissionTexture;
+	uint gMaterialIndex;
+	uint gBaseColorTexture;
+	uint gNormalTexture;
+	uint gMetallicRoughnessTexture;
+	uint gOcclusionTexture;
+	uint gEmissionTexture;
 };
-[[vk::push_constant]] const push_constants_t gPushConstants = { TRANSFORM_I, PROJECTION_I, 0, ~0, ~0, ~0, ~0, ~0, ~0 };
 
 struct v2f {
 	float4 position : SV_Position;
@@ -75,9 +73,9 @@ v2f vs(
 	float2 texcoord : TEXCOORD,
 	uint instanceId : SV_InstanceID) {
 	v2f o;
-	TransformData objectToCamera = tmul(gPushConstants.WorldToCamera, gTransforms[instanceId]);
+	TransformData objectToCamera = tmul(gWorldToCamera, gTransforms[instanceId]);
 	o.cameraPos.xyz = transform_point(objectToCamera, vertex);
-	o.position = project_point(gPushConstants.Projection, o.cameraPos.xyz);
+	o.position = project_point(gProjection, o.cameraPos.xyz);
 	o.normal.xyz = transform_vector(objectToCamera, normal);
 	o.tangent.xyz = transform_vector(objectToCamera, tangent);
 	float3 bitangent = cross(o.normal.xyz, o.tangent.xyz);
@@ -89,7 +87,7 @@ v2f vs(
 }
 
 float4 SampleLight(LightData light, float3 cameraPos) {
-	TransformData lightToCamera = tmul(gPushConstants.WorldToCamera, light.mLightToWorld);
+	TransformData lightToCamera = tmul(gWorldToCamera, light.mLightToWorld);
 	float3 lightCoord = transform_point(inverse(lightToCamera), cameraPos);
 
 	float4 r = float4(0,0,0,1);
@@ -106,7 +104,7 @@ float4 SampleLight(LightData light, float3 cameraPos) {
 		float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, lightCoord));
 		if (all(abs(shadowCoord.xy) < 1)) {
 			shadowCoord.y = -shadowCoord.y;
-			r.w *= gShadowAtlas.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z);
+			r.w *= gShadowMap.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z);
 		}
 	}
 	
@@ -114,40 +112,40 @@ float4 SampleLight(LightData light, float3 cameraPos) {
 }
 
 float4 fs(v2f i) : SV_Target0 {
-	MaterialData material = gMaterials[gPushConstants.MaterialIndex];
+	MaterialData material = gMaterials[gMaterialIndex];
 	float4 baseColor = material.mBaseColor;
 	float3 view = normalize(-i.cameraPos.xyz);
 	float3 normal = i.normal.xyz;
 	float2 metallicRoughness = float2(material.mMetallic, material.mRoughness);
 	float3 emission = material.mEmission;
 	
-	if (gPushConstants.BaseColorTexture < gTextureCount)
-		baseColor *= gTextures[gPushConstants.BaseColorTexture].Sample(gSampler, i.texcoord);
+	if (gBaseColorTexture < gTextureCount)
+		baseColor *= gTextures[gBaseColorTexture].Sample(gSampler, i.texcoord);
 	
 	if (gAlphaClip >= 0 && baseColor.a < gAlphaClip) discard;
 	
-	if (gPushConstants.NormalTexture < gTextureCount) {
+	if (gNormalTexture < gTextureCount) {
 		float3 bitangent = float3(i.cameraPos.w, i.normal.w, i.tangent.w);
-		normal = mul((gTextures[gPushConstants.NormalTexture].Sample(gSampler, i.texcoord).xyz*2-1) * float3(material.mNormalScale.xx, 1), float3x3(i.tangent.xyz, bitangent, i.normal.xyz));
+		normal = mul((gTextures[gNormalTexture].Sample(gSampler, i.texcoord).xyz*2-1) * float3(material.mNormalScale.xx, 1), float3x3(i.tangent.xyz, bitangent, i.normal.xyz));
 	}
 
-	if (gPushConstants.MetallicRoughnessTexture < gTextureCount)
-		metallicRoughness *= gTextures[gPushConstants.MetallicRoughnessTexture].Sample(gSampler, i.texcoord).rg;
-	if (gPushConstants.EmissionTexture < gTextureCount)
-		emission *= gTextures[gPushConstants.EmissionTexture].Sample(gSampler, i.texcoord).rgb;
+	if (gMetallicRoughnessTexture < gTextureCount)
+		metallicRoughness *= gTextures[gMetallicRoughnessTexture].Sample(gSampler, i.texcoord).rg;
+	if (gEmissionTexture < gTextureCount)
+		emission *= gTextures[gEmissionTexture].Sample(gSampler, i.texcoord).rgb;
 
 	BSDF bsdf = make_BSDF(baseColor.rgb, metallicRoughness.x, metallicRoughness.y, emission);
 
 	normal = normalize(normal);
 
 	float3 eval = bsdf.emission;
-	for (uint l = 0; l < gPushConstants.LightCount; l++) {
+	for (uint l = 0; l < gLightCount; l++) {
 		float4 Li = SampleLight(gLights[l], i.cameraPos.xyz);
 		float3 sfc = ShadePoint(bsdf, Li.xyz, view, normal);
 		eval += gLights[l].mEmission * Li.w * sfc;
 	}
-	if (gPushConstants.OcclusionTexture < gTextureCount)
-		eval = lerp(eval, eval * gTextures[gPushConstants.OcclusionTexture].Sample(gSampler, i.texcoord).r, material.mOcclusionScale);
+	if (gOcclusionTexture < gTextureCount)
+		eval = lerp(eval, eval * gTextures[gOcclusionTexture].Sample(gSampler, i.texcoord).r, material.mOcclusionScale);
 	return float4(eval, baseColor.a);
 }
 

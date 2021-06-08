@@ -1,12 +1,12 @@
 {
     "entryPoints" : [
         {
-            "name" : "vs_skybox",
+            "name" : "vs_axis",
             "mode" : "vert"
         }
     ],
     "types" : {
-        "_12" : {
+        "_205" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_11" : {
+        "_206" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_12",
+                    "type" : "_205",
                     "offset" : 16
                 }
             ]
         },
-        "_13" : {
+        "_207" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,45 +51,38 @@
                 }
             ]
         },
-        "_10" : {
-            "name" : "type.PushConstant.push_constants",
+        "_208" : {
+            "name" : "_208",
             "members" : [
                 {
-                    "name" : "WorldToCamera",
-                    "type" : "_11",
+                    "name" : "gWorldToCamera",
+                    "type" : "_206",
                     "offset" : 0
                 },
                 {
-                    "name" : "Projection",
-                    "type" : "_13",
+                    "name" : "gProjection",
+                    "type" : "_207",
                     "offset" : 32
                 },
                 {
-                    "name" : "EnvironmentGamma",
+                    "name" : "gEnvironmentGamma",
                     "type" : "float",
                     "offset" : 48
                 }
             ]
         }
     },
-    "inputs" : [
-        {
-            "type" : "vec3",
-            "name" : "in.var.POSITION",
-            "location" : 0
-        }
-    ],
     "outputs" : [
         {
-            "type" : "vec3",
-            "name" : "out.var.TEXCOORD0",
+            "type" : "vec4",
+            "name" : "color",
             "location" : 0
         }
     ],
     "push_constants" : [
         {
-            "type" : "_10",
-            "name" : "gPushConstants",
+            "type" : "_208",
+            "name" : "_210",
             "push_constant" : true
         }
     ]

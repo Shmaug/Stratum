@@ -1,37 +1,36 @@
-#pragma compile vs_6_6 vs_skybox
-#pragma compile vs_6_6 vs_axis
-#pragma compile ps_6_6 fs_skybox
-#pragma compile ps_6_6 fs_color
-#pragma compile ps_6_6 fs_texture
+#pragma compile -D -S vert -e vs_skybox
+#pragma compile -D -S vert -e vs_axis
+#pragma compile -D -S frag -e fs_skybox
+#pragma compile -D -S frag -e fs_color
+#pragma compile -D -S frag -e fs_texture
 
 #include "include/transform.hlsli"
 
-Texture2D<float4> gTexture;
-SamplerState gSampler;
+[[vk::binding(0)]] Texture2D<float4> gTexture;
+[[vk::binding(1)]] SamplerState gSampler;
 
-struct push_constants {
-	TransformData WorldToCamera;
-	ProjectionData Projection;
-	float EnvironmentGamma;
+[[vk::push_constant]] cbuffer {
+	TransformData gWorldToCamera;
+	ProjectionData gProjection;
+	float gEnvironmentGamma;
 };
-[[vk::push_constant]] const push_constants gPushConstants = { TRANSFORM_I, PROJECTION_I, 1 };
 
 void vs_skybox(float3 vertex : POSITION, out float4 position : SV_Position, out float3 viewRay : TEXCOORD0) {
-	position = project_point(gPushConstants.Projection, vertex);
-	viewRay = rotate_vector(inverse(gPushConstants.WorldToCamera.Rotation), vertex);
+	position = project_point(gProjection, vertex);
+	viewRay = rotate_vector(inverse(gWorldToCamera.Rotation), vertex);
 }
 float4 fs_skybox(float3 viewRay : TEXCOORD0) : SV_Target0 {
 	float3 ray = normalize(viewRay);
 	float4 color = gTexture.SampleLevel(gSampler, float2(atan2(ray.z, ray.x)*M_1_PI*.5 + .5, acos(ray.y)*M_1_PI), 0);
-	color.rgb = pow(color.rgb, 1/gPushConstants.EnvironmentGamma);
+	color.rgb = pow(color.rgb, 1/gEnvironmentGamma);
 	return color;
 }
 
 void vs_axis(uint sgn : SV_VertexID, uint axis : SV_InstanceID, out float4 vertex : SV_Position, out float4 color : COLOR) {
 	float3 direction = 0;
 	direction[axis] = 1;
-	direction = transform_vector(gPushConstants.WorldToCamera, direction);
-	vertex = project_point(gPushConstants.Projection, gPushConstants.WorldToCamera.Translation + direction*ray_box(gPushConstants.WorldToCamera.Translation, 1/direction, -10, 10)[sgn]);
+	direction = transform_vector(gWorldToCamera, direction);
+	vertex = project_point(gProjection, gWorldToCamera.Translation + direction*ray_box(gWorldToCamera.Translation, 1/direction, -10, 10)[sgn]);
 	color = 0.25;
 	color[axis] = sgn ? 0.75 : 1;
 }

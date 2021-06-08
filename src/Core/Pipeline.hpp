@@ -3,115 +3,132 @@
 #include "RenderPass.hpp"
 #include "SpirvModule.hpp"
 
-namespace stm {
-
-// TODO: descriptor_set_layouts have no way of being passed into a pipeline
-
-using VertexInputBindingData = pair< vector<vk::VertexInputAttributeDescription>, vector<vk::VertexInputBindingDescription> >;
-inline VertexInputBindingData create_vertex_bindings(const Geometry& geometry, const SpirvModule& vertexShader) {
-	vector<Buffer::View<byte>> buffers;
-	vector<vk::VertexInputAttributeDescription> attributes;
-	vector<vk::VertexInputBindingDescription> bindings;
-
-	for (const auto& [n, v] : vertexShader.stage_inputs()) {
-		const Geometry::Attribute& attrib = geometry[v.mAttributeType][v.mAttributeIndex];
-		uint32_t bindingindex;
-		for (bindingindex = 0; bindingindex < bindings.size(); bindingindex++)
-			if (buffers[bindingindex] == attrib.buffer_view() && bindings[bindingindex].stride == attrib.stride() && bindings[bindingindex].inputRate == attrib.input_rate())
-				break;
-		if (bindingindex == bindings.size()) {
-			bindings.emplace_back(bindingindex, attrib.stride(), attrib.input_rate());
-			buffers.emplace_back(attrib.buffer_view());
-		}
-		attributes.emplace_back(v.mLocation, bindingindex, attrib.format(), attrib.offset());
-	}
-	return make_pair(move(attributes), move(bindings));
+namespace std {
+inline string to_string(const vk::PushConstantRange& r) {
+	return "stageFlags = " + to_string(r.stageFlags) + ", " + ", offset = " + to_string(r.offset) + ", size = " + to_string(r.size);
+}
 }
 
+namespace stm {
+
 class Pipeline : public DeviceResource {
+public:
+	struct ShaderStage {
+	private:
+		shared_ptr<SpirvModule> mSpirv;
+		unordered_map<string, uint32_t> mSpecializationConstants;
+
+	public:
+		ShaderStage() = default;
+		ShaderStage(ShaderStage&&) = default;
+		ShaderStage(const ShaderStage&) = default;
+		inline ShaderStage(const shared_ptr<SpirvModule>& spirv, const unordered_map<string, uint32_t>& specializationConstants) : mSpirv(spirv) {
+			for (const auto&[name, p] : mSpirv->specialization_constants()) {
+				const auto[id,defaultValue] = p;
+				if (auto it = specializationConstants.find(name); it != specializationConstants.end())
+					mSpecializationConstants.emplace(name, it->second);
+				else
+					mSpecializationConstants.emplace(name, defaultValue);
+			}
+		}
+
+		ShaderStage& operator=(const ShaderStage&) = default;
+		ShaderStage& operator=(ShaderStage&&) = default;
+
+		inline const auto& spirv() const { return mSpirv; }
+		inline const auto& specialization_constants() const { return mSpecializationConstants; }
+		inline void specialization_info(vector<vk::SpecializationMapEntry>& entries, vector<uint32_t>& data) const {
+			for (const auto&[name, v] : mSpecializationConstants) {
+				entries.emplace_back(mSpirv->specialization_constants().at(name).first, (uint32_t)(data.size()*sizeof(uint32_t)), sizeof(uint32_t));
+				data.emplace_back(v);
+			}
+		}
+	};
+
 protected:
 	vk::Pipeline mPipeline;
 	vk::PipelineLayout mLayout;
-	size_t mHash = 0;
-
-	vector<shared_ptr<SpirvModule>> mSpirvModules;
+	vector<ShaderStage> mStages;
 	vector<shared_ptr<DescriptorSetLayout>> mDescriptorSetLayouts;
-	unordered_map<string, byte_blob> mSpecializationConstants;
-	unordered_map<string, vk::PushConstantRange> mPushConstants;
-	
-	inline void set_spirv(const vk::ArrayProxy<const shared_ptr<SpirvModule>>& modules) {
-		for (const shared_ptr<SpirvModule>& spirv : modules) {
-			mSpirvModules.emplace_back(spirv);
-		
-			for (const auto& [id, p] : spirv->push_constants()) {
-				auto it = mPushConstants.find(id);
-				if (it == mPushConstants.end())
-					mPushConstants.emplace(id, vk::PushConstantRange(spirv->stage(), p.first, p.second));
+	unordered_multimap<string, vk::PushConstantRange> mPushConstants;
+
+	inline Pipeline(Device& device, const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {}) : DeviceResource(device, name) {
+		mStages.resize(stages.size());
+		ranges::copy(stages, mStages.begin());
+
+		vector<vk::PushConstantRange> pcranges;
+		vector<unordered_map<uint32_t, DescriptorSetLayout::Binding>> bindings;
+
+		for (const auto& stage : mStages) {
+			// gather bindings
+			for (const auto&[id, binding] : stage.spirv()->descriptors()) {
+				uint32_t c = 1;
+				for (const auto& v : binding.mArraySize)
+					if (v.index() == 0)
+						// array size is a literal
+						c *= get<uint32_t>(v);
+					else
+						// array size is a specialization constant
+						c *= stage.specialization_constants().at(get<string>(v));
+
+				if (bindings.size() <= binding.mSet) bindings.resize(binding.mSet + 1);
+				auto it = bindings[binding.mSet].find(binding.mBinding);
+				if (it == bindings[binding.mSet].end())
+					it = bindings[binding.mSet].emplace(binding.mBinding, DescriptorSetLayout::Binding(binding.mDescriptorType, stage.spirv()->stage(), c)).first;
 				else {
-					if (it->second.offset != p.first || it->second.size != p.second) throw runtime_error("spirv modules share the same push constant names with different offsets/sizes"); 
-					it->second.stageFlags |= spirv->stage();
+					it->second.mStageFlags |= stage.spirv()->stage();
+					if (it->second.mDescriptorCount != c) throw logic_error("SPIR-V modules contain with different counts at the same binding");
+					if (it->second.mDescriptorType != binding.mDescriptorType) throw logic_error("SPIR-V modules contain descriptors of different types at the same binding");
 				}
+				if (auto s = immutableSamplers.find(id); s != immutableSamplers.end())
+					it->second.mImmutableSamplers.push_back(s->second);
 			}
+			
+			// gather push constants
+			if (!stage.spirv()->push_constants().empty()) {
+				uint32_t rangeBegin = numeric_limits<uint32_t>::max();
+				uint32_t rangeEnd = 0;
+				for (const auto& [id, p] : stage.spirv()->push_constants()) {
+					uint32_t sz = p.mTypeSize;
+					if (!p.mArraySize.empty()) {
+						sz = p.mArrayStride;
+						for (const auto& v : p.mArraySize)
+							if (v.index() == 0)
+								// array size is a literal
+								sz *= get<uint32_t>(v);
+							else
+								// array size is a specialization constant
+								sz *= stage.specialization_constants().at(get<string>(v));
+					}
+					rangeBegin = min(rangeBegin, p.mOffset);
+					rangeEnd = max(rangeEnd, p.mOffset + sz);
 
-			for (const auto& [id, binding] : spirv->descriptors())
-				if (auto it = mDescriptorBindings.find(id); it != mDescriptorBindings.end()) {
-					if (it->second.mBinding == binding.mBinding && it->second.mSet == binding.mSet) {
-						if (it->second.mDescriptorType != binding.mDescriptorType) throw invalid_argument("spirv modules share the same descriptor binding with different descriptor types");
-						it->second.mStageFlags |= binding.mStageFlags;
-						it->second.mDescriptorCount = max(it->second.mDescriptorCount, binding.mDescriptorCount);
+					if (auto it = mPushConstants.find(id); it != mPushConstants.end()) {
+						if (it->second.offset != p.mOffset || it->second.size != sz)
+							throw logic_error("Push constant [" + id + ", stage = " + to_string(stage.spirv()->stage()) + " offset = " + to_string(p.mOffset) + ", size = " + to_string(sz) + " ] does not match push constant found other stage(s): " + to_string(it->second));
+						it->second.stageFlags |= stage.spirv()->stage();
 					} else
-						mDescriptorBindings[to_string(binding.mSet)+"."+to_string(binding.mBinding) + id] = binding;
-				} else
-					mDescriptorBindings[id] = binding;
-		}
-	}
-
-	// requires mSpirvModules and mDescriptorSetLayouts to be assigned
-	// populates mPushConstants, mDescriptorBindings; hashes spirv into mHash
-	inline vk::PipelineLayout create_layout(const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) {
-		unordered_map<uint32_t, unordered_map<uint32_t, DescriptorSetLayout::Binding>> setBindings;
-		for (const auto&[name, b] : mDescriptorBindings) {
-			if (b.mSet >= mDescriptorSetLayouts.size()) mDescriptorSetLayouts.resize(b.mSet + 1);
-			setBindings[b.mSet][b.mBinding] = DescriptorSetLayout::Binding(b.mDescriptorType, b.mStageFlags, b.mDescriptorCount);
-			if (auto it = immutableSamplers.find(name); it != immutableSamplers.end())
-				setBindings[b.mSet][b.mBinding].mImmutableSamplers.emplace_back(it->second);
-		}
-		for (uint32_t set = 0; set < mDescriptorSetLayouts.size(); set++)
-			if (setBindings.count(set))
-				mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, name(), setBindings.at(set));
-			else
-				mDescriptorSetLayouts[set] = make_shared<DescriptorSetLayout>(mDevice, name());
-
-		vector<vk::PushConstantRange> pushConstantRanges;
-		for (const auto& spirv : mSpirvModules) {
-			uint32_t first = ~0;
-			uint32_t last = 0;
-			for (const auto& [id, p] : spirv->push_constants()) {
-				first = min(first, p.first);
-				last = max(last, p.first + p.second);
+						mPushConstants.emplace(id, vk::PushConstantRange(stage.spirv()->stage(), p.mOffset, sz));
+				}
+				pcranges.emplace_back(stage.spirv()->stage(), rangeBegin, rangeEnd);
 			}
-			pushConstantRanges.emplace_back(spirv->stage(), first, last - first);
-			mHash = hash_args(mHash, spirv);
 		}
-		mHash = hash_args(mHash, mSpecializationConstants);	
 
-		for (const auto& l : mDescriptorSetLayouts)
-			for (const auto&[i,b] : l->bindings())
-				for (const auto& s : b.mImmutableSamplers)
-					mHash = hash_args(mHash, s->create_info()); // only have to hash the immutable samplers; hashing the spir-v takes care of bindings/etc
-	
-		vector<vk::DescriptorSetLayout> tmp(mDescriptorSetLayouts.size());
-		ranges::transform(mDescriptorSetLayouts, tmp.begin(), &DescriptorSetLayout::operator const vk::DescriptorSetLayout &);
-		mLayout = mDevice->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, tmp, pushConstantRanges));
-		return mLayout;
+		// create descriptorsetlayouts
+		mDescriptorSetLayouts.resize(bindings.size());
+		for (uint32_t i = 0; i < bindings.size(); i++)
+			mDescriptorSetLayouts[i] = make_shared<DescriptorSetLayout>(device, name+"/DescriptorSet"+to_string(i), bindings[i]);
+		
+		vector<vk::DescriptorSetLayout> layouts(mDescriptorSetLayouts.size());
+		ranges::transform(mDescriptorSetLayouts, layouts.begin(), &DescriptorSetLayout::operator const vk::DescriptorSetLayout &);
+
+		mLayout = mDevice->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, layouts, pcranges));
 	}
-	
-	inline Pipeline(Device& device, const string& name) : DeviceResource(device, name) {}
 
 public:
 	inline ~Pipeline() {
-		if (mLayout) mDevice->destroyPipelineLayout(mLayout);
 		if (mPipeline) mDevice->destroyPipeline(mPipeline);
+		if (mLayout) mDevice->destroyPipelineLayout(mLayout);
 	}
 
 	virtual vk::PipelineBindPoint bind_point() const = 0;
@@ -123,49 +140,26 @@ public:
 	inline operator bool() const { return mPipeline; }
 
 	inline bool operator==(const Pipeline& rhs) const { return rhs.mPipeline == mPipeline; }
-	inline size_t hash() const { return mHash; }
 	inline vk::PipelineLayout layout() const { return mLayout; }
-	inline const auto& modules() const { return mSpirvModules; };
+	inline const auto& stages() const { return mStages; };
+	inline const auto& push_constants() const { return mPushConstants; };
 	inline const auto& descriptor_set_layouts() const { return mDescriptorSetLayouts; };
-	// most of the time, a pipeline wont have named descriptors with different bindings, so there is usually only one item in this range
-	inline const auto& descriptor_bindings() { return mDescriptorBindings; };
-	// most of the time, a pipeline wont have named push constants with different ranges, so there is usually only one item in this range
-	inline const auto& push_constants() { return mPushConstants; };
-
-	inline const DescriptorSetLayout::Binding& binding(const string& name) const {
-		auto it = mDescriptorBindings.find(name);
-		if (it == mDescriptorBindings.end()) throw invalid_argument("no descriptor named " + name);
-		return it->second;
-	}
-	};
+};
 
 class ComputePipeline : public Pipeline {
 public:
-	inline ComputePipeline(Device& device, const string& name, shared_ptr<SpirvModule> spirv,
-		const unordered_map<string, byte_blob>& specializationConstants = {},
-		const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {}) : Pipeline(device, name) {
-			
-		mSpecializationConstants = specializationConstants;
-		set_spirv(spirv);
-		create_layout(immutableSamplers);
-		
-		vector<vk::SpecializationMapEntry> mapEntries;
-		byte_blob specData;
-		for (const auto&[name,data] : mSpecializationConstants)
-			if (auto it = spirv->specialization_map().find(name); it != spirv->specialization_map().end()) {
-				specData.resize(max(specData.size(), it->second.offset + it->second.size));
-				memcpy(specData.data() + it->second.offset, data.data(), min(data.size(), it->second.size));
-			}
-		vk::SpecializationInfo specInfo((uint32_t)mapEntries.size(), mapEntries.data(), (uint32_t)specData.size(), specData.data());
-		mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(),
-			vk::ComputePipelineCreateInfo({},
-				vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, **spirv, spirv->entry_point().c_str(), mapEntries.size() ? &specInfo : nullptr),
-				mLayout)).value;
+	inline ComputePipeline(Device& device, const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {})
+		: Pipeline(device, name, stage, immutableSamplers) {
+		vector<uint32_t> data;
+		vector<vk::SpecializationMapEntry> entries;
+		stage.specialization_info(entries, data);
+		vk::SpecializationInfo specializationInfo((uint32_t)entries.size(), entries.data(), data.size(), data.data());
+		vk::PipelineShaderStageCreateInfo stageInfo({}, stage.spirv()->stage(), **stage.spirv(), stage.spirv()->entry_point().c_str(), specializationInfo.mapEntryCount ? nullptr : &specializationInfo);
+		mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(), vk::ComputePipelineCreateInfo({}, stageInfo, mLayout)).value;
 		mDevice.set_debug_name(mPipeline, name);
 	}
-
 	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eCompute; }
-	inline vk::Extent3D workgroup_size() const { return mSpirvModules[0]->workgroup_size(); }
+	inline const auto& workgroup_size() const { return stages().front().spirv()->workgroup_size(); }
 };
 
 class GraphicsPipeline : public Pipeline {
@@ -180,19 +174,16 @@ private:
 	vk::PipelineViewportStateCreateInfo mViewportState;
 	uint32_t mRenderQueue;
 
+	unordered_map<Geometry::AttributeType, unordered_map<uint32_t, uint32_t>> mVertexBufferMap; // mVertexBufferMap[attributeType][typeindex] = bindingIndex
+
 public:
 	inline GraphicsPipeline(const string& name, const stm::RenderPass& renderPass, uint32_t subpassIndex, const Geometry& geometry,
-		const vk::ArrayProxy<const shared_ptr<SpirvModule>>& spirv, const unordered_map<string, byte_blob>& specializationConstants = {},
-		const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {},
+		const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {},
 		vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill, bool sampleShading = false,
 		const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = {},
-		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name) {
+		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name, stages, immutableSamplers) {
 		
-		mSpecializationConstants = specializationConstants;
-		set_spirv(spirv);
-		create_layout(immutableSamplers);
-
 		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
 		for (const auto&[type,blendState,desc] : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
 			if (type == RenderPass::AttachmentTypeFlags::eColor || type == RenderPass::AttachmentTypeFlags::eDepthStencil)
@@ -202,20 +193,50 @@ public:
 		}
 		if (!blendStates.empty()) mBlendStates = blendStates;
 
-		mHash = hash_args(renderPass, subpassIndex, geometry.topology(), cullMode, polygonMode, sampleShading);
-		for (const auto state : mBlendStates) mHash = hash_args(mHash, state);
-		for (const auto state : dynamicStates) mHash = hash_args(mHash, state);
-
 		for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].attachments())
 			if (get<RenderPass::AttachmentTypeFlags>(desc) & (RenderPass::AttachmentTypeFlags::eColor | RenderPass::AttachmentTypeFlags::eDepthStencil)) {
 				mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
 				break;
 			}
 
-		auto vertexInput = create_vertex_bindings(geometry, *spirv.front());
-		if (!vertexInput.first.empty()) mHash = hash_args(mHash, vertexInput);
-		vk::PipelineVertexInputStateCreateInfo vertexInfo({}, vertexInput.second, vertexInput.first);
+		vector<vk::VertexInputAttributeDescription> attributes;
+		vector<vk::VertexInputBindingDescription> bindings;
+		vector<Buffer::View<byte>> uniqueBuffers;
+		for (const auto& [n, v] : stages.front().spirv()->stage_inputs()) {
+			const Geometry::Attribute& attrib = geometry[v.mAttributeType][v.mTypeIndex];
+			uint32_t i = (uint32_t)uniqueBuffers.size();
+			if (auto it = ranges::find(uniqueBuffers, attrib.buffer()); it == uniqueBuffers.end()) {
+				bindings.emplace_back(i, attrib.stride(), attrib.input_rate());
+				uniqueBuffers.emplace_back(attrib.buffer());
+			} else
+				i = (uint32_t)std::distance(it, uniqueBuffers.begin());
+			attributes.emplace_back(v.mLocation, i, attrib.format(), attrib.offset());
+			mVertexBufferMap[v.mAttributeType][v.mTypeIndex] = i;
+		}
+		vk::PipelineVertexInputStateCreateInfo vertexInfo({}, bindings, attributes);
 
+		vector<uint32_t> data;
+		vector<vk::SpecializationMapEntry> entries;
+		vector<vk::SpecializationInfo> specializationInfos(stages.size());
+		ranges::transform(stages, specializationInfos.begin(), [&](const auto& stage) {
+			size_t s = entries.size();
+			stage.specialization_info(entries, data);
+			vk::SpecializationInfo r;
+			r.mapEntryCount = (uint32_t)(entries.size() - s);
+			r.pMapEntries = reinterpret_cast<vk::SpecializationMapEntry*>(entries.size());
+			return r;
+		});
+		
+		vector<vk::PipelineShaderStageCreateInfo> vkstages(stages.size());
+		uint32_t i = 0;
+		ranges::transform(stages, vkstages.begin(), [&](const auto& stage) {
+			specializationInfos[i].pMapEntries = entries.data() + reinterpret_cast<size_t>(specializationInfos[i].pMapEntries);
+			specializationInfos[i].dataSize = data.size()*sizeof(uint32_t);
+			specializationInfos[i].pData = data.data();
+			vk::PipelineShaderStageCreateInfo r({}, stage.spirv()->stage(), **stage.spirv(), stage.spirv()->entry_point().c_str(), specializationInfos[i].mapEntryCount ? nullptr : &specializationInfos[i]);
+			i++;
+			return r;
+		});
 		mDepthStencilState = depthStencilState;
 		mDynamicStates = dynamicStates;
 		mInputAssemblyState = { {}, geometry.topology() };
@@ -224,25 +245,8 @@ public:
 		mMultisampleState = { {}, sampleCount, sampleShading };
 		vk::PipelineColorBlendStateCreateInfo blendState({}, false, vk::LogicOp::eCopy, mBlendStates);
 		vk::PipelineDynamicStateCreateInfo dynamicState({}, dynamicStates);
-
-		list<byte_blob> specDatas;
-		list<vector<vk::SpecializationMapEntry>> specMapEntries;
-		vector<vk::PipelineShaderStageCreateInfo> stages(mSpirvModules.size());
-		ranges::transform(mSpirvModules, stages.begin(), [&](const auto& spirv) {
-			auto& mapEntries = specMapEntries.emplace_front(vector<vk::SpecializationMapEntry>());
-			auto& specData = specDatas.emplace_front(byte_blob());
-			for (const auto&[name,data] : mSpecializationConstants)
-				if (auto it = spirv->specialization_map().find(name); it != spirv->specialization_map().end()) {
-					auto& entry = mapEntries.emplace_back(it->second.constantID, (uint32_t)specData.size(), it->second.size);
-					specData.resize(entry.offset + entry.size);
-					memcpy(specData.data() + entry.offset, data.data(), min(data.size(), it->second.size));
-				}
-			vk::SpecializationInfo specInfo((uint32_t)mapEntries.size(), mapEntries.data(), (uint32_t)specData.size(), specData.data());
-			return vk::PipelineShaderStageCreateInfo({}, spirv->stage(), **spirv, spirv->entry_point().c_str(), specInfo.dataSize ? &specInfo : nullptr);
-		});
-
 		mPipeline = mDevice->createGraphicsPipeline(mDevice.pipeline_cache(), 
-			vk::GraphicsPipelineCreateInfo({}, stages, &vertexInfo, &mInputAssemblyState, nullptr, &mViewportState,
+			vk::GraphicsPipelineCreateInfo({}, vkstages, &vertexInfo, &mInputAssemblyState, nullptr, &mViewportState,
 			&mRasterizationState, &mMultisampleState, &mDepthStencilState, &blendState, &dynamicState, mLayout, *renderPass, subpassIndex)).value;
 		mDevice.set_debug_name(mPipeline, name);
 	}
@@ -253,8 +257,12 @@ public:
 }
 
 namespace std {
-template<class T> requires(is_base_of_v<stm::Pipeline,T>)
-struct hash<T> {
-	inline size_t operator()(const T& pipeline) { return pipeline.hash(); }
+template<> struct hash<stm::Pipeline::ShaderStage> {
+	inline size_t operator()(const stm::Pipeline::ShaderStage& r) const {
+		vector<vk::SpecializationMapEntry> entries;
+		vector<uint32_t> data;
+		r.specialization_info(entries, data);
+		return stm::hash_args(*r.spirv(), entries, data);
+	}
 };
 }

@@ -1,12 +1,12 @@
 {
     "entryPoints" : [
         {
-            "name" : "average3d",
+            "name" : "average2d",
             "mode" : "comp",
             "workgroup_size" : [
-                4,
-                4,
-                4
+                8,
+                8,
+                1
             ],
             "workgroup_size_is_spec_constant_id" : [
                 false,
@@ -17,17 +17,17 @@
     ],
     "images" : [
         {
-            "type" : "image3D",
-            "name" : "gOutput3",
+            "type" : "image2D",
+            "name" : "gInput2",
             "set" : 0,
-            "binding" : 2,
+            "binding" : 1,
             "format" : "rgba32f"
         },
         {
-            "type" : "image3D",
-            "name" : "gInput3",
+            "type" : "image2D",
+            "name" : "gOutput2",
             "set" : 0,
-            "binding" : 3,
+            "binding" : 0,
             "format" : "rgba32f"
         }
     ]

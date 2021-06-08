@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_20" : {
+        "_296" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_19" : {
+        "_297" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,29 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_20",
+                    "type" : "_296",
                     "offset" : 16
                 }
             ]
         },
-        "_18" : {
-            "name" : "type.StructuredBuffer.TransformData",
-            "members" : [
-                {
-                    "name" : "_m0",
-                    "type" : "_19",
-                    "array" : [
-                        0
-                    ],
-                    "array_size_is_literal" : [
-                        true
-                    ],
-                    "offset" : 0,
-                    "array_stride" : 32
-                }
-            ]
-        },
-        "_21" : {
+        "_298" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -68,53 +51,70 @@
                 }
             ]
         },
-        "_22" : {
-            "name" : "type.PushConstant.push_constants_t",
+        "_299" : {
+            "name" : "_299",
             "members" : [
                 {
-                    "name" : "WorldToCamera",
-                    "type" : "_19",
+                    "name" : "gWorldToCamera",
+                    "type" : "_297",
                     "offset" : 0
                 },
                 {
-                    "name" : "Projection",
-                    "type" : "_21",
+                    "name" : "gProjection",
+                    "type" : "_298",
                     "offset" : 32
                 },
                 {
-                    "name" : "LightCount",
+                    "name" : "gLightCount",
                     "type" : "uint",
                     "offset" : 48
                 },
                 {
-                    "name" : "MaterialIndex",
+                    "name" : "gMaterialIndex",
                     "type" : "uint",
                     "offset" : 52
                 },
                 {
-                    "name" : "BaseColorTexture",
+                    "name" : "gBaseColorTexture",
                     "type" : "uint",
                     "offset" : 56
                 },
                 {
-                    "name" : "NormalTexture",
+                    "name" : "gNormalTexture",
                     "type" : "uint",
                     "offset" : 60
                 },
                 {
-                    "name" : "MetallicRoughnessTexture",
+                    "name" : "gMetallicRoughnessTexture",
                     "type" : "uint",
                     "offset" : 64
                 },
                 {
-                    "name" : "OcclusionTexture",
+                    "name" : "gOcclusionTexture",
                     "type" : "uint",
                     "offset" : 68
                 },
                 {
-                    "name" : "EmissionTexture",
+                    "name" : "gEmissionTexture",
                     "type" : "uint",
                     "offset" : 72
+                }
+            ]
+        },
+        "_303" : {
+            "name" : "gTransforms",
+            "members" : [
+                {
+                    "name" : "@data",
+                    "type" : "_297",
+                    "array" : [
+                        0
+                    ],
+                    "array_size_is_literal" : [
+                        true
+                    ],
+                    "offset" : 0,
+                    "array_stride" : 32
                 }
             ]
         }
@@ -122,50 +122,50 @@
     "inputs" : [
         {
             "type" : "vec3",
-            "name" : "in.var.POSITION",
+            "name" : "vertex",
             "location" : 0
         },
         {
             "type" : "vec3",
-            "name" : "in.var.NORMAL",
+            "name" : "normal",
             "location" : 1
         },
         {
             "type" : "vec3",
-            "name" : "in.var.TANGENT",
+            "name" : "tangent",
             "location" : 2
         },
         {
             "type" : "vec2",
-            "name" : "in.var.TEXCOORD",
+            "name" : "texcoord",
             "location" : 3
         }
     ],
     "outputs" : [
         {
             "type" : "vec4",
-            "name" : "out.var.NORMAL",
+            "name" : "@entryPointOutput.normal",
             "location" : 0
         },
         {
             "type" : "vec4",
-            "name" : "out.var.TANGENT",
+            "name" : "@entryPointOutput.tangent",
             "location" : 1
         },
         {
             "type" : "vec4",
-            "name" : "out.var.TEXCOORD0",
+            "name" : "@entryPointOutput.cameraPos",
             "location" : 2
         },
         {
             "type" : "vec2",
-            "name" : "out.var.TEXCOORD1",
+            "name" : "@entryPointOutput.texcoord",
             "location" : 3
         }
     ],
     "ssbos" : [
         {
-            "type" : "_18",
+            "type" : "_303",
             "name" : "gTransforms",
             "readonly" : true,
             "block_size" : 0,
@@ -175,8 +175,8 @@
     ],
     "push_constants" : [
         {
-            "type" : "_22",
-            "name" : "gPushConstants",
+            "type" : "_299",
+            "name" : "_301",
             "push_constant" : true
         }
     ]

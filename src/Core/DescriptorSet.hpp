@@ -8,8 +8,8 @@ using Descriptor = variant<
 	tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
 	Buffer::StrideView,											// storage/uniform buffer, stride used for dynamic offsets to work
 	Buffer::TexelView, 											// texel buffer
-	byte_blob, 													// inline buffer data
-	vk::AccelerationStructureKHR 								// acceleration structure
+	vector<byte>, 													// inline uniform buffer data
+	vk::AccelerationStructureKHR						// acceleration structure
 >;
 
 template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
@@ -120,7 +120,7 @@ public:
 
 	inline const Descriptor* find(uint32_t binding, uint32_t arrayIndex = 0) const {
 		auto it = mDescriptors.find((uint64_t(binding)<<32)|arrayIndex);
-		if (it == mDescriptors.end()) nullptr;
+		if (it == mDescriptors.end()) return nullptr;
 		return &it->second;
 	}
 	inline const Descriptor& at(uint32_t binding, uint32_t arrayIndex = 0) const { return mDescriptors.at((uint64_t(binding)<<32)|arrayIndex); }
@@ -187,7 +187,7 @@ public:
 				break;
 
 			case vk::DescriptorType::eInlineUniformBlockEXT:
-				info.mInlineInfo.setData<byte>(get<byte_blob>(entry));
+				info.mInlineInfo.setData<byte>(get<vector<byte>>(entry));
 				write.descriptorCount = info.mInlineInfo.dataSize;
 				write.pNext = &info.mInlineInfo;
 				break;
