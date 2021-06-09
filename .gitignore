@@ -3,6 +3,7 @@
 build
 install
 bin
+extern
 CMakeSettings.json
 CMakeCache.txt
 CMakeFiles
@@ -14,6 +15,3 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 *.aps
-shadertoolsconfig.json
-extern/*
-Plugins/Raytracing

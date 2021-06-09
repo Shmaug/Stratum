@@ -8,8 +8,8 @@ namespace stm {
 class Material {
 private:
 	vector<shared_ptr<SpirvModule>> mModules;
-	unordered_map<string, byte_blob> mSpecializationConstants;
-	unordered_map<string, byte_blob> mPushConstants;
+	unordered_map<string, uint32_t> mSpecializationConstants;
+	unordered_map<string, vector<byte>> mPushConstants;
 	unordered_map<string, unordered_map<uint32_t, stm::Descriptor>> mDescriptors;
 	unordered_map<string, shared_ptr<Sampler>> mImmutableSamplers;
 	vk::CullModeFlags mCullMode = vk::CullModeFlagBits::eBack;
@@ -54,75 +54,49 @@ public:
 	inline auto& depth_stencil() { return mDepthStencilState; }
 	inline const auto& depth_stencil() const { return mDepthStencilState; }
 
-	template<typename T = byte_blob>
-	inline void specialization_constant(const string& name, const T& v) {
-		auto it = mSpecializationConstants.find(name);
-		size_t sz = 0;
-		if (it == mSpecializationConstants.end()) {
-			for (const auto& m : mModules)
-				if (auto it = m->mSpecializationMap.find(name); it != m->mSpecializationMap.end()) {
-					sz = it->second.size;
-					break;
-				}
-			if (sz == 0) throw invalid_argument("No specialization constant named " + name);
-		} else
-			sz = it->second.size();
-
-		if constexpr (is_same_v<T,byte_blob>) {
-			if (v.size() != sz) throw invalid_argument("Argument must match specialization constant size");
-			mSpecializationConstants[name] = v;
-		} else {
-			if (sizeof(T) != sz) throw invalid_argument("Argument must match specialization constant size");
-			auto& c = mSpecializationConstants[name];
-			if (c.size() != sizeof(T)) c.resize(sizeof(T));
-			memcpy(c.data(), &v, sizeof(T));
-		}
-		mPipelines.clear();
+	inline void specialization_constant(const string& name, uint32_t v) {
+		mSpecializationConstants.emplace(name, v);
 	}
-	template<typename T = byte_blob>
-	inline const T& specialization_constant(const string& name) {
+	inline uint32_t specialization_constant(const string& name) const {
 		auto it = mSpecializationConstants.find(name);
-		if (it == mSpecializationConstants.end()) throw invalid_argument("No specialization constant named " + name);
-		if constexpr (is_same_v<T,byte_blob>)
+		if (it != mSpecializationConstants.end())
 			return it->second;
-		else {
-			if (it->second.size() != sizeof(T)) throw invalid_argument("Argument size must match specialization constant size");
-			return *reinterpret_cast<T*>(it->second.data());
-		}
+		for (const auto& spirv : mModules)
+			if (auto it2 = spirv->specialization_constants().find(name); it2 != spirv->specialization_constants().end())
+				return it2->second.second; // defailt value
+		throw invalid_argument("No specialization constant named " + name);
 	}
 	
-	template<typename T = byte_blob>
+	template<typename T = vector<byte>>
 	inline void push_constant(const string& name, const T& v) {
 		auto it = mPushConstants.find(name);
 		size_t sz = 0;
 		if (it == mPushConstants.end()) {
 			for (const auto& m : mModules)
 				if (auto it = m->push_constants().find(name); it != m->push_constants().end()) {
-					sz = it->second.second;
+					sz = it->second.mTypeSize;
 					break;
 			}
 			if (sz == 0) throw invalid_argument("No push constant named " + name);
 		} else
 			sz = it->second.size();
 
-		if constexpr (is_same_v<T,byte_blob>) {
-			if (v.size() != sz) throw invalid_argument("Argument must match push constant size");
-			mPushConstants[name] = v;
+		auto& c = mPushConstants[name];
+		if constexpr (ranges::range<T>) {
+			if (sizeof(ranges::range_value_t<T>)*ranges::size(v) != sz) throw invalid_argument("Argument must match push constant size");
+			c.resize(ranges::range_value_t<T>*ranges::size(v));
+			ranges::copy(v, span<ranges::range_value_t<T>>(c.data(), ranges::size(v)));
 		} else {
 			if (sizeof(T) != sz) throw invalid_argument("Argument must match push constant size");
-			auto& c = mPushConstants[name];
-			if (c.size() != sizeof(T)) {
-				c.resize(sizeof(T));
-				new (c.data()) T(v);
-			} else
-				*reinterpret_cast<T*>(c.data()) = v;
+			c.resize(sizeof(T));
+			*reinterpret_cast<T*>(c.data()) = v;
 		}
 	}
-	template<typename T = byte_blob>
+	template<typename T = vector<byte>>
 	inline const T& push_constant(const string& name) const {
 		auto it = mPushConstants.find(name);
 		if (it == mPushConstants.end()) throw invalid_argument("No push constant named " + name);
-		if constexpr (is_same_v<T,byte_blob>)
+		if constexpr (is_same_v<T,vector<byte>>)
 			return it->second;
 		else {
 			if (it->second.size() != sizeof(T)) throw invalid_argument("Type size must match push constant size");
@@ -130,10 +104,19 @@ public:
 		}
 	}
 
-	inline size_t descriptor_count(const string& name) const {
+	inline uint32_t descriptor_count(const string& name) const {
 		for (const auto& spirv : mModules)
-			if (auto it = spirv->mDescriptorBindings.find(name); it != spirv->mDescriptorBindings.end())
-				return it->second.mDescriptorCount;
+			if (auto it = spirv->descriptors().find(name); it != spirv->descriptors().end()) {
+				uint32_t count = 1;
+				for (const auto& v : it->second.mArraySize)
+					if (v.index() == 0)
+						// array size is a literal
+						count *= get<uint32_t>(v);
+					else
+						// array size is a specialization constant
+						count *= specialization_constant(get<string>(v));
+				return count;
+			}
 		return 0;
 	}
 
@@ -146,7 +129,7 @@ public:
 		}
 
 		for (const auto& spirv : mModules)
-			if (spirv->mDescriptorBindings.find(name) != spirv->mDescriptorBindings.end()) {
+			if (spirv->descriptors().find(name) != spirv->descriptors().end()) {
 				auto desc_it = mDescriptors.emplace(name, unordered_map<uint32_t, stm::Descriptor>()).first;
 				auto it = desc_it->second.emplace(arrayIndex, stm::Descriptor()).first;
 				return it->second;

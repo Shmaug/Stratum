@@ -7,8 +7,6 @@ namespace stm {
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
 
-using byte_blob = vector<byte>;
-
 namespace hlsl {
 
 using uint = uint32_t;

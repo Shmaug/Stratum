@@ -37,7 +37,7 @@ pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<
 	mShadowRenderNode = &nodeGraph.emplace("shadowpass").emplace<RenderNode>();
 	mShadowRenderNode->node().set_parent(mRenderNode->node());
 	(*mShadowRenderNode)[""].bind_point(vk::PipelineBindPoint::eGraphics);
-	(*mShadowRenderNode)[""]["gShadowAtlas"] = RenderPass::SubpassDescription::AttachmentInfo(
+	(*mShadowRenderNode)[""]["gShadowMap"] = RenderPass::SubpassDescription::AttachmentInfo(
 		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
 			vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
 			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
@@ -64,12 +64,12 @@ pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<
 			material.bind(commandBuffer, primitive.mGeometry);
 			material.bind_descriptor_sets(commandBuffer);
 			material.push_constants(commandBuffer);
-			commandBuffer.push_constant("MaterialIndex", primitive.mMaterialIndex);
-			commandBuffer.push_constant("BaseColorTexture", primitive.mBaseColorTexture);
-			commandBuffer.push_constant("NormalTexture", primitive.mNormalTexture);
-			commandBuffer.push_constant("MetallicRoughnessTexture", primitive.mMetallicRoughnessTexture);
-			commandBuffer.push_constant("OcclusionTexture", primitive.mOcclusionTexture);
-			commandBuffer.push_constant("EmissionTexture", primitive.mEmissionTexture);
+			commandBuffer.push_constant("gMaterialIndex", primitive.mMaterialIndex);
+			commandBuffer.push_constant("gBaseColorTexture", primitive.mBaseColorTexture);
+			commandBuffer.push_constant("gNormalTexture", primitive.mNormalTexture);
+			commandBuffer.push_constant("gMetallicRoughnessTexture", primitive.mMetallicRoughnessTexture);
+			commandBuffer.push_constant("gOcclusionTexture", primitive.mOcclusionTexture);
+			commandBuffer.push_constant("gEmissionTexture", primitive.mEmissionTexture);
 			primitive.mGeometry.drawIndexed(commandBuffer, primitive.mIndices, primitive.mIndexCount, 1, primitive.mFirstIndex, primitive.mVertexOffset, primitive.mMaterialIndex);
 		});
 	};
@@ -260,6 +260,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 					typeName = typeName.substr(0, c);
 				}
 				if (typeName.back() == '_') typeName = typeName.substr(0, typeName.length() - 1);
+
 				static const unordered_map<string, Geometry::AttributeType> semanticMap {
 					{ "position", 	Geometry::AttributeType::ePosition },
 					{ "normal", 		Geometry::AttributeType::eNormal },
@@ -270,10 +271,9 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 					{ "psize", 			Geometry::AttributeType::ePointSize },
 					{ "pointsize", 	Geometry::AttributeType::ePointSize }
 				};
-				
-				geometry[semanticMap.at(typeName)][typeIdx] = Geometry::Attribute(
-					buffers[model.bufferViews[accessor.bufferView].buffer], fmt,
-					(uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex, model.bufferViews[accessor.bufferView].byteOffset);
+				auto& attribs = geometry[semanticMap.at(typeName)];
+				if (attribs.size() < typeIdx) attribs.resize(typeIdx);
+				attribs.emplace_back(buffers[model.bufferViews[accessor.bufferView].buffer], fmt, (uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex, model.bufferViews[accessor.bufferView].byteOffset);
 			}
 			return geometry;
 		});
@@ -310,7 +310,6 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		if (node.mesh < model.meshes.size()) {
 			for (size_t i = 0; i < model.meshes[node.mesh].primitives.size(); i++) {
 				auto& prim = model.meshes[node.mesh].primitives[i];
-				auto& geometry = geometries[node.mesh][i];
 				auto& indices = model.accessors[prim.indices];
 
 				size_t indexStride = 0;
@@ -330,7 +329,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				}
 				
 				PrimitiveSet& p = dst.emplace<PrimitiveSet>();
-				p.mGeometry = geometry;
+				p.mGeometry = geometries[node.mesh][i];
 				p.mIndices = Buffer::StrideView(buffers[model.bufferViews[indices.bufferView].buffer], indexStride, model.bufferViews[indices.bufferView].byteOffset, model.bufferViews[indices.bufferView].byteLength);
 				p.mIndexCount = (uint32_t)indices.count;
 				p.mVertexOffset = 0;
@@ -378,7 +377,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 
 	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	Texture::View shadowAtlas = make_shared<Texture>(commandBuffer.mDevice, "gShadowAtlas", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowAtlas"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	Texture::View shadowAtlas = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
 	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
@@ -402,16 +401,16 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 
 	mMaterial->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
-	mMaterial->descriptor("gShadowAtlas") = sampled_texture_descriptor(shadowAtlas);
-	mMaterial->push_constant("LightCount", (uint32_t)lights.size());
+	mMaterial->descriptor("gShadowMap") = sampled_texture_descriptor(shadowAtlas);
+	mMaterial->push_constant("gLightCount", (uint32_t)lights.size());
 
 	mShadowMaterial->descriptor("gTransforms") = mMaterial->descriptor("gTransforms");
 
 	for (const hlsl::LightData& light : lights) {		
-		mShadowMaterial->push_constant("WorldToCamera", inverse(light.mLightToWorld));
-		mShadowMaterial->push_constant("Projection", light.mShadowProjection);
+		mShadowMaterial->push_constant("gWorldToCamera", inverse(light.mLightToWorld));
+		mShadowMaterial->push_constant("gProjection", light.mShadowProjection);
 		// TODO: use light.mShadowST to set viewport
-		mShadowRenderNode->render(commandBuffer, { { "gShadowAtlas", shadowAtlas } });
+		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowAtlas } });
 	}
 
 	mMaterial->transition_images(commandBuffer);

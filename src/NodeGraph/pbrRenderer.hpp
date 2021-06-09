@@ -50,8 +50,8 @@ public:
 	STRATUM_API void load_gltf(CommandBuffer& commandBuffer, const fs::path& filename);
 
 	inline void render(CommandBuffer& commandBuffer, const Texture::View& renderTarget, const hlsl::TransformData& cameraToWorld, const hlsl::ProjectionData& projection) const {
-		mMaterial->push_constant("Projection", projection);
-		mMaterial->push_constant("WorldToCamera", inverse(cameraToWorld));
+		mMaterial->push_constant("gProjection", projection);
+		mMaterial->push_constant("gWorldToCamera", inverse(cameraToWorld));
 		main_pass().render(commandBuffer, {
 			{ "primaryResolve", renderTarget }
 		});

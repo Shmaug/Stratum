@@ -173,6 +173,13 @@ public:
 	};
 };
 
+template<typename T>
+struct buffer_view_hash {
+  inline size_t operator()(const Buffer::View<T>& v) const {
+    return hash_args(v.buffer_ptr().get(), v.offset(), v.size_bytes());
+  }
+};
+
 template<class T>
 class buffer_vector {
 public:

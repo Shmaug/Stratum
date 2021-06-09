@@ -8,19 +8,19 @@
     "inputs" : [
         {
             "type" : "vec4",
-            "name" : "in.var.COLOR",
+            "name" : "color",
             "location" : 0
         },
         {
             "type" : "vec2",
-            "name" : "in.var.TEXCOORD0",
+            "name" : "uv",
             "location" : 1
         }
     ],
     "outputs" : [
         {
             "type" : "vec4",
-            "name" : "out.var.SV_Target0",
+            "name" : "@entryPointOutput",
             "location" : 0
         }
     ],

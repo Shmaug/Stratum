@@ -3,6 +3,8 @@
 
 #include "NodeGraph/pbrRenderer.hpp"
 
+#include <json.hpp>
+
 using namespace stm;
 
 unordered_map<string, shared_ptr<SpirvModule>> gSpirvModules;
@@ -13,13 +15,12 @@ int main(int argc, char** argv) {
 		stm::Window& window = instance->window();
 		Device& device = instance->device();
 
-		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V")) {
-			auto m = make_shared<SpirvModule>(p);
-			cout << gSpirvModules.emplace(p.stem().string()+"/"+m->entry_point(), m).first->first << endl;
-		}
+		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V"))
+			if (p.extension() == ".spv")
+				gSpirvModules.emplace(p.stem().string(), make_shared<SpirvModule>(device, p)).first->first;
 		
 		NodeGraph nodeGraph;
-		pbrRenderer pbr(nodeGraph, device, gSpirvModules.at("pbr/vs"), gSpirvModules.at("pbr/fs"));
+		pbrRenderer pbr(nodeGraph, device, gSpirvModules.at("pbr_vs"), gSpirvModules.at("pbr_fs"));
 		
 		{
 			auto commandBuffer = device.get_command_buffer("Init");

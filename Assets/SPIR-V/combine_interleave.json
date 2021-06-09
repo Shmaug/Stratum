@@ -16,11 +16,11 @@
         }
     ],
     "types" : {
-        "_10" : {
-            "name" : "type.PushConstant.push_constants",
+        "_22" : {
+            "name" : "_22",
             "members" : [
                 {
-                    "name" : "Width",
+                    "name" : "gWidth",
                     "type" : "uint",
                     "offset" : 0
                 }
@@ -52,8 +52,8 @@
     ],
     "push_constants" : [
         {
-            "type" : "_10",
-            "name" : "gPushConstants",
+            "type" : "_22",
+            "name" : "_24",
             "push_constant" : true
         }
     ]

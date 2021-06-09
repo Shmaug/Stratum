@@ -153,16 +153,19 @@ public:
 	inline void dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
 	
 	// dispatch on ceil(size / workgroupSize)
+	inline void dispatch_align(const vk::Extent2D& dim) {
+		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
+		mCommandBuffer.dispatch(
+			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
+			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1],
+			1);
+	}
 	inline void dispatch_align(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
-			(dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width,
-			(dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height, 
-			(dim.depth + cp->workgroup_size().depth - 1) / cp->workgroup_size().depth);
-	}
-	inline void dispatch_align(const vk::Extent2D& dim) {
-		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
-		mCommandBuffer.dispatch((dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width, (dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height, 1);
+			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
+			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1], 
+			(dim.depth + cp->workgroup_size()[2] - 1) / cp->workgroup_size()[2]);
 	}
 	inline void dispatch_align(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_align(vk::Extent3D(x,y,z)); }
 
@@ -181,21 +184,24 @@ public:
 		return true;
 	}
 	
-	template<typename T>
+	template<typename T> requires(is_trivially_copyable_v<T>)
 	inline void push_constant(const string& name, const T& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
 		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
-		if constexpr (is_same_v<T, byte_blob>) {
-			if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
-			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, value.data());
-		} else {
-			static_assert(is_trivially_copyable_v<T>);
-			if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
-			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, &value);
-		}
+		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, &value);
 	}
 	
+	template<ranges::range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
+	inline void push_constant(const string& name, const R& value) {
+		auto it = mBoundPipeline->push_constants().find(name);
+		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
+		const auto& range = it->second;
+		if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
+	}
+
 	inline void bind_descriptor_set(uint32_t index, shared_ptr<DescriptorSet> descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets = {}) {
 		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 		hold_resource(descriptorSet);

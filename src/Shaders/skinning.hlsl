@@ -1,86 +1,85 @@
-#pragma compile cs_6_6 skin
-#pragma compile cs_6_6 blend
+#pragma compile -D -S comp -e skin
+#pragma compile -D -S comp -e blend
 
 struct VertexWeight {
-	float4 Weights;
-	uint4 Indices;
+	float4 weights;
+	uint4 indices;
 };
 
-RWByteAddressBuffer Vertices : register(u0);
-RWByteAddressBuffer BlendTarget0 : register(u1);
-RWByteAddressBuffer BlendTarget1 : register(u2);
-RWByteAddressBuffer BlendTarget2 : register(u3);
-RWByteAddressBuffer BlendTarget3 : register(u4);
-RWStructuredBuffer<VertexWeight> Weights : register(u5);
-RWStructuredBuffer<float4x4> Pose : register(u6);
+[[vk::binding(0)]] RWByteAddressBuffer gVertices;
+[[vk::binding(1)]] ByteAddressBuffer gBlendTarget0;
+[[vk::binding(2)]] ByteAddressBuffer gBlendTarget1;
+[[vk::binding(3)]] ByteAddressBuffer gBlendTarget2;
+[[vk::binding(4)]] ByteAddressBuffer gBlendTarget3;
+[[vk::binding(5)]] StructuredBuffer<VertexWeight> gWeights;
+[[vk::binding(6)]] StructuredBuffer<float4x4> gPose;
 
-struct push_constants {
-	uint VertexCount;
-	uint VertexStride;
-	uint NormalOffset;
-	uint TangentOffset;
-	float4 BlendFactors;
+[[vk::push_constant]] cbuffer {
+	uint gVertexCount;
+	uint gVertexStride;
+	uint gNormalOffset;
+	uint gTangentOffset;
+	float4 gBlendFactors;
 };
-[[vk::push_constant]] const push_constants gPushConstants = { 0, 0, 0, 0, float4(0,0,0,0) };
 
 [numthreads(64, 1, 1)]
 void skin(uint3 index : SV_DispatchThreadID) {
-	if (index.x >= gPushConstants.VertexCount) return;
+	if (index.x >= gVertexCount) return;
 	
-	VertexWeight w = Weights[index.x];
+	VertexWeight w = gWeights[index.x];
 
 	float4x4 transform = 0;
-	transform += Pose[w.Indices[0]] * w.Weights[0];
-	transform += Pose[w.Indices[1]] * w.Weights[1];
-	transform += Pose[w.Indices[2]] * w.Weights[2];
-	transform += Pose[w.Indices[3]] * w.Weights[3];
+	transform += gPose[w.indices[0]] * w.weights[0];
+	transform += gPose[w.indices[1]] * w.weights[1];
+	transform += gPose[w.indices[2]] * w.weights[2];
+	transform += gPose[w.indices[3]] * w.weights[3];
 
-	uint address = index.x * gPushConstants.VertexStride;
-	float3 vertex = asfloat(Vertices.Load3(address));
-	float3 normal = asfloat(Vertices.Load3(address + gPushConstants.NormalOffset));
-	float3 tangent = asfloat(Vertices.Load3(address + gPushConstants.TangentOffset));
+	uint address = index.x * gVertexStride;
+	float3 vertex = asfloat(gVertices.Load3(address));
+	float3 normal = asfloat(gVertices.Load3(address + gNormalOffset));
+	float3 tangent = asfloat(gVertices.Load3(address + gTangentOffset));
 
 	vertex = mul(transform, float4(vertex, 1)).xyz;
 	normal = mul((float3x3)transform, normal);
 	tangent = mul((float3x3)transform, tangent);
 
-	Vertices.Store3(address, asuint(vertex));
-	Vertices.Store3(address + gPushConstants.NormalOffset, asuint(normal));
-	Vertices.Store3(address + gPushConstants.TangentOffset, asuint(tangent));
+	gVertices.Store3(address, asuint(vertex));
+	gVertices.Store3(address + gNormalOffset, asuint(normal));
+	gVertices.Store3(address + gTangentOffset, asuint(tangent));
 }
 
 [numthreads(64, 1, 1)]
 void blend(uint3 index : SV_DispatchThreadID) {
-	if (index.x >= gPushConstants.VertexCount) return;
+	if (index.x >= gVertexCount) return;
 	
-	uint address = index.x * gPushConstants.VertexStride;
+	uint address = index.x * gVertexStride;
 
-	float sum = dot(1, abs(gPushConstants.BlendFactors));
+	float sum = dot(1, abs(gBlendFactors));
 	float isum = max(0, 1 - sum);
 
-	float3 vertex = isum * asfloat(Vertices.Load3(address));
-	float3 normal = isum * asfloat(Vertices.Load3(address + gPushConstants.NormalOffset));
-	float3 tangent = isum * asfloat(Vertices.Load3(address + gPushConstants.TangentOffset));
+	float3 vertex  = isum * asfloat(gVertices.Load3(address));
+	float3 normal  = isum * asfloat(gVertices.Load3(address + gNormalOffset));
+	float3 tangent = isum * asfloat(gVertices.Load3(address + gTangentOffset));
 
-	vertex += gPushConstants.BlendFactors[0] * asfloat(BlendTarget0.Load3(address));
-	normal += gPushConstants.BlendFactors[0] * asfloat(BlendTarget0.Load3(address + gPushConstants.NormalOffset));
-	tangent += gPushConstants.BlendFactors[0] * asfloat(BlendTarget0.Load3(address + gPushConstants.TangentOffset));
+	vertex  += gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address));
+	normal  += gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address + gNormalOffset));
+	tangent += gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address + gTangentOffset));
 
-	vertex += gPushConstants.BlendFactors[1] * asfloat(BlendTarget1.Load3(address));
-	normal += gPushConstants.BlendFactors[1] * asfloat(BlendTarget1.Load3(address + gPushConstants.NormalOffset));
-	tangent += gPushConstants.BlendFactors[1] * asfloat(BlendTarget1.Load3(address + gPushConstants.TangentOffset));
+	vertex  += gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address));
+	normal  += gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address + gNormalOffset));
+	tangent += gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address + gTangentOffset));
 
-	vertex += gPushConstants.BlendFactors[2] * asfloat(BlendTarget2.Load3(address));
-	normal += gPushConstants.BlendFactors[2] * asfloat(BlendTarget2.Load3(address + gPushConstants.NormalOffset));
-	tangent += gPushConstants.BlendFactors[2] * asfloat(BlendTarget2.Load3(address + gPushConstants.TangentOffset));
+	vertex  += gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address));
+	normal  += gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address + gNormalOffset));
+	tangent += gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address + gTangentOffset));
 
-	vertex += gPushConstants.BlendFactors[3] * asfloat(BlendTarget3.Load3(address));
-	normal += gPushConstants.BlendFactors[3] * asfloat(BlendTarget3.Load3(address + gPushConstants.NormalOffset));
-	tangent += gPushConstants.BlendFactors[3] * asfloat(BlendTarget3.Load3(address + gPushConstants.TangentOffset));
+	vertex  += gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address));
+	normal  += gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address + gNormalOffset));
+	tangent += gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address + gTangentOffset));
 
 	normal = normalize(normal);
 
-	Vertices.Store3(address, asuint(vertex));
-	Vertices.Store3(address + gPushConstants.NormalOffset, asuint(normal));
-	Vertices.Store3(address + gPushConstants.TangentOffset, asuint(tangent));
+	gVertices.Store3(address, asuint(vertex));
+	gVertices.Store3(address + gNormalOffset, asuint(normal));
+	gVertices.Store3(address + gTangentOffset, asuint(tangent));
 }
