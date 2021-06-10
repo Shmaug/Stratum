@@ -1,4 +1,5 @@
-#pragma compile vertex vs_ui fragment fs_ui
+#pragma compile -D -S vert -e vs_ui 
+#pragma compile -D -S frag -e fs_ui
 
 SamplerState gFontsSampler : register(s0);
 Texture2D<float4> gFontsTexture : register(t1); 
