@@ -26,10 +26,10 @@ public:
 	inline Fence& completion_fence() const { return *mCompletionFence; }
 	inline Device::QueueFamily* queue_family() const { return mQueueFamily; }
 	
-	inline shared_ptr<Framebuffer> bound_framebuffer() const { return mBoundFramebuffer; }
+	inline const shared_ptr<Framebuffer>& bound_framebuffer() const { return mBoundFramebuffer; }
 	inline uint32_t subpass_index() const { return mSubpassIndex; }
-	inline shared_ptr<Pipeline> bound_pipeline() const { return mBoundPipeline; }
-	inline shared_ptr<DescriptorSet> bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
+	inline const shared_ptr<Pipeline>& bound_pipeline() const { return mBoundPipeline; }
+	inline const shared_ptr<DescriptorSet>& bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
 
 	// Label a region for a tool such as RenderDoc
 	STRATUM_API void begin_label(const string& label, const Vector4f& color = { 1,1,1,0 });
@@ -169,7 +169,7 @@ public:
 	}
 	inline void dispatch_align(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_align(vk::Extent3D(x,y,z)); }
 
-	STRATUM_API void begin_render_pass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> frameBuffer, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& frameBuffer, const vk::Rect2D& renderArea, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void end_render_pass();
 
@@ -190,9 +190,18 @@ public:
 		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
 		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, &value);
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
 	}
 	
+	template<typename T, int M, int N> requires(is_trivially_copyable_v<T> && M != Eigen::Dynamic && N != Eigen::Dynamic)
+	inline void push_constant(const string& name, const Eigen::Array<T,M,N>& value) {
+		auto it = mBoundPipeline->push_constants().find(name);
+		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
+		const auto& range = it->second;
+		if (range.size != sizeof(T)*M*N) throw invalid_argument("argument size (" + to_string(sizeof(T)*M*N) + ") must match push constant size (" + to_string(range.size) +")");
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T)*M*N, value.data());
+	}
+
 	template<ranges::range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
 	inline void push_constant(const string& name, const R& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
@@ -202,7 +211,7 @@ public:
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
 	}
 
-	inline void bind_descriptor_set(uint32_t index, shared_ptr<DescriptorSet> descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets = {}) {
+	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets = {}) {
 		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 		hold_resource(descriptorSet);
 		

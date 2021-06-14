@@ -31,11 +31,7 @@ public:
 		uint32_t mFirstIndex;
 		
 		uint32_t mMaterialIndex;
-		uint32_t mBaseColorTexture;
-		uint32_t mNormalTexture;
-		uint32_t mMetallicRoughnessTexture;
-		uint32_t mOcclusionTexture;
-		uint32_t mEmissionTexture;
+		hlsl::TextureIndices mTextureIndices;
 	};
 
 	STRATUM_API pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs,

@@ -42,35 +42,65 @@ public:
 	};
 	
 	class Node {
-	public:
-		class component_t {
+	private:
+		class component_ptr {
 		private:
-			void* mPointer = nullptr;
-			void(*mDestructor)(const void*) = nullptr;
+			void* mPointer;
+			void(*mDestructor)(const void*);
 		public:
-			component_t() = default;
-			component_t(const component_t&) = delete;
-			inline component_t(component_t&& c) : mPointer(c.mPointer), mDestructor(c.mDestructor) {
+			inline component_ptr() : mPointer(nullptr), mDestructor(nullptr) {}
+			component_ptr(const component_ptr&) = delete;
+			inline component_ptr(component_ptr&& c) : mPointer(c.mPointer), mDestructor(c.mDestructor) {
 				c.mPointer = nullptr;
-				c.mDestructor = nullptr;
 			}
-			inline component_t(void* ptr, auto dtor) : mPointer(ptr), mDestructor(dtor) {}
-			inline ~component_t() {
+			inline ~component_ptr() {
 				if (mPointer) {
 					mDestructor(mPointer);
-					delete reinterpret_cast<byte*>(mPointer);
+					::operator delete(mPointer);
 					mPointer = nullptr;
 				}
 			}
-
-			template<typename T> inline explicit operator T*() const { return reinterpret_cast<T*>(mPointer); }
+			
+			template<typename T, typename...Args>
+			inline component_ptr(const T*, Args&&...args) {
+				mPointer = ::operator new(sizeof(T), align_val_t(alignof(T)), nothrow);
+				mDestructor = [](const void* ptr) { reinterpret_cast<const T*>(ptr)->~T(); };
+				new (mPointer) T(forward<Args>(args)...);
+			}
+		
+			template<typename T> inline T* get() const {
+				return reinterpret_cast<T*>(mPointer);
+			}
 		};
+		
+		friend class NodeGraph;
+		NodeGraph& mNodeGraph;
+		string mName;
+		Node* mParent = nullptr;
+		unordered_map<type_index, component_ptr> mComponents;
 
+		inline Node(NodeGraph& NodeGraph, const string& name) : mNodeGraph(NodeGraph), mName(name) {}
+
+	public:
 		Event<Node&> OnChildAdded;
 		Event<Node&> OnChildRemoving;
 		Event<>      OnParentChanged;
 
 		Node(Node&&) = default;
+		inline ~Node() {
+			clear_parent();
+			// detach children
+			while (true) {
+				auto edge_it = mNodeGraph.mEdges.find(this);
+				if (edge_it == mNodeGraph.mEdges.end()) break;
+				edge_it->second->clear_parent();
+			}
+			
+			for (const auto&[tid,c] : mComponents)
+				if (auto it = mNodeGraph.mComponentMap.find(tid); it != mNodeGraph.mComponentMap.end())
+					it->second.erase(this);
+			mComponents.clear();
+		}
 
 		inline const string& name() const { return mName; }
 		inline NodeGraph& node_graph() const { return mNodeGraph; }
@@ -104,20 +134,26 @@ public:
 			OnParentChanged(mNodeGraph);
 		}
 	
-		template<typename T, typename... Args> requires(constructible_from<T,Args&&...> || constructible_from<T,Node*,Args&&...> || constructible_from<T,Node&,Args&&...>)
+		template<typename T, typename... Args> requires(constructible_from<T, Args&&...>)
 		inline T& emplace(Args&&... args) {
 			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
-			void* ptr = ::operator new(sizeof(T), align_val_t(alignof(T)), nothrow);
-			mComponents.emplace(typeid(T), component_t(ptr, [](const void* p){ reinterpret_cast<const T*>(p)->~T(); }));
 			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
-			if constexpr (constructible_from<T, Args&&...>)
-				return *new (ptr) T(forward<Args>(args)...);
-			else if constexpr (constructible_from<T, Node*, Args&&...>)
-				return *new (ptr) T(this, forward<Args>(args)...);
-			else if constexpr (constructible_from<T, Node&, Args&&...>)
-				return *new (ptr) T(forward<Node&>(*this), forward<Args>(args)...);
-			else
-				static_assert("T must be constructible from either:\nArgs...\nNode*, Args...\nNode&, Args...\n");
+			component_ptr c(reinterpret_cast<const T*>(nullptr), forward<Args>(args)...);
+			return *mComponents.emplace(typeid(T), move(c)).first->second.get<T>();
+		}
+		template<typename T, typename... Args> requires(constructible_from<T, Node*, Args&&...>)
+		inline T& emplace(Args&&... args) {
+			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
+			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
+			component_ptr c(reinterpret_cast<const T*>(nullptr), this, forward<Args>(args)...);
+			return *mComponents.emplace(typeid(T), move(c)).first->second.get<T>();
+		}
+		template<typename T, typename... Args> requires(constructible_from<T, Node&, Args&&...>)
+		inline T& emplace(Args&&... args) {
+			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
+			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
+			component_ptr c(reinterpret_cast<const T*>(nullptr), forward<Node&>(*this), forward<Args>(args)...);
+			return *mComponents.emplace(typeid(T), move(c)).first->second.get<T>();
 		}
 		
 		inline bool erase(type_index type) {
@@ -135,7 +171,7 @@ public:
 		template<typename T>
 		inline auto components() const {
 			auto[first,last] = mComponents.equal_range(typeid(T));
-			return views::transform(ranges::subrange(first,last), [](const auto& p) -> T& { return *(T*)p.second; });
+			return views::transform(ranges::subrange(first,last), [](const auto& p) -> T& { return *p.second.get<T>(); });
 		}
 	
 		template<typename T, typename F> requires(invocable<F,T*> || invocable<F,const T*> || invocable<F,T&> || invocable<F,const T&>)
@@ -143,9 +179,9 @@ public:
 			auto[first,last] = mComponents.equal_range(typeid(T));
 			for (const auto& p : ranges::subrange(first,last))
 				if constexpr (invocable<F, T*> || invocable<F, const T*>)
-					fn((T*)p.second);
+					fn((T*)p.second.get<T>());
 				else
-					fn(*(T*)p.second);
+					fn(*(T*)p.second.get<T>());
 		}
 	
 		template<typename T, typename F> requires(invocable<F,T*> || invocable<F,const T*> || invocable<F,T&> || invocable<F,const T&>)
@@ -157,16 +193,10 @@ public:
 			}
 		}
 
-	private:
-		friend class NodeGraph;
-		NodeGraph& mNodeGraph;
-		string mName;
-		Node* mParent = nullptr;
-		unordered_map<type_index, component_t> mComponents;
-
-		inline Node(NodeGraph& NodeGraph, const string& name) : mNodeGraph(NodeGraph), mName(name) {}
 	};
 
+	inline bool empty() const { return mNodes.empty(); }
+	inline void clear() { mNodes.clear(); }
 	inline bool contains(const Node* ptr) const { return mNodes.count(ptr); }
 
 	inline Node& emplace(const string& name) {
@@ -175,26 +205,9 @@ public:
 		mNodes.emplace(ptr, move(node));
 		return *ptr;
 	}
-	
 	inline void erase(Node& node) {
 		auto node_it = mNodes.find(&node);
 		if (node_it == mNodes.end()) return;
-	
-		for (auto&[tid,c] : node.mComponents) {
-			c.~component_t();
-			auto it = mComponentMap.find(tid);
-			it->second.erase(&node);
-			if (it->second.empty())
-				mComponentMap.erase(it);
-		}
-
-		while (true) {
-			auto edge_it = mEdges.find(&node);
-			if (edge_it == mEdges.end()) break;
-			edge_it->second->clear_parent();
-		}
-		node.clear_parent();
-		
 		mNodes.erase(node_it);
 	}
 
@@ -215,10 +228,8 @@ public:
 
 private:
 	friend class Node;
-	
 	unordered_map<const Node*, unique_ptr<Node>> mNodes;
 	unordered_multimap<const Node*, Node*> mEdges;
-
 	unordered_map<type_index, unordered_set<Node*>> mComponentMap;
 };
 

@@ -14,8 +14,6 @@ struct hash<pair<vk::ImageSubresourceRange, vk::ComponentMapping>> {
 }
 namespace stm {
 
-// TODO: Texture::View object for Swapchain images, to allow for the swapchain to be used directly in a renderpass
-
 inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
 	switch (layout) {
     case vk::ImageLayout::eUndefined:

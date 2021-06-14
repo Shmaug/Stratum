@@ -65,11 +65,6 @@ pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<
 			material.bind_descriptor_sets(commandBuffer);
 			material.push_constants(commandBuffer);
 			commandBuffer.push_constant("gMaterialIndex", primitive.mMaterialIndex);
-			commandBuffer.push_constant("gBaseColorTexture", primitive.mBaseColorTexture);
-			commandBuffer.push_constant("gNormalTexture", primitive.mNormalTexture);
-			commandBuffer.push_constant("gMetallicRoughnessTexture", primitive.mMetallicRoughnessTexture);
-			commandBuffer.push_constant("gOcclusionTexture", primitive.mOcclusionTexture);
-			commandBuffer.push_constant("gEmissionTexture", primitive.mEmissionTexture);
 			primitive.mGeometry.drawIndexed(commandBuffer, primitive.mIndices, primitive.mIndexCount, 1, primitive.mFirstIndex, primitive.mVertexOffset, primitive.mMaterialIndex);
 		});
 	};
@@ -177,6 +172,16 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		m.mRoughness = (float)material.pbrMetallicRoughness.roughnessFactor;
 		m.mNormalScale = (float)material.normalTexture.scale;
 		m.mOcclusionScale = (float)material.occlusionTexture.strength;
+		hlsl::TextureIndices inds;
+		inds.mBaseColor = material.pbrMetallicRoughness.baseColorTexture.index;
+		inds.mNormal = material.normalTexture.index;
+		inds.mEmission = material.emissiveTexture.index;
+		inds.mMetallic = inds.mRoughness = material.pbrMetallicRoughness.metallicRoughnessTexture.index;
+		inds.mMetallicChannel = 0;
+		inds.mRoughnessChannel = 1;
+		inds.mOcclusion = material.occlusionTexture.index;
+		inds.mOcclusionChannel = 0;
+		m.mTextureIndices = hlsl::pack_texture_indices(inds);
 		return m;
 	});
 	ranges::transform(model.meshes, geometries.begin(), [&](const tinygltf::Mesh& mesh) {
@@ -304,7 +309,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 
 		hlsl::TransformData& transform = dst.emplace<hlsl::TransformData>(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		if (!node.translation.empty()) transform.Translation = Map<const Array3d>(node.translation.data()).cast<float>();
-		if (!node.rotation.empty()) 	 transform.Rotation = Quaterniond(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]).cast<float>();
+		if (!node.rotation.empty()) 	 transform.Rotation = Quaterniond(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).cast<float>();
 		if (!node.scale.empty()) 			 transform.Scale = (float)Map<const Vector3d>(node.scale.data()).norm();
 		
 		if (node.mesh < model.meshes.size()) {
@@ -335,11 +340,6 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				p.mVertexOffset = 0;
 				p.mFirstIndex = (uint32_t)(indices.byteOffset/indexStride);
 				p.mMaterialIndex = prim.material;
-				p.mBaseColorTexture = model.materials[prim.material].pbrMetallicRoughness.baseColorTexture.index;
-				p.mNormalTexture = model.materials[prim.material].normalTexture.index;
-				p.mMetallicRoughnessTexture = model.materials[prim.material].pbrMetallicRoughness.metallicRoughnessTexture.index;
-				p.mOcclusionTexture = model.materials[prim.material].occlusionTexture.index;
-				p.mEmissionTexture = model.materials[prim.material].emissiveTexture.index;
 			}
 		}
 
@@ -362,7 +362,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				light.mSpotAngleOffset = -(float)(co * light.mSpotAngleScale);
 				light.mShadowProjection = hlsl::make_perspective((float)l.spot.outerConeAngle, 1, 0, 128);
 			}
-			light.mShadowBias = .00001f;
+			light.mShadowBias = .000001f;
 			light.mShadowST = Vector4f(1,1,0,0);
 		}
  
@@ -377,7 +377,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 
 	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	Texture::View shadowAtlas = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
 	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
@@ -395,13 +395,16 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (const hlsl::LightData& l : n.components<hlsl::LightData>())
-			lights.emplace_back(l).mLightToWorld = transform; // TODO: assign mShadowST
+		for (const hlsl::LightData& l : n.components<hlsl::LightData>()) {
+			hlsl::LightData& dst = lights.emplace_back(l);
+			dst.mLightToWorld = transform;
+			dst.mShadowST = hlsl::float4(1,1,0,0);
+		}
 	}
 
 	mMaterial->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
-	mMaterial->descriptor("gShadowMap") = sampled_texture_descriptor(shadowAtlas);
+	mMaterial->descriptor("gShadowMap") = sampled_texture_descriptor(shadowMap);
 	mMaterial->push_constant("gLightCount", (uint32_t)lights.size());
 
 	mShadowMaterial->descriptor("gTransforms") = mMaterial->descriptor("gTransforms");
@@ -410,7 +413,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		mShadowMaterial->push_constant("gWorldToCamera", inverse(light.mLightToWorld));
 		mShadowMaterial->push_constant("gProjection", light.mShadowProjection);
 		// TODO: use light.mShadowST to set viewport
-		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowAtlas } });
+		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowMap } });
 	}
 
 	mMaterial->transition_images(commandBuffer);

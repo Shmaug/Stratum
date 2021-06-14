@@ -56,7 +56,7 @@ void CommandBuffer::reset(const string& name) {
 	mState = CommandBufferState::eRecording;
 }
 
-void CommandBuffer::begin_render_pass(shared_ptr<RenderPass> renderPass, shared_ptr<Framebuffer> framebuffer, const vk::ArrayProxy<const vk::ClearValue>& clearValues, vk::SubpassContents contents) {
+void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxy<const vk::ClearValue>& clearValues, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < framebuffer->size(); i++)
@@ -72,7 +72,7 @@ void CommandBuffer::begin_render_pass(shared_ptr<RenderPass> renderPass, shared_
 	} else
 		ranges::copy(clearValues, vals.begin());
 
-	mCommandBuffer.beginRenderPass(vk::RenderPassBeginInfo(**renderPass, **framebuffer, vk::Rect2D({}, framebuffer->extent()), vals), contents);
+	mCommandBuffer.beginRenderPass(vk::RenderPassBeginInfo(**renderPass, **framebuffer, renderArea, vals), contents);
 
 	mBoundFramebuffer = framebuffer;
 	mSubpassIndex = 0;

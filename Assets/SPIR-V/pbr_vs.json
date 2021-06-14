@@ -73,31 +73,6 @@
                     "name" : "gMaterialIndex",
                     "type" : "uint",
                     "offset" : 52
-                },
-                {
-                    "name" : "gBaseColorTexture",
-                    "type" : "uint",
-                    "offset" : 56
-                },
-                {
-                    "name" : "gNormalTexture",
-                    "type" : "uint",
-                    "offset" : 60
-                },
-                {
-                    "name" : "gMetallicRoughnessTexture",
-                    "type" : "uint",
-                    "offset" : 64
-                },
-                {
-                    "name" : "gOcclusionTexture",
-                    "type" : "uint",
-                    "offset" : 68
-                },
-                {
-                    "name" : "gEmissionTexture",
-                    "type" : "uint",
-                    "offset" : 72
                 }
             ]
         },
@@ -154,7 +129,7 @@
         },
         {
             "type" : "vec4",
-            "name" : "@entryPointOutput.cameraPos",
+            "name" : "@entryPointOutput.posCamera",
             "location" : 2
         },
         {
