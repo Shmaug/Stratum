@@ -262,6 +262,7 @@ public:
 	}
 	inline Vector2f& cursor_pos() { return mCursorPos; }
 
+	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
 	inline const Vector2f& cursor_pos() const { return mCursorPos; }
 	inline const Vector2f& cursor_delta() const { return mCursorDelta; }
 	inline float scroll_delta() const { return mScrollDelta; }

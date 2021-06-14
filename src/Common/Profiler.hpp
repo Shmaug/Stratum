@@ -18,8 +18,12 @@ private:
 	STRATUM_API static list<ProfilerSample> mFrameHistory;
 	STRATUM_API static ProfilerSample* mCurrentSample;
 	STRATUM_API static size_t mHistoryCount;
+	STRATUM_API static bool mPaused;
+	STRATUM_API static unique_ptr<ProfilerSample> mTimelineSample;
 
 public:
+	static void DrawGui();
+
 	inline static void begin_sample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
 		ProfilerSample s;
 		s.mParent = mCurrentSample;
@@ -37,6 +41,7 @@ public:
 	}
 	inline static ProfilerSample& end_sample() {
 		if (!mCurrentSample) throw logic_error("attempt to end nonexistant profiler sample!");
+		if (mPaused) return *mCurrentSample;
 		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
 		ProfilerSample* tmp = mCurrentSample;
 		mCurrentSample = mCurrentSample->mParent;
