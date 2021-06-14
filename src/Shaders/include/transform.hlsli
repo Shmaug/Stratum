@@ -79,7 +79,7 @@ inline float4 project_point(ProjectionData t, float3 v) {
 	r[1] = v[1]*t.Scale[1];
 	r[2] = (v[2] + t.OffsetZ) * t.Scale[2];
 	if (is_perspective(t)) {
-		r[2] *= sqrt(v[2]);
+		r[2] *= v[2];
 		r[3] = v[2];
 	} else {
 		r[2] = -r[2];

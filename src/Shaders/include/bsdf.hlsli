@@ -15,7 +15,7 @@ static const float gDielectricSpecular = 0.04f;
 inline BSDF make_BSDF(float3 baseColor, float metallic, float roughness, float3 emission = 0) {
 	BSDF bsdf;
 	bsdf.specular = lerp(gDielectricSpecular, baseColor, metallic);
-	bsdf.diffuse = baseColor * (1 - gDielectricSpecular) * (1 - metallic) / max(1 - max3(bsdf.specular), 1e-6f);
+	bsdf.diffuse = baseColor * (1 - gDielectricSpecular) * (1 - metallic) / max(1 - max3(bsdf.specular), 1e-5f);
 	bsdf.roughness = max(.002f, roughness);
 	bsdf.emission = emission;
 	return bsdf;

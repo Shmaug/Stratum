@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_639" : {
+        "_702" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_640" : {
+        "_703" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_639",
+                    "type" : "_702",
                     "offset" : 16
                 }
             ]
         },
-        "_641" : {
+        "_704" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,17 +51,17 @@
                 }
             ]
         },
-        "_642" : {
-            "name" : "_642",
+        "_705" : {
+            "name" : "_705",
             "members" : [
                 {
                     "name" : "gWorldToCamera",
-                    "type" : "_640",
+                    "type" : "_703",
                     "offset" : 0
                 },
                 {
                     "name" : "gProjection",
-                    "type" : "_641",
+                    "type" : "_704",
                     "offset" : 32
                 },
                 {
@@ -73,35 +73,10 @@
                     "name" : "gMaterialIndex",
                     "type" : "uint",
                     "offset" : 52
-                },
-                {
-                    "name" : "gBaseColorTexture",
-                    "type" : "uint",
-                    "offset" : 56
-                },
-                {
-                    "name" : "gNormalTexture",
-                    "type" : "uint",
-                    "offset" : 60
-                },
-                {
-                    "name" : "gMetallicRoughnessTexture",
-                    "type" : "uint",
-                    "offset" : 64
-                },
-                {
-                    "name" : "gOcclusionTexture",
-                    "type" : "uint",
-                    "offset" : 68
-                },
-                {
-                    "name" : "gEmissionTexture",
-                    "type" : "uint",
-                    "offset" : 72
                 }
             ]
         },
-        "_806" : {
+        "_865" : {
             "name" : "MaterialData",
             "members" : [
                 {
@@ -138,15 +113,20 @@
                     "name" : "pad",
                     "type" : "uint",
                     "offset" : 44
+                },
+                {
+                    "name" : "mTextureIndices",
+                    "type" : "uvec4",
+                    "offset" : 48
                 }
             ]
         },
-        "_808" : {
+        "_867" : {
             "name" : "gMaterials",
             "members" : [
                 {
                     "name" : "@data",
-                    "type" : "_806",
+                    "type" : "_865",
                     "array" : [
                         0
                     ],
@@ -154,21 +134,21 @@
                         true
                     ],
                     "offset" : 0,
-                    "array_stride" : 48
+                    "array_stride" : 64
                 }
             ]
         },
-        "_1006" : {
+        "_1093" : {
             "name" : "LightData",
             "members" : [
                 {
                     "name" : "mLightToWorld",
-                    "type" : "_640",
+                    "type" : "_703",
                     "offset" : 0
                 },
                 {
                     "name" : "mShadowProjection",
-                    "type" : "_641",
+                    "type" : "_704",
                     "offset" : 32
                 },
                 {
@@ -208,12 +188,12 @@
                 }
             ]
         },
-        "_1008" : {
+        "_1095" : {
             "name" : "gLights",
             "members" : [
                 {
                     "name" : "@data",
-                    "type" : "_1006",
+                    "type" : "_1093",
                     "array" : [
                         0
                     ],
@@ -239,7 +219,7 @@
         },
         {
             "type" : "vec4",
-            "name" : "i.cameraPos",
+            "name" : "i.posCamera",
             "location" : 2
         },
         {
@@ -266,7 +246,7 @@
             "type" : "texture2D",
             "name" : "gTextures",
             "array" : [
-                856
+                912
             ],
             "array_size_is_literal" : [
                 false
@@ -291,7 +271,7 @@
     ],
     "ssbos" : [
         {
-            "type" : "_808",
+            "type" : "_867",
             "name" : "gMaterials",
             "readonly" : true,
             "block_size" : 0,
@@ -299,7 +279,7 @@
             "binding" : 1
         },
         {
-            "type" : "_1008",
+            "type" : "_1095",
             "name" : "gLights",
             "readonly" : true,
             "block_size" : 0,
@@ -309,8 +289,8 @@
     ],
     "push_constants" : [
         {
-            "type" : "_642",
-            "name" : "_644",
+            "type" : "_705",
+            "name" : "_707",
             "push_constant" : true
         }
     ],
@@ -319,14 +299,14 @@
             "name" : "gTextureCount",
             "id" : 0,
             "type" : "uint",
-            "variable_id" : 856,
+            "variable_id" : 912,
             "default_value" : 16
         },
         {
             "name" : "gAlphaClip",
             "id" : 1,
             "type" : "float",
-            "variable_id" : 878,
+            "variable_id" : 934,
             "default_value" : -1.0
         }
     ]

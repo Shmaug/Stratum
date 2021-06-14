@@ -190,9 +190,18 @@ public:
 		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
 		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, &value);
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
 	}
 	
+	template<typename T, int M, int N> requires(is_trivially_copyable_v<T> && M != Eigen::Dynamic && N != Eigen::Dynamic)
+	inline void push_constant(const string& name, const Eigen::Array<T,M,N>& value) {
+		auto it = mBoundPipeline->push_constants().find(name);
+		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
+		const auto& range = it->second;
+		if (range.size != sizeof(T)*M*N) throw invalid_argument("argument size (" + to_string(sizeof(T)*M*N) + ") must match push constant size (" + to_string(range.size) +")");
+		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T)*M*N, value.data());
+	}
+
 	template<ranges::range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
 	inline void push_constant(const string& name, const R& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
