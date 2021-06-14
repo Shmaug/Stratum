@@ -12,8 +12,7 @@ size_t Profiler::mHistoryCount = 256;
 bool Profiler::mPaused = false;
 unique_ptr<ProfilerSample> Profiler::mTimelineSample = nullptr;
 
-namespace ProfilerGui
-{
+namespace ProfilerGui {
 
 static ImVec2 startOffset = ImVec2(10.f, 10.f);
 static constexpr float sectionHeight = 20.f;
