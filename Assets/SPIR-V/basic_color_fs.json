@@ -1,7 +1,7 @@
 {
     "entryPoints" : [
         {
-            "name" : "fs_color",
+            "name" : "color_fs",
             "mode" : "frag"
         }
     ],

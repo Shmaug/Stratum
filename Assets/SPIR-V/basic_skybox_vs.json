@@ -1,12 +1,12 @@
 {
     "entryPoints" : [
         {
-            "name" : "vs_axis",
+            "name" : "skybox_vs",
             "mode" : "vert"
         }
     ],
     "types" : {
-        "_205" : {
+        "_158" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_206" : {
+        "_159" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_205",
+                    "type" : "_158",
                     "offset" : 16
                 }
             ]
         },
-        "_207" : {
+        "_160" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,38 +51,50 @@
                 }
             ]
         },
-        "_208" : {
-            "name" : "_208",
+        "_161" : {
+            "name" : "_161",
             "members" : [
                 {
                     "name" : "gWorldToCamera",
-                    "type" : "_206",
+                    "type" : "_159",
                     "offset" : 0
                 },
                 {
                     "name" : "gProjection",
-                    "type" : "_207",
+                    "type" : "_160",
                     "offset" : 32
                 },
                 {
                     "name" : "gEnvironmentGamma",
                     "type" : "float",
                     "offset" : 48
+                },
+                {
+                    "name" : "gScaleTranslate",
+                    "type" : "vec4",
+                    "offset" : 64
                 }
             ]
         }
     },
+    "inputs" : [
+        {
+            "type" : "vec3",
+            "name" : "vertex",
+            "location" : 0
+        }
+    ],
     "outputs" : [
         {
-            "type" : "vec4",
-            "name" : "color",
+            "type" : "vec3",
+            "name" : "viewRay",
             "location" : 0
         }
     ],
     "push_constants" : [
         {
-            "type" : "_208",
-            "name" : "_210",
+            "type" : "_161",
+            "name" : "_163",
             "push_constant" : true
         }
     ]

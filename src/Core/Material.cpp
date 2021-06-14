@@ -9,12 +9,16 @@ shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const 
 		return Pipeline::ShaderStage(spirv, mSpecializationConstants);
 	});
 
-	size_t key = hash_args(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry.topology(), geometry | views::values, stages, mCullMode, mPolygonMode, mSampleShading, mDepthStencilState, mBlendStates);
+	size_t key = hash_args(
+		commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
+		geometry.topology(), geometry|views::values, stages,
+		mImmutableSamplers|views::transform([](const auto& s){ return s.second->create_info(); }),
+		mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
 	auto p_it = mPipelines.find(key);
 	if (p_it == mPipelines.end())
 		p_it = mPipelines.emplace(key, make_shared<GraphicsPipeline>(mName,
 				commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
-				geometry, stages, mImmutableSamplers, mCullMode, mPolygonMode, mSampleShading, mDepthStencilState, mBlendStates) ).first;
+				geometry, stages, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates) ).first;
 	
 	const auto& pipeline = p_it->second;
 	commandBuffer.bind_pipeline(pipeline);

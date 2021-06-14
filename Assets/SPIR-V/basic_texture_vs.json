@@ -1,0 +1,116 @@
+{
+    "entryPoints" : [
+        {
+            "name" : "texture_vs",
+            "mode" : "vert"
+        }
+    ],
+    "types" : {
+        "_33" : {
+            "name" : "quatf",
+            "members" : [
+                {
+                    "name" : "coeffs",
+                    "type" : "vec4",
+                    "offset" : 0
+                }
+            ]
+        },
+        "_34" : {
+            "name" : "TransformData",
+            "members" : [
+                {
+                    "name" : "Translation",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "Scale",
+                    "type" : "float",
+                    "offset" : 12
+                },
+                {
+                    "name" : "Rotation",
+                    "type" : "_33",
+                    "offset" : 16
+                }
+            ]
+        },
+        "_35" : {
+            "name" : "ProjectionData",
+            "members" : [
+                {
+                    "name" : "Scale",
+                    "type" : "vec3",
+                    "offset" : 0
+                },
+                {
+                    "name" : "OffsetZ",
+                    "type" : "float",
+                    "offset" : 12
+                }
+            ]
+        },
+        "_36" : {
+            "name" : "_36",
+            "members" : [
+                {
+                    "name" : "gWorldToCamera",
+                    "type" : "_34",
+                    "offset" : 0
+                },
+                {
+                    "name" : "gProjection",
+                    "type" : "_35",
+                    "offset" : 32
+                },
+                {
+                    "name" : "gEnvironmentGamma",
+                    "type" : "float",
+                    "offset" : 48
+                },
+                {
+                    "name" : "gScaleTranslate",
+                    "type" : "vec4",
+                    "offset" : 64
+                }
+            ]
+        }
+    },
+    "inputs" : [
+        {
+            "type" : "vec2",
+            "name" : "v.vertex",
+            "location" : 0
+        },
+        {
+            "type" : "vec2",
+            "name" : "v.uv",
+            "location" : 1
+        },
+        {
+            "type" : "vec4",
+            "name" : "v.color",
+            "location" : 2
+        }
+    ],
+    "outputs" : [
+        {
+            "type" : "vec2",
+            "name" : "uv",
+            "location" : 0
+        },
+        {
+            "type" : "vec4",
+            "name" : "color",
+            "location" : 1
+        }
+    ],
+    "push_constants" : [
+        {
+            "type" : "_36",
+            "name" : "_38",
+            "push_constant" : true
+        }
+    ]
+}

@@ -1,4 +1,4 @@
-#include "pbrRenderer.hpp"
+#include "PbrRenderer.hpp"
 #include "../Core/Window.hpp"
 
 #define TINYGLTF_USE_CPP14
@@ -8,72 +8,35 @@
 
 using namespace stm;
 
-pbrRenderer::pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs, vk::SampleCountFlagBits sampleCount, vk::ImageLayout dstLayout) : mNodeGraph(nodeGraph) {
-	#pragma region render nodes
+PbrRenderer::PbrRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs) : mNodeGraph(nodeGraph) {
 	vk::PipelineColorBlendAttachmentState blendOpaque;
 	blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 
-	mRenderNode = &nodeGraph.emplace("mainpass").emplace<RenderNode>();
-	(*mRenderNode)[""].bind_point(vk::PipelineBindPoint::eGraphics);
-	(*mRenderNode)[""]["primaryColor"] =  RenderPass::SubpassDescription::AttachmentInfo(
-		RenderPass::AttachmentTypeFlags::eColor, blendOpaque, vk::AttachmentDescription({},
-			device.mInstance.window().surface_format().format, sampleCount,
-			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
-			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-			vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal));
-	(*mRenderNode)[""]["primaryDepth"] =  RenderPass::SubpassDescription::AttachmentInfo(
-		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
-			vk::Format::eD32Sfloat, sampleCount,
-			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eDontCare,
-			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal));
-	(*mRenderNode)[""]["primaryResolve"] =  RenderPass::SubpassDescription::AttachmentInfo(
-		RenderPass::AttachmentTypeFlags::eResolve, blendOpaque, vk::AttachmentDescription({},
-			device.mInstance.window().surface_format().format, vk::SampleCountFlagBits::e1,
-			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore,
-			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-			vk::ImageLayout::eColorAttachmentOptimal, dstLayout));
-			
-	mShadowRenderNode = &nodeGraph.emplace("shadowpass").emplace<RenderNode>();
-	mShadowRenderNode->node().set_parent(mRenderNode->node());
-	(*mShadowRenderNode)[""].bind_point(vk::PipelineBindPoint::eGraphics);
-	(*mShadowRenderNode)[""]["gShadowMap"] = RenderPass::SubpassDescription::AttachmentInfo(
+	mShadowPass = &nodeGraph.emplace("shadowpass").emplace<RenderNode>();
+	(*mShadowPass)[""].bind_point(vk::PipelineBindPoint::eGraphics);
+	(*mShadowPass)[""]["gShadowMap"] = RenderPass::SubpassDescription::AttachmentInfo(
 		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
 			vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
 			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
-	#pragma endregion
 
-	#pragma region materials
 	mMaterial = make_shared<Material>("pbr", vs, fs);
-	mShadowMaterial = make_shared<Material>("pbrShadow", vs);
 
-	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(device, "gSampler", vk::SamplerCreateInfo({},
+	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
-	mMaterial->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(device, "gShadowSampler", vk::SamplerCreateInfo({},
+	mMaterial->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(fs->mDevice, "gShadowSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
 		0, true, 2, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
-	#pragma endregion
 
-	auto render_fn = [&](Material& material, CommandBuffer& commandBuffer) {
-		mNodeGraph.for_each_component<PrimitiveSet>([&](const PrimitiveSet& primitive) {
-			material.bind(commandBuffer, primitive.mGeometry);
-			material.bind_descriptor_sets(commandBuffer);
-			material.push_constants(commandBuffer);
-			commandBuffer.push_constant("gMaterialIndex", primitive.mMaterialIndex);
-			primitive.mGeometry.drawIndexed(commandBuffer, primitive.mIndices, primitive.mIndexCount, 1, primitive.mFirstIndex, primitive.mVertexOffset, primitive.mMaterialIndex);
-		});
-	};
-	mRenderNode->PreRender.emplace(mRenderNode->node(), bind_front(&pbrRenderer::pre_render, this));		
-	mShadowRenderNode->OnRender.emplace(mRenderNode->node(), bind_front(render_fn, ref(*mShadowMaterial)) );
-	mRenderNode->OnRender.emplace(mRenderNode->node(), bind_front(render_fn, ref(*mMaterial)) );		
+	mShadowMaterial = make_shared<Material>("pbrShadow", vs);
+	mShadowPass->OnDraw.emplace(mShadowPass->node(), bind(&PbrRenderer::draw, this, std::placeholders::_1, ref(*mShadowMaterial)) );
 }
 
-void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filename) {
+void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("pbrRenderer::load_gltf", commandBuffer);
 
 	tinygltf::Model model;
@@ -293,7 +256,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 	
 	mMaterial->descriptor("gMaterials") = commandBuffer.copy_buffer(materials, vk::BufferUsageFlagBits::eStorageBuffer);
 
-	mMaterial->cull_mode(vk::CullModeFlagBits::eFront);
+	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
 
 	queue<pair<NodeGraph::Node*, int>> todo;
 	for (const auto& s : model.scenes)
@@ -370,14 +333,14 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 	}
 }
 
-void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
+void PbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 	ProfilerRegion s("pbrRenderer::pre_render", commandBuffer);
 
 	Buffer::View<hlsl::MaterialData> materialBuffer = get<Buffer::StrideView>(mMaterial->descriptor("gMaterials"));
 
 	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowPass)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
 	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
@@ -413,8 +376,18 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		mShadowMaterial->push_constant("gWorldToCamera", inverse(light.mLightToWorld));
 		mShadowMaterial->push_constant("gProjection", light.mShadowProjection);
 		// TODO: use light.mShadowST to set viewport
-		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowMap } });
+		mShadowPass->render(commandBuffer, { { "gShadowMap", shadowMap } });
 	}
 
 	mMaterial->transition_images(commandBuffer);
+}
+
+void PbrRenderer::draw(CommandBuffer& commandBuffer, Material& material) const {
+	mNodeGraph.for_each_component<PrimitiveSet>([&](const PrimitiveSet& primitive) {
+		material.bind(commandBuffer, primitive.mGeometry);
+		material.bind_descriptor_sets(commandBuffer);
+		material.push_constants(commandBuffer);
+		commandBuffer.push_constant("gMaterialIndex", primitive.mMaterialIndex);
+		primitive.mGeometry.drawIndexed(commandBuffer, primitive.mIndices, primitive.mIndexCount, 1, primitive.mFirstIndex, primitive.mVertexOffset, primitive.mMaterialIndex);
+	});
 }

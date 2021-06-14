@@ -12,9 +12,8 @@ private:
 	unordered_map<string, vector<byte>> mPushConstants;
 	unordered_map<string, unordered_map<uint32_t, stm::Descriptor>> mDescriptors;
 	unordered_map<string, shared_ptr<Sampler>> mImmutableSamplers;
-	vk::CullModeFlags mCullMode = vk::CullModeFlagBits::eBack;
-	vk::PolygonMode mPolygonMode = vk::PolygonMode::eFill;
 	bool mSampleShading = false;
+	vk::PipelineRasterizationStateCreateInfo mRasterState = { {}, false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack };
 	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState = vk::PipelineDepthStencilStateCreateInfo({}, true, true, vk::CompareOp::eLessOrEqual);
 	vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
 
@@ -36,20 +35,18 @@ public:
 			return *it;
 	}
 
+	inline const auto& immutable_samplers() const { return mImmutableSamplers; }
 	inline void set_immutable_sampler(const string& name, const shared_ptr<Sampler>& sampler) {
 		auto it = mImmutableSamplers.find(name);
 		mImmutableSamplers.emplace(name, sampler);
 		mPipelines.clear();
 	}
 
-	inline void cull_mode(const vk::CullModeFlags& v) { mCullMode = v; }
-	inline const auto& cull_mode() const { return mCullMode; }
-
-	inline void polygon_mode(const vk::PolygonMode& v) { mPolygonMode = v; }
-	inline const auto& polygon_mode() const { return mPolygonMode; }
-
 	inline void sample_shading(bool v) { mSampleShading = v; }
 	inline const auto& sample_shading() const { return mSampleShading; }
+
+	inline auto& raster_state() { return mRasterState; }
+	inline const auto& raster_state() const { return mRasterState; }
 
 	inline auto& depth_stencil() { return mDepthStencilState; }
 	inline const auto& depth_stencil() const { return mDepthStencilState; }

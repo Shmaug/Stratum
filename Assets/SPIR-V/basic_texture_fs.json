@@ -1,19 +1,19 @@
 {
     "entryPoints" : [
         {
-            "name" : "fs_texture",
+            "name" : "texture_fs",
             "mode" : "frag"
         }
     ],
     "inputs" : [
         {
-            "type" : "vec4",
-            "name" : "color",
+            "type" : "vec2",
+            "name" : "uv",
             "location" : 0
         },
         {
-            "type" : "vec2",
-            "name" : "uv",
+            "type" : "vec4",
+            "name" : "color",
             "location" : 1
         }
     ],

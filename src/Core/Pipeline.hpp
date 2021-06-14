@@ -179,7 +179,8 @@ private:
 public:
 	inline GraphicsPipeline(const string& name, const stm::RenderPass& renderPass, uint32_t subpassIndex, const Geometry& geometry,
 		const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {},
-		vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack, vk::PolygonMode polygonMode = vk::PolygonMode::eFill, bool sampleShading = false,
+		const vk::PipelineRasterizationStateCreateInfo& rasterState = { {}, false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack },
+		bool sampleShading = false,
 		const vk::PipelineDepthStencilStateCreateInfo& depthStencilState = { {}, true, true, vk::CompareOp::eLessOrEqual, {}, {}, {}, {}, 0, 1 },
 		const vector<vk::PipelineColorBlendAttachmentState>& blendStates = {},
 		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name, stages, immutableSamplers) {
@@ -241,7 +242,7 @@ public:
 		mDynamicStates = dynamicStates;
 		mInputAssemblyState = { {}, geometry.topology() };
 		mViewportState = { {}, 1, nullptr, 1, nullptr };
-		mRasterizationState = { {}, false, false, polygonMode, cullMode };
+		mRasterizationState = rasterState;
 		mMultisampleState = { {}, sampleCount, sampleShading };
 		vk::PipelineColorBlendStateCreateInfo blendState({}, false, vk::LogicOp::eCopy, mBlendStates);
 		vk::PipelineDynamicStateCreateInfo dynamicState({}, dynamicStates);

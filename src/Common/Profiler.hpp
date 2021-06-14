@@ -22,7 +22,6 @@ private:
 	STRATUM_API static unique_ptr<ProfilerSample> mTimelineSample;
 
 public:
-	static void DrawGui();
 
 	inline static void begin_sample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
 		ProfilerSample s;
@@ -50,6 +49,8 @@ public:
 
 	inline static const list<ProfilerSample>& history() { return mFrameHistory; }
 	inline static void clear() { mFrameHistory.clear(); }
+
+	static void draw_imgui();
 };
 
 }

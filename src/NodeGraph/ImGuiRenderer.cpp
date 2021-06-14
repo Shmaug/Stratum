@@ -1,0 +1,185 @@
+#include "ImGuiRenderer.hpp"
+#include <imgui_internal.h>
+
+#include "../Core/Window.hpp"
+
+using namespace stm;
+
+ImGuiRenderer::ImGuiRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs) {
+	ImGui::CreateContext();
+
+	ImGuiIO& io = ImGui::GetIO();
+	io.BackendRendererName = "imgui_impl_vulkan";
+	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
+
+	ImGui::StyleColorsDark();
+
+	io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;         // We can honor GetMouseCursor() values (optional)
+	io.BackendFlags |= ImGuiBackendFlags_HasSetMousePos;          // We can honor io.WantSetMousePos requests (optional, rarely used)
+	io.BackendPlatformName = "imgui_impl_win32";
+
+	// Keyboard mapping. Dear ImGui will use those indices to peek into the io.KeysDown[] array that we will update during the application lifetime.
+	io.KeyMap[ImGuiKey_Tab] = eKeyTab;
+	io.KeyMap[ImGuiKey_LeftArrow] = eKeyLeft;
+	io.KeyMap[ImGuiKey_RightArrow] = eKeyRight;
+	io.KeyMap[ImGuiKey_UpArrow] = eKeyUp;
+	io.KeyMap[ImGuiKey_DownArrow] = eKeyDown;
+	io.KeyMap[ImGuiKey_PageUp] = eKeyPageUp;
+	io.KeyMap[ImGuiKey_PageDown] = eKeyPageDown;
+	io.KeyMap[ImGuiKey_Home] = eKeyHome;
+	io.KeyMap[ImGuiKey_End] = eKeyEnd;
+	io.KeyMap[ImGuiKey_Insert] = eKeyInsert;
+	io.KeyMap[ImGuiKey_Delete] = eKeyDelete;
+	io.KeyMap[ImGuiKey_Backspace] = eKeyBackspace;
+	io.KeyMap[ImGuiKey_Space] = eKeySpace;
+	io.KeyMap[ImGuiKey_Enter] = eKeyEnter;
+	io.KeyMap[ImGuiKey_Escape] = eKeyEscape;
+	io.KeyMap[ImGuiKey_KeyPadEnter] = eKeyEnter;
+	io.KeyMap[ImGuiKey_A] = 'A';
+	io.KeyMap[ImGuiKey_C] = 'C';
+	io.KeyMap[ImGuiKey_V] = 'V';
+	io.KeyMap[ImGuiKey_X] = 'X';
+	io.KeyMap[ImGuiKey_Y] = 'Y';
+	io.KeyMap[ImGuiKey_Z] = 'Z';
+
+	/*ImGui::GetStyle().FramePadding = ImVec2(4.0f, 2.0f);
+	ImGui::GetStyle().ItemSpacing = ImVec2(8.0f, 2.0f);
+	ImGui::GetStyle().WindowRounding = 2.0f;
+	ImGui::GetStyle().ChildRounding = 2.0f;
+	ImGui::GetStyle().FrameRounding = 2.f;
+	ImGui::GetStyle().ScrollbarRounding = 0.0f;
+	ImGui::GetStyle().GrabRounding = 1.0f;
+	ImGui::GetStyle().WindowBorderSize = 1.0f;
+	ImGui::GetStyle().FrameBorderSize = 1.0f;*/
+	ImGui::GetStyle().ItemSpacing = ImVec2(8.0f, 4.0f);
+	ImGui::GetStyle().FramePadding = ImVec2(4.0f, 4.0f);
+	ImGui::GetStyle().WindowRounding = 10.0f;
+	ImGui::GetStyle().WindowMenuButtonPosition = ImGuiDir_Right;
+	//ImGui::GetStyle().FrameRounding = 8.f;
+
+	ImVec4* colors = ImGui::GetStyle().Colors;
+	colors[ImGuiCol_Text] = ImVec4(0.8f, 0.8f, 0.8f, 1.f);
+	colors[ImGuiCol_TextDisabled] = ImVec4(0.6f, 0.6f, 0.6f, 1.f);
+	colors[ImGuiCol_WindowBg] = ImVec4(0.f, 0.f, 0.f, 1.f);
+	colors[ImGuiCol_Border] = ImVec4(0.f, 0.f, 0.f, 1.f);
+	colors[ImGuiCol_TitleBg] = ImVec4(0.f, 0.f, 0.f, 1.00f);
+	colors[ImGuiCol_TitleBgActive] = ImVec4(0.f, 0.f, 0.f, 1.00f);
+	colors[ImGuiCol_FrameBg] = ImVec4(.0f, .0f, .0f, 1.f);
+	colors[ImGuiCol_Header] = ImVec4(.15f, .15f, .15f, 1.f);
+	colors[ImGuiCol_PlotLines] = ImVec4(1.f, 1.f, 1.f, 1.f);
+	colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
+	colors[ImGuiCol_PlotHistogram] = ImVec4(0.78f, 0.78f, 0.78f, 1.00f);
+	colors[ImGuiCol_PlotHistogramHovered] = ImVec4(0.56f, 0.56f, 0.56f, 1.00f);
+	colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+
+	mMaterial = make_shared<Material>("ImGui", vs, fs);
+	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
+	mMaterial->depth_stencil().setDepthTestEnable(false);
+
+	io.Fonts->AddFontFromFileTTF("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", 18.f);
+}
+
+void ImGuiRenderer::create_textures(CommandBuffer& commandBuffer) {
+	ImGuiIO& io = ImGui::GetIO();
+
+	unsigned char* pixels;
+	int width, height;
+	io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+	auto staging = make_shared<Buffer>(commandBuffer.mDevice, "ImGuiNode::CreateTextures/Staging", width*height*texel_size(vk::Format::eR8G8B8A8Unorm), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	memcpy(staging->data(), pixels, staging->size());
+	
+	auto tex = make_shared<Texture>(commandBuffer.mDevice, "ImGuiRenderer/Texture", vk::Extent3D(width, height, 1), vk::Format::eR8G8B8A8Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage);
+	tex->transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+	commandBuffer->copyBufferToImage(*commandBuffer.hold_resource(staging), **tex, vk::ImageLayout::eTransferDstOptimal,
+		{ vk::BufferImageCopy(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->array_layers()), {0, 0, 0}, vk::Extent3D(width, height, 1)) }
+	);
+
+	if (!mMaterial->immutable_samplers().count("gSampler"))
+		mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(commandBuffer.mDevice, "gSampler", vk::SamplerCreateInfo({},
+			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
+			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
+			0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
+	mMaterial->descriptor("gTexture") = sampled_texture_descriptor(move(tex));
+}
+
+void ImGuiRenderer::new_frame(const Window& window, float deltaTime) {
+	const float width = float(window.swapchain_extent().width), height = float(window.swapchain_extent().height);
+	ImGuiIO& io = ImGui::GetIO();
+	io.DisplaySize = ImVec2(width, height);
+	io.DisplayFramebufferScale = ImVec2(1.f, 1.f);
+
+	io.DeltaTime = deltaTime;
+
+	io.ImeWindowHandle = window.handle();
+	io.MousePos = ImVec2(window.cursor_pos().x(), window.cursor_pos().y());
+	io.MouseDown[0] = window.input_state().pressed(eMouse1);
+	io.MouseDown[1] = window.input_state().pressed(eMouse2);
+	io.MouseDown[2] = window.input_state().pressed(eMouse3);
+	io.MouseWheel = window.input_state().scroll_delta();
+	ranges::uninitialized_fill(io.KeysDown, 0);
+	for (KeyCode key : window.input_state().buttons())
+		io.KeysDown[size_t(key)] = 1;
+
+	ImGui::NewFrame();
+}
+
+void ImGuiRenderer::pre_render(CommandBuffer& commandBuffer) {
+	ImGui::Render();
+
+	mDrawData = ImGui::GetDrawData();
+	if (!mDrawData || mDrawData->TotalVtxCount <= 0) return;
+
+	mMaterial->transition_images(commandBuffer);
+	
+	buffer_vector<ImDrawVert> vertices(commandBuffer.mDevice, mDrawData->TotalVtxCount, vk::BufferUsageFlagBits::eTransferSrc);
+	buffer_vector<ImDrawIdx>   indices(commandBuffer.mDevice, mDrawData->TotalIdxCount, vk::BufferUsageFlagBits::eTransferSrc);
+
+	auto vertexIt = vertices.begin();
+	auto indexIt = indices.begin();
+	for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
+		ranges::copy_n(cmdList->VtxBuffer.Data, cmdList->VtxBuffer.size(), vertexIt);
+		ranges::copy_n(cmdList->IdxBuffer.Data, cmdList->IdxBuffer.size(), indexIt);
+		vertexIt += cmdList->VtxBuffer.size();
+		indexIt += cmdList->IdxBuffer.size();
+	}
+
+	auto vtxbuffer = commandBuffer.copy_buffer<ImDrawVert>(vertices, vk::BufferUsageFlagBits::eVertexBuffer);
+	mGeometry = Geometry(vk::PrimitiveTopology::eTriangleList, {
+		{ Geometry::AttributeType::ePosition, { Geometry::Attribute(vtxbuffer, vk::Format::eR32G32Sfloat,  offsetof(ImDrawVert, pos)) } },
+		{ Geometry::AttributeType::eTexcoord, { Geometry::Attribute(vtxbuffer, vk::Format::eR32G32Sfloat,  offsetof(ImDrawVert, uv)) } },
+		{ Geometry::AttributeType::eColor,    { Geometry::Attribute(vtxbuffer, vk::Format::eR8G8B8A8Unorm, offsetof(ImDrawVert, col)) } }
+	});
+	mIndices = commandBuffer.copy_buffer<ImDrawIdx>(indices, vk::BufferUsageFlagBits::eIndexBuffer);
+}
+
+void ImGuiRenderer::draw(CommandBuffer& commandBuffer) {
+	if (!mDrawData || mDrawData->TotalVtxCount <= 0) return;
+
+	mMaterial->bind(commandBuffer, mGeometry);
+	mMaterial->bind_descriptor_sets(commandBuffer);
+
+	mGeometry.bind(commandBuffer);
+	commandBuffer.bind_index_buffer(mIndices);
+
+	uint32_t vtxOffset = 0;
+	uint32_t idxOffset = 0;
+	for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
+		for (const ImDrawCmd& cmd : cmdList->CmdBuffer)
+			if (cmd.UserCallback != nullptr) {
+				// TODO: reset render state callback
+				// if (cmd->UserCallback == ResetRenderState)
+				cmd.UserCallback(cmdList, &cmd);
+			} else {
+				//ImVec4 clipRect;
+				//clipRect.x = (cmd->ClipRect.x - mDrawData->DisplayPos.x) * mDrawData->FramebufferScale.x;
+				//clipRect.y = (cmd->ClipRect.y - mDrawData->DisplayPos.y) * mDrawData->FramebufferScale.y;
+				//clipRect.z = (cmd->ClipRect.z - mDrawData->DisplayPos.x) * mDrawData->FramebufferScale.x;
+				//clipRect.w = (cmd->ClipRect.w - mDrawData->DisplayPos.y) * mDrawData->FramebufferScale.y;
+				//commandBuffer.push_constant<ImVec4>("ClipRect", clipRect);
+				commandBuffer->drawIndexed(cmd.ElemCount, 1, cmd.IdxOffset + idxOffset, cmd.VtxOffset + vtxOffset, 0);
+			}
+		vtxOffset += cmdList->VtxBuffer.Size;
+		idxOffset += cmdList->IdxBuffer.Size;
+	}
+}

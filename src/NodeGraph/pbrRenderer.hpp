@@ -11,15 +11,13 @@ namespace hlsl {
 #pragma pack(pop)
 }
 
-class pbrRenderer {
+class PbrRenderer {
 private:
 	NodeGraph& mNodeGraph;
 	shared_ptr<Material> mMaterial;
 	shared_ptr<Material> mShadowMaterial;
-	RenderNode* mRenderNode;
-	RenderNode* mShadowRenderNode;
+	RenderNode* mShadowPass;
 
-	STRATUM_API void pre_render(CommandBuffer& commandBuffer) const;
 
 public:
 	struct PrimitiveSet {
@@ -34,24 +32,17 @@ public:
 		hlsl::TextureIndices mTextureIndices;
 	};
 
-	STRATUM_API pbrRenderer(NodeGraph& nodeGraph, Device& device, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs,
-		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e4, vk::ImageLayout dstLayout = vk::ImageLayout::ePresentSrcKHR);
+	STRATUM_API PbrRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs);
 	
 	inline NodeGraph& node_graph() const { return mNodeGraph; }
-	inline RenderNode& main_pass() const { return *mRenderNode; }
-	inline RenderNode& shadow_pass() const { return *mShadowRenderNode; }
+	inline RenderNode& shadow_pass() const { return *mShadowPass; }
 	inline Material& material() const { return *mMaterial; }
 	inline Material& shadow_material() const { return *mShadowMaterial; }
 
 	STRATUM_API void load_gltf(CommandBuffer& commandBuffer, const fs::path& filename);
 
-	inline void render(CommandBuffer& commandBuffer, const Texture::View& renderTarget, const hlsl::TransformData& cameraToWorld, const hlsl::ProjectionData& projection) const {
-		mMaterial->push_constant("gProjection", projection);
-		mMaterial->push_constant("gWorldToCamera", inverse(cameraToWorld));
-		main_pass().render(commandBuffer, {
-			{ "primaryResolve", renderTarget }
-		});
-	}
+	STRATUM_API void pre_render(CommandBuffer& commandBuffer) const;
+	STRATUM_API void draw(CommandBuffer& commandBuffer, Material& material) const;
 };
 
 }

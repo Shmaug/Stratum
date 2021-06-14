@@ -11,8 +11,12 @@ file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image.h 
 file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h ${STRATUM_PATH}/extern/include/stb_image_write.h)
 file(DOWNLOAD https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h ${STRATUM_PATH}/extern/include/tiny_gltf.h)
 
-if (NOT extern/include/imgui)
-    execute_process(COMMAND git clone https://github.com/ocornut/imgui extern/include/imgui WORKING_DIRECTORY ${STRATUM_PATH})
+find_package(imgui CONFIG)
+if (NOT imgui_FOUND)
+    if (NOT extern/include/imgui)
+        execute_process(COMMAND git clone https://github.com/ocornut/imgui extern/include/imgui WORKING_DIRECTORY ${STRATUM_PATH})
+    endif()
+    find_package(imgui CONFIG REQUIRED PATHS "${STRATUM_PATH}/extern/include")
 endif()
 
 find_package(Vulkan REQUIRED)

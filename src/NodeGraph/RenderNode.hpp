@@ -25,7 +25,7 @@ private:
 
 public:
   NodeGraph::Event<CommandBuffer&> PreRender;
-  NodeGraph::Event<CommandBuffer&> OnRender;
+  NodeGraph::Event<CommandBuffer&> OnDraw;
 
   RenderNode(RenderNode&&) = default;
   inline RenderNode(NodeGraph::Node& node, const unordered_map<SubpassIdentifier, RenderPass::SubpassDescription>& subpasses = {}) : mNode(node) {
@@ -34,7 +34,7 @@ public:
   }
 
 	inline NodeGraph::Node& node() const { return mNode; }
-\
+
   template<ranges::range R>
   inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const R& renderTargets, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::Rect2D renderArea = {}) {
     validate_renderpass(commandBuffer.mDevice);
@@ -50,10 +50,10 @@ public:
     commandBuffer->setViewport(0, { vk::Viewport((float)renderArea.offset.x, (float)(renderArea.offset.y + renderArea.extent.height), (float)renderArea.extent.width, -(float)renderArea.extent.height, 0, 1) });
     commandBuffer->setScissor(0, { renderArea });
 
-    OnRender(mNode.node_graph(), commandBuffer);
+    OnDraw(mNode.node_graph(), commandBuffer);
     for (uint32_t i = 1; i < mRenderPass->subpasses().size(); i++) {
       commandBuffer.next_subpass();
-      OnRender(mNode.node_graph(), commandBuffer);
+      OnDraw(mNode.node_graph(), commandBuffer);
     }
     commandBuffer.end_render_pass();
 

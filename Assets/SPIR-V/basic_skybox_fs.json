@@ -1,7 +1,7 @@
 {
     "entryPoints" : [
         {
-            "name" : "fs_skybox",
+            "name" : "skybox_fs",
             "mode" : "frag"
         }
     ],
@@ -68,6 +68,11 @@
                     "name" : "gEnvironmentGamma",
                     "type" : "float",
                     "offset" : 48
+                },
+                {
+                    "name" : "gScaleTranslate",
+                    "type" : "vec4",
+                    "offset" : 64
                 }
             ]
         }

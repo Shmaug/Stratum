@@ -177,7 +177,6 @@ public:
 		if (mBoundPipeline == pipeline) return false;
 		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
-		mBoundDescriptorSets.clear(); // TODO: do descriptorsets need to be cleared?
 		mBoundVertexBuffers.clear();
 		mBoundIndexBuffer = {};
 		hold_resource(pipeline);
