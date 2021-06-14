@@ -86,6 +86,8 @@ int main(int argc, char** argv) {
 		}
 		
 		device.flush();
+
+		nodeGraph.clear();
 		gSpirvModules.clear();
 	}
 	instance.reset();

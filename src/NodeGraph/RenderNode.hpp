@@ -36,7 +36,7 @@ public:
 	inline NodeGraph::Node& node() const { return mNode; }
 \
   template<ranges::range R>
-  inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const R& renderTargets, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}) {
+  inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const R& renderTargets, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::Rect2D renderArea = {}) {
     validate_renderpass(commandBuffer.mDevice);
     
     ProfilerRegion ps("RenderNode::render", commandBuffer);
@@ -44,9 +44,11 @@ public:
 
     PreRender(mNode.node_graph(), commandBuffer);
     
-    commandBuffer.begin_render_pass(mRenderPass, framebuffer, clearValues);
-    commandBuffer->setViewport(0, { vk::Viewport(0, (float)framebuffer->extent().height, (float)framebuffer->extent().width, -(float)framebuffer->extent().height, 0, 1) });
-    commandBuffer->setScissor(0, { vk::Rect2D(vk::Offset2D(0,0), framebuffer->extent()) });
+    if (renderArea.extent.width == 0) renderArea.extent.width = framebuffer->extent().width;
+    if (renderArea.extent.height == 0) renderArea.extent.height = framebuffer->extent().height;
+    commandBuffer.begin_render_pass(mRenderPass, framebuffer, renderArea, clearValues);
+    commandBuffer->setViewport(0, { vk::Viewport((float)renderArea.offset.x, (float)(renderArea.offset.y + renderArea.extent.height), (float)renderArea.extent.width, -(float)renderArea.extent.height, 0, 1) });
+    commandBuffer->setScissor(0, { renderArea });
 
     OnRender(mNode.node_graph(), commandBuffer);
     for (uint32_t i = 1; i < mRenderPass->subpasses().size(); i++) {

@@ -304,7 +304,7 @@ void pbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 
 		hlsl::TransformData& transform = dst.emplace<hlsl::TransformData>(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		if (!node.translation.empty()) transform.Translation = Map<const Array3d>(node.translation.data()).cast<float>();
-		if (!node.rotation.empty()) 	 transform.Rotation = Quaterniond(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]).cast<float>();
+		if (!node.rotation.empty()) 	 transform.Rotation = Quaterniond(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).cast<float>();
 		if (!node.scale.empty()) 			 transform.Scale = (float)Map<const Vector3d>(node.scale.data()).norm();
 		
 		if (node.mesh < model.meshes.size()) {
@@ -377,7 +377,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 
 	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	Texture::View shadowAtlas = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowRenderNode)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
 
 	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
@@ -395,13 +395,16 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (const hlsl::LightData& l : n.components<hlsl::LightData>())
-			lights.emplace_back(l).mLightToWorld = transform; // TODO: assign mShadowST
+		for (const hlsl::LightData& l : n.components<hlsl::LightData>()) {
+			hlsl::LightData& dst = lights.emplace_back(l);
+			dst.mLightToWorld = transform;
+			dst.mShadowST = hlsl::float4(1,1,0,0);
+		}
 	}
 
 	mMaterial->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
-	mMaterial->descriptor("gShadowMap") = sampled_texture_descriptor(shadowAtlas);
+	mMaterial->descriptor("gShadowMap") = sampled_texture_descriptor(shadowMap);
 	mMaterial->push_constant("gLightCount", (uint32_t)lights.size());
 
 	mShadowMaterial->descriptor("gTransforms") = mMaterial->descriptor("gTransforms");
@@ -410,7 +413,7 @@ void pbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		mShadowMaterial->push_constant("gWorldToCamera", inverse(light.mLightToWorld));
 		mShadowMaterial->push_constant("gProjection", light.mShadowProjection);
 		// TODO: use light.mShadowST to set viewport
-		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowAtlas } });
+		mShadowRenderNode->render(commandBuffer, { { "gShadowMap", shadowMap } });
 	}
 
 	mMaterial->transition_images(commandBuffer);
