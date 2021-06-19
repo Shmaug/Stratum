@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_33" : {
+        "_27" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_34" : {
+        "_28" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_33",
+                    "type" : "_27",
                     "offset" : 16
                 }
             ]
         },
-        "_35" : {
+        "_29" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,17 +51,17 @@
                 }
             ]
         },
-        "_36" : {
-            "name" : "_36",
+        "_30" : {
+            "name" : "_30",
             "members" : [
                 {
                     "name" : "gWorldToCamera",
-                    "type" : "_34",
+                    "type" : "_28",
                     "offset" : 0
                 },
                 {
                     "name" : "gProjection",
-                    "type" : "_35",
+                    "type" : "_29",
                     "offset" : 32
                 },
                 {
@@ -70,8 +70,13 @@
                     "offset" : 48
                 },
                 {
-                    "name" : "gScaleTranslate",
-                    "type" : "vec4",
+                    "name" : "gOffset",
+                    "type" : "vec2",
+                    "offset" : 56
+                },
+                {
+                    "name" : "gTexelSize",
+                    "type" : "vec2",
                     "offset" : 64
                 }
             ]
@@ -80,36 +85,36 @@
     "inputs" : [
         {
             "type" : "vec2",
-            "name" : "v.vertex",
+            "name" : "vertex",
             "location" : 0
         },
         {
             "type" : "vec2",
-            "name" : "v.uv",
+            "name" : "uv",
             "location" : 1
         },
         {
             "type" : "vec4",
-            "name" : "v.color",
+            "name" : "color",
             "location" : 2
         }
     ],
     "outputs" : [
         {
             "type" : "vec2",
-            "name" : "uv",
+            "name" : "@entryPointOutput.uv",
             "location" : 0
         },
         {
             "type" : "vec4",
-            "name" : "color",
+            "name" : "@entryPointOutput.color",
             "location" : 1
         }
     ],
     "push_constants" : [
         {
-            "type" : "_36",
-            "name" : "_38",
+            "type" : "_30",
+            "name" : "_32",
             "push_constant" : true
         }
     ]

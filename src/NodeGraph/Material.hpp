@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CommandBuffer.hpp"
-#include "SpirvModule.hpp"
+#include "../Core/CommandBuffer.hpp"
+#include "../Core/SpirvModule.hpp"
 
 namespace stm {
 
@@ -35,21 +35,24 @@ public:
 			return *it;
 	}
 
-	inline const auto& immutable_samplers() const { return mImmutableSamplers; }
-	inline void set_immutable_sampler(const string& name, const shared_ptr<Sampler>& sampler) {
-		auto it = mImmutableSamplers.find(name);
-		mImmutableSamplers.emplace(name, sampler);
-		mPipelines.clear();
-	}
-
 	inline void sample_shading(bool v) { mSampleShading = v; }
 	inline const auto& sample_shading() const { return mSampleShading; }
 
 	inline auto& raster_state() { return mRasterState; }
 	inline const auto& raster_state() const { return mRasterState; }
 
+	inline auto& blend_states() { return mBlendStates; }
+	inline const auto& blend_states() const { return mBlendStates; }
+
 	inline auto& depth_stencil() { return mDepthStencilState; }
 	inline const auto& depth_stencil() const { return mDepthStencilState; }
+
+	inline const auto& immutable_samplers() const { return mImmutableSamplers; }
+	inline void set_immutable_sampler(const string& name, const shared_ptr<Sampler>& sampler) {
+		auto it = mImmutableSamplers.find(name);
+		mImmutableSamplers.emplace(name, sampler);
+		mPipelines.clear();
+	}
 
 	inline void specialization_constant(const string& name, uint32_t v) {
 		mSpecializationConstants.emplace(name, v);

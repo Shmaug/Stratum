@@ -56,6 +56,8 @@ private:
 	array<uint32_t,3> mWorkgroupSize;
 };
 
+using spirv_module_map = unordered_map<string, shared_ptr<SpirvModule>>;
+
 }
 
 namespace std {

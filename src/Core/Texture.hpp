@@ -145,7 +145,7 @@ public:
 		vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
 	}
 
-	// Create around vk::Image, but don't own it
+	// Create around vk::Image, but don't own it (for example, swapchain images). Signified via mMemory = nullptr
 	inline Texture(vk::Image image, Device& device, const string& name, 
 		const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, vk::ImageTiling tiling = vk::ImageTiling::eOptimal)
@@ -172,7 +172,7 @@ public:
 	
 	inline ~Texture() {
 		for (auto&[k,v] : mViews) mDevice->destroyImageView(v);
-		if (mMemory) mDevice->destroyImage(mImage); // if mMemory isn't set, then the image object isn't owned by this object (ie swapchain images)
+		if (mMemory) mDevice->destroyImage(mImage);
 	}
 
 	inline vk::Image& operator*() { return mImage; }

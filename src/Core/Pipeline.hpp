@@ -200,17 +200,23 @@ public:
 				break;
 			}
 
+		struct stride_view_hash {
+			inline size_t operator()(const Buffer::StrideView& v) const {
+				return hash_args(v.buffer_ptr().get(), v.offset(), v.size_bytes(), v.stride());
+			}
+		};
+
 		vector<vk::VertexInputAttributeDescription> attributes;
 		vector<vk::VertexInputBindingDescription> bindings;
-		vector<Buffer::View<byte>> uniqueBuffers;
+		unordered_map<Buffer::StrideView, uint32_t, stride_view_hash> uniqueBuffers;
 		for (const auto& [n, v] : stages.front().spirv()->stage_inputs()) {
 			const Geometry::Attribute& attrib = geometry[v.mAttributeType][v.mTypeIndex];
 			uint32_t i = (uint32_t)uniqueBuffers.size();
-			if (auto it = ranges::find(uniqueBuffers, attrib.buffer()); it == uniqueBuffers.end()) {
-				bindings.emplace_back(i, attrib.stride(), attrib.input_rate());
-				uniqueBuffers.emplace_back(attrib.buffer());
+			if (auto it = uniqueBuffers.find(attrib.buffer()); it == uniqueBuffers.end()) {
+				bindings.emplace_back(i, (uint32_t)attrib.buffer().stride(), attrib.input_rate());
+				uniqueBuffers.emplace(attrib.buffer(), i);
 			} else
-				i = (uint32_t)std::distance(it, uniqueBuffers.begin());
+				i = it->second;
 			attributes.emplace_back(v.mLocation, i, attrib.format(), attrib.offset());
 			mVertexBufferMap[v.mAttributeType][v.mTypeIndex] = i;
 		}

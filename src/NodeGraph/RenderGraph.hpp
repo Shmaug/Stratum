@@ -1,14 +1,13 @@
 #pragma once
 
 #include "NodeGraph.hpp"
-
-#include "../Core/Material.hpp"
+#include "Material.hpp"
 
 namespace stm {
 
 using SubpassIdentifier = string;
 
-class RenderNode {
+class RenderGraph {
 private:
   NodeGraph::Node& mNode;
   vector<pair<SubpassIdentifier, RenderPass::SubpassDescription>> mSubpasses;
@@ -16,19 +15,20 @@ private:
 
   inline void validate_renderpass(Device& device) {
     if (!mRenderPass) {
-      ProfilerRegion ps("RenderNode::validate_renderpass");
+      ProfilerRegion ps("RenderGraph::validate_renderpass");
       vector<RenderPass::SubpassDescription> subpasses(mSubpasses.size());
       ranges::transform(mSubpasses, subpasses.begin(), &pair<SubpassIdentifier, RenderPass::SubpassDescription>::second);
       mRenderPass = make_shared<RenderPass>(device, mNode.name()+"/RenderPass", subpasses);
     }
   }
-
+  
 public:
   NodeGraph::Event<CommandBuffer&> PreRender;
   NodeGraph::Event<CommandBuffer&> OnDraw;
 
-  RenderNode(RenderNode&&) = default;
-  inline RenderNode(NodeGraph::Node& node, const unordered_map<SubpassIdentifier, RenderPass::SubpassDescription>& subpasses = {}) : mNode(node) {
+  RenderGraph(RenderGraph&&) = default;
+
+  inline RenderGraph(NodeGraph::Node& node, const unordered_map<SubpassIdentifier, RenderPass::SubpassDescription>& subpasses = {}) : mNode(node) {
     mSubpasses.resize(subpasses.size());
     ranges::copy(subpasses, mSubpasses.begin());
   }
@@ -39,10 +39,10 @@ public:
   inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const R& renderTargets, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::Rect2D renderArea = {}) {
     validate_renderpass(commandBuffer.mDevice);
     
-    ProfilerRegion ps("RenderNode::render", commandBuffer);
+    ProfilerRegion ps("RenderGraph::render", commandBuffer);
     auto framebuffer = make_shared<Framebuffer>(*mRenderPass, mNode.name()+"/Framebuffer", renderTargets);
 
-    PreRender(mNode.node_graph(), commandBuffer);
+    PreRender(commandBuffer);
     
     if (renderArea.extent.width == 0) renderArea.extent.width = framebuffer->extent().width;
     if (renderArea.extent.height == 0) renderArea.extent.height = framebuffer->extent().height;
@@ -50,10 +50,10 @@ public:
     commandBuffer->setViewport(0, { vk::Viewport((float)renderArea.offset.x, (float)(renderArea.offset.y + renderArea.extent.height), (float)renderArea.extent.width, -(float)renderArea.extent.height, 0, 1) });
     commandBuffer->setScissor(0, { renderArea });
 
-    OnDraw(mNode.node_graph(), commandBuffer);
+    OnDraw(commandBuffer);
     for (uint32_t i = 1; i < mRenderPass->subpasses().size(); i++) {
       commandBuffer.next_subpass();
-      OnDraw(mNode.node_graph(), commandBuffer);
+      OnDraw(commandBuffer);
     }
     commandBuffer.end_render_pass();
 

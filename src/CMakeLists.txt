@@ -28,3 +28,5 @@ file(GLOB_RECURSE SHADER_FILES "Shaders/**.[gh]lsl")
 foreach(SHADER_FILE ${SHADER_FILES})
   CompileShader(${SHADER_FILE} ${STRATUM_PATH}/Assets/SPIR-V)
 endforeach()
+
+add_subdirectory(Plugins/DicomVis)

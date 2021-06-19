@@ -56,6 +56,7 @@ pair<Geometry::AttributeType, uint32_t> attribute_type(const string& name) {
 	static const unordered_map<string, Geometry::AttributeType> gAttributeTypeMap {
 		{ "vertex", Geometry::AttributeType::ePosition },
 		{ "position", Geometry::AttributeType::ePosition },
+		{ "pos", Geometry::AttributeType::ePosition },
 		{ "normal", Geometry::AttributeType::eNormal },
 		{ "tangent", Geometry::AttributeType::eTangent },
 		{ "binormal", Geometry::AttributeType::eBinormal },

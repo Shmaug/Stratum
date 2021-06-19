@@ -1,8 +1,6 @@
 #ifndef MATH_H
 #define MATH_H
 
-#ifndef __cplusplus
-
 #ifndef M_PI
 #define M_PI (3.1415926535897932)
 #endif
@@ -60,8 +58,6 @@ inline float4 pow2(float4 x) { return x*x; }
 inline float4 pow3(float4 x) { return pow2(x)*x; }
 inline float4 pow4(float4 x) { return pow2(x)*pow2(x); }
 inline float4 pow5(float4 x) { return pow4(x)*x; }
-
-#endif
 
 inline float3 hue_to_rgb(float hue) {
 	float x = 6*hue;

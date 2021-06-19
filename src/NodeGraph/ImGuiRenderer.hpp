@@ -1,21 +1,23 @@
 #pragma once
 
-#include <imgui.h>
-
-#include "../Core/Material.hpp"
 #include "NodeGraph.hpp"
+#include "Material.hpp"
+
+#include <imgui.h>
 
 namespace stm {
 
 class ImGuiRenderer {
 private:
+	NodeGraph::Node& mNode;
 	shared_ptr<Material> mMaterial;
-	Geometry mGeometry;
-	Buffer::StrideView mIndices;
+	Buffer::View<ImDrawVert> mVertices;
+	Buffer::View<ImDrawIdx>  mIndices;
 	const ImDrawData* mDrawData;
 	
 public:
-	STRATUM_API ImGuiRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs);
+	STRATUM_API ImGuiRenderer(NodeGraph::Node& node);
+	STRATUM_API ~ImGuiRenderer();
 
 	STRATUM_API void create_textures(CommandBuffer& commandBuffer);
 

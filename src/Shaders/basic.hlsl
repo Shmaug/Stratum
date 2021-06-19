@@ -14,10 +14,11 @@
 	TransformData gWorldToCamera;
 	ProjectionData gProjection;
 	float gEnvironmentGamma;
-	float4 gScaleTranslate;
+	float2 gOffset;
+	float2 gTexelSize;
 };
 
-float4 axis_vs(in uint axis : SV_InstanceID, in uint sgn : SV_VertexID, out float4 color : COLOR) : SV_Position {
+float4 axis_vs(in uint axis : SV_InstanceID, in uint sgn : SV_VertexID, out float4 position : SV_Position, out float4 color : COLOR) {
 	float3 direction = 0;
 	direction[axis] = 1;
 	direction = transform_vector(gWorldToCamera, direction);
@@ -25,20 +26,22 @@ float4 axis_vs(in uint axis : SV_InstanceID, in uint sgn : SV_VertexID, out floa
 	color[axis] = sgn ? 0.75 : 1;
 	return project_point(gProjection, gWorldToCamera.Translation + direction*ray_box(gWorldToCamera.Translation, 1/direction, -10, 10)[sgn]);
 }
-float4 skybox_vs(in float3 vertex : POSITION, out float3 viewRay : TEXCOORD0) : SV_Position {
+float4 skybox_vs(in float3 vertex : POSITION, out float4 position : SV_Position, out float3 viewRay : TEXCOORD0) {
 	viewRay = rotate_vector(inverse(gWorldToCamera.Rotation), vertex);
 	return project_point(gProjection, vertex);
 }
 
-struct vertex_gui {
-	float2 vertex : POSITION;
+struct v2f_texture {
+	float4 position : SV_Position;
 	float2 uv : TEXCOORD0;
 	float4 color : COLOR0;
 };
-float4 texture_vs(in vertex_gui v, out float2 uv : TEXCOORD0, out float4 color : COLOR) : SV_Position {
-	uv = v.uv;
-	color = v.color;
-	return float4(v.vertex * gScaleTranslate.xy + gScaleTranslate.zw, 0, 1);
+v2f_texture texture_vs(in float2 vertex : POSITION, in float2 uv : TEXCOORD0, in float4 color : COLOR) {
+	v2f_texture o;
+	o.position = float4((vertex - gOffset) * gTexelSize*2-1, 0, 1);
+	o.uv = uv;
+	o.color = color;
+	return o;
 }
 
 float4 color_fs(float4 color : COLOR) : SV_Target0 { return color; }

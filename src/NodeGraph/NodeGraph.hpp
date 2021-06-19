@@ -11,45 +11,67 @@ public:
 	template<typename... Args>
 	class Event {
 	private:
-		unordered_multimap<const Node*, function<void(Args...)>> mCallbacks;
+		unordered_multimap<const Node*, pair<function<void(Args...)>, NodeGraph*>> mCallbacks;
 
 	public:
 		inline bool empty() { return mCallbacks.empty(); }
 		inline void clear() { mCallbacks.clear(); }
-		
-		template<typename F> requires(invocable<F, Args...> || invocable<F, Node*, Args...> || invocable<F, Node&, Args...>)
-		inline void emplace(const Node& node, F&& fn) {
-			if constexpr (invocable<F, Args...>)
-				mCallbacks.emplace(&node, function<void(Args...)>(forward<F>(fn)));
-			else if constexpr (invocable<F, Node&, Args...>)
-				mCallbacks.emplace(&node, function<void(Args...)>(bind_front(forward<F>(fn), node)));
-			else
-				mCallbacks.emplace(&node, function<void(Args...)>(bind_front(forward<F>(fn), &node)));
-		}
-		inline void erase(const Node& node) {
-			mCallbacks.erase(&node);
-		}
 
-		inline void operator()(NodeGraph& nodeGraph, Args&&... args) {
+		inline void validate() {
 			for (auto it = mCallbacks.begin(); it != mCallbacks.end();)
-				if (nodeGraph.contains(it->first))
+				if (it->second.second->contains(it->first))
 					++it;
 				else
 					it = mCallbacks.erase(it);
-			for (const auto&[node, fn] : mCallbacks)
-				invoke(fn, forward<Args>(args)...);
+		}
+
+		template<typename F> requires(invocable<F, Args...> || invocable<F, Node*, Args...> || invocable<F, Node&, Args...>)
+		inline void emplace(const Node& node, F&& fn) {
+			validate();
+			if constexpr (invocable<F, Args...>)
+				mCallbacks.emplace(&node, make_pair<function<void(Args...)>, NodeGraph*>( forward<F>(fn), &node.node_graph() ));
+			else if constexpr (invocable<F, Node&, Args...>)
+				mCallbacks.emplace(&node, make_pair<function<void(Args...)>, NodeGraph*>( bind_front(forward<F>(fn), node), &node.node_graph() ));
+			else
+				mCallbacks.emplace(&node, make_pair<function<void(Args...)>, NodeGraph*>( bind_front(forward<F>(fn), &node), &node.node_graph() ));
+		}
+		inline void erase(const Node& node) {
+			mCallbacks.erase(&node);
+			validate();
+		}
+
+		inline void operator()(Args&&... args) const {
+			for (auto it = mCallbacks.begin(); it != mCallbacks.end(); it++)
+				if (it->second.second->contains(it->first))
+					invoke(it->second.first, forward<Args>(args)...);
+		}
+		inline void operator()(Args&&... args) {
+			for (auto it = mCallbacks.begin(); it != mCallbacks.end();)
+				if (it->second.second->contains(it->first)) {
+					invoke(it->second.first, forward<Args>(args)...);
+					++it;
+				} else
+					it = mCallbacks.erase(it);
 		}
 	};
 	
 	class Node {
-	private:		
+	private:
+		using component_t = pair<void*, function<void(const void*)>>;
+
 		friend class NodeGraph;
 		NodeGraph& mNodeGraph;
 		string mName;
-		Node* mParent = nullptr;
-		unordered_map<type_index, pair<shared_ptr<void>, function<void(const void*)>>> mComponents;
+		const Node* mParent = nullptr;
+		unordered_map<type_index, component_t> mComponents;
 
 		inline Node(NodeGraph& NodeGraph, const string& name) : mNodeGraph(NodeGraph), mName(name) {}
+
+		inline auto erase_unchecked(unordered_map<type_index, component_t>::const_iterator it) {
+			it->second.second(it->second.first);
+			mNodeGraph.mComponentMap.at(it->first).erase(this);
+			return mComponents.erase(it);
+		}
 
 	public:
 		Event<Node&> OnChildAdded;
@@ -59,115 +81,126 @@ public:
 		Node(Node&&) = default;
 		inline ~Node() {
 			clear_parent();
-			// detach children
 			while (true) {
 				auto edge_it = mNodeGraph.mEdges.find(this);
 				if (edge_it == mNodeGraph.mEdges.end()) break;
 				edge_it->second->clear_parent();
 			}
-			
-			auto c_it = mComponents.begin();
-			while (c_it != mComponents.end()) {
-				if (auto it = mNodeGraph.mComponentMap.find(c_it->first); it != mNodeGraph.mComponentMap.end())
-					it->second.erase(this);
-				c_it = mComponents.erase(c_it);
-			}
+			for (auto it = mComponents.begin(); it != mComponents.end();)
+				it = erase_unchecked(it);
 		}
 
 		inline const string& name() const { return mName; }
 		inline NodeGraph& node_graph() const { return mNodeGraph; }
 
-		inline Node* parent() const { return mParent; }
+		inline const Node* parent() const { return mParent; }
 		inline auto children() const {
 			auto[first,last] = mNodeGraph.mEdges.equal_range(this);
-			return ranges::subrange(first,last) | views::values;
+			return ranges::transform_view(ranges::subrange(first,last) | views::values, [](Node* n) -> Node& { return *n; });
 		}
 
 		inline void clear_parent() {
 			if (mParent) {
-				mParent->OnChildRemoving(mNodeGraph, *this);
+				mParent->OnChildRemoving(*this);
 				auto[first,last] = mNodeGraph.mEdges.equal_range(mParent);
 				mNodeGraph.mEdges.erase(ranges::find(first, last, this, &unordered_multimap<const Node*, Node*>::value_type::second));
 				mParent = nullptr;
-				OnParentChanged(mNodeGraph);
+				OnParentChanged();
 			}
 		}
-		inline void set_parent(Node& parent) {
+		inline void set_parent(const Node& parent) {
 			if (mParent) { 
 				if (mParent == &parent) return;
 				// remove from parent
-				mParent->OnChildRemoving(mNodeGraph, *this);
+				mParent->OnChildRemoving(*this);
 				auto[first,last] = mNodeGraph.mEdges.equal_range(mParent);
 				mNodeGraph.mEdges.erase(ranges::find(first, last, this, &unordered_multimap<const Node*, Node*>::value_type::second));
 			}
 			mNodeGraph.mEdges.emplace(&parent, this);
 			mParent = &parent;
-			parent.OnChildAdded(mNodeGraph, *this);
-			OnParentChanged(mNodeGraph);
+			parent.OnChildAdded(*this);
+			OnParentChanged();
 		}
 	
-		template<typename T, typename... Args> requires(constructible_from<T, Args&&...>)
-		inline T& emplace(Args&&... args) {
+		template<typename T, typename... Args>
+		inline T& make_component(Args&&... args) {
 			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
 			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
-			T* ptr = new T(forward<Args>(args)...);
-			mComponents.emplace(typeid(T), make_pair<shared_ptr<void>, function<void(const void*)>>(
-				shared_ptr<void>(ptr), [](const void* p) { reinterpret_cast<const T*>(p)->~T(); } ));
-			return *ptr;
-		}
-		template<typename T, typename... Args> requires(constructible_from<T, Node*, Args&&...>)
-		inline T& emplace(Args&&... args) {
-			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
-			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
-			T* ptr = new T(this, forward<Args>(args)...);
-			mComponents.emplace(typeid(T), make_pair<shared_ptr<void>, function<void(const void*)>>(
-				shared_ptr<void>(ptr), [](const void* p) { reinterpret_cast<const T*>(p)->~T(); } ));
-			return *ptr;
-		}
-		template<typename T, typename... Args> requires(constructible_from<T, Node&, Args&&...>)
-		inline T& emplace(Args&&... args) {
-			if (mComponents.count(typeid(T))) throw logic_error("Node already contains component of type T");
-			mNodeGraph.mComponentMap[typeid(T)].emplace(this);
-			T* ptr = new T(forward<Node&>(*this), forward<Args>(args)...);
-			mComponents.emplace(typeid(T), make_pair<shared_ptr<void>, function<void(const void*)>>(
-				shared_ptr<void>(ptr), [](const void* p) { reinterpret_cast<const T*>(p)->~T(); } ));
+			T* ptr;
+			if constexpr(constructible_from<T, Args&&...>)
+				ptr = new T(forward<Args>(args)...);
+			else if constexpr(constructible_from<T, Node*, Args&&...>)
+				ptr = new T(this, forward<Args>(args)...);
+			else if constexpr(constructible_from<T, Node&, Args&&...>)
+				ptr = new T(forward<Node&>(*this), forward<Args>(args)...);
+			else
+				static_assert(false, "T is must be constructible from Args...");
+			mComponents.emplace(typeid(T), component_t(ptr, [](const void* p) { delete reinterpret_cast<const T*>(p); } ));
 			return *ptr;
 		}
 		
+		// make a new T inside a new node named 'name', parented to this node
+		template<typename T, typename... Args>
+		inline T& make_child(const string& name, Args&&... args) const {
+			Node& n = mNodeGraph.emplace(name);
+			n.set_parent(*this);
+			return n.make_component<T>(forward<Args>(args)...);
+		}
+
 		inline bool erase(type_index type) {
 			auto it = mComponents.find(type);
 			if (it == mComponents.end()) return false;
-			mComponents.erase(it);
-			if (mComponents.find(type) == mComponents.end())
-				mNodeGraph.mComponentMap.at(type).erase(this);
+			erase_unchecked(it);
 			return true;
 		}
-		template<typename T> inline bool erase() {
-			return erase(typeid(T));
-		}
+		template<typename T> inline bool erase() { return erase(typeid(T)); }
 
 		template<typename T>
-		inline auto components() const {
-			auto[first,last] = mComponents.equal_range(typeid(T));
-			return views::transform(ranges::subrange(first,last), [](const auto& p) -> T& { return *reinterpret_cast<T*>(p.second.first.get()); });
+		inline T& component() const {
+			auto it = mComponents.find(typeid(T));
+			return *reinterpret_cast<T*>(it->second.first);
 		}
-	
-		template<typename T, typename F> requires(invocable<F,T*> || invocable<F,const T*> || invocable<F,T&> || invocable<F,const T&>)
-		inline void for_each_component(F&& fn) const {
-			auto[first,last] = mComponents.equal_range(typeid(T));
-			for (const auto& p : ranges::subrange(first,last))
-				if constexpr (invocable<F, T*> || invocable<F, const T*>)
-					fn(reinterpret_cast<T*>(p.second.first.get()));
-				else
-					fn(*reinterpret_cast<T*>(p.second.first.get()));
+
+		template<typename T, typename F> requires(
+			invocable<F,const Node*> || invocable<F,const Node&> ||
+			invocable<F,T*> || invocable<F,const T*> ||
+			invocable<F,T&> || invocable<F,const T&>)
+		inline auto invoke(F&& fn) const {
+			if constexpr (invocable<F, const Node*>)
+				return fn(this);
+			else if constexpr (invocable<F,const Node&>)
+				return fn(*this);
+			else if constexpr (invocable<F, T*> || invocable<F, const T*>)
+				return fn(&component<T>());
+			else
+				return fn(component<T>());
 		}
-	
-		template<typename T, typename F> requires(invocable<F,T*> || invocable<F,const T*> || invocable<F,T&> || invocable<F,const T&>)
+
+		template<typename T, typename F> 
 		inline void for_each_ancestor(F&& fn) const {
+			auto cmap_it = mNodeGraph.mComponentMap.find(typeid(T));
+			if (cmap_it == mNodeGraph.mComponentMap.end()) return;
 			const Node* n = this;
 			while (n) {
-				n->for_each_component<T>(forward<F>(fn));
+				if (cmap_it->second.find(n) != cmap_it->second.end())
+					n->invoke<T,F>(forward<F>(fn));
 				n = n->mParent;
+			}
+		}
+	
+		template<typename T, typename F>
+		inline void for_each_child(F&& fn) const {
+			auto cmap_it = mNodeGraph.mComponentMap.find(typeid(T));
+			if (cmap_it == mNodeGraph.mComponentMap.end()) return;
+			queue<const Node*> q;
+			q.push(this);
+			while (!q.empty()) {
+				const Node* n = q.front();
+				q.pop();
+				if (cmap_it->second.find(n) != cmap_it->second.end())
+					n->invoke<T,F>(forward<F>(fn));
+				for (Node& c : n->children())
+					q.push(&c);
 			}
 		}
 	};
@@ -175,6 +208,7 @@ public:
 	inline bool empty() const { return mNodes.empty(); }
 	inline void clear() { mNodes.clear(); }
 	inline bool contains(const Node* ptr) const { return mNodes.count(ptr); }
+
 
 	inline Node& emplace(const string& name) {
 		auto node = make_unique<Node>(move(Node(*this, name)));
@@ -188,26 +222,19 @@ public:
 		mNodes.erase(node_it);
 	}
 
+
 	template<typename T> inline auto find_nodes() const {
-		ranges::subrange<unordered_set<Node*>::const_iterator> r;
+		ranges::subrange<unordered_set<const Node*>::const_iterator> r;
 		auto it = mComponentMap.find(typeid(T));
 		if (it != mComponentMap.end()) r = ranges::subrange(it->second);
-		return views::transform(r, [](Node* n) -> Node& { return *n; });
-	}
-
-	template<typename T, typename F> requires(invocable<F,T*> || invocable<F,const T*> || invocable<F,T&> || invocable<F,const T&>)
-	inline void for_each_component(F&& fn) const {
-		auto it = mComponentMap.find(typeid(T));
-		if (it == mComponentMap.end()) return;
-		for (Node* n : it->second)
-			n->for_each_component<T>(forward<F>(fn));
+		return views::transform(r, [](const Node* n) -> const Node& { return *n; });
 	}
 
 private:
 	friend class Node;
 	unordered_map<const Node*, unique_ptr<Node>> mNodes;
 	unordered_multimap<const Node*, Node*> mEdges;
-	unordered_map<type_index, unordered_set<Node*>> mComponentMap;
+	unordered_map<type_index, unordered_set<const Node*>> mComponentMap;
 };
 
 }

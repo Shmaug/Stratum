@@ -1,7 +1,9 @@
 #ifndef TRANSFORM_H
 #define TRANSFORM_H
 
+#ifndef __cplusplus
 #include "math.hlsli"
+#endif
 
 struct TransformData {
 	float3 Translation;
@@ -88,7 +90,7 @@ inline float4 project_point(ProjectionData t, float3 v) {
 	return r;
 }
 inline float3 back_project(ProjectionData t, float2 v) {
-	return float3(v[0]/t.Scale[0], v[1]/t.Scale[1], 1);
+	return float3(v[0], v[1], t.OffsetZ) / t.Scale;
 }
 
 #endif

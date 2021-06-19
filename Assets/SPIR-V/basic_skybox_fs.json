@@ -70,8 +70,13 @@
                     "offset" : 48
                 },
                 {
-                    "name" : "gScaleTranslate",
-                    "type" : "vec4",
+                    "name" : "gOffset",
+                    "type" : "vec2",
+                    "offset" : 56
+                },
+                {
+                    "name" : "gTexelSize",
+                    "type" : "vec2",
                     "offset" : 64
                 }
             ]

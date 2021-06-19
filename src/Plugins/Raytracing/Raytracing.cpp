@@ -4,7 +4,6 @@
 #include <Scene/MeshRenderer.hpp>
 #include <Scene/GUI.hpp>
 #include <Scene/Scene.hpp>
-#include <Util/Profiler.hpp>
 #include <Util/Tokenizer.hpp>
 
 #include <stack>

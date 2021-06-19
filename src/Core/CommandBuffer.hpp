@@ -177,8 +177,6 @@ public:
 		if (mBoundPipeline == pipeline) return false;
 		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
-		mBoundVertexBuffers.clear();
-		mBoundIndexBuffer = {};
 		hold_resource(pipeline);
 		return true;
 	}
@@ -210,19 +208,21 @@ public:
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
 	}
 
-	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets = {}) {
+	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
 		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 		hold_resource(descriptorSet);
 		
-		vector<vk::DescriptorSet> sets;
-		vector<uint32_t> offsets;
 		descriptorSet->flush_writes();
 		if (!mBoundFramebuffer) transition_images(*descriptorSet);
 
-		if (index + sets.size() >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + sets.size() + 1);
-		mBoundDescriptorSets[index + sets.size()] = descriptorSet;
-		sets.emplace_back(**descriptorSet);
+		if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
+		mBoundDescriptorSets[index] = descriptorSet;
 		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
+	}
+
+	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet) {
+		if (index < mBoundDescriptorSets.size() && mBoundDescriptorSets[index] == descriptorSet) return;
+		bind_descriptor_set(index, descriptorSet, {});
 	}
 
 	template<typename T>

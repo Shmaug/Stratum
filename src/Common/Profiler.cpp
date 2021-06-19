@@ -37,19 +37,14 @@ namespace ProfilerGui {
     return stream.str();
   }
 
-  static inline unique_ptr<ProfilerSample> copyProfilerSample(const ProfilerSample& sample, ProfilerSample* parent = nullptr) {
+  static inline unique_ptr<ProfilerSample> copyProfilerSample(const ProfilerSample& sample) {
     unique_ptr<ProfilerSample> s = make_unique<ProfilerSample>();
     s->mColor = sample.mColor;
     s->mDuration = sample.mDuration;
     s->mLabel = sample.mLabel;
-    s->mParent = parent;
     s->mStartTime = sample.mStartTime;
-
-    for (const unique_ptr<ProfilerSample>& child : sample.mChildren) {
-      unique_ptr<ProfilerSample> childCopy = copyProfilerSample(*child, s.get());
-      s->mChildren.push_back(move(childCopy));
-    }
-
+    for (const unique_ptr<ProfilerSample>& child : sample.mChildren)
+      s->mChildren.emplace_back(move(copyProfilerSample(*child)))->mParent = s.get();
     return s;
   }
 
@@ -286,23 +281,22 @@ namespace ProfilerGui {
 
 } // namespace ProfilerGui
 
-void Profiler::draw_imgui() {
-  ImGui::Begin("profiler");
+void Profiler::imgui() {
+  if (ImGui::Begin("Profiler") && mFrameHistory.size()) {
+    auto hist_begin = ++mFrameHistory.begin();
 
-  if (mFrameHistory.size()) {
     vector<float> frameTimings(mFrameHistory.size());
-    ranges::transform(mFrameHistory, frameTimings.begin(), [](const ProfilerSample& sample) {
+    ranges::transform(hist_begin, mFrameHistory.end(), frameTimings.begin(), [](const ProfilerSample& sample) {
       return chrono::duration_cast<chrono::duration<float, milli>>(sample.mDuration).count();
     });
 
-    ProfilerGui::DrawPlot(frameTimings.data(), frameTimings.size(), ImVec2(400, 100), [](const size_t idx) {
-      mTimelineSample = ProfilerGui::copyProfilerSample(*next(mFrameHistory.begin(), idx));
+    ProfilerGui::DrawPlot(frameTimings.data(), frameTimings.size(), ImVec2(400, 100), [&,hist_begin](const size_t idx) {
+      mTimelineSample = ProfilerGui::copyProfilerSample(*next(hist_begin, idx));
     });
-    ProfilerGui::DrawTimeline(mTimelineSample ? *mTimelineSample : *next(mFrameHistory.begin()));
+    ProfilerGui::DrawTimeline(mTimelineSample ? *mTimelineSample : *hist_begin);
 
     if (mPaused ? ImGui::Button("resume") : ImGui::Button("pause"))
       mPaused = !mPaused;
   }
-
   ImGui::End();
 }

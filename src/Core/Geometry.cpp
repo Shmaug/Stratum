@@ -6,14 +6,20 @@ using namespace stm;
 void Geometry::bind(CommandBuffer& commandBuffer) const {
   auto pipeline = dynamic_pointer_cast<GraphicsPipeline>(commandBuffer.bound_pipeline());
   if (!pipeline) throw logic_error("cannot draw a mesh without a bound graphics pipeline\n");
-  
-  unordered_set<Buffer::View<byte>, buffer_view_hash<byte>> uniqueBuffers;
-  const auto& shader_inputs = commandBuffer.bound_pipeline()->stages().front().spirv()->stage_inputs();
-  for (const auto&[id, v] : shader_inputs) {
+      
+  struct stride_view_hash {
+    inline size_t operator()(const Buffer::StrideView& v) const {
+      return hash_args(v.buffer_ptr().get(), v.offset(), v.size_bytes(), v.stride());
+    }
+  };
+  unordered_set<Buffer::StrideView, stride_view_hash> uniqueBuffers;
+  for (const auto&[id, v] : commandBuffer.bound_pipeline()->stages().front().spirv()->stage_inputs()) {
     auto it = mAttributes.find(v.mAttributeType);
     if (it == mAttributes.end() || it->second.size() <= v.mTypeIndex) throw logic_error("Geometry does not contain required shader input " + to_string(v.mAttributeType) + "." + to_string(v.mTypeIndex));
         
     const auto& b = it->second[v.mTypeIndex].buffer();
+    if (uniqueBuffers.contains(b)) continue;
+    
     commandBuffer.bind_vertex_buffer((uint32_t)uniqueBuffers.size(), b);
     uniqueBuffers.emplace(b);
   }

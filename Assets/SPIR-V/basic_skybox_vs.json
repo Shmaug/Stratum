@@ -6,7 +6,7 @@
         }
     ],
     "types" : {
-        "_158" : {
+        "_159" : {
             "name" : "quatf",
             "members" : [
                 {
@@ -16,7 +16,7 @@
                 }
             ]
         },
-        "_159" : {
+        "_160" : {
             "name" : "TransformData",
             "members" : [
                 {
@@ -31,12 +31,12 @@
                 },
                 {
                     "name" : "Rotation",
-                    "type" : "_158",
+                    "type" : "_159",
                     "offset" : 16
                 }
             ]
         },
-        "_160" : {
+        "_161" : {
             "name" : "ProjectionData",
             "members" : [
                 {
@@ -51,17 +51,17 @@
                 }
             ]
         },
-        "_161" : {
-            "name" : "_161",
+        "_163" : {
+            "name" : "_163",
             "members" : [
                 {
                     "name" : "gWorldToCamera",
-                    "type" : "_159",
+                    "type" : "_160",
                     "offset" : 0
                 },
                 {
                     "name" : "gProjection",
-                    "type" : "_160",
+                    "type" : "_161",
                     "offset" : 32
                 },
                 {
@@ -70,8 +70,13 @@
                     "offset" : 48
                 },
                 {
-                    "name" : "gScaleTranslate",
-                    "type" : "vec4",
+                    "name" : "gOffset",
+                    "type" : "vec2",
+                    "offset" : 56
+                },
+                {
+                    "name" : "gTexelSize",
+                    "type" : "vec2",
                     "offset" : 64
                 }
             ]
@@ -86,15 +91,20 @@
     ],
     "outputs" : [
         {
+            "type" : "vec4",
+            "name" : "@entryPointOutput",
+            "location" : 0
+        },
+        {
             "type" : "vec3",
             "name" : "viewRay",
-            "location" : 0
+            "location" : 1
         }
     ],
     "push_constants" : [
         {
-            "type" : "_161",
-            "name" : "_163",
+            "type" : "_163",
+            "name" : "_165",
             "push_constant" : true
         }
     ]

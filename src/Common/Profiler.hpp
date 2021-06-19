@@ -48,9 +48,9 @@ public:
 	}
 
 	inline static const list<ProfilerSample>& history() { return mFrameHistory; }
-	inline static void clear() { mFrameHistory.clear(); }
+	inline static void clear_history() { mFrameHistory.clear(); }
 
-	static void draw_imgui();
+	static void imgui();
 };
 
 }

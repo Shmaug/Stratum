@@ -3,7 +3,6 @@
 using namespace stm;
 
 shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const Geometry& geometry) {
-
 	vector<Pipeline::ShaderStage> stages(mModules.size());
 	ranges::transform(mModules, stages.begin(), [&](const auto& spirv) {
 		return Pipeline::ShaderStage(spirv, mSpecializationConstants);
@@ -25,10 +24,11 @@ shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const 
 	
 	ProfilerRegion ps("Material::bind", commandBuffer);
 
+	// update mDescriptorSets
+	
 	auto& descriptorSets = mDescriptorSets[pipeline.get()];
 	descriptorSets.clear();
 
-	// update descriptor set entries
 	for (auto& [id, entries] : mDescriptors) {
 		for (const auto& stage : pipeline->stages())
 			if (auto it = stage.spirv()->descriptors().find(id); it != stage.spirv()->descriptors().end()) {
@@ -46,7 +46,6 @@ shared_ptr<GraphicsPipeline> Material::bind(CommandBuffer& commandBuffer, const 
 }
 
 void Material::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) const {
-
 	unordered_map<uint32_t, vector<pair<uint32_t, uint32_t>>> offsetMap;
 	for (const auto&[id,offset] : dynamicOffsets)
 		for (const auto& stage : commandBuffer.bound_pipeline()->stages())

@@ -29,4 +29,3 @@ include_directories(${STRATUM_PATH}/extern/include)
 include(compile_shader.cmake)
 
 add_subdirectory(src)
-#add_subdirectory(Plugins/DicomVis)

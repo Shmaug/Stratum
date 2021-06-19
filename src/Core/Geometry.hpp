@@ -9,7 +9,7 @@ class Geometry {
 public:
 	struct Attribute {
 	private:
-		Buffer::View<byte> mBuffer;
+		Buffer::StrideView mBuffer;
 		vk::Format mFormat;
 		uint32_t mOffset;
 		vk::VertexInputRate mInputRate;
@@ -18,13 +18,8 @@ public:
 		Attribute() = default;
 		Attribute(const Attribute&) = default;
 		Attribute(Attribute&&) = default;
-		inline Attribute(const Buffer::View<byte>& v) : mBuffer(v) {}
-		inline Attribute(Buffer::View<byte>&& v) : mBuffer(v) {}
-		inline Attribute(const shared_ptr<Buffer>& b, vk::Format fmt, uint32_t offset = 0, vk::VertexInputRate inputRate = vk::VertexInputRate::eVertex, vk::DeviceSize bufferOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
-			: mBuffer(b, bufferOffset, elementCount), mFormat(fmt), mOffset(offset), mInputRate(inputRate) {}
-		template<typename T>
-		inline Attribute(const Buffer::View<T>& view, vk::Format fmt, uint32_t offset = 0, vk::VertexInputRate inputRate = vk::VertexInputRate::eVertex)
-			: mBuffer(view.buffer_ptr(), view.offset(), view.size_bytes()), mFormat(fmt), mOffset(offset), mInputRate(inputRate) {}
+		inline Attribute(const Buffer::StrideView& b, vk::Format fmt, uint32_t offset = 0, vk::VertexInputRate inputRate = vk::VertexInputRate::eVertex)
+			: mBuffer(b), mFormat(fmt), mOffset(offset), mInputRate(inputRate) {}
 		
 		Attribute& operator=(const Attribute&) = default;
 		Attribute& operator=(Attribute&&) = default;

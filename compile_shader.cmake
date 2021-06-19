@@ -29,7 +29,7 @@ function(CompileShader SRC_PATH DST_FOLDER)
     set(SPV_JSON_PATH "${DST_FOLDER}/${DST_NAME}.json")
 
     add_custom_command(OUTPUT "${SPV_PATH}"
-      COMMAND glslangValidator -V ${GLSLC_ARGS} -g -I"${STRATUM_PATH}/src/Shaders/include" -o "${SPV_PATH}" "${SRC_PATH}"
+      COMMAND glslangValidator -V -g  ${GLSLC_ARGS} -o "${SPV_PATH}" "${SRC_PATH}"
       DEPENDS "${SRC_PATH}" IMPLICIT_DEPENDS c "${SRC_PATH}")
     add_custom_command(OUTPUT "${SPV_JSON_PATH}"
       COMMAND spirv-cross ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect

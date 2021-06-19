@@ -173,13 +173,6 @@ public:
 	};
 };
 
-template<typename T>
-struct buffer_view_hash {
-  inline size_t operator()(const Buffer::View<T>& v) const {
-    return hash_args(v.buffer_ptr().get(), v.offset(), v.size_bytes());
-  }
-};
-
 template<class T>
 class buffer_vector {
 public:
@@ -237,7 +230,7 @@ public:
 				mDevice->destroyBuffer(tmp);
 			}
 			requirements.alignment = max(requirements.alignment, alignof(T));
-			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector", mBufferUsage, mSharingMode);
+			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector<"+string(typeid(T).name())+">", mBufferUsage, mSharingMode);
 			if (mBuffer) memcpy(b->data(), mBuffer->data(), mBuffer->size());
 			mBuffer = b;
 		}

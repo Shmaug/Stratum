@@ -1,19 +1,17 @@
 #pragma once
 
-#include <NodeGraph/SceneNode.hpp>
-#include <NodeGraph/Camera.hpp>
-
+#include <NodeGraph/RenderGraph.hpp>
 #include "ImageLoader.hpp"
+
+#include <imgui.h>
 
 namespace stm {
 namespace shader_interop {
-#include "Shaders/common.hlsli"
+#include "Shaders/include/transform.hlsli"
 }
 }
 
 namespace dcmvs {
-
-using namespace stm;
 
 enum class OrganMaskBits : uint32_t {
 	eBladder = 1,
@@ -26,8 +24,10 @@ enum class OrganMaskBits : uint32_t {
 };
 using OrganMask = vk::Flags<OrganMaskBits>;
 
-class RenderVolume : public NodeGraph::Node {
-	private:
+class VolumeRenderer {
+private:
+	NodeGraph::Node& mNode;
+
 	// The volume loaded directly from the folder
 	shared_ptr<Texture> mRawVolume = nullptr;
 	// The mask loaded directly from the folder
@@ -39,9 +39,9 @@ class RenderVolume : public NodeGraph::Node {
 	shared_ptr<Texture> mGradient = nullptr;
 	bool mGradientDirty = false;
 	
-	device_vector<VolumeUniformBuffer> mUniformBuffer;
-	shared_ptr<Pipeline> mPrecomputePipeline;
-	shared_ptr<Pipeline> mRenderPipeline;
+	shared_ptr<Material> mBakeColorMaterial;
+	shared_ptr<Material> mBakeGradientMaterial;
+	shared_ptr<Material> mRenderMaterial;
 
 public:
 	enum class ShadingMode {
@@ -57,12 +57,13 @@ public:
 	ShadingMode mShadingMode = {};
 	OrganMask mOrganMask = {};
 
-	PLUGIN_EXPORT RenderVolume(const string& name, NodeGraph* scene, Device& device, const fs::path& imageStackFolder);
+	PLUGIN_EXPORT VolumeRenderer(NodeGraph::Node& node, const string& name, Device& device, const fs::path& imageStackFolder);
 
-	PLUGIN_EXPORT void BakeRender(CommandBuffer& commandBuffer);
+	PLUGIN_EXPORT void imgui();
 
-	PLUGIN_EXPORT void DrawGui(CommandBuffer& commandBuffer, Camera& camera, GuiContext& gui);
-	PLUGIN_EXPORT void draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer, Camera& camera);
+	PLUGIN_EXPORT void bake(CommandBuffer& commandBuffer);
+
+	PLUGIN_EXPORT void draw(CommandBuffer& commandBuffer, shared_ptr<Framebuffer> framebuffer);
 };
 
 }

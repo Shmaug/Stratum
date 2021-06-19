@@ -1,4 +1,3 @@
-#include "Core/Material.hpp"
 #include "Core/Window.hpp"
 
 #include "NodeGraph/PbrRenderer.hpp"
@@ -8,128 +7,128 @@
 
 using namespace stm;
 
-unordered_map<string, shared_ptr<SpirvModule>> gSpirvModules;
+class Application {
+private:
+	Instance& mInstance;
 
-int main(int argc, char** argv) {
-	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
-	{
-		stm::Window& window = instance->window();
-		Device& device = instance->device();
+	RenderGraph& mMainPass;
+	ImGuiRenderer& mImGuiRenderer;
+	PbrRenderer& mPbrRenderer;
 
-		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V"))
-			if (p.extension() == ".spv")
-				gSpirvModules.emplace(p.stem().string(), make_shared<SpirvModule>(device, p)).first->first;
-		
-		NodeGraph nodeGraph;
+public:
+	inline Application(NodeGraph::Node& node, Instance& instance) :
+		mInstance(instance), mMainPass(node.make_component<RenderGraph>()), mPbrRenderer(node.make_component<PbrRenderer>()), mImGuiRenderer(node.make_component<ImGuiRenderer>()) {
 		
 		vk::PipelineColorBlendAttachmentState blendOpaque;
 		blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-
-		auto mainPass = &nodeGraph.emplace("mainpass").emplace<RenderNode>();
-		(*mainPass)[""].bind_point(vk::PipelineBindPoint::eGraphics);
-		(*mainPass)[""]["primaryColor"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""].bind_point(vk::PipelineBindPoint::eGraphics);
+		mMainPass[""]["primaryColor"] =  RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eColor, blendOpaque, vk::AttachmentDescription({},
-				device.mInstance.window().surface_format().format, vk::SampleCountFlagBits::e4,
+				mInstance.window().surface_format().format, vk::SampleCountFlagBits::e4,
 				vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal));
-		(*mainPass)[""]["primaryDepth"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""]["primaryDepth"] =  RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
 				vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e4,
 				vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eDontCare, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal));
-		(*mainPass)[""]["primaryResolve"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""]["primaryResolve"] =  RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eResolve, blendOpaque, vk::AttachmentDescription({},
-				device.mInstance.window().surface_format().format, vk::SampleCountFlagBits::e1,
+				mInstance.window().surface_format().format, vk::SampleCountFlagBits::e1,
 				vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
 
-		PbrRenderer pbr(nodeGraph, gSpirvModules.at("pbr_vs"), gSpirvModules.at("pbr_fs"));
-		ImGuiRenderer imgui(nodeGraph, gSpirvModules.at("basic_texture_vs"), gSpirvModules.at("basic_texture_fs"));
-			
-		mainPass->PreRender.emplace(mainPass->node(), bind_front(&PbrRenderer::pre_render, &pbr));
-		mainPass->OnDraw.emplace(mainPass->node(),  bind(&PbrRenderer::draw, &pbr, std::placeholders::_1, ref(pbr.material())));
+		mMainPass.PreRender.emplace(node, bind_front(&PbrRenderer::pre_render, &mPbrRenderer));
+		mMainPass.PreRender.emplace(node, bind_front(&ImGuiRenderer::pre_render, &mImGuiRenderer));
+		mMainPass.OnDraw.emplace(node, bind_front(&PbrRenderer::draw, &mPbrRenderer, ref(mPbrRenderer.material())));
+		mMainPass.OnDraw.emplace(node, bind_front(&ImGuiRenderer::draw, &mImGuiRenderer)); // TODO: ensure this is always last in the draw queue
 
-		mainPass->PreRender.emplace(mainPass->node(), bind_front(&ImGuiRenderer::pre_render, &imgui));
-		mainPass->OnDraw.emplace(mainPass->node(), bind_front(&ImGuiRenderer::draw, &imgui));
-		
 		{
-			auto commandBuffer = device.get_command_buffer("Init");
-			imgui.create_textures(*commandBuffer);
-			for (const string& filepath : instance->find_arguments("load_gltf"))
-				pbr.load_gltf(*commandBuffer, filepath);
-			device.submit(commandBuffer);
-			device.flush();
+			auto commandBuffer = mInstance.device().get_command_buffer("Init");
+			mImGuiRenderer.create_textures(*commandBuffer);
+			for (const string& filepath : mInstance.find_arguments("load_gltf"))
+				mPbrRenderer.load_gltf(*commandBuffer, filepath);
+			mInstance.device().submit(commandBuffer);
+			mInstance.device().flush();
 		}
+	}
 
-		hlsl::TransformData gCameraToWorld = hlsl::make_transform(Vector3f(0,1,-3));
+	inline void run() {
+		stm::Window& window = mInstance.window();
+		Device& device = mInstance.device();
+
 		float fovy = radians(60.f);
+		Vector2f euler = Vector2f::Zero();
+		hlsl::TransformData cameraToWorld = hlsl::make_transform(Vector3f(0,1,-3));
+		auto t0 = chrono::high_resolution_clock::now();
 
 		while (true) {
 			Profiler::begin_sample("Frame" + to_string(window.present_count()));
-			instance->poll_events();
+			mInstance.poll_events();
 			if (!window.handle()) break; // Window was closed
+
+			auto t1 = chrono::high_resolution_clock::now();
+			float deltaTime = chrono::duration_cast<chrono::duration<float>>(t1 - t0).count();
+			t0 = t1;
 
 			{
 				ProfilerRegion ps("Camera Controls");
-				
-				static auto t0 = chrono::high_resolution_clock::now();
-				auto t1 = chrono::high_resolution_clock::now();
-				auto dt = t1 - t0;
-				t0 = t1;
-
-				float deltaTime = chrono::duration_cast<chrono::duration<float>>(dt).count();
-
-				// count fps
-				static float frameTimeAccum = 0;
-				static uint32_t fpsAccum = 0;
-				frameTimeAccum += deltaTime;
-				fpsAccum++;
-				if (frameTimeAccum > 1) {
-					float totalTime = chrono::duration<float>(frameTimeAccum).count();
-					printf("%.2f fps (%fms)\t\t\r", (float)fpsAccum/totalTime, totalTime/fpsAccum);
-					frameTimeAccum -= 1;
-					fpsAccum = 0;
+				if (!ImGui::GetIO().WantCaptureMouse) {
+					if (window.pressed(KeyCode::eMouse2)) {
+						euler += window.cursor_delta().reverse() * .005f;
+						euler.x() = clamp(euler.x(), -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
+						cameraToWorld.Rotation = Quaternionf(AngleAxisf(euler.y(), Vector3f(0,1,0))) * Quaternionf(AngleAxisf(euler.x(), Vector3f(1,0,0)));
+					}
+					fovy = clamp(fovy - window.scroll_delta(), radians(20.f), radians(90.f));
 				}
-
-				// move camera
-				if (window.pressed(KeyCode::eMouse2)) {
-					static Vector2f euler = Vector2f::Zero();
-					euler += window.cursor_delta().reverse() * .005f;
-					euler.x() = clamp(euler.x(), -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
-					gCameraToWorld.Rotation = Quaternionf(AngleAxisf(euler.y(), Vector3f(0,1,0))) * Quaternionf(AngleAxisf(euler.x(), Vector3f(1,0,0)));
+				if (!ImGui::GetIO().WantCaptureKeyboard) {
+					Vector3f mv = Vector3f::Zero();
+					if (window.pressed(KeyCode::eKeyD)) mv += Vector3f( 1,0,0);
+					if (window.pressed(KeyCode::eKeyA)) mv += Vector3f(-1,0,0);
+					if (window.pressed(KeyCode::eKeyW)) mv += Vector3f(0,0, 1);
+					if (window.pressed(KeyCode::eKeyS)) mv += Vector3f(0,0,-1);
+					cameraToWorld.Translation += (cameraToWorld.Rotation*mv*deltaTime).array();
 				}
-				Vector3f mv = Vector3f::Zero();
-				if (window.pressed(KeyCode::eKeyD)) mv += Vector3f( 1,0,0);
-				if (window.pressed(KeyCode::eKeyA)) mv += Vector3f(-1,0,0);
-				if (window.pressed(KeyCode::eKeyW)) mv += Vector3f(0,0, 1);
-				if (window.pressed(KeyCode::eKeyS)) mv += Vector3f(0,0,-1);
-				gCameraToWorld.Translation += (gCameraToWorld.Rotation*mv*deltaTime).array();
-
-				fovy = clamp(fovy - window.scroll_delta(), radians(20.f), radians(90.f));
-
-				imgui.new_frame(window, deltaTime);
+				mPbrRenderer.material().push_constant("gWorldToCamera", inverse(cameraToWorld));
 			}
 
-			Profiler::draw_imgui();
+			mImGuiRenderer.new_frame(window, deltaTime);
 
+			Profiler::imgui();
+
+			ImGui::Render();
+			
 			auto commandBuffer = device.get_command_buffer("Frame");
 			if (auto backBuffer = window.acquire_image(*commandBuffer)) {
-				pbr.material().push_constant("gWorldToCamera", inverse(gCameraToWorld));
-				pbr.material().push_constant("gProjection", hlsl::make_perspective(fovy, (float)backBuffer.texture().extent().height/(float)backBuffer.texture().extent().width, 0, 64));
-				mainPass->render(*commandBuffer, { { "primaryResolve", backBuffer } });
+				mPbrRenderer.material().push_constant("gProjection", hlsl::make_perspective(fovy, (float)backBuffer.texture().extent().height/(float)backBuffer.texture().extent().width, 0, 64));
+				mMainPass.render(*commandBuffer, { { "primaryResolve", backBuffer } });
 				
 				Semaphore& semaphore = commandBuffer->hold_resource<Semaphore>(device, "RenderSemaphore");
 				device.submit(commandBuffer, { *window.image_available_semaphore() }, { vk::PipelineStageFlagBits::eColorAttachmentOutput }, { *semaphore });
 				window.present({ *semaphore });
 			}
+			Profiler::end_sample();
 		}
-		
-		device.flush();
-
-		nodeGraph.clear();
-		gSpirvModules.clear();
+		Profiler::clear_history();
+		mInstance.device().flush();
 	}
+};
+
+int main(int argc, char** argv) {
+	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
+	{
+		NodeGraph nodeGraph;
+		NodeGraph::Node& root = nodeGraph.emplace("Application");
+		auto& spirvModules = root.make_component<spirv_module_map>();
+		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V"))
+			if (p.extension() == ".spv")
+				spirvModules.emplace(p.stem().string(), make_shared<SpirvModule>(instance->device(), p)).first->first;
+		
+		Application app(root, *instance);
+		app.run();
+		nodeGraph.clear();
+	}
+	Profiler::clear_history();
 	instance.reset();
-	Profiler::clear();
 	return EXIT_SUCCESS;
 }

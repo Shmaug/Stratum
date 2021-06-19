@@ -8,21 +8,11 @@
 
 using namespace stm;
 
-PbrRenderer::PbrRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs, const shared_ptr<SpirvModule>& fs) : mNodeGraph(nodeGraph) {
-	vk::PipelineColorBlendAttachmentState blendOpaque;
-	blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-
-	mShadowPass = &nodeGraph.emplace("shadowpass").emplace<RenderNode>();
-	(*mShadowPass)[""].bind_point(vk::PipelineBindPoint::eGraphics);
-	(*mShadowPass)[""]["gShadowMap"] = RenderPass::SubpassDescription::AttachmentInfo(
-		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
-			vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
-			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
-			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
-
+PbrRenderer::PbrRenderer(NodeGraph::Node& node) : mNode(node), mShadowPass(node.make_child<RenderGraph>("shadow pass")) {
+	const auto& vs = mNode.component<spirv_module_map>().at("pbr_vs");
+	const auto& fs = mNode.component<spirv_module_map>().at("pbr_fs");
 	mMaterial = make_shared<Material>("pbr", vs, fs);
-
+	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
 	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
@@ -32,8 +22,18 @@ PbrRenderer::PbrRenderer(NodeGraph& nodeGraph, const shared_ptr<SpirvModule>& vs
 		vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
 		0, true, 2, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
 
+	vk::PipelineColorBlendAttachmentState blendOpaque;
+	blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+	mShadowPass[""].bind_point(vk::PipelineBindPoint::eGraphics);
+	mShadowPass[""]["gShadowMap"] = RenderPass::SubpassDescription::AttachmentInfo(
+		RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
+			vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
+			vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
+			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
+
 	mShadowMaterial = make_shared<Material>("pbrShadow", vs);
-	mShadowPass->OnDraw.emplace(mShadowPass->node(), bind(&PbrRenderer::draw, this, std::placeholders::_1, ref(*mShadowMaterial)) );
+	mShadowPass.OnDraw.emplace(mNode, bind_front(&PbrRenderer::draw, this, ref(*mShadowMaterial)) );
 }
 
 void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filename) {
@@ -161,7 +161,6 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				case TINYGLTF_MODE_TRIANGLE_FAN: 		topo = vk::PrimitiveTopology::eTriangleFan; break;
 			}
 			Geometry geometry(topo);
-
 			for (const auto&[attribName,attribIndex] : prim.attributes) {
 				const auto& accessor = model.accessors[attribIndex];
 
@@ -241,7 +240,11 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 				};
 				auto& attribs = geometry[semanticMap.at(typeName)];
 				if (attribs.size() < typeIdx) attribs.resize(typeIdx);
-				attribs.emplace_back(buffers[model.bufferViews[accessor.bufferView].buffer], fmt, (uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex, model.bufferViews[accessor.bufferView].byteOffset);
+				
+				const tinygltf::BufferView& bv = model.bufferViews[accessor.bufferView];
+				attribs.emplace_back(
+					Buffer::StrideView(buffers[bv.buffer], accessor.ByteStride(bv), bv.byteOffset, bv.byteLength),
+					fmt, (uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex);
 			}
 			return geometry;
 		});
@@ -253,24 +256,24 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		mMaterial->descriptor("gTextures", i) = sampled_texture_descriptor(images[i]);
 	for (uint32_t i = (uint32_t)images.size(); i < mMaterial->descriptor_count("gTextures"); i++)
 		mMaterial->descriptor("gTextures", i) = sampled_texture_descriptor(blank);
-	
 	mMaterial->descriptor("gMaterials") = commandBuffer.copy_buffer(materials, vk::BufferUsageFlagBits::eStorageBuffer);
 
-	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
 
 	queue<pair<NodeGraph::Node*, int>> todo;
 	for (const auto& s : model.scenes)
 		for (auto& n : s.nodes)
-			todo.push({ nullptr, n });
+			todo.push({ &mNode, n });
 	while (!todo.empty()) {
-		const auto& [parent, nodeIndex] = todo.front();
+		const auto [parent, nodeIndex] = todo.front();
+		todo.pop();
+		
 		const auto& node = model.nodes[nodeIndex];
 
-		NodeGraph::Node& dst = node_graph().emplace(node.name);
-		if (parent) dst.set_parent(*parent);
+		NodeGraph::Node& dst = mNode.node_graph().emplace(node.name);
+		dst.set_parent(*parent);
 		for (int n : node.children) todo.push({ &dst, n });
-
-		hlsl::TransformData& transform = dst.emplace<hlsl::TransformData>(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
+		
+		hlsl::TransformData& transform = dst.make_component<hlsl::TransformData>(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		if (!node.translation.empty()) transform.Translation = Map<const Array3d>(node.translation.data()).cast<float>();
 		if (!node.rotation.empty()) 	 transform.Rotation = Quaterniond(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]).cast<float>();
 		if (!node.scale.empty()) 			 transform.Scale = (float)Map<const Vector3d>(node.scale.data()).norm();
@@ -296,7 +299,7 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 					break;
 				}
 				
-				PrimitiveSet& p = dst.emplace<PrimitiveSet>();
+				PrimitiveSet& p = dst.make_child<PrimitiveSet>("PrimitiveSet");
 				p.mGeometry = geometries[node.mesh][i];
 				p.mIndices = Buffer::StrideView(buffers[model.bufferViews[indices.bufferView].buffer], indexStride, model.bufferViews[indices.bufferView].byteOffset, model.bufferViews[indices.bufferView].byteLength);
 				p.mIndexCount = (uint32_t)indices.count;
@@ -309,7 +312,7 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		auto light_it = node.extensions.find("KHR_lights_punctual");
 		if (light_it != node.extensions.end() && light_it->second.Has("light")) {
 			const tinygltf::Light& l = model.lights[light_it->second.Get("light").GetNumberAsInt()];
-			hlsl::LightData& light = dst.emplace<hlsl::LightData>();
+			hlsl::LightData& light = dst.make_child<hlsl::LightData>(l.name);
 			light.mEmission = Map<const Array3d>(l.color.data()).cast<float>() * (float)l.intensity;
 			light.mFlags = LIGHT_USE_SHADOWMAP;
 			if (l.type == "directional") {
@@ -328,8 +331,6 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 			light.mShadowBias = .000001f;
 			light.mShadowST = Vector4f(1,1,0,0);
 		}
- 
-		todo.pop();
 	}
 }
 
@@ -337,33 +338,30 @@ void PbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 	ProfilerRegion s("pbrRenderer::pre_render", commandBuffer);
 
 	Buffer::View<hlsl::MaterialData> materialBuffer = get<Buffer::StrideView>(mMaterial->descriptor("gMaterials"));
-
 	buffer_vector<hlsl::TransformData> transforms(commandBuffer.mDevice, materialBuffer.size());
 	buffer_vector<hlsl::LightData> lights(commandBuffer.mDevice);
-	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>((*mShadowPass)[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
-
-	for (auto& n : mNodeGraph.find_nodes<PrimitiveSet>()) {
+	Texture::View shadowMap = make_shared<Texture>(commandBuffer.mDevice, "gShadowMap", vk::Extent3D(2048,2048,1), get<vk::AttachmentDescription>(mShadowPass[""]["gShadowMap"]), vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled);
+	
+	// TODO: cache transforms
+	mNode.for_each_child<PrimitiveSet>([&](const NodeGraph::Node& n) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (const PrimitiveSet& p : n.components<PrimitiveSet>())
-			transforms[p.mMaterialIndex] = transform;
-	}
+		transforms[n.component<PrimitiveSet>().mMaterialIndex] = transform;
+	});
 
 	if (transforms.empty()) return;
 	
-	for (auto& n : mNodeGraph.find_nodes<hlsl::LightData>()) {
+	mNode.for_each_child<hlsl::LightData>([&](const NodeGraph::Node& n) {
 		hlsl::TransformData transform(hlsl::float3::Zero(), 1.f, hlsl::quatf::Identity());
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		for (const hlsl::LightData& l : n.components<hlsl::LightData>()) {
-			hlsl::LightData& dst = lights.emplace_back(l);
-			dst.mLightToWorld = transform;
-			dst.mShadowST = hlsl::float4(1,1,0,0);
-		}
-	}
+		hlsl::LightData& dst = lights.emplace_back(n.component<hlsl::LightData>());
+		dst.mLightToWorld = transform;
+		dst.mShadowST = hlsl::float4(1,1,0,0);
+	});
 
 	mMaterial->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
 	mMaterial->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
@@ -376,18 +374,8 @@ void PbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		mShadowMaterial->push_constant("gWorldToCamera", inverse(light.mLightToWorld));
 		mShadowMaterial->push_constant("gProjection", light.mShadowProjection);
 		// TODO: use light.mShadowST to set viewport
-		mShadowPass->render(commandBuffer, { { "gShadowMap", shadowMap } });
+		mShadowPass.render(commandBuffer, { { "gShadowMap", shadowMap } });
 	}
 
 	mMaterial->transition_images(commandBuffer);
-}
-
-void PbrRenderer::draw(CommandBuffer& commandBuffer, Material& material) const {
-	mNodeGraph.for_each_component<PrimitiveSet>([&](const PrimitiveSet& primitive) {
-		material.bind(commandBuffer, primitive.mGeometry);
-		material.bind_descriptor_sets(commandBuffer);
-		material.push_constants(commandBuffer);
-		commandBuffer.push_constant("gMaterialIndex", primitive.mMaterialIndex);
-		primitive.mGeometry.drawIndexed(commandBuffer, primitive.mIndices, primitive.mIndexCount, 1, primitive.mFirstIndex, primitive.mVertexOffset, primitive.mMaterialIndex);
-	});
 }
