@@ -4,7 +4,7 @@ set(DCMTK_DIR $ENV{DCMTK_DIR})
 
 find_package(DCMTK REQUIRED COMPONENTS ofstd oflog dcmdata dcmimgle)
 
-add_library(DicomVis MODULE DicomVis.cpp ImageLoader.cpp VolumeRenderer.cpp)
+add_library(DicomVis SHARED DicomVis.cpp ImageLoader.cpp VolumeRenderer.cpp)
 target_compile_definitions(DicomVis PUBLIC ${STM_COMPILE_DEFINITIONS})
 target_include_directories(DicomVis PUBLIC ${STRATUM_PATH}/src PRIVATE ${DCMTK_INCLUDE_DIRS})
 target_link_libraries(DicomVis PUBLIC Stratum PRIVATE ${DCMTK_LIBRARIES})

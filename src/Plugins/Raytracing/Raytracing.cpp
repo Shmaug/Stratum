@@ -493,12 +493,12 @@ private:
 public:
 	inline int Priority() override { return 10000; }
 
-	PLUGIN_EXPORT Raytracing() : { mEnabled = true; }
-	PLUGIN_EXPORT ~Raytracing() {
+	PLUGIN_API Raytracing() : { mEnabled = true; }
+	PLUGIN_API ~Raytracing() {
 		safe_delete_array(mFrameData);
 	}
 
-	PLUGIN_EXPORT bool OnSceneInit(Scene* scene) override {
+	PLUGIN_API bool OnSceneInit(Scene* scene) override {
 		mScene = scene;
 		mInput = mScene->InputManager()->GetFirst<MouseKeyboardInput>();
 
@@ -640,7 +640,7 @@ public:
 		return true;
 	}
 
-	PLUGIN_EXPORT void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) override {
+	PLUGIN_API void OnUpdate(stm_ptr<CommandBuffer> commandBuffer) override {
 		if (mInput->KeyDownFirst(KEY_F11)) mShowGUI = !mShowGUI;
 		if (mInput->GetPointerLast(0)->mGuiHitT < 0 && mInput->KeyDownFirst(MOUSE_LEFT)) {
 			float2 uv = (mInput->CursorPos() + .5f) / float2(mInput->WindowWidth(), mInput->WindowHeight());
@@ -652,7 +652,7 @@ public:
 		}
 	}
 	
-	PLUGIN_EXPORT void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) override {		
+	PLUGIN_API void OnLateUpdate(stm_ptr<CommandBuffer> commandBuffer) override {		
 		FrameData& fd = mFrameData[commandBuffer->Device()->FrameContextIndex()];
 		FrameData& pfd = mFrameData[(commandBuffer->Device()->FrameContextIndex() + (commandBuffer->Device()->MaxFramesInFlight() - 1)) % commandBuffer->Device()->MaxFramesInFlight()];
 
@@ -756,7 +756,7 @@ public:
 			1, barriers);
 	}
 
-	PLUGIN_EXPORT void PreRender(stm_ptr<CommandBuffer> commandBuffer, Camera* camera) override {
+	PLUGIN_API void PreRender(stm_ptr<CommandBuffer> commandBuffer, Camera* camera) override {
 		if (commandBuffer->CurrentSubpass() != "raytrace") return;
 
 		GraphicsShader* shader = mScene->AssetManager()->LoadShader("Shaders/rtblit.stmb")->GetGraphics(PASS_MAIN, {});

@@ -1,11 +1,17 @@
 #pragma once
 
-#include "hash.hpp"
+#include "includes.hpp"
 
 namespace stm {
 
+
+using namespace std;
+using namespace Eigen;
+namespace fs = std::filesystem;
+
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
+
 
 namespace hlsl {
 
@@ -113,8 +119,34 @@ inline ArrayType<T,3> rotate_vector(const Quaternion<T>& q, const ArrayType<T,3>
 
 }
 
-#pragma region misc math expressions
+#pragma region misc concepts
+template<typename T>
+struct remove_const_tuple { using type = remove_const_t<T>; };
+template<typename Tx, typename Ty>
+struct remove_const_tuple<pair<Tx, Ty>> { using type = pair<remove_const_t<Tx>, remove_const_t<Ty>>; };
+template<typename... Types>
+struct remove_const_tuple<tuple<Types...>> { using type = tuple<remove_const_t<Types>...>; };
+template<typename T> using remove_const_tuple_t = typename remove_const_tuple<T>::type;
 
+template<typename _Type, template<typename...> typename _Template>
+constexpr bool is_specialization_v = false;
+template<template<class...> typename _Template, typename...Args>
+constexpr bool is_specialization_v<_Template<Args...>, _Template> = true;
+
+template<typename T> concept is_pair = is_specialization_v<T, pair>;
+template<typename T> concept is_tuple = is_specialization_v<T, tuple>;
+
+template<typename T> constexpr bool is_dynamic_span_v = false;
+template<typename T> constexpr bool is_dynamic_span_v<span<T,dynamic_extent>> = true;
+
+template<typename R> concept fixed_sized_range = is_specialization_v<R, std::array> || (is_specialization_v<R, span> && !is_dynamic_span_v<R>);
+template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_sized_range<R> && requires(R r, size_t n) { r.resize(n); };
+
+template<typename R> concept associative_range = ranges::range<R> &&
+	requires { typename R::key_type; typename R::value_type; } &&
+	requires(R r, ranges::range_value_t<R> v) { { r.emplace(v) } -> is_pair; };
+#pragma endregion
+#pragma region misc math expressions
 template<unsigned_integral T>
 constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
 

@@ -56,7 +56,27 @@ private:
 	array<uint32_t,3> mWorkgroupSize;
 };
 
-using spirv_module_map = unordered_map<string, shared_ptr<SpirvModule>>;
+struct spirv_module_map {
+public:
+	using container_t = unordered_map<string, shared_ptr<SpirvModule>>;
+	spirv_module_map() = default;
+	spirv_module_map(spirv_module_map&&) = default;
+	spirv_module_map(const spirv_module_map&) = default;
+	inline spirv_module_map(container_t&& m) : mModules(m) {}
+	inline spirv_module_map(const container_t& m) : mModules(m) {}
+	inline spirv_module_map(Device& device, const fs::path& dir) {
+		for (const fs::path& p : fs::directory_iterator(dir))
+			if (p.extension() == ".spv")
+				mModules.emplace(p.stem().string(), make_shared<SpirvModule>(device, p)).first->first;
+	}
+	inline const shared_ptr<SpirvModule>& at(const string& key) const { return mModules.at(key); }
+	inline const shared_ptr<SpirvModule>& operator[](const string& key) const { return at(key); }
+	inline auto begin() const { return mModules.begin(); }
+	inline auto end() const { return mModules.end(); }
+	inline auto find(const string& key) const { return mModules.find(key); }
+private:
+	container_t mModules;
+};
 
 }
 

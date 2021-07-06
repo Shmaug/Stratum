@@ -66,19 +66,19 @@ public:
     vector<Texture::View> attachments(mRenderPass->attachments().size());
     for (auto[id,view] : renderTargets) {
       attachments[mRenderPass->attachment_index(id)] = view;
-      extent.width = max(extent.width, view.texture().extent().width);
-      extent.height = max(extent.height, view.texture().extent().height);
+      extent.width  = max(extent.width , view.texture()->extent().width);
+      extent.height = max(extent.height, view.texture()->extent().height);
     }
-    for (uint32_t i = 0; i < attachments.size(); i++)
-      if (!attachments[i]) {
-        auto[info, id] = mRenderPass->attachments()[i];
-        vk::ImageUsageFlagBits usageFlags;
-        if (is_depth_stencil(info.format))
-          usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment;
-        else
-          usageFlags = vk::ImageUsageFlagBits::eColorAttachment;
-        attachments[i] = make_shared<Texture>(commandBuffer.mDevice, id, extent, info, usageFlags);
-      }
+    for (uint32_t i = 0; i < attachments.size(); i++) {
+      if (attachments[i]) continue;
+      const auto&[info, id] = mRenderPass->attachments()[i];
+      vk::ImageUsageFlagBits usageFlags;
+      if (is_depth_stencil(info.format))
+        usageFlags = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+      else
+        usageFlags = vk::ImageUsageFlagBits::eColorAttachment;
+      attachments[i] = make_shared<Texture>(commandBuffer.mDevice, id, extent, info, usageFlags);
+    }
     return render(commandBuffer, attachments);
   }
   inline shared_ptr<Framebuffer> render(CommandBuffer& commandBuffer, const unordered_map<RenderAttachmentId, pair<Texture::View, vk::ClearValue>>& renderTargets) {
@@ -91,7 +91,7 @@ public:
       uint32_t index = mRenderPass->attachment_index(id);
       attachments[index] = p.first;
       clearValues[index] = p.second;
-      extent = vk::Extent2D(max(extent.width, p.first.texture().extent().width), max(extent.height, p.first.texture().extent().height));
+      extent = vk::Extent2D(max(extent.width, p.first.texture()->extent().width), max(extent.height, p.first.texture()->extent().height));
     }
     return render(commandBuffer, attachments, clearValues);
   }

@@ -60,12 +60,12 @@ void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, 
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < framebuffer->size(); i++)
-		(*framebuffer)[i].texture().transition_barrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
+		(*framebuffer)[i].texture()->transition_barrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
 
 	vector<vk::ClearValue> vals(framebuffer->size());
 	if (clearValues.empty()) {
 		for (uint32_t i = 0; i < framebuffer->size(); i++)
-			if (is_depth_stencil(framebuffer->at(i).texture().format()))
+			if (is_depth_stencil(framebuffer->at(i).texture()->format()))
 				vals[i] = vk::ClearValue( vk::ClearDepthStencilValue(1.f, 0) );
 			else
 				vals[i] = vk::ClearValue( vk::ClearColorValue(std::array<uint32_t,4>{0,0,0,0}) );
@@ -85,9 +85,9 @@ void CommandBuffer::next_subpass(vk::SubpassContents contents) {
 	for (uint32_t i = 0; i < mBoundFramebuffer->size(); i++) {
 		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().subpasses()[mSubpassIndex].at(mBoundFramebuffer->render_pass().attachments()[i].second)).initialLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
-		attachment.texture().mTrackedLayout = layout;
-		attachment.texture().mTrackedStageFlags = guess_stage(layout);
-		attachment.texture().mTrackedAccessFlags = guess_access_flags(layout);
+		attachment.texture()->mTrackedLayout = layout;
+		attachment.texture()->mTrackedStageFlags = guess_stage(layout);
+		attachment.texture()->mTrackedAccessFlags = guess_access_flags(layout);
 	}
 }
 void CommandBuffer::end_render_pass() {
@@ -97,9 +97,9 @@ void CommandBuffer::end_render_pass() {
 	for (uint32_t i = 0; i < mBoundFramebuffer->render_pass().attachments().size(); i++) {
 		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().attachments()[i]).finalLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
-		attachment.texture().mTrackedLayout = layout;
-		attachment.texture().mTrackedStageFlags = guess_stage(layout);
-		attachment.texture().mTrackedAccessFlags = guess_access_flags(layout);
+		attachment.texture()->mTrackedLayout = layout;
+		attachment.texture()->mTrackedStageFlags = guess_stage(layout);
+		attachment.texture()->mTrackedAccessFlags = guess_access_flags(layout);
 	}
 	
 	mBoundFramebuffer = nullptr;

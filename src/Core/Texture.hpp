@@ -124,8 +124,7 @@ public:
 	}
 
 	// If mipLevels = 0, will auto-determine according to extent
-	inline Texture(Device& device, const string& name,
-		const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
+	inline Texture(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::ImageTiling tiling = vk::ImageTiling::eOptimal)
 			: DeviceResource(device, name), mExtent(extent), mFormat(format), mArrayLayers(arrayLayers), mSampleCount(numSamples), mUsage(usage), 
 			mMipLevels(mipLevels ? mipLevels : (numSamples > vk::SampleCountFlagBits::e1) ? 1 : max_mips(extent)), mCreateFlags(createFlags), mTiling(tiling) {
@@ -194,15 +193,15 @@ public:
 	// Texture must support vk::ImageLayout::eTransferSrcOptimal and vk::ImageLayout::eTransferDstOptimal
 	STRATUM_API void generate_mip_maps(CommandBuffer& commandBuffer);
 	
-	STRATUM_API void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout);
-	inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout newLayout) {
-		transition_barrier(commandBuffer, mTrackedStageFlags, guess_stage(newLayout), mTrackedLayout, newLayout);
+	STRATUM_API void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, const vk::ImageSubresourceRange& subresourceRange, bool force = false);
+	inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout newLayout, bool force = false) {
+		transition_barrier(commandBuffer, mTrackedStageFlags, guess_stage(newLayout), mTrackedLayout, newLayout, vk::ImageSubresourceRange(mAspect, 0, mip_levels(), 0, array_layers()), force);
 	}
-	inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		transition_barrier(commandBuffer, guess_stage(oldLayout), guess_stage(newLayout), oldLayout, newLayout);
+	inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, bool force = false) {
+		transition_barrier(commandBuffer, guess_stage(oldLayout), guess_stage(newLayout), oldLayout, newLayout, vk::ImageSubresourceRange(mAspect, 0, mip_levels(), 0, array_layers()), force);
 	}
-	inline void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags dstStage, vk::ImageLayout newLayout) {
-		transition_barrier(commandBuffer, mTrackedStageFlags, dstStage, mTrackedLayout, newLayout);
+	inline void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags dstStage, vk::ImageLayout newLayout, bool force = false) {
+		transition_barrier(commandBuffer, mTrackedStageFlags, dstStage, mTrackedLayout, newLayout, vk::ImageSubresourceRange(mAspect, 0, mip_levels(), 0, array_layers()), force);
 	}
 	
 	class View {
@@ -226,10 +225,15 @@ public:
 
 		inline const vk::ImageView& operator*() const { return mView; }
 		inline const vk::ImageView* operator->() const { return &mView; }
-		inline Texture& texture() const { return *mTexture; }
-		inline const shared_ptr<Texture>& texture_ptr() const { return mTexture; }
+		inline const auto& texture() const { return mTexture; }
 		inline const vk::ImageSubresourceRange& subresource_range() const { return mSubresource; }
-		inline vk::ImageSubresourceLayers subresource(uint32_t mipLevel) const { return vk::ImageSubresourceLayers(mSubresource.aspectMask, mSubresource.baseMipLevel + mipLevel, mSubresource.baseArrayLayer, mSubresource.layerCount); }
+		inline vk::ImageSubresourceLayers subresource(uint32_t level) const {
+			return vk::ImageSubresourceLayers(mSubresource.aspectMask, mSubresource.baseMipLevel + level, mSubresource.baseArrayLayer, mSubresource.layerCount);
+		}
+	
+		inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout newLayout, bool force = false) const {
+			mTexture->transition_barrier(commandBuffer, mTexture->mTrackedStageFlags, guess_stage(newLayout), mTexture->mTrackedLayout, newLayout, mSubresource, force);
+		}
 	};
 
 private:

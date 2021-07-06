@@ -4,13 +4,12 @@
 
 #include "../../Shaders/include/transform.hlsli"
 
-[[vk::constant_id(0)]] const bool gBakedColor = false;
-[[vk::constant_id(1)]] const bool gBakedGradient = false;
+[[vk::constant_id(0)]] const bool gColorBaked = false;
+[[vk::constant_id(1)]] const bool gGradientBaked = false;
 [[vk::constant_id(2)]] const bool gColorize = false;
 [[vk::constant_id(3)]] const bool gLocalShading = false;
-[[vk::constant_id(4)]] const bool gMaskColored = false;
-[[vk::constant_id(5)]] const bool gSingleChannel = true;
-[[vk::constant_id(6)]] const uint gMaxSamples = 4096;
+[[vk::constant_id(4)]] const bool gMasked = false;
+[[vk::constant_id(5)]] const uint gMaxSamples = 4096;
 
 Texture3D<float4> gVolume;
 Texture3D<uint> gMask;
@@ -27,9 +26,9 @@ Texture2DMS<float> gDepthBuffer;
 	uint2 gScreenResolution;
 	uint2 gWriteOffset;
 	uint3 gVolumeResolution;
+	uint gFrameIndex;
 	float gDensity;
 	uint gMaskValue;
-	uint gFrameIndex;
 	float2 gRemapRange;
 	float2 gHueRange;
 };
@@ -37,7 +36,7 @@ Texture2DMS<float> gDepthBuffer;
 float4 sample_volume(uint3 index) {
 	float4 c = gVolume[index];
 
-	if (!gBakedColor) {
+	if (!gColorBaked) {
 		// non-baked volume, do processing
 		if (gColorize)
 			c.rgb = hsv_to_rgb(float3(gHueRange.x + c.a * (gHueRange.y - gHueRange.x), .5, 1));
@@ -45,7 +44,7 @@ float4 sample_volume(uint3 index) {
 		c.a *= saturate((c.a - gRemapRange.x) / (gRemapRange.y - gRemapRange.x));
 	}
 
-	if (gMaskColored) {
+	if (gMasked) {
 		static const float3 maskColors[8] = {
 			float3(1.0, 0.1, 0.1),
 			float3(0.1, 1.0, 0.1),
@@ -65,7 +64,7 @@ float4 sample_volume(uint3 index) {
 	return c;
 }
 float3 sample_gradient(uint3 index) {
-	if (gBakedGradient)
+	if (gGradientBaked)
 		return gGradient[index].xyz;
 	else {
 		uint3 next = min(index + 1, gVolumeResolution);

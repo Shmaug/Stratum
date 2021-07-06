@@ -94,8 +94,8 @@ void Texture::create() {
 	}
 }
 
-void Texture::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-	if (oldLayout == newLayout) return;
+void Texture::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, const vk::ImageSubresourceRange& subresourceRange, bool force) {
+	if (oldLayout == newLayout && !force) return;
 	if (newLayout == vk::ImageLayout::eUndefined) {
 		mTrackedLayout = newLayout;
 		mTrackedStageFlags = dstStage;
@@ -108,10 +108,7 @@ void Texture::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStage
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = mImage;
-	barrier.subresourceRange.baseMipLevel = 0;
-	barrier.subresourceRange.levelCount = mip_levels();
-	barrier.subresourceRange.baseArrayLayer = 0;
-	barrier.subresourceRange.layerCount = array_layers();
+	barrier.subresourceRange = subresourceRange;
 	barrier.srcAccessMask = mTrackedAccessFlags;
 	barrier.dstAccessMask = guess_access_flags(newLayout);
 	barrier.subresourceRange.aspectMask = mAspect;

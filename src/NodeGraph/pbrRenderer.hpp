@@ -13,7 +13,6 @@ namespace hlsl {
 
 class PbrRenderer {
 private:
-	NodeGraph::Node& mNode;
 	RenderGraph& mShadowPass;
 	shared_ptr<Material> mMaterial;
 	shared_ptr<Material> mShadowMaterial;
@@ -30,6 +29,8 @@ public:
 		uint32_t mMaterialIndex;
 		hlsl::TextureIndices mTextureIndices;
 	};
+	
+	NodeGraph::Node& mNode;
 
 	STRATUM_API PbrRenderer(NodeGraph::Node& node);
 

@@ -146,7 +146,7 @@ public:
 			for (auto& [arrayIndex, d] : p)
 				if (d.index() == 0)
 					if (Texture::View view = get<Texture::View>(d))
-						view.texture().transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
+						view.texture()->transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
 	}
 
 	STRATUM_API virtual shared_ptr<GraphicsPipeline> bind(CommandBuffer& commandBuffer, const Geometry& g);

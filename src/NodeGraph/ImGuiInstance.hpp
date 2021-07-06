@@ -7,17 +7,18 @@
 
 namespace stm {
 
-class ImGuiRenderer {
+class ImGuiInstance {
 private:
-	NodeGraph::Node& mNode;
 	shared_ptr<Material> mMaterial;
 	Buffer::View<ImDrawVert> mVertices;
 	Buffer::View<ImDrawIdx>  mIndices;
 	const ImDrawData* mDrawData;
 	
 public:
-	STRATUM_API ImGuiRenderer(NodeGraph::Node& node);
-	STRATUM_API ~ImGuiRenderer();
+	NodeGraph::Node& mNode;
+	
+	STRATUM_API ImGuiInstance(NodeGraph::Node& node);
+	STRATUM_API ~ImGuiInstance();
 
 	STRATUM_API void create_textures(CommandBuffer& commandBuffer);
 

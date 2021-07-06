@@ -9,7 +9,7 @@ void Geometry::bind(CommandBuffer& commandBuffer) const {
       
   struct stride_view_hash {
     inline size_t operator()(const Buffer::StrideView& v) const {
-      return hash_args(v.buffer_ptr().get(), v.offset(), v.size_bytes(), v.stride());
+      return hash_args(v.buffer().get(), v.offset(), v.size_bytes(), v.stride());
     }
   };
   unordered_set<Buffer::StrideView, stride_view_hash> uniqueBuffers;

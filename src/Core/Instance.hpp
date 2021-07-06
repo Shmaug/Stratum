@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Common/common.hpp"
+#include "../Common/hash.hpp"
 
 #ifdef WIN32
 #include <vulkan/vulkan_win32.h>

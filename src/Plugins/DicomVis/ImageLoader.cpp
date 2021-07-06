@@ -1,269 +1,139 @@
 #include "ImageLoader.hpp"
 
+#include <execution>
+
 #include <stb_image.h>
-
+#include <dcmtk/dcmdata/dcfilefo.h>
+#include <dcmtk/dcmdata/dcdeftag.h>
 #include <dcmtk/dcmimgle/dcmimage.h>
-#include <dcmtk/dcmAsset/dctk.h>
-
 
 using namespace dcmvs;
 
-unordered_multimap<string, ImageStackType> gExtensionMap {
-	{ ".dcm", eDicom },
-	{ ".raw", eRaw },
-	{ ".png", eStandard },
-	{ ".jpg", eStandard }
-};
+Texture::View load_dicom(const fs::path& folder, CommandBuffer& commandBuffer, Array3f* voxelSize) {
+	Array2d bounds = Array2d::Zero();
+	Array2d maxSpacing = Array2d::Zero();
 
-ImageStackType ImageLoader::FolderStackType(const fs::path& folder) {
-	try {
-		if (!fs::exists(folder)) return ImageStackType::eNone;
-
-		ImageStackType type = ImageStackType::eNone;
-		for (const auto& p : fs::directory_iterator(folder))
-			if (ExtensionMap.count(p.path().extension().string())) {
-				ImageStackType t = ExtensionMap.find(p.path().extension().string())->second;
-				if (type != ImageStackType::eNone && type != t) return ImageStackType::eNone; // inconsistent image type
-				type = t;
-			}
-
-		if (type == ImageStackType::eNone) return type;
-
-		if (type == ImageStackType::eStandard) {
-			vector<fs::path> images;
-			for (const auto& p : fs::directory_iterator(folder))
-				if (ExtensionMap.count(p.path().extension().string()))
-					images.emplace_back(p.path());
-			auto ass_fuck = [](const fs::path& a, const fs::path& b) {
-				return a.stem().string() < b.stem().string();
-			};
-			cout << ass_fuck("shit", "cock");
-			ranges::sort(images, ass_fuck);
-
-			int x, y, c;
-			if (stbi_info(images[0].string().c_str(), &x, &y, &c) == 0) return ImageStackType::eNone;
-
-			uint32_t width = x;
-			uint32_t height = y;
-			uint32_t channels = c;
-			uint32_t depth = (uint32_t)images.size();
-
-			for (uint32_t i = 1; i < images.size(); i++) {
-				stbi_info(images[i].string().c_str(), &x, &y, &c);
-				if (x != width) { return ImageStackType::eNone; }
-				if (y != height) { return ImageStackType::eNone; }
-				if (c != channels) { return ImageStackType::eNone; }
-			}
-		}
-		return type;
-	} catch (exception&) {
-		return ImageStackType::eNone;
-	}
-}
-
-shared_ptr<Texture> ImageLoader::LoadStandardStack(const fs::path& folder, Device& device, Vector3f* scale, bool reverse, uint32_t channelCount, bool unorm) {
-	if (!fs::exists(folder)) return nullptr;
-
-	vector<fs::path> images;
+	vector<pair<double, unique_ptr<DicomImage>>> slices;
 	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eStandard)
-			images.emplace_back(p.path());
-	if (images.empty()) return nullptr;
-	ranges::sort(images, [reverse](const fs::path& a, const fs::path& b) {
-		string astr = a.stem().string();
-		string bstr = b.stem().string();
-		if (astr.find_first_not_of( "0123456789" ) == string::npos && bstr.find_first_not_of( "0123456789" ) == string::npos)
-			return reverse ? stoi(astr) > stoi(bstr) : stoi(astr) < stoi(bstr);
-		return reverse ? astr > bstr : astr < bstr;
-	});
+		if (p.path().extension() == ".dcm") {
+			DcmFileFormat fileFormat;
+			fileFormat.loadFile(p.path().string().c_str());
+			DcmDataset* dataset = fileFormat.getDataset();
 
-	int x, y, c;
-	stbi_info(images[0].string().c_str(), &x, &y, &c);
-	
-	vk::Extent3D extent = { (uint32_t)x, (uint32_t)y, (uint32_t)images.size() };
-	uint32_t channels = channelCount == 0 ? c : channelCount;
+			Array2d spacing;
+			double location;
+			dataset->findAndGetFloat64(DCM_PixelSpacing, spacing[0], 0);
+			dataset->findAndGetFloat64(DCM_PixelSpacing, spacing[1], 1);
+			dataset->findAndGetFloat64(DCM_SliceLocation, location, 0);
 
-	vk::Format format;
-	switch (channels) {
-	case 4:
-		format = unorm ? vk::Format::eR8G8B8A8Unorm : vk::Format::eR8G8B8A8Uint;
-		break;
-	case 3:
-		format = unorm ? vk::Format::eR8G8B8Unorm : vk::Format::eR8G8B8Uint;
-		break;
-	case 2:
-		format = unorm ? vk::Format::eR8G8Unorm : vk::Format::eR8G8Uint;
-		break;
-	case 1:
-		format = unorm ? vk::Format::eR8Unorm : vk::Format::eR8Uint;
-		break;
-	default:
-		return nullptr; // ??
-	}
+			maxSpacing = maxSpacing.max(spacing);
+			bounds[0] = min(location - spacing.z()/2, bounds[0]);
+			bounds[1] = max(location + spacing.z()/2, bounds[1]);
 
-	size_t sliceSize = extent.width * extent.height * channels;
-	vector<uint8_t> pixels(sliceSize * extent.depth);
-
-	uint32_t done = 0;
-	vector<thread> threads;
-	uint32_t threadCount = thread::hardware_concurrency();
-	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.emplace_back(thread([=, &done]() {
-			int xt, yt, ct;
-			for (uint32_t i = j; i < images.size(); i += threadCount) {
-				stbi_uc* img = stbi_load(images[i].string().c_str(), &xt, &yt, &ct, 0);
-				if (xt == extent.width || yt == extent.height) {
-					if (ct == channels)
-						memcpy(pixels + sliceSize * i, img, sliceSize);
-					else {
-						uint8_t* slice = pixels + sliceSize * i;
-						for (uint32_t y = 0; y < extent.height; y++)
-							for (uint32_t x = 0; x < extent.width; x++)
-								for (uint32_t k = 0; k < min((uint32_t)ct, channels); k++)
-									slice[channels * (y * extent.width + x) + k] = img[ct * (y * extent.width + x) + k];
-					}
-				}
-				stbi_image_free(img);
-
-				done++;
-			}
-		}));
-	}
-	cout << "Loading stack";
-	while (done < images.size()) {
-		cout << "\rLoading stack: " << done << "/" << images.size() << "    ";
-		this_thread::sleep_for(10ms);
-	}
-	for (thread& t : threads) t.join();
-	cout << "\rLoading stack: Done           \n";
-
-	auto volume = make_shared<Texture>(folder.string(), device, extent, format, pixels, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
-	if (scale) *scale = Vector3f(.05f, .05f, .05f);
-
-	return volume;
-}
-
-struct DcmSlice {
-	DicomImage* image;
-	Vector3d spacing;
-	double location;
-};
-DcmSlice ReadDicomSlice(const string& file) {
-	DcmFileFormat fileFormat;
-	fileFormat.loadFile(file.c_str());
-	DcmDataset* dataset = fileFormat.getDataset();
-
-	Vector3d s = 0;
-	dataset->findAndGetFloat64(DCM_PixelSpacing, s.x, 0);
-	dataset->findAndGetFloat64(DCM_PixelSpacing, s.y, 1);
-	dataset->findAndGetFloat64(DCM_SliceThickness, s.z, 0);
-
-	double x = 0;
-	dataset->findAndGetFloat64(DCM_SliceLocation, x, 0);
-
-	return { new DicomImage(file.c_str()), s, x };
-}
-shared_ptr<Texture> ImageLoader::LoadDicomStack(const fs::path& folder, Device& device, Vector3f* size) {
-	if (!fs::exists(folder)) return nullptr;
-
-	Vector3d maxSpacing = 0;
-	vector<DcmSlice> images = {};
-	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eDicom) {
-			images.emplace_back(ReadDicomSlice(p.path().string()));
-			maxSpacing = max(maxSpacing, images[images.size() - 1].spacing);
+			slices.emplace_back(location, make_unique<DicomImage>(p.path().string().c_str()));
 		}
+	if (slices.empty()) return {};
 
-	if (images.empty()) return nullptr;
+	ranges::sort(slices, {}, [](const auto& p) { return p.first; });
 
-	ranges::sort(images, [](const DcmSlice& a, const DcmSlice& b) {
-		return a.location < b.location;
-	});
+	vk::Extent3D extent(slices.front().second->getWidth(), slices.front().second->getHeight(), (uint32_t)slices.size());
+	if (extent.width == 0 || extent.height == 0) return {};
 
-	vk::Extent3D extent = { images[0].image->getWidth(), images[0].image->getHeight(), (uint32_t)images.size() };
-
-	if (extent.width == 0 || extent.height == 0) return nullptr;
-
-	// volume size in meters
-	if (size) {
-		Vector2f b = (float)images[0].location;
-		for (auto i : images) {
-			b.x = (float)fmin(i.location - i.spacing.z * .5, b.x);
-			b.y = (float)fmax(i.location + i.spacing.z * .5, b.y);
-		}
-
-		*size = Vector3f(.001 * Vector3d(maxSpacing.xy * Vector2d(extent.width, extent.height), b.y - b.x));
-		printf("%fm x %fm x %fm\n", size->x, size->y, size->z);
+	// voxel size in meters
+	if (voxelSize) {
+		*voxelSize = (.001 * Vector3d(maxSpacing.x(), maxSpacing.y(), (bounds[1] - bounds[0])/extent.depth)).cast<float>();
+		printf("%fm x %fm x %fm\n", voxelSize->x()*extent.width, voxelSize->y()*extent.height, voxelSize->z()*extent.depth);
 	}
 
 	size_t sliceSize = extent.width * extent.height * sizeof(uint16_t);
+	auto pixels = make_shared<Buffer>(commandBuffer.mDevice, folder.string()+"/Staging", extent.depth*sliceSize, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	uint16_t* data = new uint16_t[extent.width * extent.height * extent.depth];
-	memset(data, 0, extent.depth * sliceSize);
-	for (uint32_t i = 0; i < images.size(); i++) {
-		images[i].image->setMinMaxWindow();
-		uint16_t* pixels = (uint16_t*)images[i].image->getOutputData(16);
-		memcpy(data + i * extent.width * extent.height, pixels, sliceSize);
+	auto inds = ranges::iota_view(size_t(0), slices.size());
+	for (uint32_t i = 0; i < slices.size(); i++) {
+		slices[i].second->setMinMaxWindow();
+		memcpy(pixels->data() + i * extent.width * extent.height, slices[i].second->getOutputData(16), sliceSize);
 	}
 
-	auto tex = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR16Unorm, data, extent.depth*sliceSize, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
-	delete[] data;
-	for (auto& i : images) delete i.image;
-	return tex;
+	auto volume = make_shared<Texture>(folder.string(), commandBuffer.mDevice, extent, vk::Format::eR16Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferDst);
+	return commandBuffer.upload_image<byte>(pixels, volume);
 }
 
-shared_ptr<Texture> ImageLoader::LoadRawStack(const fs::path& folder, Device& device, Vector3f* scale) {
-	if (!fs::exists(folder)) return nullptr;
-
-	vector<fs::path> images;
+Texture::View load_stbi(const fs::path& folder, CommandBuffer& commandBuffer, bool reverse, bool isInteger, bool isSigned) {
+	vector<pair<fs::path, Array3i>> images;
+	Array3i c;
 	for (const auto& p : fs::directory_iterator(folder))
-		if (ExtensionMap.count(p.path().extension().string()) && ExtensionMap.find(p.path().extension().string())->second == ImageStackType::eRaw)
-			images.emplace_back(p.path());
-	if (images.empty()) return nullptr;
-	ranges::sort(images, [](auto a, auto b) { return a.string() < b.string(); });
+		if (stbi_info(p.path().string().c_str(), &c[0], &c[1], &c[2]) == 0) 
+			if (images.empty() || (c == images.front().second).all())
+				images.emplace_back(p.path(), c);
+	if (images.empty()) return {};
+	
+	ranges::sort(images, [reverse](const auto& lhs, const auto& rhs) {
+		string astr = lhs.first.stem().string();
+		string bstr = rhs.first.stem().string();
+		if (astr.find_first_not_of( "0123456789" ) == string::npos && bstr.find_first_not_of( "0123456789" ) == string::npos)
+			return reverse ? (stoi(astr) > stoi(bstr)) : (stoi(astr) < stoi(bstr));
+		return reverse ? (astr > bstr) : (astr < bstr);
+	});
+	
+	vk::Extent3D extent((uint32_t)images.front().second[0], (uint32_t)images.front().second[1], (uint32_t)images.size());
 
-	vk::Extent3D extent = { 2048, 1216, (uint32_t)images.size() };
+	vk::Format format;
+	switch (images.front().second[2]) {
+	case 4:
+		format = isInteger ? (isSigned ? vk::Format::eR8G8B8A8Sint : vk::Format::eR8G8B8A8Uint) : (isSigned ? vk::Format::eR8G8B8A8Snorm : vk::Format::eR8G8B8A8Unorm);
+		break;
+	case 3:
+		format = isInteger ? (isSigned ? vk::Format::eR8G8B8Sint : vk::Format::eR8G8B8Uint) : (isSigned ? vk::Format::eR8G8B8Snorm : vk::Format::eR8G8B8Unorm);
+		break;
+	case 2:
+		format = isInteger ? (isSigned ? vk::Format::eR8G8Sint : vk::Format::eR8G8Uint) : (isSigned ? vk::Format::eR8G8Snorm : vk::Format::eR8G8Unorm);
+		break;
+	case 1:
+		format = isInteger ? (isSigned ? vk::Format::eR8Sint : vk::Format::eR8Uint) : (isSigned ? vk::Format::eR8Snorm : vk::Format::eR8Unorm);
+		break;
+	default:
+		return {}; // ??
+	}
+
+	size_t sliceSize = extent.width * extent.height * images.front().second[2];
+	auto pixels = make_shared<Buffer>(commandBuffer.mDevice, folder.string()+"/Staging", sliceSize * extent.depth, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+	int xt, yt, ct;
+	for (uint32_t i = 0; i < images.size(); i++) {
+		stbi_uc* img = stbi_load(images[i].first.string().c_str(), &xt, &yt, &ct, 0);
+		memcpy(pixels->data() + sliceSize * i, img, sliceSize);
+		stbi_image_free(img);
+	}
+
+	auto volume = make_shared<Texture>(folder.string(), commandBuffer.mDevice, extent, format, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferDst);
+	return commandBuffer.upload_image<byte>(pixels, volume);
+}
+
+Texture::View load_raw(const fs::path& folder, CommandBuffer& commandBuffer, vk::Extent2D sliceExtent, vk::Format format) {
+	if (!fs::exists(folder)) return {};
+
+	vector<pair<fs::path, size_t>> slices;
+	for (const auto& p : fs::directory_iterator(folder)) {
+		ifstream s(p.path(), ios::ate|ios::binary);
+		if (s.is_open() && (slices.empty() || s.tellg() == slices.front().second))
+			slices.emplace_back(p.path(), s.tellg());
+	}
+	if (slices.empty()) return {};
+	
+	ranges::sort(slices, [](const auto& a, const auto& b) { return a.first.string() < b.first.string(); });
+
+	vk::Extent3D extent(sliceExtent.width, sliceExtent.height, (uint32_t)slices.size());
+	
 	size_t pixelCount = extent.width * extent.height;
+	auto pixels = make_shared<Buffer>(commandBuffer.mDevice, folder.string()+"/Staging", slices.front().second * extent.depth, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-	size_t sliceSize = pixelCount * 4;
-	uint8_t* pixels = new uint8_t[sliceSize * extent.depth];
-	memset(pixels, 0, sliceSize * extent.depth);
-
-	uint32_t done = 0;
-	vector<thread> threads;
-	uint32_t threadCount = thread::hardware_concurrency();
-	for (uint32_t j = 0; j < threadCount; j++) {
-		threads.emplace_back(thread([=, &done]() {
-			for (uint32_t i = j; i < images.size(); i += threadCount) {
-				vector<uint8_t> slice;
-				if (!read_file(images[i].string(), slice))
-					throw invalid_argument("failed to read" + images[i].string());
-
-				uint8_t* sliceStart = pixels + sliceSize * i;
-				for (uint32_t y = 0; y < extent.height; y++)
-					for (uint32_t x = 0; x < extent.width; x++) {
-						sliceStart[4 * (x + y * extent.width) + 0] = slice[x + y * extent.width];
-						sliceStart[4 * (x + y * extent.width) + 1] = slice[x + y * extent.width + pixelCount];
-						sliceStart[4 * (x + y * extent.width) + 2] = slice[x + y * extent.width + 2*pixelCount];
-						sliceStart[4 * (x + y * extent.width) + 3] = 0xFF;
-					}
-
-				done++;
-			}
-		}));
+	for (uint32_t i = 0; i < slices.size(); i++) {
+		auto slice = read_file<vector<byte>>(slices[i].first);
+		memcpy(pixels->data() + slices.front().second * i, slice.data(), slices.front().second);
 	}
-	cout << "Loading stack";
-	while (done < images.size()) {
-		cout << "\rLoading stack: " << done << "/" << images.size();
-		this_thread::sleep_for(10ms);
-	}
-	for (thread& t : threads) t.join();
-	cout << "\rLoading stack: Done           \n";
-
-	auto volume = make_shared<Texture>(folder.string(), device, extent, vk::Format::eR8G8B8A8Unorm, pixels, sliceSize * extent.depth, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
-	delete[] pixels;
-
-	if (scale) *scale = Vector3f(.00033f * extent.width, .00033f * extent.height, .001f * extent.depth);
+	
+	auto volume = make_shared<Texture>(folder.string(), commandBuffer.mDevice, extent, format, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferDst);
+	commandBuffer.upload_image<byte>(pixels, volume);
 
 	return volume;
 }

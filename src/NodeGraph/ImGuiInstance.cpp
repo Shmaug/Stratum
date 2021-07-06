@@ -1,11 +1,26 @@
-#include "ImGuiRenderer.hpp"
+#include "ImGuiInstance.hpp"
 #include <imgui_internal.h>
 
 #include "../Core/Window.hpp"
 
 using namespace stm;
 
-ImGuiRenderer::ImGuiRenderer(NodeGraph::Node& node) : mNode(node) {
+ImGuiInstance::ImGuiInstance(NodeGraph::Node& node) : mNode(node) {
+	const spirv_module_map& spirv = mNode.node_graph().find_components<spirv_module_map>().front();
+	const auto& basic_texture_fs = spirv["basic_texture_fs"];
+	mMaterial = make_shared<Material>("ImGui", spirv["basic_texture_vs"], basic_texture_fs);
+	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
+	mMaterial->depth_stencil().setDepthTestEnable(false);
+	mMaterial->depth_stencil().setDepthWriteEnable(false);
+	mMaterial->blend_states() = { vk::PipelineColorBlendAttachmentState(true,
+		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
+		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
+		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA) };
+	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(basic_texture_fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
+		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
+		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
+		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
+
 	ImGui::CreateContext();
 
 	ImGuiIO& io = ImGui::GetIO();
@@ -69,23 +84,13 @@ ImGuiRenderer::ImGuiRenderer(NodeGraph::Node& node) : mNode(node) {
 	colors[ImGuiCol_PlotHistogramHovered] = ImVec4(0.56f, 0.56f, 0.56f, 1.00f);
 	colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
 
-	mMaterial = make_shared<Material>("ImGui", mNode.component<spirv_module_map>().at("basic_texture_vs"), mNode.component<spirv_module_map>().at("basic_texture_fs"));
-	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
-	mMaterial->depth_stencil().setDepthTestEnable(false);
-	mMaterial->depth_stencil().setDepthWriteEnable(false);
-	vk::PipelineColorBlendAttachmentState alphaBlend(true,
-		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
-		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
-		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
-	mMaterial->blend_states() = { alphaBlend };
-
 	io.Fonts->AddFontFromFileTTF("Assets/Fonts/OpenSans/OpenSans-Regular.ttf", 18.f);
 }
-ImGuiRenderer::~ImGuiRenderer() {
+ImGuiInstance::~ImGuiInstance() {
 	ImGui::DestroyContext();
 }
 
-void ImGuiRenderer::create_textures(CommandBuffer& commandBuffer) {
+void ImGuiInstance::create_textures(CommandBuffer& commandBuffer) {
 	ImGuiIO& io = ImGui::GetIO();
 
 	unsigned char* pixels;
@@ -95,21 +100,15 @@ void ImGuiRenderer::create_textures(CommandBuffer& commandBuffer) {
 	auto staging = make_shared<Buffer>(commandBuffer.mDevice, "ImGuiNode::CreateTextures/Staging", width*height*texel_size(vk::Format::eR8G8B8A8Unorm), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	memcpy(staging->data(), pixels, staging->size());
 	
-	auto tex = make_shared<Texture>(commandBuffer.mDevice, "ImGuiRenderer/Texture", vk::Extent3D(width, height, 1), vk::Format::eR8G8B8A8Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage);
+	auto tex = make_shared<Texture>(commandBuffer.mDevice, "ImGuiInstance/Texture", vk::Extent3D(width, height, 1), vk::Format::eR8G8B8A8Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage);
 	tex->transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	commandBuffer->copyBufferToImage(*commandBuffer.hold_resource(staging), **tex, vk::ImageLayout::eTransferDstOptimal,
 		{ vk::BufferImageCopy(0, 0, 0, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, tex->array_layers()), { 0, 0, 0 }, vk::Extent3D(width, height, 1)) }
 	);
 	mMaterial->descriptor("gTexture") = sampled_texture_descriptor(move(tex));
-
-	if (!mMaterial->immutable_samplers().count("gSampler"))
-		mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(commandBuffer.mDevice, "gSampler", vk::SamplerCreateInfo({},
-			vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
-			vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
-			0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
 }
 
-void ImGuiRenderer::new_frame(const Window& window, float deltaTime) {
+void ImGuiInstance::new_frame(const Window& window, float deltaTime) {
 	ImGuiIO& io = ImGui::GetIO();
 	io.DisplaySize = ImVec2((float)window.swapchain_extent().width, (float)window.swapchain_extent().height);
 	io.DisplayFramebufferScale = ImVec2(1.f, 1.f);
@@ -130,7 +129,7 @@ void ImGuiRenderer::new_frame(const Window& window, float deltaTime) {
 	ImGui::NewFrame();
 }
 
-void ImGuiRenderer::pre_render(CommandBuffer& commandBuffer) {
+void ImGuiInstance::pre_render(CommandBuffer& commandBuffer) {
 	mDrawData = ImGui::GetDrawData();
 
 	if (!mDrawData || mDrawData->TotalVtxCount <= 0) return;
@@ -155,7 +154,7 @@ void ImGuiRenderer::pre_render(CommandBuffer& commandBuffer) {
 	mIndices  = commandBuffer.copy_buffer<ImDrawIdx >(indices,  vk::BufferUsageFlagBits::eIndexBuffer);
 }
 
-void ImGuiRenderer::draw(CommandBuffer& commandBuffer) {
+void ImGuiInstance::draw(CommandBuffer& commandBuffer) {
 	if (!mDrawData || mDrawData->CmdListsCount <= 0) return;
 
 	Geometry geom(vk::PrimitiveTopology::eTriangleList, {

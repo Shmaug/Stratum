@@ -20,7 +20,7 @@ public:
 		ranges::copy(attachments, mAttachments.begin());
 		
 		for (uint32_t i = 0; i < mAttachments.size(); i++)
-			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].texture().extent().width), max(mExtent.height, mAttachments[i].texture().extent().height) );
+			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].texture()->extent().width), max(mExtent.height, mAttachments[i].texture()->extent().height) );
 
 		vector<vk::ImageView> views(mAttachments.size());
 		ranges::transform(mAttachments, views.begin(), &Texture::View::operator*);

@@ -95,17 +95,17 @@
                     "offset" : 96
                 },
                 {
-                    "name" : "gDensity",
-                    "type" : "float",
+                    "name" : "gFrameIndex",
+                    "type" : "uint",
                     "offset" : 108
                 },
                 {
-                    "name" : "gMaskValue",
-                    "type" : "uint",
+                    "name" : "gDensity",
+                    "type" : "float",
                     "offset" : 112
                 },
                 {
-                    "name" : "gFrameIndex",
+                    "name" : "gMaskValue",
                     "type" : "uint",
                     "offset" : 116
                 },
@@ -160,7 +160,7 @@
     ],
     "specialization_constants" : [
         {
-            "name" : "gBakedColor",
+            "name" : "gColorBaked",
             "id" : 0,
             "type" : "bool",
             "variable_id" : 237,
@@ -174,14 +174,14 @@
             "default_value" : false
         },
         {
-            "name" : "gMaskColored",
+            "name" : "gMasked",
             "id" : 4,
             "type" : "bool",
             "variable_id" : 287,
             "default_value" : false
         },
         {
-            "name" : "gBakedGradient",
+            "name" : "gGradientBaked",
             "id" : 1,
             "type" : "bool",
             "variable_id" : 335,
@@ -189,7 +189,7 @@
         },
         {
             "name" : "gMaxSamples",
-            "id" : 6,
+            "id" : 5,
             "type" : "uint",
             "variable_id" : 606,
             "default_value" : 4096

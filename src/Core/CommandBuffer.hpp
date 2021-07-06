@@ -44,19 +44,19 @@ public:
 	}
 	template<typename T>
 	inline const Buffer::View<T>& hold_resource(const Buffer::View<T>& v) {
-		hold_resource(v.buffer_ptr());
+		hold_resource(v.buffer());
 		return v;
 	}
 	inline const Buffer::TexelView& hold_resource(const Buffer::TexelView& v) {
-		hold_resource(v.buffer_ptr());
+		hold_resource(v.buffer());
 		return v;
 	}
 	inline const Buffer::StrideView& hold_resource(const Buffer::StrideView& v) {
-		hold_resource(v.buffer_ptr());
+		hold_resource(v.buffer());
 		return v;
 	}
 	inline const Texture::View& hold_resource(const Texture::View& v) {
-		hold_resource(v.texture_ptr());
+		hold_resource(v.texture());
 		return v;
 	}
 
@@ -96,37 +96,18 @@ public:
 		barrier(srcStage, dstStage, b);
 	}
 
-	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
-	inline void transition_images(T&... sets) {
-		auto fn = [&](auto& descriptorSet) {
-			for (auto&[idx, entry] : descriptorSet.mDescriptors)
-				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
-					case vk::DescriptorType::eCombinedImageSampler:
-					case vk::DescriptorType::eInputAttachment:
-					case vk::DescriptorType::eSampledImage:
-					case vk::DescriptorType::eStorageImage:
-						get<Texture::View>(entry).texture().transition_barrier(*this, get<vk::ImageLayout>(entry));
-						break;
-				}
-		};
-		(sets.flush_writes(), ...);
-		(fn(sets), ...);
-	}
-
 	template<typename T = byte, typename S = T>
 	inline const Buffer::View<S>& copy_buffer(const Buffer::View<T>& src, const Buffer::View<S>& dst) {
 		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must be the same size");
-		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst.buffer_ptr()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst.buffer()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
 		return dst;
 	}
-
 	template<typename T = byte>
 	inline Buffer::View<T> copy_buffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
-		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer().name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
-		mCommandBuffer.copyBuffer(*hold_resource(src.buffer_ptr()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
+		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer()->name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
+		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
 		return Buffer::View<T>(dst);
 	}
-	
 	template<typename T = byte>
 	inline Buffer::View<T> copy_buffer(const buffer_vector<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
 		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer()->name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
@@ -139,12 +120,20 @@ public:
 		if (level == 0) {
 			copies.resize(src.subresource_range().levelCount);
 			for (uint32_t i = 0; i < copies.size(); i++)
-			copies[i] = vk::ImageCopy(src.subresource(i), {}, dst.subresource(i), {}, src.texture().extent());
+			copies[i] = vk::ImageCopy(src.subresource(i), {}, dst.subresource(i), {}, src.texture()->extent());
 		} else
-			copies.emplace_back(src.subresource(level), vk::Offset3D(), dst.subresource(level), vk::Offset3D(), src.texture().extent());
-		src.texture().transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
-		dst.texture().transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyImage(*hold_resource(src.texture_ptr()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.texture_ptr()), vk::ImageLayout::eTransferDstOptimal, copies);
+			copies.emplace_back(src.subresource(level), vk::Offset3D(), dst.subresource(level), vk::Offset3D(), src.texture()->extent());
+		src.texture()->transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.copyImage(*hold_resource(src.texture()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, copies);
+		return dst;
+	}
+
+	template<typename T = byte>
+	inline const Texture::View& upload_image(const Buffer::View<T>& src, const Texture::View& dst, uint32_t level = 0) {
+		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
+			vk::BufferImageCopy(0, 0, 0, dst.subresource(level)) });
 		return dst;
 	}
 
@@ -189,7 +178,6 @@ public:
 		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
 	}
-	
 	template<typename T, int M, int N> requires(is_trivially_copyable_v<T> && M != Eigen::Dynamic && N != Eigen::Dynamic)
 	inline void push_constant(const string& name, const Eigen::Array<T,M,N>& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
@@ -198,7 +186,6 @@ public:
 		if (range.size != sizeof(T)*M*N) throw invalid_argument("argument size (" + to_string(sizeof(T)*M*N) + ") must match push constant size (" + to_string(range.size) +")");
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T)*M*N, value.data());
 	}
-
 	template<ranges::range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
 	inline void push_constant(const string& name, const R& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
@@ -206,6 +193,23 @@ public:
 		const auto& range = it->second;
 		if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
+	}
+
+	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
+	inline void transition_images(T&... sets) {
+		auto fn = [&](auto& descriptorSet) {
+			for (auto&[idx, entry] : descriptorSet.mDescriptors)
+				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
+					case vk::DescriptorType::eCombinedImageSampler:
+					case vk::DescriptorType::eInputAttachment:
+					case vk::DescriptorType::eSampledImage:
+					case vk::DescriptorType::eStorageImage:
+						get<Texture::View>(entry).texture()->transition_barrier(*this, get<vk::ImageLayout>(entry));
+						break;
+				}
+		};
+		(sets.flush_writes(), ...);
+		(fn(sets), ...);
 	}
 
 	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
@@ -219,7 +223,6 @@ public:
 		mBoundDescriptorSets[index] = descriptorSet;
 		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
 	}
-
 	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet) {
 		if (index < mBoundDescriptorSets.size() && mBoundDescriptorSets[index] == descriptorSet) return;
 		bind_descriptor_set(index, descriptorSet, {});
@@ -229,7 +232,7 @@ public:
 	inline void bind_vertex_buffer(uint32_t index, const Buffer::View<T>& view) {
 		if (mBoundVertexBuffers[index] != view) {
 			mBoundVertexBuffers[index] = view;
-			mCommandBuffer.bindVertexBuffers(index, { *view.buffer() }, { view.offset() });
+			mCommandBuffer.bindVertexBuffers(index, { **view.buffer() }, { view.offset() });
 		}
 	}
 	template<ranges::input_range R>
@@ -239,7 +242,7 @@ public:
 		bool needBind = false;
 		uint32_t i = 0;
 		for (const auto& v : views) {
-			bufs[i] = *v.buffer();
+			bufs[i] = **v.buffer();
 			offsets[i] = v.offset();
 			if (mBoundVertexBuffers[index + i] != v) {
 				needBind = true;
@@ -257,7 +260,7 @@ public:
 			else if (view.stride() == sizeof(uint16_t)) type = vk::IndexTypeValue<uint16_t>::value;
 			else if (view.stride() == sizeof(uint8_t))  type = vk::IndexTypeValue<uint8_t>::value;
 			else throw invalid_argument("invalid stride for index buffer");
-			mCommandBuffer.bindIndexBuffer(*view.buffer(), view.offset(), type);
+			mCommandBuffer.bindIndexBuffer(**view.buffer(), view.offset(), type);
 		}
 	}
 

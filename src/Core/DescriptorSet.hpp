@@ -171,7 +171,7 @@ public:
 			case vk::DescriptorType::eUniformBuffer:
 			case vk::DescriptorType::eStorageBuffer: {
 				const auto& view = get<Buffer::StrideView>(entry);
-				info.mBufferInfo.buffer = *view.buffer();
+				info.mBufferInfo.buffer = **view.buffer();
 				info.mBufferInfo.offset = view.offset();
 				if (write.descriptorType == vk::DescriptorType::eUniformBufferDynamic || write.descriptorType == vk::DescriptorType::eStorageBufferDynamic)
 					info.mBufferInfo.range = view.stride();

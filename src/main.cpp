@@ -1,7 +1,7 @@
 #include "Core/Window.hpp"
 
 #include "NodeGraph/PbrRenderer.hpp"
-#include "NodeGraph/ImGuiRenderer.hpp"
+#include "NodeGraph/ImGuiInstance.hpp"
 
 #include <json.hpp>
 
@@ -9,39 +9,40 @@ using namespace stm;
 
 class Application {
 private:
+	NodeGraph::Node& mNode;
+	
 	Instance& mInstance;
-
 	RenderGraph& mMainPass;
-	ImGuiRenderer& mImGuiRenderer;
+	ImGuiInstance& mImGuiRenderer;
 	PbrRenderer& mPbrRenderer;
 
 public:
-	inline Application(NodeGraph::Node& node, Instance& instance) :
-		mInstance(instance), mMainPass(node.make_component<RenderGraph>()), mPbrRenderer(node.make_component<PbrRenderer>()), mImGuiRenderer(node.make_component<ImGuiRenderer>()) {
+	inline Application(NodeGraph::Node& node)
+		: mNode(node), mInstance(*mNode.find_in_ancestor<Instance>()), mMainPass(node.make_in_child<RenderGraph>("Main Window")), mPbrRenderer(node.make_in_child<PbrRenderer>("PBR Renderer")), mImGuiRenderer(node.make_in_child<ImGuiInstance>("ImGui Renderer")) {
 		
 		vk::PipelineColorBlendAttachmentState blendOpaque;
 		blendOpaque.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 		mMainPass[""].bind_point(vk::PipelineBindPoint::eGraphics);
-		mMainPass[""]["primaryColor"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""]["primaryColor"] = RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eColor, blendOpaque, vk::AttachmentDescription({},
 				mInstance.window().surface_format().format, vk::SampleCountFlagBits::e4,
 				vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal));
-		mMainPass[""]["primaryDepth"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""]["primaryDepth"] = RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eDepthStencil, blendOpaque, vk::AttachmentDescription({},
 				vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e4,
 				vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eDontCare, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal));
-		mMainPass[""]["primaryResolve"] =  RenderPass::SubpassDescription::AttachmentInfo(
+		mMainPass[""]["primaryResolve"] = RenderPass::SubpassDescription::AttachmentInfo(
 			RenderPass::AttachmentTypeFlags::eResolve, blendOpaque, vk::AttachmentDescription({},
 				mInstance.window().surface_format().format, vk::SampleCountFlagBits::e1,
 				vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
 
-		mMainPass.PreRender.emplace(node, bind_front(&PbrRenderer::pre_render, &mPbrRenderer));
-		mMainPass.PreRender.emplace(node, bind_front(&ImGuiRenderer::pre_render, &mImGuiRenderer));
-		mMainPass.OnDraw.emplace(node, bind_front(&PbrRenderer::draw, &mPbrRenderer, ref(mPbrRenderer.material())));
-		mMainPass.OnDraw.emplace(node, bind_front(&ImGuiRenderer::draw, &mImGuiRenderer)); // TODO: ensure this is always last in the draw queue
+		mMainPass.PreRender.emplace(mNode, bind_front(&PbrRenderer::pre_render, &mPbrRenderer));
+		mMainPass.PreRender.emplace(mNode, bind_front(&ImGuiInstance::pre_render, &mImGuiRenderer));
+		mMainPass.OnDraw.emplace(mNode, bind_front(&PbrRenderer::draw, &mPbrRenderer, ref(mPbrRenderer.material())));
+		mMainPass.OnDraw.emplace(mNode, bind_front(&ImGuiInstance::draw, &mImGuiRenderer)); // TODO: ensure this is always last in the draw queue
 
 		{
 			auto commandBuffer = mInstance.device().get_command_buffer("Init");
@@ -49,13 +50,10 @@ public:
 			for (const string& filepath : mInstance.find_arguments("load_gltf"))
 				mPbrRenderer.load_gltf(*commandBuffer, filepath);
 			mInstance.device().submit(commandBuffer);
-			mInstance.device().flush();
 		}
 	}
-
 	inline void run() {
 		stm::Window& window = mInstance.window();
-		Device& device = mInstance.device();
 
 		float fovy = radians(60.f);
 		Vector2f euler = Vector2f::Zero();
@@ -96,39 +94,33 @@ public:
 
 			Profiler::imgui();
 
-			ImGui::Render();
+			{
+				ProfilerRegion ps("ImGui::Render");
+				ImGui::Render();
+			}
 			
-			auto commandBuffer = device.get_command_buffer("Frame");
+			auto commandBuffer = mInstance.device().get_command_buffer("Frame");
 			if (auto backBuffer = window.acquire_image(*commandBuffer)) {
-				mPbrRenderer.material().push_constant("gProjection", hlsl::make_perspective(fovy, (float)backBuffer.texture().extent().height/(float)backBuffer.texture().extent().width, 0, 64));
+				mPbrRenderer.material().push_constant("gProjection", hlsl::make_perspective(fovy, (float)backBuffer.texture()->extent().height/(float)backBuffer.texture()->extent().width, 0, 64));
 				mMainPass.render(*commandBuffer, { { "primaryResolve", backBuffer } });
 				
-				Semaphore& semaphore = commandBuffer->hold_resource<Semaphore>(device, "RenderSemaphore");
-				device.submit(commandBuffer, { *window.image_available_semaphore() }, { vk::PipelineStageFlagBits::eColorAttachmentOutput }, { *semaphore });
+				Semaphore& semaphore = commandBuffer->hold_resource<Semaphore>(mInstance.device(), "RenderSemaphore");
+				mInstance.device().submit(commandBuffer, { *window.image_available_semaphore() }, { vk::PipelineStageFlagBits::eColorAttachmentOutput }, { *semaphore });
 				window.present({ *semaphore });
 			}
 			Profiler::end_sample();
 		}
-		Profiler::clear_history();
-		mInstance.device().flush();
 	}
 };
 
 int main(int argc, char** argv) {
-	unique_ptr<Instance> instance = make_unique<Instance>(argc, argv);
-	{
-		NodeGraph nodeGraph;
-		NodeGraph::Node& root = nodeGraph.emplace("Application");
-		auto& spirvModules = root.make_component<spirv_module_map>();
-		for (const fs::path& p : fs::directory_iterator("Assets/SPIR-V"))
-			if (p.extension() == ".spv")
-				spirvModules.emplace(p.stem().string(), make_shared<SpirvModule>(instance->device(), p)).first->first;
-		
-		Application app(root, *instance);
-		app.run();
-		nodeGraph.clear();
-	}
-	Profiler::clear_history();
-	instance.reset();
+	NodeGraph nodeGraph;
+	NodeGraph::Node& root = nodeGraph.emplace("Instance");
+	Instance& mInstance = root.make_component<Instance>(argc, argv);
+
+	root.make_in_child<spirv_module_map>("SPIRV", mInstance.device(), "Assets/SPIR-V");
+	root.make_in_child<Application>("Application").run();
+	
+	nodeGraph.erase_recurse(root);
 	return EXIT_SUCCESS;
 }

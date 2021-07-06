@@ -4,53 +4,49 @@
 
 namespace stm {
 
-struct ProfilerSample {
-	ProfilerSample* mParent;
-	list<unique_ptr<ProfilerSample>> mChildren;
-	chrono::high_resolution_clock::time_point mStartTime;
-	chrono::nanoseconds mDuration;
-	Vector4f mColor;
-	string mLabel;
-};
-
 class Profiler {
-private:
-	STRATUM_API static list<ProfilerSample> mFrameHistory;
-	STRATUM_API static ProfilerSample* mCurrentSample;
-	STRATUM_API static size_t mHistoryCount;
-	STRATUM_API static bool mPaused;
-	STRATUM_API static unique_ptr<ProfilerSample> mTimelineSample;
-
 public:
+	struct sample_t {
+		shared_ptr<sample_t> mParent;
+		list<shared_ptr<sample_t>> mChildren;
+		chrono::high_resolution_clock::time_point mStartTime;
+		chrono::nanoseconds mDuration;
+		Vector4f mColor;
+		string mLabel;
+		
+		sample_t() = default;
+		sample_t(sample_t&& s) = default;
+		inline sample_t(const shared_ptr<sample_t>& parent, const string& label, const Vector4f& color)
+			: mParent(parent), mColor(color), mLabel(label), mStartTime(chrono::high_resolution_clock::now()), mDuration(chrono::nanoseconds::zero()) {}
+	};
 
 	inline static void begin_sample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
-		ProfilerSample s;
-		s.mParent = mCurrentSample;
-		s.mStartTime = chrono::high_resolution_clock::now();
-		s.mDuration = chrono::nanoseconds::zero();
-		s.mLabel = label;
-		s.mColor = color;
+		auto s = make_unique<sample_t>(mCurrentSample, label, color);
 		if (mCurrentSample)
-			mCurrentSample = mCurrentSample->mChildren.emplace_back(make_unique<ProfilerSample>(move(s))).get();
+			mCurrentSample = mCurrentSample->mChildren.emplace_back(move(s));
 		else {
-			mCurrentSample = &mFrameHistory.emplace_front(move(s));
-			while (mFrameHistory.size() > mHistoryCount)
-				mFrameHistory.pop_back();
+			mCurrentSample = mFrameHistory.emplace_front(move(s));
+			while (mFrameHistory.size() > mFrameHistoryCount) mFrameHistory.pop_back();
 		}
 	}
-	inline static ProfilerSample& end_sample() {
-		if (!mCurrentSample) throw logic_error("attempt to end nonexistant profiler sample!");
-		if (mPaused) return *mCurrentSample;
+	inline static shared_ptr<sample_t> end_sample() {
+		if (!mCurrentSample) throw logic_error("cannot call end_sample without first calling begin_sample");
 		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
-		ProfilerSample* tmp = mCurrentSample;
+		auto tmp = mCurrentSample;
 		mCurrentSample = mCurrentSample->mParent;
-		return *tmp;
+		return tmp;
 	}
 
-	inline static const list<ProfilerSample>& history() { return mFrameHistory; }
+	inline static const auto& history() { return mFrameHistory; }
 	inline static void clear_history() { mFrameHistory.clear(); }
 
-	static void imgui();
+	STRATUM_API static void imgui();
+
+private:
+	STRATUM_API static size_t mFrameHistoryCount;
+	STRATUM_API static list<shared_ptr<sample_t>> mFrameHistory;
+	STRATUM_API static shared_ptr<sample_t> mCurrentSample;
+
 };
 
 }

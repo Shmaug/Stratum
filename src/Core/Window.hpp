@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CommandBuffer.hpp"
-#include "InputState.hpp"
 
 namespace stm {
 
@@ -232,24 +231,13 @@ enum KeyCode {
 #endif
 };
 
-class MouseKeyboardState : public InputState {
+class MouseKeyboardState {
 private:
 	Vector2f mCursorPos;
 	Vector2f mCursorDelta;
 	float mScrollDelta;
 	unordered_set<KeyCode> mButtons;
 public:
-	MouseKeyboardState(const MouseKeyboardState& ms) = default;
-	MouseKeyboardState(MouseKeyboardState&& ms) = default;
-	inline MouseKeyboardState() : InputState("MouseKeyboard") {};
-	inline MouseKeyboardState& operator=(const MouseKeyboardState& rhs) {
-		mCursorPos = rhs.mCursorPos;
-		mCursorDelta = rhs.mCursorDelta;
-		mScrollDelta = rhs.mScrollDelta;
-		mButtons = rhs.mButtons;
-		return *this;
-	};
-	
 	inline void clear_deltas() {
 		mCursorDelta = Vector2f::Zero();
 		mScrollDelta = 0;

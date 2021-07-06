@@ -56,7 +56,7 @@ public:
 	inline vk::DeviceSize size() const { return mSize; }
 	inline byte* data() const { return mMemory->data(); }
 
-	template<typename T>
+	template<typename T = byte>
 	class View {
 	private:
 		shared_ptr<Buffer> mBuffer;
@@ -89,8 +89,7 @@ public:
 
 		inline operator bool() const { return !empty(); }
 		
-		inline Buffer& buffer() const { return *mBuffer; }
-		inline const shared_ptr<Buffer>& buffer_ptr() const { return mBuffer; }
+		inline const auto& buffer() const { return mBuffer; }
     inline vk::DeviceSize offset() const { return mOffset; }
 
     inline bool empty() const { return !mBuffer || mSize == 0; }
@@ -117,7 +116,7 @@ public:
 		StrideView(const StrideView&) = default;
 		inline StrideView(const View<byte>& view, vk::DeviceSize stride) : View<byte>(view), mStride(stride) {}
 		template<typename T>
-		inline StrideView(const View<T>& v) : View<byte>(v.buffer_ptr(), v.offset(), v.size_bytes()), mStride(sizeof(T)) {}
+		inline StrideView(const View<T>& v) : View<byte>(v.buffer(), v.offset(), v.size_bytes()), mStride(sizeof(T)) {}
 		inline StrideView(const shared_ptr<Buffer>& buffer, vk::DeviceSize stride, vk::DeviceSize byteOffset = 0, vk::DeviceSize byteLength = VK_WHOLE_SIZE) 
 			: View<byte>(buffer, byteOffset, byteLength), mStride(stride) {}
     
@@ -130,7 +129,7 @@ public:
 		template<typename T>
 		inline operator View<T>() const {
 			if (sizeof(T) != mStride) throw logic_error("sizeof(T) must match stride");
-			return Buffer::View<T>(buffer_ptr(), offset(), size_bytes()/sizeof(T));
+			return Buffer::View<T>(buffer(), offset(), size_bytes()/sizeof(T));
 		}
 	};
 
@@ -145,7 +144,7 @@ public:
 		TexelView(const TexelView&) = default;
 		template<typename T>
 		inline TexelView(const View<T>& view, vk::Format fmt)
-			: View<byte>(view.buffer_ptr(), view.offset(), view.size_bytes()), mFormat(fmt) {
+			: View<byte>(view.buffer(), view.offset(), view.size_bytes()), mFormat(fmt) {
 			mHashKey = hash_args(offset(), size_bytes(), mFormat);
 		}
 		inline TexelView(const shared_ptr<Buffer>& buf, vk::Format fmt, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE)
@@ -154,12 +153,12 @@ public:
 		}
 		
 		inline const vk::BufferView& operator*() const {
-			if (auto it = buffer().mTexelViews.find(mHashKey); it != buffer().mTexelViews.end())
+			if (auto it = buffer()->mTexelViews.find(mHashKey); it != buffer()->mTexelViews.end())
 				return it->second;
 			else {
-				vk::BufferView v = buffer().mDevice->createBufferView(vk::BufferViewCreateInfo({}, *buffer(), mFormat, offset(), size_bytes()));
-				buffer().mDevice.set_debug_name(v, buffer().name()+"/View");
-				return buffer().mTexelViews.emplace(mHashKey, v).first->second;
+				vk::BufferView v = buffer()->mDevice->createBufferView(vk::BufferViewCreateInfo({}, **buffer(), mFormat, offset(), size_bytes()));
+				buffer()->mDevice.set_debug_name(v, buffer()->name()+"/View");
+				return buffer()->mTexelViews.emplace(mHashKey, v).first->second;
 			}
 		}
 		inline const vk::BufferView* operator->() const { return &operator*(); }

@@ -8,16 +8,16 @@
 
 using namespace stm;
 
-PbrRenderer::PbrRenderer(NodeGraph::Node& node) : mNode(node), mShadowPass(node.make_child<RenderGraph>("shadow pass")) {
-	const auto& vs = mNode.component<spirv_module_map>().at("pbr_vs");
-	const auto& fs = mNode.component<spirv_module_map>().at("pbr_fs");
-	mMaterial = make_shared<Material>("pbr", vs, fs);
+PbrRenderer::PbrRenderer(NodeGraph::Node& node) : mNode(node), mShadowPass(node.make_in_child<RenderGraph>("shadow pass")) {
+	const spirv_module_map& spirv = mNode.node_graph().find_components<spirv_module_map>().front();
+	const auto& pbr_vs = spirv["pbr_vs"];
+	mMaterial = make_shared<Material>("pbr", pbr_vs, spirv["pbr_fs"]);
 	mMaterial->raster_state().setFrontFace(vk::FrontFace::eClockwise);
-	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
+	mMaterial->set_immutable_sampler("gSampler", make_shared<Sampler>(pbr_vs->mDevice, "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
-	mMaterial->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(fs->mDevice, "gShadowSampler", vk::SamplerCreateInfo({},
+	mMaterial->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(pbr_vs->mDevice, "gShadowSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
 		0, true, 2, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
@@ -32,7 +32,7 @@ PbrRenderer::PbrRenderer(NodeGraph::Node& node) : mNode(node), mShadowPass(node.
 			vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 			vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
 
-	mShadowMaterial = make_shared<Material>("pbrShadow", vs);
+	mShadowMaterial = make_shared<Material>("pbrShadow", pbr_vs);
 	mShadowPass.OnDraw.emplace(mNode, bind_front(&PbrRenderer::draw, this, ref(*mShadowMaterial)) );
 }
 
@@ -61,7 +61,7 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		Buffer::View<byte> tmp = make_shared<Buffer>(device, buffer.name+"/Staging", dst.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		memcpy(tmp.data(), buffer.data.data(), tmp.size());
 		commandBuffer.copy_buffer(tmp, dst);
-		return dst.buffer_ptr();
+		return dst.buffer();
 	});
 	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
 		auto pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -299,7 +299,7 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 					break;
 				}
 				
-				PrimitiveSet& p = dst.make_child<PrimitiveSet>("PrimitiveSet");
+				PrimitiveSet& p = dst.make_in_child<PrimitiveSet>("PrimitiveSet");
 				p.mGeometry = geometries[node.mesh][i];
 				p.mIndices = Buffer::StrideView(buffers[model.bufferViews[indices.bufferView].buffer], indexStride, model.bufferViews[indices.bufferView].byteOffset, model.bufferViews[indices.bufferView].byteLength);
 				p.mIndexCount = (uint32_t)indices.count;
@@ -312,7 +312,7 @@ void PbrRenderer::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		auto light_it = node.extensions.find("KHR_lights_punctual");
 		if (light_it != node.extensions.end() && light_it->second.Has("light")) {
 			const tinygltf::Light& l = model.lights[light_it->second.Get("light").GetNumberAsInt()];
-			hlsl::LightData& light = dst.make_child<hlsl::LightData>(l.name);
+			hlsl::LightData& light = dst.make_in_child<hlsl::LightData>(l.name);
 			light.mEmission = Map<const Array3d>(l.color.data()).cast<float>() * (float)l.intensity;
 			light.mFlags = LIGHT_USE_SHADOWMAP;
 			if (l.type == "directional") {
@@ -348,7 +348,7 @@ void PbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		transforms[n.component<PrimitiveSet>().mMaterialIndex] = transform;
+		transforms[n.get<PrimitiveSet>().mMaterialIndex] = transform;
 	});
 
 	if (transforms.empty()) return;
@@ -358,7 +358,7 @@ void PbrRenderer::pre_render(CommandBuffer& commandBuffer) const {
 		n.for_each_ancestor<hlsl::TransformData>([&](const hlsl::TransformData& t) {
 			transform = hlsl::tmul(transform, t);
 		});
-		hlsl::LightData& dst = lights.emplace_back(n.component<hlsl::LightData>());
+		hlsl::LightData& dst = lights.emplace_back(n.get<hlsl::LightData>());
 		dst.mLightToWorld = transform;
 		dst.mShadowST = hlsl::float4(1,1,0,0);
 	});
