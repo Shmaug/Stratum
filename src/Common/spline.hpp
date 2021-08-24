@@ -4,8 +4,8 @@
 
 namespace stm {
 
-template<typename T>
-class spline {
+template<typename T> requires(is_arithmetic_v<T>)
+class Spline {
 public:
 	enum class ExtrapolateMode {
 		eConstant,
@@ -22,7 +22,7 @@ public:
 		eStep,
 	};
 
-	struct keyframe_t {
+	struct Key {
 		chrono::milliseconds mTime;
 		T mValue;
 		T mTangentIn;
@@ -31,82 +31,76 @@ public:
 		TangentMode mTangentModeOut = TangentMode::eSmooth;
 	};
 
-	spline() = default;
-	spline(const spline&) = default;
-	spline(spline&&) = default;
-	inline spline(const vector<keyframe_t>& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
-		: mKeyframes(keyframes), mExtrapolateIn(in), mExtrapolateOut(out) {
-
-		if (!mKeyframes.size()) return;
+	Spline() = default;
+	Spline(const Spline&) = default;
+	Spline(Spline&&) = default;
+	template<range_of<Key> R>
+	inline Spline(R&& keyframes, ExtrapolateMode in = ExtrapolateMode::eConstant, ExtrapolateMode out = ExtrapolateMode::eConstant)
+		: mExtrapolateIn(in), mExtrapolateOut(out) {
+		ranges::copy(keyframes, back_inserter(mKeys));
+		if (mKeys.empty()) return;
 		
 		// compute tangents
-		for (uint32_t i = 0; i < mKeyframes.size(); i++) {
-			switch (mKeyframes[i].mTangentModeIn) {
+		for (auto k = mKeys.begin(); k != mKeys.end(); k++) {
+			switch (k->mTangentModeIn) {
 			case TangentMode::eSmooth:
-				if (i > 0 && i < mKeyframes.size()-1) {
-					mKeyframes[i].mTangentIn = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
+				if (i > 0 && i < mKeys.size()-1) {
+					k->mTangentIn = (next(k)->mValue - mKeys[i - 1].mValue) / (next(k)->mTime - mKeys[i - 1].mTime);
 					break;
 				}
 			case TangentMode::eLinear:
-				if (i > 0) mKeyframes[i].mTangentIn = (mKeyframes[i].mValue - mKeyframes[i-1].mValue) / (mKeyframes[i].mTime - mKeyframes[i - 1].mTime);
+				if (i > 0) k->mTangentIn = (k->mValue - mKeys[i - 1].mValue) / (k->mTime - mKeys[i - 1].mTime);
 				break;
 			}
-
-			switch (mKeyframes[i].mTangentModeOut) {
+			switch (k->mTangentModeOut) {
 			case TangentMode::eSmooth:
-				if (i > 0 && i < mKeyframes.size() - 1) {
-					mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i - 1].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i - 1].mTime);
+				if (i > 0 && i < mKeys.size() - 1) {
+					k->mTangentOut = (next(k)->mValue - mKeys[i - 1].mValue) / (next(k)->mTime - mKeys[i - 1].mTime);
 					break;
 				}
 			case TangentMode::eLinear:
-				if (i < mKeyframes.size() - 1) mKeyframes[i].mTangentOut = (mKeyframes[i + 1].mValue - mKeyframes[i].mValue) / (mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
+				if (i < mKeys.size() - 1) k->mTangentOut = (next(k)->mValue - k->mValue) / (next(k)->mTime - k->mTime);
 				break;
 			}
 		}
 
-		mKeyframes[0].mTangentIn = mKeyframes[0].mTangentOut;
-		mKeyframes[mKeyframes.size() - 1].mTangentOut = mKeyframes[mKeyframes.size() - 1].mTangentIn;
+		mKeys.front().mTangentIn = mKeys.front()mTangentOut;
+		mKeys.back().mTangentOut = mKeys.back().mTangentIn;
 		
-		// compute curve
-		mCoefficients.resize(mKeyframes.size());
-		for (uint32_t i = 0; i < mKeyframes.size() - 1; i++) {
+		// compute coefficients
+		mCoefficients.resize(mKeys.size());
+		for (uint32_t i = 0; i < mKeys.size() - 1; i++) {
+			const Key& k0 = mKeys[i];
+			const Key& k1 = mKeys[i+1];
+			Eigen::Array<T,4>& c = mCoefficients[i];
 
-			auto ts = chrono::duration_cast<chrono::duration<float, chrono::seconds>>(mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
+			auto ts = chrono::duration_cast<chrono::duration<float, chrono::seconds>>(k1.mTime - k0.mTime);
 
-			T p0y = mKeyframes[i].mValue;
-			T p1y = mKeyframes[i + 1].mValue;
-			T v0 = mKeyframes[i].mTangentOut * ts;
-			T v1 = mKeyframes[i + 1].mTangentIn * ts;
-
-			mCoefficients[i].d = p0y;
-			if (mKeyframes[i].mTangentModeOut != TangentMode::eStep) {
-				mCoefficients[i].c = v0;
-				mCoefficients[i].b = 3 * (p1y - p0y) - 2*v0 - v1;
-				mCoefficients[i].a = p1y - p0y - v0 - mCoefficients[i].b;
+			c[0] = k0.mValue;
+			if (k.mTangentModeOut != TangentMode::eStep) {
+				c[1] = k0.mTangentOut * ts;
+				c[2] = 3 * (k1.mValue - c[0]) - 2*c[1] - k1.mTangentIn * ts;
+				c[3] = k1.mValue - c[0] - c[1] - c[2];
 			}
 		}
 	}
 
 	inline T sample(float t) const {
-		if (mKeyframes.size() == 0) return 0;
-		if (mKeyframes.size() == 1) return mKeyframes[0].mValue;
+		if (mKeys.empty()) return {};
 
-		const keyframe_t& first = mKeyframes[0];
-		const keyframe_t& last = mKeyframes[mKeyframes.size() - 1];
-
-		float length = last.mTime - first.mTime;
-		float ts = first.mTime - t;
-		float tl = t - last.mTime;
+		const float length = mKeys.back().mTime - mKeys.front().mTime;
+		const float ts = mKeys.front().mTime - t;
+		const float tl = t - mKeys.back().mTime;
 		T offset = 0;
 		
 		if (tl > 0) {
 			switch (mExtrapolateOut) {
 			case ExtrapolateMode::eConstant:
-				return last.mValue;
+				return mKeys.back().mValue;
 			case ExtrapolateMode::eLinear:
-				return last.mValue + last.mTangentOut * tl;
+				return mKeys.back().mValue + mKeys.back().mTangentOut * tl;
 			case ExtrapolateMode::eCycleOffset:
-				offset += (last.mValue - first.mValue) * (floorf(tl / length) + 1);
+				offset += (mKeys.back().mValue - mKeys.front().mValue) * (floorf(tl / length) + 1);
 			case ExtrapolateMode::eCycle:
 				t = fmodf(tl, length);
 				break;
@@ -115,16 +109,16 @@ public:
 				if (t > length) t = 2 * length - t;
 				break;
 			}
-			t += first.mTime;
+			t += mKeys.front().mTime;
 		}
 		if (ts > 0) {
 			switch (mExtrapolateIn) {
 			case ExtrapolateMode::eConstant:
-				return first.mValue;
+				return mKeys.front().mValue;
 			case ExtrapolateMode::eLinear:
-				return first.mValue - first.mTangentIn * ts;
+				return mKeys.front().mValue - mKeys.front().mTangentIn * ts;
 			case ExtrapolateMode::eCycleOffset:
-				offset += (first.mValue - last.mValue) * (floorf(ts / length) + 1);
+				offset += (mKeys.front().mValue - mKeys.back().mValue) * (floorf(ts / length) + 1);
 			case ExtrapolateMode::eCycle:
 				t = fmodf(ts, length);
 				break;
@@ -133,37 +127,40 @@ public:
 				if (t > length) t = 2 * length - t;
 				break;
 			}
-			t = last.mTime - t; // looping anims loop back to last key
+			t = mKeys.back().mTime - t; // looping anims loop back to last key
 		}
 
 		// find the first key after t
-		uint32_t i = 0;
-		for (uint32_t j = 1; j < (uint32_t)mKeyframes.size(); j++)
-			if (mKeyframes[j].mTime > t) {
-				i = j - 1;
+		uint32_t i;
+		for (i = 0; i < (uint32_t)mKeys.size() - 1; i++)
+			if (mKeys[i + 1]->mTime > t)
 				break;
-			}
-
-		float u = (t - mKeyframes[i].mTime) / (mKeyframes[i + 1].mTime - mKeyframes[i].mTime);
-		coeff_t c = mCoefficients[i];
-		return u*u*u*c.a + u*u*c.b + u*c.c + c.d + offset;
+			
+		const Key& k = mKeyframes[i];
+		const Eigen::Array<T,4>& c = mCoefficients[i];
+		float u = (t - k.mTime) / (k.mTime - k.mTime);
+		float u2 = u*u;
+		return c.dot(Eigen::Array<T,4>(1, u, u2, u2*u)) + offset;
+		//return u2*u*c[3] + u2*c[2] + u*c[1] + c[0] + offset;
 	}
 
 	inline ExtrapolateMode extrapolate_in() const { return mExtrapolateIn; }
 	inline ExtrapolateMode extrapolate_out() const { return mExtrapolateOut; }
-	inline keyframe_t keyframe(uint32_t index) const { return mKeyframes[index]; }
-	inline Vector4f coefficient(uint32_t index) const { return mCoefficients[index]; }
+	inline Key at(size_t index) const { return mKeys[index]; }
+	inline Eigen::Array<T,4> coefficient(size_t index) const { return mCoefficients[index]; }
 
-	inline const vector<keyframe_t>& keyframes() const { return (uint32_t)mKeyframes; }
-	inline keyframe_t& operator[](uint32_t index) { return mKeyframes[index]; }
+	inline vector<Key>::iterator begin() { return mKeys.begin(); }
+	inline vector<Key>::iterator end() { return mKeys.end(); }
+	inline vector<Key>::const_iterator begin() const { return mKeys.begin(); }
+	inline vector<Key>::const_iterator end() const { return mKeys.end(); }
+
+	inline Key& operator[](size_t index) { return mKeys[index]; }
 
 private:
-	struct coeff_t { T a, b, c, d; };
-
 	ExtrapolateMode mExtrapolateIn  = ExtrapolateMode::eConstant;
 	ExtrapolateMode mExtrapolateOut = ExtrapolateMode::eConstant;
-	vector<coeff_t> mCoefficients;
-	vector<keyframe_t> mKeyframes;
+	vector<Eigen::Array<T,4>> mCoefficients;
+	vector<Key> mKeys;
 };
 
 }

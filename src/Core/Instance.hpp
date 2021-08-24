@@ -1,7 +1,6 @@
 #pragma once
 
-#include "../Common/common.hpp"
-#include "../Common/hash.hpp"
+#include <Common/hash.hpp>
 
 #ifdef WIN32
 #include <vulkan/vulkan_win32.h>
@@ -39,8 +38,10 @@ public:
 	inline stm::Device& device() const { return *mDevice; }
 	inline stm::Window& window() const { return *mWindow; }
 	
-	inline bool find_argument(const string& name) const {
-		return mOptions.find(name) != mOptions.end();
+	inline optional<string> find_argument(const string& name) const {
+		auto it = mOptions.find(name);
+		if (it == mOptions.end()) return nullopt;
+		return it->second;
 	}
 	inline auto find_arguments(const string& name) const {
 		auto[first,last] = mOptions.equal_range(name);
@@ -57,7 +58,7 @@ public:
 	inline x11::Display* x_display() const { return mXDisplay; }
 	#endif
 
-	STRATUM_API void poll_events();
+	STRATUM_API void poll_events() const;
 
 private:
 	vk::Instance mInstance;
@@ -71,9 +72,8 @@ private:
 
 	bool mDestroyPending = false;
 
-	friend class stm::Window;
-	
 	#ifdef WIN32
+	friend class stm::Window;
 	static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;
 	#endif

@@ -4,6 +4,12 @@
 
 namespace stm {
 
+class GeometryDescription {
+	vk::Format mFormat;
+	uint32_t mElementStride;
+	uint32_t mOffset;
+	vk::VertexInputRate mInputRate;
+};
 
 class Geometry {
 public:
@@ -23,12 +29,17 @@ public:
 		
 		Attribute& operator=(const Attribute&) = default;
 		Attribute& operator=(Attribute&&) = default;
-		inline bool operator==(const Attribute&) const = default;
+		bool operator==(const Attribute&) const = default;
+
+		inline Attribute& operator=(const Buffer::StrideView& b) {
+			if (mBuffer && b.stride() != mBuffer.stride()) throw invalid_argument("Cannot assign buffer with different stride");
+			mBuffer = b;
+			return *this;
+		}
 		
 		inline operator bool() const { return !mBuffer.empty(); }
 		
 		inline const auto& buffer() const { return mBuffer; }
-
 		inline vk::Format format() const { return mFormat; }
     inline uint32_t offset() const { return mOffset; }
 		inline uint32_t stride() const { return texel_size(mFormat);}
@@ -88,6 +99,12 @@ template<>
 struct hash<stm::Geometry::Attribute> {
 	inline size_t operator()(const stm::Geometry::Attribute& v) const {
 		return stm::hash_args(v.format(), v.offset(), v.input_rate());
+	}
+};
+template<>
+struct hash<stm::Geometry> {
+	inline size_t operator()(const stm::Geometry& g) const {
+		return stm::hash_args(g.topology(), g|views::values);
 	}
 };
 

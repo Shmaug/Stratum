@@ -242,27 +242,16 @@ public:
 		mCursorDelta = Vector2f::Zero();
 		mScrollDelta = 0;
 	}
-	inline void add_cursor_delta(const Vector2f& delta) {
-		mCursorDelta += delta;
-	}
-	inline void add_scroll_delta(float delta) {
-		mScrollDelta += delta;
-	}
+	inline void add_cursor_delta(const Vector2f& delta) { mCursorDelta += delta; }
+	inline void add_scroll_delta(float delta) { mScrollDelta += delta; }
 	inline Vector2f& cursor_pos() { return mCursorPos; }
-
 	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
 	inline const Vector2f& cursor_pos() const { return mCursorPos; }
 	inline const Vector2f& cursor_delta() const { return mCursorDelta; }
 	inline float scroll_delta() const { return mScrollDelta; }
-	inline bool pressed(KeyCode key) const {
-		return mButtons.count(key);
-	}
-	inline void set_button(KeyCode key) {
-		mButtons.emplace(key);
-	}
-	inline void unset_button(KeyCode key) {
-		mButtons.erase(key);
-	}
+	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
+	inline void set_button(KeyCode key) { mButtons.emplace(key); }
+	inline void unset_button(KeyCode key) { mButtons.erase(key); }
 };
 
 class Window {
@@ -277,8 +266,8 @@ public:
 	inline vk::SurfaceKHR surface() const { return mSurface; }
 	inline vk::SwapchainKHR swapchain() const { return mSwapchain; }
 	inline vk::SurfaceFormatKHR surface_format() const { return mSurfaceFormat; }
-	inline vk::Extent2D swapchain_extent() const { return mSwapchainExtent; }
-	inline Semaphore& image_available_semaphore() const { return *mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
+	inline const vk::Extent2D& swapchain_extent() const { return mSwapchainExtent; }
+	inline const shared_ptr<Semaphore>& image_available_semaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
 	
 	inline void allow_tearing(bool v) { mAllowTearing = v; }
@@ -303,7 +292,7 @@ public:
 
 	STRATUM_API Texture::View acquire_image(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
-	STRATUM_API void present(const vector<vk::Semaphore>& waitSemaphores);
+	STRATUM_API void present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores = {});
 	// Number of times present has been called
 	inline size_t present_count() const { return mPresentCount; }
 
@@ -340,7 +329,7 @@ private:
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
 	vector<Texture::View> mSwapchainImages;
-	vector<unique_ptr<Semaphore>> mImageAvailableSemaphores;
+	vector<shared_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
 	uint32_t mBackBufferIndex = 0;

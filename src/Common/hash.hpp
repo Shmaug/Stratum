@@ -24,7 +24,7 @@ constexpr size_t hash_array(const T(& arr)[N]) {
 		return hash_combine(hash_array<T,N-1>(arr), hasher(arr[N-1]));
 }
 
-template<typename T>
+template<typename T> requires(!hashable<T> && !ranges::range<T>)
 inline size_t hash_args(const T& v) {
 	class hash_streambuf : public basic_streambuf<char, char_traits<char>> {
 	public:
@@ -46,7 +46,7 @@ inline size_t hash_args(const T& v) {
 	return hash<T>()(v);
 }
 
-template<ranges::range R>
+template<ranges::range R> requires(!hashable<R>)
 inline size_t hash_args(const R& r) {
 	auto it = ranges::begin(r);
 	if (it == ranges::end(r)) return 0;

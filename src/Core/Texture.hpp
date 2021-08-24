@@ -14,72 +14,6 @@ struct hash<pair<vk::ImageSubresourceRange, vk::ComponentMapping>> {
 }
 namespace stm {
 
-inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
-	switch (layout) {
-    case vk::ImageLayout::eUndefined:
-    case vk::ImageLayout::ePresentSrcKHR:
-    case vk::ImageLayout::eColorAttachmentOptimal:
-			return {};
-
-    case vk::ImageLayout::eGeneral:
-			return vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-
-    case vk::ImageLayout::eDepthAttachmentOptimal:
-    case vk::ImageLayout::eStencilAttachmentOptimal:
-    case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
-    case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
-    case vk::ImageLayout::eDepthStencilAttachmentOptimal:
-			return vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
-
-    case vk::ImageLayout::eDepthReadOnlyOptimal:
-    case vk::ImageLayout::eStencilReadOnlyOptimal:
-    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
-			return vk::AccessFlagBits::eDepthStencilAttachmentRead;
-		
-    case vk::ImageLayout::eShaderReadOnlyOptimal:
-			return vk::AccessFlagBits::eShaderRead;
-    case vk::ImageLayout::eTransferSrcOptimal:
-			return vk::AccessFlagBits::eTransferRead;
-    case vk::ImageLayout::eTransferDstOptimal:
-			return vk::AccessFlagBits::eTransferWrite;
-	}
-	return vk::AccessFlagBits::eShaderRead;
-}
-inline vk::PipelineStageFlags guess_stage(vk::ImageLayout layout) {
-	switch (layout) {
-		case vk::ImageLayout::eGeneral:
-			return vk::PipelineStageFlagBits::eComputeShader;
-
-		case vk::ImageLayout::eColorAttachmentOptimal:
-			return vk::PipelineStageFlagBits::eColorAttachmentOutput;
-		
-		case vk::ImageLayout::eShaderReadOnlyOptimal:
-		case vk::ImageLayout::eDepthReadOnlyOptimal:
-		case vk::ImageLayout::eStencilReadOnlyOptimal:
-		case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
-			return vk::PipelineStageFlagBits::eFragmentShader;
-
-		case vk::ImageLayout::eTransferSrcOptimal:
-		case vk::ImageLayout::eTransferDstOptimal:
-			return vk::PipelineStageFlagBits::eTransfer;
-
-		case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
-		case vk::ImageLayout::eDepthStencilAttachmentOptimal:
-		case vk::ImageLayout::eStencilAttachmentOptimal:
-		case vk::ImageLayout::eDepthAttachmentOptimal:
-		case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
-			return vk::PipelineStageFlagBits::eLateFragmentTests;
-
-		case vk::ImageLayout::ePresentSrcKHR:
-		case vk::ImageLayout::eSharedPresentKHR:
-			return vk::PipelineStageFlagBits::eBottomOfPipe;
-
-		default:
-			return vk::PipelineStageFlagBits::eTopOfPipe;
-	}
-}
-
-
 class Sampler : public DeviceResource {
 private:
 	vk::Sampler mSampler;
@@ -101,7 +35,6 @@ public:
 
 	inline const vk::SamplerCreateInfo& create_info() const { return mInfo; }
 };
-
 
 class Texture : public DeviceResource {
 public:
@@ -144,7 +77,7 @@ public:
 		vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
 	}
 
-	// Create around vk::Image, but don't own it (for example, swapchain images). Signified via mMemory = nullptr
+	// Create around vk::Image, but don't own it (for example, swapchain images). Sets mMemory to nullptr
 	inline Texture(vk::Image image, Device& device, const string& name, 
 		const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
 		vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::ImageCreateFlags createFlags = {}, vk::ImageTiling tiling = vk::ImageTiling::eOptimal)
@@ -225,8 +158,10 @@ public:
 
 		inline const vk::ImageView& operator*() const { return mView; }
 		inline const vk::ImageView* operator->() const { return &mView; }
+		inline void reset() { mTexture.reset(); }
 		inline const auto& texture() const { return mTexture; }
 		inline const vk::ImageSubresourceRange& subresource_range() const { return mSubresource; }
+		inline const vk::ComponentMapping& components() const { return mComponents; }
 		inline vk::ImageSubresourceLayers subresource(uint32_t level) const {
 			return vk::ImageSubresourceLayers(mSubresource.aspectMask, mSubresource.baseMipLevel + level, mSubresource.baseArrayLayer, mSubresource.layerCount);
 		}
@@ -261,6 +196,17 @@ private:
 	vk::ImageLayout mTrackedLayout = vk::ImageLayout::eUndefined;
 	vk::PipelineStageFlags mTrackedStageFlags = vk::PipelineStageFlagBits::eTopOfPipe;
 	vk::AccessFlags mTrackedAccessFlags = {};
+};
+
+}
+
+namespace std {
+	
+template<>
+struct hash<stm::Texture::View> {
+	inline size_t operator()(const stm::Texture::View& v) const {
+		return stm::hash_args(v.texture().get(), v.subresource_range(), v.components());
+	}
 };
 
 }

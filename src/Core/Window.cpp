@@ -114,11 +114,9 @@ Texture::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	mBackBufferIndex = result.value;
 	return back_buffer();
 }
-void stm::Window::present(const vector<vk::Semaphore>& waitSemaphores) {
+void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores) {
 	ProfilerRegion ps("Window::present");
-	vector<vk::SwapchainKHR> swapchains { mSwapchain };
-	vector<uint32_t> imageIndices { mBackBufferIndex };
-	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, swapchains, imageIndices));
+	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, mSwapchain, mBackBufferIndex));
 	mPresentCount++;
 }
 
@@ -253,11 +251,11 @@ void stm::Window::create_swapchain(Device& device) {
 	
 	// create per-frame image views and semaphores
 	for (uint32_t i = 0; i < images.size(); i++) {
-		mSwapchainDevice->set_debug_name(images[i], "swapchain_image");
+		mSwapchainDevice->set_debug_name(images[i], "swapchain"+to_string(i));
 		mSwapchainImages[i] = Texture::View(
-			make_shared<Texture>(images[i], *mSwapchainDevice, "swapchain_image", vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
+			make_shared<Texture>(images[i], *mSwapchainDevice, "swapchain"+to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
 			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
-		mImageAvailableSemaphores[i] = make_unique<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
+		mImageAvailableSemaphores[i] = make_shared<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
 	}
 }
 void stm::Window::destroy_swapchain() {

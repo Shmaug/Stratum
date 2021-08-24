@@ -6,7 +6,6 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-
 #include <stb_image.h>
 
 using namespace stm;
@@ -45,10 +44,11 @@ Texture::PixelData Texture::load(Device& device, const fs::path& filename, bool 
 			case 4: format = vk::Format::eR8G8B8A8Unorm; break;
 		}
 	}
-	if (!pixels) throw invalid_argument("could not load " + filename.string());
+	if (!pixels) throw invalid_argument("Could not load " + filename.string());
+	cout << "Loaded " << filename << " (" << x << "x" << y << ")" << endl;
 	if (desiredChannels) channels = desiredChannels;
 
-	Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*texel_size(format), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eUniformTexelBuffer|vk::BufferUsageFlagBits::eStorageTexelBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU));
+	Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*texel_size(format), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY));
 	memcpy(buf.data(), pixels, buf.size());
 	stbi_image_free(pixels);
 	return make_pair(Buffer::TexelView(buf, format), vk::Extent3D(x,y,1));
@@ -134,7 +134,7 @@ void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 	blit.srcOffsets[1] = vk::Offset3D((int32_t)mExtent.width, (int32_t)mExtent.height, (int32_t)mExtent.depth);
 
 	for (uint32_t i = 1; i < mMipLevels; i++) {
-		// Blit the previous mip level into this one
+		// Blit mip level i-1 into mip level i
 		blit.srcSubresource.mipLevel = i - 1;
 		blit.dstSubresource.mipLevel = i;
 		blit.dstOffsets[1].x = max(1, blit.srcOffsets[1].x / 2);
@@ -143,7 +143,7 @@ void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 		commandBuffer->blitImage(
 			mImage, vk::ImageLayout::eTransferSrcOptimal,
 			mImage, vk::ImageLayout::eTransferDstOptimal,
-			{ blit }, vk::Filter::eLinear);
+			blit, vk::Filter::eLinear);
 
 		blit.srcOffsets[1] = blit.dstOffsets[1];
 		

@@ -1,5 +1,5 @@
 #include "Profiler.hpp"
-#include "../Core/Window.hpp"
+#include <Core/Window.hpp>
 
 #include <imgui.h>
 
@@ -69,21 +69,20 @@ inline void createPlotGridlines(const Range2f& ssRange, const Range2f& outRange,
   }
 }
 
-template<typename OnSampleSelectedFunc>
-inline void DrawPlot(float* data, size_t size, const float width, const float height, const OnSampleSelectedFunc& onSampleSelected) {
-  assert(size > 1);
+template<ranges::random_access_range R, typename OnSampleSelectedFunc>
+inline void DrawPlot(const R& data, const float width, const float height, const OnSampleSelectedFunc& onSampleSelected) {
+  assert(ranges::size(data) > 1);
 
   auto ImLerp = [](const ImVec2& a, const ImVec2& b, const ImVec2& t) { return ImVec2(a.x + (b.x - a.x) * t.x, a.y + (b.y - a.y) * t.y); };
 
-  const size_t res_w = min(size, size_t(width)) - 1;
+  const size_t res_w = min(ranges::size(data), size_t(width)) - 1;
   const float t_step = 1.f / res_w;
 
   float v_min = 0.f;
   float v_max = -FLT_MAX;
-  for (int i = 0; i < size; i++) {
+  for (int i = 0; i < ranges::size(data); i++) {
     const float v = data[i];
-    if (v != v) // Ignore NaN values
-      continue;
+    if (v != v) continue; // Ignore NaN values
     //v_min = std::min(v_min, v);
     v_max = std::max(v_max, v);
   }
@@ -106,7 +105,7 @@ inline void DrawPlot(float* data, size_t size, const float width, const float he
   const ImU32 colBase = ImGui::GetColorU32(ImGuiCol_PlotLines);
   const ImU32 colText = ImGui::GetColorU32(ImGuiCol_Text);
   float t1 = 0;
-  for (size_t i = 1; i < size; i++) {
+  for (size_t i = 1; i < ranges::size(data); i++) {
     const float v1 = (data[i - 1] - v_min) * inv_scale;
     const float v2 = (data[i] - v_min) * inv_scale;
 
@@ -120,7 +119,7 @@ inline void DrawPlot(float* data, size_t size, const float width, const float he
   const ImVec2 mousePos = ImGui::GetMousePos();
   if (mousePos.y > frame_bb.Min.y && mousePos.y < frame_bb.Max.y && mousePos.x > frame_bb.Min.x && mousePos.x < frame_bb.Max.x) {
     const float idxNorm = (mousePos.x - frame_bb.Min.x) / (frame_bb.Max.x - frame_bb.Min.x);
-    const size_t idx = size_t(idxNorm * float(size));
+    const size_t idx = size_t(idxNorm * float(ranges::size(data)));
     ImGui::BeginTooltip();
     ImGui::Text(std::to_string(data[idx]).c_str());
     ImGui::EndTooltip();
@@ -255,26 +254,25 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
   ImGui::Dummy(ImVec2(width, dummyHeight));
 }
 
-void Profiler::imgui() {
-  if (ImGui::Begin("Profiler") && mFrameHistory.size()) {
-    auto hist_begin = ++mFrameHistory.begin();
-
+void Profiler::on_gui() {
+  if (!mFrameHistory.empty() && ImGui::Begin("Profiler")) {
     vector<float> frameTimings(mFrameHistory.size());
-    ranges::transform(hist_begin, mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
+    ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
       return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();
     });
 
     const float graphScale = 2;
+    
     float width = ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x;
     mFrameHistoryCount = size_t(width / graphScale);
-    
     width = min(width, graphScale*frameTimings.size());
+    
     const float height = ImGui::GetWindowContentRegionMax().y - ImGui::GetWindowContentRegionMin().y;
 
-    DrawPlot(frameTimings.data(), frameTimings.size(), width, height/4, [&,hist_begin](const size_t idx) {
-      mTimelineSample = *next(hist_begin, idx);
+    DrawPlot(frameTimings, width, height/4, [&](const size_t idx) {
+      mTimelineSample = *next(mFrameHistory.begin(), idx+1);
     });
-    DrawTimeline(mTimelineSample ? *mTimelineSample : **hist_begin, width);
+    DrawTimeline(mTimelineSample ? *mTimelineSample : **mFrameHistory.begin(), width);
   }
   ImGui::End();
 }

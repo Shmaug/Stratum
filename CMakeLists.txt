@@ -1,31 +1,18 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.20)
 
 project(Stratum)
-set(CMAKE_CXX_STANDARD 20)
 
-set(STRATUM_PATH ${CMAKE_CURRENT_LIST_DIR})
-
-file(DOWNLOAD https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp ${STRATUM_PATH}/extern/include/json.hpp)
-file(DOWNLOAD https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/master/include/vk_mem_alloc.h ${STRATUM_PATH}/extern/include/vk_mem_alloc.h)
-file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image.h ${STRATUM_PATH}/extern/include/stb_image.h)
-file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h ${STRATUM_PATH}/extern/include/stb_image_write.h)
-file(DOWNLOAD https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h ${STRATUM_PATH}/extern/include/tiny_gltf.h)
-
-find_package(imgui CONFIG)
-if (NOT imgui_FOUND)
-    if (NOT extern/include/imgui)
-        execute_process(COMMAND git clone https://github.com/ocornut/imgui extern/include/imgui WORKING_DIRECTORY ${STRATUM_PATH})
-    endif()
-    find_package(imgui CONFIG REQUIRED PATHS "${STRATUM_PATH}/extern/include")
-endif()
+# Find dependencies
 
 find_package(Vulkan REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(OpenXR CONFIG REQUIRED)
+find_package(OpenXR REQUIRED CONFIG)
+find_package(imgui  REQUIRED CONFIG)
 
-link_libraries(Eigen3::Eigen Vulkan::Vulkan)
-include_directories(${STRATUM_PATH}/extern/include)
-
-include(compile_shader.cmake)
+file(DOWNLOAD https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp                       ${CMAKE_CURRENT_LIST_DIR}/src/extern/json.hpp)
+file(DOWNLOAD https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/master/include/vk_mem_alloc.h ${CMAKE_CURRENT_LIST_DIR}/src/extern/vk_mem_alloc.h)
+file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image.h                                              ${CMAKE_CURRENT_LIST_DIR}/src/extern/stb_image.h)
+file(DOWNLOAD https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h                                        ${CMAKE_CURRENT_LIST_DIR}/src/extern/stb_image_write.h)
+file(DOWNLOAD https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h                                            ${CMAKE_CURRENT_LIST_DIR}/src/extern/tiny_gltf.h)
 
 add_subdirectory(src)

@@ -12,9 +12,9 @@ using Descriptor = variant<
 	vk::AccelerationStructureKHR						// acceleration structure
 >;
 
-template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Texture::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
 constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
-template<typename T> requires(is_same_v<T,Texture::View> || is_same_v<T,vk::ImageLayout> || is_same_v<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Texture::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
 constexpr const T& get(const stm::Descriptor& d) { return get<T>(get<0>(d)); }
 
 inline Descriptor texture_descriptor(const Texture::View& texture, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler) {

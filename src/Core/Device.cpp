@@ -1,5 +1,7 @@
-#define VMA_IMPLEMENTATION
 #include "Device.hpp"
+
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
 #undef VMA_IMPLEMENTATION
 
 #include "Window.hpp"
@@ -96,7 +98,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
 		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.window().surface());
-		// TODO: create more queues to utilize more parallelization (if necessary?)
+		// TODO: create more queues for parallelization (if necessary?)
 		for (uint32_t i = 0; i < 1; i++) {
 			q.mQueues.emplace_back(mDevice.getQueue(info.queueFamilyIndex, i));
 			set_debug_name(q.mQueues[i], "DeviceQueue"+to_string(i));
@@ -172,11 +174,22 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 	} else
 		return make_shared<CommandBuffer>(*this, name, queueFamily, level);
 }
-void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vector<vk::Semaphore>& waitSemaphores, const vector<vk::PipelineStageFlags>& waitStages, const vector<vk::Semaphore>& signalSemaphores) {
+void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProxy<pair<shared_ptr<Semaphore>, vk::PipelineStageFlags>>& waitSemaphores, const vk::ArrayProxy<shared_ptr<Semaphore>>& signalSemaphores) {
 	ProfilerRegion ps("CommandBuffer::submit");
 
+	vector<vk::Semaphore> waits(waitSemaphores.size());
+	vector<vk::PipelineStageFlags> waitStages(waitSemaphores.size());
+	vector<vk::Semaphore> signals(signalSemaphores.size());
+
+	ranges::transform(views::elements<0>(waitSemaphores), waits.begin(), [](const shared_ptr<Semaphore>& s) { return **s; });
+	ranges::copy(views::elements<1>(waitSemaphores), waitStages.begin());
+	ranges::transform(signalSemaphores, signals.begin(), [](const shared_ptr<Semaphore>& s) { return **s; });
+
+	for(const auto&[s, stage] : waitSemaphores) commandBuffer->hold_resource(s);
+	for(const auto& s : signalSemaphores) commandBuffer->hold_resource(s);
+
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily->mQueues[0].submit({ vk::SubmitInfo(waitSemaphores, waitStages, **commandBuffer, signalSemaphores) }, **commandBuffer->mCompletionFence);
+	commandBuffer->mQueueFamily->mQueues[0].submit(vk::SubmitInfo(waits, waitStages, **commandBuffer, signals), **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 	
 	scoped_lock l(mQueueFamilies.m());

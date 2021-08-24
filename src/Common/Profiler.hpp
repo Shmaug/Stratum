@@ -40,13 +40,12 @@ public:
 	inline static const auto& history() { return mFrameHistory; }
 	inline static void clear_history() { mFrameHistory.clear(); }
 
-	STRATUM_API static void imgui();
+	STRATUM_API static void on_gui();
 
 private:
 	STRATUM_API static size_t mFrameHistoryCount;
 	STRATUM_API static list<shared_ptr<sample_t>> mFrameHistory;
 	STRATUM_API static shared_ptr<sample_t> mCurrentSample;
-
 };
 
 }

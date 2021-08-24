@@ -3,7 +3,7 @@
 #include "Fence.hpp"
 #include "Framebuffer.hpp"
 #include "Pipeline.hpp"
-#include "../Common/Profiler.hpp"
+#include <Common/Profiler.hpp>
 
 namespace stm {
 
@@ -58,11 +58,6 @@ public:
 	inline const Texture::View& hold_resource(const Texture::View& v) {
 		hold_resource(v.texture());
 		return v;
-	}
-
-	template<derived_from<DeviceResource> T, typename...Args> requires(constructible_from<T,Args...>)
-	inline auto& hold_resource(Args&&...args) {
-		return hold_resource(make_shared<T>(forward<Args>(args)...));
 	}
 
 	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& b) {
@@ -130,10 +125,10 @@ public:
 	}
 
 	template<typename T = byte>
-	inline const Texture::View& upload_image(const Buffer::View<T>& src, const Texture::View& dst, uint32_t level = 0) {
+	inline const Texture::View& upload_image(const shared_ptr<Buffer>& src, const Texture::View& dst, uint32_t level = 0) {
 		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
-			vk::BufferImageCopy(0, 0, 0, dst.subresource(level)) });
+		mCommandBuffer.copyBufferToImage(*hold_resource(src), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
+			vk::BufferImageCopy(0, 0, 0, dst.subresource(level), {}, dst.texture()->extent()) });
 		return dst;
 	}
 
@@ -158,7 +153,7 @@ public:
 	}
 	inline void dispatch_align(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_align(vk::Extent3D(x,y,z)); }
 
-	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& frameBuffer, const vk::Rect2D& renderArea, const vk::ArrayProxy<const vk::ClearValue>& clearValues = {}, vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxyNoTemporaries<const vk::ClearValue>& clearValues, vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void end_render_pass();
 
@@ -195,7 +190,7 @@ public:
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
 	}
 
-	template<typename...T> requires(is_same_v<T,DescriptorSet> && ...)
+	template<typename...T> requires(same_as<T,DescriptorSet> && ...)
 	inline void transition_images(T&... sets) {
 		auto fn = [&](auto& descriptorSet) {
 			for (auto&[idx, entry] : descriptorSet.mDescriptors)
@@ -232,7 +227,7 @@ public:
 	inline void bind_vertex_buffer(uint32_t index, const Buffer::View<T>& view) {
 		if (mBoundVertexBuffers[index] != view) {
 			mBoundVertexBuffers[index] = view;
-			mCommandBuffer.bindVertexBuffers(index, { **view.buffer() }, { view.offset() });
+			mCommandBuffer.bindVertexBuffers(index, **view.buffer(), view.offset());
 		}
 	}
 	template<ranges::input_range R>

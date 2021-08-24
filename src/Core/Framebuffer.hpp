@@ -13,15 +13,10 @@ private:
 	vector<Texture::View> mAttachments;
 
 public:
-	template<ranges::range R>
-	inline Framebuffer(stm::RenderPass& renderPass, const string& name, const R& attachments) : DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass) {
-
-		mAttachments.resize(attachments.size());
-		ranges::copy(attachments, mAttachments.begin());
-		
+	inline Framebuffer(stm::RenderPass& renderPass, const string& name, const vk::ArrayProxy<Texture::View>& attachments)
+		: DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass), mAttachments(attachments.begin(), attachments.end()) {		
 		for (uint32_t i = 0; i < mAttachments.size(); i++)
 			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].texture()->extent().width), max(mExtent.height, mAttachments[i].texture()->extent().height) );
-
 		vector<vk::ImageView> views(mAttachments.size());
 		ranges::transform(mAttachments, views.begin(), &Texture::View::operator*);
 		mFramebuffer = renderPass.mDevice->createFramebuffer(vk::FramebufferCreateInfo({}, *mRenderPass, views, mExtent.width, mExtent.height, 1));
@@ -36,7 +31,7 @@ public:
 	inline const vk::Framebuffer& operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };
 	
-	inline vk::Extent2D extent() const { return mExtent; }
+	inline const vk::Extent2D& extent() const { return mExtent; }
 	inline stm::RenderPass& render_pass() const { return mRenderPass; };
 
 	inline size_t size() const { return mAttachments.size(); }

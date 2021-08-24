@@ -186,17 +186,17 @@ public:
 		const vector<vk::DynamicState>& dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, vk::DynamicState::eLineWidth }) : Pipeline(renderPass.mDevice, name, stages, immutableSamplers) {
 		
 		vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
-		for (const auto&[type,blendState,desc] : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
-			if (type == RenderPass::AttachmentTypeFlags::eColor || type == RenderPass::AttachmentTypeFlags::eDepthStencil)
-				sampleCount = desc.samples;
-			if (blendStates.empty() && type == RenderPass::AttachmentTypeFlags::eColor)
-				mBlendStates.emplace_back(blendState);
+		for (const auto& desc : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
+			if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil)
+				sampleCount = desc.mDescription.samples;
+			if (blendStates.empty() && desc.mType == AttachmentType::eColor)
+				mBlendStates.emplace_back(desc.mBlendState);
 		}
 		if (!blendStates.empty()) mBlendStates = blendStates;
 
 		for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].attachments())
-			if (get<RenderPass::AttachmentTypeFlags>(desc) & (RenderPass::AttachmentTypeFlags::eColor | RenderPass::AttachmentTypeFlags::eDepthStencil)) {
-				mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
+			if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil) {
+				mMultisampleState.rasterizationSamples = desc.mDescription.samples;
 				break;
 			}
 

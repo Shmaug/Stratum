@@ -17,7 +17,7 @@ namespace hlsl {
 
 using uint = uint32_t;
 
-template<typename T, int M, int N = 1> using ArrayType  = Eigen::Array<T, M, N, Eigen::ColMajor, M, N>;
+template<typename T, int M, int N = 1> using ArrayType = Eigen::Array<T, M, N, Eigen::ColMajor, M, N>;
 
 using int2    	= ArrayType<int32_t, 2>;
 using int3    	= ArrayType<int32_t, 3>;
@@ -28,9 +28,6 @@ using uint4   	= ArrayType<int32_t, 4>;
 using float2  	= ArrayType<float, 2>;
 using float3  	= ArrayType<float, 3>;
 using float4  	= ArrayType<float, 4>;
-using double2 	= ArrayType<double, 2>;
-using double3 	= ArrayType<double, 3>;
-using double4 	= ArrayType<double, 4>;
 using int2x2    = ArrayType<int32_t, 2, 2>;
 using int3x2    = ArrayType<int32_t, 3, 2>;
 using int4x2    = ArrayType<int32_t, 4, 2>;
@@ -40,9 +37,6 @@ using uint4x2   = ArrayType<int32_t, 4, 2>;
 using float2x2  = ArrayType<float, 2, 2>;
 using float3x2  = ArrayType<float, 3, 2>;
 using float4x2  = ArrayType<float, 4, 2>;
-using double2x2 = ArrayType<double, 2, 2>;
-using double3x2 = ArrayType<double, 3, 2>;
-using double4x2 = ArrayType<double, 4, 2>;
 using int2x3    = ArrayType<int32_t, 2, 3>;
 using int3x3    = ArrayType<int32_t, 3, 3>;
 using int4x3    = ArrayType<int32_t, 4, 3>;
@@ -52,9 +46,6 @@ using uint4x3   = ArrayType<int32_t, 4, 3>;
 using float2x3  = ArrayType<float, 2, 3>;
 using float3x3  = ArrayType<float, 3, 3>;
 using float4x3  = ArrayType<float, 4, 3>;
-using double2x3 = ArrayType<double, 2, 3>;
-using double3x3 = ArrayType<double, 3, 3>;
-using double4x3 = ArrayType<double, 4, 3>;
 using int2x4    = ArrayType<int32_t, 2, 4>;
 using int3x4    = ArrayType<int32_t, 3, 4>;
 using int4x4    = ArrayType<int32_t, 4, 4>;
@@ -64,58 +55,24 @@ using uint4x4   = ArrayType<int32_t, 4, 4>;
 using float2x4  = ArrayType<float, 2, 4>;
 using float3x4  = ArrayType<float, 3, 4>;
 using float4x4  = ArrayType<float, 4, 4>;
-using double2x4 = ArrayType<double, 2, 4>;
-using double3x4 = ArrayType<double, 3, 4>;
-using double4x4 = ArrayType<double, 4, 4>;
-
-using quatf = Quaternion<float>;
-using quatd = Quaternion<double>;
-
-#define QUATF_I Quaternionf::Identity()
 
 template<typename T, int M, int N, int K>
 inline ArrayType<T,M,K> mul(const ArrayType<T,M,N>& a, const ArrayType<T,N,K>& b) {
-	return (a.matrix()*b.matrix()).array();
+	return a.matrix()*b.matrix();
 }
 
 template<typename T> inline const T& min(const T& a, const T& b) { return std::min(a,b); }
 template<typename T> inline const T& max(const T& a, const T& b) { return std::max(a,b); }
-template<typename T, int M, int N> inline ArrayType<T,M,N> max(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.max(b); }
-template<typename T, int M, int N> inline ArrayType<T,M,N> min(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.min(b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> max(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.max(b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> min(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.min(b); }
 
 template<typename T, int M, int N>
-inline ArrayType<T,M,N> saturate(const ArrayType<T,M,N>& v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
+inline ArrayType<T,M,N> saturate(ArrayType<T,M,N> v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
 
-template<typename T, int M, int N>
-inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int M, int N>
-inline T length(const ArrayType<T,M,N>& a) { return a.matrix().norm(); }
-template<typename T, int M, int N>
-inline ArrayType<T,M,N> normalize(const ArrayType<T,M,N>& a) { return a.matrix().normalized().array(); }
-template<typename T>
-inline ArrayType<T,3> cross(const T& a, const T& b) { return a.matrix().cross(b.matrix()).array(); }
-
-template<typename T> inline T max3(const ArrayType<T,3,1>& x) { return max(max(x[0], x[1]), x[2]); }
-template<typename T> inline T max4(const ArrayType<T,4,1>& x) { return max(max(x[0], x[1]), max(x[2], x[3])); }
-template<typename T> inline T min3(const ArrayType<T,3,1>& x) { return min(min(x[0], x[1]), x[2]); }
-template<typename T> inline T min4(const ArrayType<T,4,1>& x) { return min(min(x[0], x[1]), min(x[2], x[3])); }
-
-template<typename T> inline T pow2(const T& x) { return x*x; }
-template<typename T> inline T pow3(const T& x) { return pow2(x)*x; }
-template<typename T> inline T pow4(const T& x) { return pow2(x)*pow2(x); }
-template<typename T> inline T pow5(const T& x) { return pow4(x)*x; }
-
-template<typename T, int M, int N = 1>
-inline ArrayType<T,M-1,N> hnormalized(const ArrayType<T,M,N>& a) { return a.matrix().hnormalized().array(); }
-template<typename T, int M, int N = 1>
-inline ArrayType<T,M+1,N> homogeneous(const ArrayType<T,M,N>& a) { return a.matrix().homogeneous().array(); }
-
-template<typename T>
-inline Quaternion<T> qmul(const Quaternion<T>& q1, const Quaternion<T>& q2) { return q1*q2; }
-template<typename T>
-inline Quaternion<T> inverse(const Quaternion<T>& q) { return q.inverse(); }
-template<typename T>
-inline ArrayType<T,3> rotate_vector(const Quaternion<T>& q, const ArrayType<T,3>& v) { return q*v; }
+template<typename T, int M, int N> inline T dot(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int M, int N> inline T length(ArrayType<T,M,N> a) { return a.norm(); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> normalize(ArrayType<T,M,N> a) { return a.matrix().normalized(); }
+template<typename T> inline ArrayType<T,3> cross(ArrayType<T,3> a, ArrayType<T,3> b) { return a.matrix().cross(b.matrix()); }
 
 }
 
@@ -145,6 +102,9 @@ template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_
 template<typename R> concept associative_range = ranges::range<R> &&
 	requires { typename R::key_type; typename R::value_type; } &&
 	requires(R r, ranges::range_value_t<R> v) { { r.emplace(v) } -> is_pair; };
+
+template<typename V, typename T> concept view_of = ranges::view<V> && same_as<ranges::range_value_t<V>, T>;
+template<typename R, typename T> concept range_of = ranges::range<R> && same_as<ranges::range_value_t<R>, T>;
 #pragma endregion
 #pragma region misc math expressions
 template<unsigned_integral T>
@@ -160,9 +120,9 @@ template<integral T> constexpr T align_down(T value, size_t alignment) { return 
 
 template<typename T>
 inline T signed_distance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
-	Vector3f normal = plane.normal();
-	Hyperplane<float,3> dilatatedPlane(normal, plane.offset() - abs(box.sizes().dot(normal)));
-	Vector3f n = lerp(box.max(), box.min(), max<Array3f>(normal.array().sign(), Array3f::Zero()));
+	auto normal = plane.normal();
+	Hyperplane<T,3> dilatatedPlane(normal, plane.offset() - abs(box.sizes().dot(normal)));
+	auto n = lerp(box.max(), box.min(), max(normal.sign(), Matrix<T,3>::Zero()));
 	return dilatatedPlane.signedDistance(n);
 }
 
@@ -578,6 +538,84 @@ inline constexpr T channel_count(vk::Format format) {
 		
 	}
 	return 0;
+}
+
+inline vk::PipelineStageFlags guess_stage(vk::ImageLayout layout) {
+	switch (layout) {
+		case vk::ImageLayout::eGeneral:
+			return vk::PipelineStageFlagBits::eComputeShader;
+
+		case vk::ImageLayout::eColorAttachmentOptimal:
+			return vk::PipelineStageFlagBits::eColorAttachmentOutput;
+		
+		case vk::ImageLayout::eShaderReadOnlyOptimal:
+		case vk::ImageLayout::eDepthReadOnlyOptimal:
+		case vk::ImageLayout::eStencilReadOnlyOptimal:
+		case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
+			return vk::PipelineStageFlagBits::eFragmentShader;
+
+		case vk::ImageLayout::eTransferSrcOptimal:
+		case vk::ImageLayout::eTransferDstOptimal:
+			return vk::PipelineStageFlagBits::eTransfer;
+
+		case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
+		case vk::ImageLayout::eDepthStencilAttachmentOptimal:
+		case vk::ImageLayout::eStencilAttachmentOptimal:
+		case vk::ImageLayout::eDepthAttachmentOptimal:
+		case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
+			return vk::PipelineStageFlagBits::eLateFragmentTests;
+
+		case vk::ImageLayout::ePresentSrcKHR:
+		case vk::ImageLayout::eSharedPresentKHR:
+			return vk::PipelineStageFlagBits::eBottomOfPipe;
+
+		default:
+			return vk::PipelineStageFlagBits::eTopOfPipe;
+	}
+}
+
+inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
+	switch (layout) {
+    case vk::ImageLayout::eUndefined:
+    case vk::ImageLayout::ePresentSrcKHR:
+			return vk::AccessFlagBits::eNoneKHR;
+
+    case vk::ImageLayout::eColorAttachmentOptimal:
+			return vk::AccessFlagBits::eColorAttachmentWrite;
+
+    case vk::ImageLayout::eGeneral:
+			return vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
+
+    case vk::ImageLayout::eDepthAttachmentOptimal:
+    case vk::ImageLayout::eStencilAttachmentOptimal:
+    case vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal:
+    case vk::ImageLayout::eDepthAttachmentStencilReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilAttachmentOptimal:
+			return vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+
+    case vk::ImageLayout::eDepthReadOnlyOptimal:
+    case vk::ImageLayout::eStencilReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
+			return vk::AccessFlagBits::eDepthStencilAttachmentRead;
+		
+    case vk::ImageLayout::eShaderReadOnlyOptimal:
+			return vk::AccessFlagBits::eShaderRead;
+    case vk::ImageLayout::eTransferSrcOptimal:
+			return vk::AccessFlagBits::eTransferRead;
+    case vk::ImageLayout::eTransferDstOptimal:
+			return vk::AccessFlagBits::eTransferWrite;
+	}
+	return vk::AccessFlagBits::eShaderRead;
+}
+
+inline auto format_bytes(size_t bytes) { 
+	const char* units[] { "B", "KB", "MB", "GB", "TB" };
+	uint32_t i = 0;
+	while (bytes > 1024 && i < ranges::size(units)-1) {
+		bytes /= 1024;
+		i++;
+	}
+	return make_pair(bytes, units[i]);
 }
 
 }

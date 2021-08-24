@@ -74,7 +74,7 @@ public:
 		View(const View&) = default;
 		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
 			if (mBuffer) {
-				mSize = elementCount == VK_WHOLE_SIZE ? (mBuffer->size() - byteOffset)/sizeof(T) : elementCount;
+				mSize = (elementCount == VK_WHOLE_SIZE) ? (mBuffer->size() - byteOffset)/sizeof(T) : elementCount;
 				if (mOffset + mSize > mBuffer->size()) throw out_of_range("view size out of bounds");
 			}
 		}
@@ -93,6 +93,7 @@ public:
     inline vk::DeviceSize offset() const { return mOffset; }
 
     inline bool empty() const { return !mBuffer || mSize == 0; }
+		inline void reset() { mBuffer.reset(); }
 		inline size_type size() const { return mSize; }
     inline vk::DeviceSize size_bytes() const { return mSize*sizeof(T); }
 		inline pointer data() const { return reinterpret_cast<pointer>(mBuffer->data() + offset()); }

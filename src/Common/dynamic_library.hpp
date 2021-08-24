@@ -34,8 +34,8 @@ public:
 #endif
   };
 
-  template<typename Tr, typename... Args>
-  inline Tr invoke(const string& name, Args&&... args) {
+  template<typename return_t, typename... Args>
+  inline return_t invoke(const string& name, Args&&... args) {
     auto it = mFunctionPtrs.find(name);
     if (it == mFunctionPtrs.end()) {
 #ifdef WIN32
@@ -44,8 +44,10 @@ public:
       it = mFunctionPtrs.emplace(name, dlsym(mHandle, name.c_str())).first;
 #endif
     }
-    typedef Tr (*fn_ptr) (Args...);
-    return invoke((fn_ptr)it->second, forward<Args>(args)...);
+    if (it->second == nullptr) throw invalid_argument("Could not find function " + name);
+    typedef return_t(__stdcall * fn_t)(Args...);
+    fn_t fn = (fn_t)it->second;
+    return std::invoke(fn, forward<Args>(args)...);
   }
 };
 

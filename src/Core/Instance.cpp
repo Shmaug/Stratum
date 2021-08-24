@@ -68,10 +68,10 @@ Instance::Instance(int argc, char** argv) {
 	}
 
 
-	bool debugMessenger = find_argument("debugMessenger");
+	bool debugMessenger = find_argument("debugMessenger").has_value();
 	uint32_t deviceIndex = 0;
-	if (auto args = find_arguments("deviceIndex"); !args.empty())
-		deviceIndex = stoi(args.front());
+	if (auto index = find_argument("deviceIndex"))
+		deviceIndex = stoi(*index);
 	if (debugMessenger)
 		mOptions.emplace("layer", "VK_LAYER_KHRONOS_validation");
 	if (ranges::count(find_arguments("layer"), "VK_LAYER_KHRONOS_validation")) {
@@ -210,8 +210,8 @@ Instance::Instance(int argc, char** argv) {
 	#endif
 
 	vk::Rect2D windowPosition = { { 160, 90 }, { 1600, 900 } };
-	for (const auto& r : find_arguments("width")) windowPosition.extent.width = stoi(r);
-	for (const auto& r : find_arguments("height")) windowPosition.extent.height = stoi(r);
+	if (auto w = find_argument("width")) windowPosition.extent.width = stoi(*w);
+	if (auto h = find_argument("height")) windowPosition.extent.height = stoi(*h);
 	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
 	
 	if (find_argument("fullscreen")) mWindow->fullscreen(true);
@@ -243,7 +243,7 @@ Instance::~Instance() {
 #endif
 }
 
-void Instance::poll_events() {
+void Instance::poll_events() const {
 	ProfilerRegion ps("Instance::poll_events");
 	mWindow->mInputStateLast = mWindow->mInputState;
 	mWindow->mInputState.clear_deltas();

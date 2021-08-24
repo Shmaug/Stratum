@@ -1,9 +1,8 @@
 #pragma once
 
 #include "Instance.hpp"
+#include <Common/locked_object.hpp>
 #include <vk_mem_alloc.h>
-
-#include "../Common/locked_object.hpp"
 
 namespace stm {
 
@@ -110,7 +109,7 @@ public:
 	}
 	
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer, const vector<vk::Semaphore>& waitSemaphores = {}, const vector<vk::PipelineStageFlags>& waitStages = {}, const vector<vk::Semaphore>& signalSemaphores = {});
+	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProxy<pair<shared_ptr<Semaphore>, vk::PipelineStageFlags>>& waitSemaphores = {}, const vk::ArrayProxy<shared_ptr<Semaphore>>& signalSemaphores = {});
 	STRATUM_API void flush();
 
 private:
