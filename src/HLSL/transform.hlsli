@@ -26,7 +26,7 @@ inline float3 transform_point(TransformData t, float3 v) {
 }
 inline TransformData inverse(TransformData t) {
 	TransformData r;
-	r.Rotation = conj(t.Rotation);
+	r.Rotation = inverse(t.Rotation);
 	r.Scale = 1/t.Scale;
 	r.Translation = rotate_vector(r.Rotation, -t.Translation * r.Scale);
 	return r;
@@ -47,6 +47,7 @@ inline ProjectionData make_orthographic(float width, float height, float ox, flo
 	r.Mode = rightHanded ? ProjectionMode_RightHanded : 0;
 	r.Offset[0] = ox;
 	r.Offset[1] = oy;
+	r.Offset[2] = 0;
 	return r;
 }
 inline ProjectionData make_perspective(float fovy, float aspect /* width/height */, float ox, float oy, float zfar, bool rightHanded) {
@@ -56,6 +57,7 @@ inline ProjectionData make_perspective(float fovy, float aspect /* width/height 
 	r.Scale[2] = 1/zfar;
 	r.Offset[0] = ox;
 	r.Offset[1] = oy;
+	r.Offset[2] = 0;
 	r.Mode = ProjectionMode_Perspective;
 	if (rightHanded) r.Mode |= ProjectionMode_RightHanded;
 	return r;

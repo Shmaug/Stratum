@@ -27,64 +27,22 @@ inline quatf make_quatf(float3 xyz, float w) {
 	return q;
 }
 
-#define QUATF_I make_quatf(0,0,0,1)
-
 inline quatf angle_axis(float angle, float3 axis) {
 	return make_quatf(axis*sin(angle/2), cos(angle/2));
 }
-inline quatf q_look_at(float3 forward, float3 up) {
-	float3 right = normalize(cross(forward, up));
-	up = normalize(cross(forward, right));
-	float diag = right[0] + up[1] + forward[2];
-	quatf q;
-	if (diag > 0) {
-		float num = sqrt(diag + 1);
-		q.w = num/2;
-		num = 0.5/num;
-		q.xyz[0] = (up[2] - forward[1]) * num;
-		q.xyz[1] = (forward[0] - right[2]) * num;
-		q.xyz[2] = (right[1] - up[0]) * num;
-	} else if ((right[0] >= up[1]) && (right[0] >= forward[2])) {
-		float num = sqrt(1 + right[0] - up[1] - forward[2]);
-		q.xyz[0] = num/2;
-		num = 0.5 / num;
-		q.xyz[1] = (right[1] + up[0]) * num;
-		q.xyz[2] = (right[2] + forward[0]) * num;
-		q.w = (up[2] - forward[1]) * num;
-	} else if (up[1] > forward[2]) {
-		float num = sqrt(1 + up[1] - right[0] - forward[2]);
-		q.xyz[1] = num/2;
-		num = 0.5 / num;
-		q.xyz[0] = (up[0] + right[1]) * num;
-		q.xyz[2] = (forward[1] + up[2]) * num;
-		q.w = (forward[0] - right[2]) * num;
-	} else {
-		float num = sqrt(1 + forward[2] - right[0] - up[1]);
-		q.xyz[2] = num/2;
-		num = 0.5 / num;
-		q.xyz[0] = (forward[0] + right[2]) * num;
-		q.xyz[1] = (forward[1] + up[2]) * num;
-		q.w = (right[1] - up[0]) * num;
-	}
-	return q;
-}
 
 inline quatf normalize(quatf q) {
-	float nrm = 1 / sqrt(q.xyz[0]*q.xyz[0] + q.xyz[1]*q.xyz[1] + q.xyz[2]*q.xyz[2] + q.w*q.w);
+	float nrm = 1 / sqrt(dot(q.xyz, q.xyz) + q.w*q.w);
 	return make_quatf(q.xyz*nrm, q.w*nrm);
 }
-inline quatf conj(quatf q) { return make_quatf(-q.xyz, q.w); }
+inline quatf inverse(quatf q) { return normalize( make_quatf(-q.xyz, q.w) ); }
 inline quatf qmul(quatf q1, quatf q2) {
-	quatf r;
-  r.xyz[0] = (q1.w * q2.xyz[0]) + (q1.xyz[0] * q2.w) + (q1.xyz[1] * q2.xyz[2]) - (q1.xyz[2] * q2.xyz[1]);
-  r.xyz[1] = (q1.w * q2.xyz[1]) - (q1.xyz[0] * q2.xyz[2]) + (q1.xyz[1] * q2.w) + (q1.xyz[2] * q2.xyz[0]);
-  r.xyz[2] = (q1.w * q2.xyz[2]) + (q1.xyz[0] * q2.xyz[1]) - (q1.xyz[1] * q2.xyz[0]) + (q1.xyz[2] * q2.w);
-  r.w = (q1.w * q2.w) - (q1.xyz[0] * q2.xyz[0]) - (q1.xyz[1] * q2.xyz[1]) - (q1.xyz[2] * q2.xyz[2]);
-	return r;
+	return make_quatf(
+		q1.w*q2.xyz + q2.w*q1.xyz + cross(q1.xyz,q2.xyz),
+		q1.w*q2.w - dot(q1.xyz,q2.xyz) );
 }
 inline float3 rotate_vector(quatf q, float3 v) {
-	float3 tmp = cross(q.xyz, v) + v*q.w;
-  return v + 2*cross(q.xyz, tmp);
+  return qmul(q, qmul(make_quatf(v,0), inverse(q))).xyz;
 }
 inline quatf slerp(quatf a, quatf b, float t) {
 	float cosHalfAngle = a.w * b.w + dot(a.xyz, b.xyz);

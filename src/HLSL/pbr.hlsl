@@ -57,18 +57,16 @@ float4 SampleLight(LightData light, float3 posCamera) {
 	float3 lightCoord = transform_point(inverse(lightToCamera), posCamera);
 	float3 dir = 0;
 	float atten = 0;
+	float zdir = (light.mShadowProjection.Mode & ProjectionMode_RightHanded) ? 1 : -1;
 	if (light.mType == LightType_Distant) {
-		dir = rotate_vector(lightToCamera.Rotation, float3(0,0, (light.mShadowProjection.Mode & ProjectionMode_RightHanded) ? -1 : 1));
+		dir = rotate_vector(lightToCamera.Rotation, float3(0,0,zdir));
 		atten = 1;
 	} else {
 		float len = 1/dot(lightCoord,lightCoord)
 		dir = normalize(lightToCamera.Translation - posCamera);
 		atten = len;
-		if (light.mFlags & LightType_Spot) {
-			float z = lightCoord.z;
-			if (light.mShadowProjection.Mode & ProjectionMode_RightHanded) z = -z;
-			atten *= pow2(saturate(z*sqrt(len)) * light.mSpotAngleScale + light.mSpotAngleOffset);
-		}
+		if (light.mFlags & LightType_Spot)
+			atten *= pow2(light.mSpotAngleScale*saturate(sqrt(len)*zdir*lightCoord.z) + light.mSpotAngleOffset);
 	}
 	if (atten > 0 && (light.mFlags & LightFlags_Shadowmap) == LightFlags_Shadowmap) {
 		float3 shadowCoord = project_point(light.mShadowProjection, lightCoord);
@@ -112,8 +110,6 @@ float4 fs(v2f i) : SV_Target0 {
 		float4 Li = SampleLight(gLights[l], i.posCamera.xyz);
 		if (Li.w > 0) eval += gLights[l].mEmission * Li.w * ShadePoint(bsdf, Li.xyz, view, normal);
 	}
-
-	eval += saturate(normal.y);// * bsdf.diffuse;
 
 	if (inds.mOcclusion < gTextureCount)
 		eval = lerp(eval, eval * gTextures[inds.mOcclusion].Sample(gSampler, i.texcoord)[inds.mOcclusionChannel].r, material.mOcclusionScale);

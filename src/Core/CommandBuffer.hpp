@@ -11,12 +11,7 @@ class CommandBuffer : public DeviceResource {
 public:	
 	// assumes a CommandPool has been created for this_thread in queueFamily
 	STRATUM_API CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	inline ~CommandBuffer() {
-		if (mState == CommandBufferState::eInFlight)
-			fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Destroying CommandBuffer [%s] that is in-flight!\n", name().c_str());
-		clear();
-		mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
-	}
+	STRATUM_API ~CommandBuffer();
 
 	inline vk::CommandBuffer& operator*() { return mCommandBuffer; }
 	inline vk::CommandBuffer* operator->() { return &mCommandBuffer; }
@@ -40,6 +35,7 @@ public:
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
 	inline T& hold_resource(const shared_ptr<T>& r) {
+		r->mTracking.emplace(this);
 		return *static_cast<T*>(mHeldResources.emplace( static_pointer_cast<DeviceResource>(r) ).first->get());
 	}
 	template<typename T>
@@ -60,8 +56,8 @@ public:
 		return v;
 	}
 
-	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::MemoryBarrier& b) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { b }, {}, {});
+	inline void memory_barrier(vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { vk::MemoryBarrier(srcAccessMask, dstAccessMask) }, {}, {});
 	}
 	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& b) {
 		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { b }, {});
@@ -69,9 +65,9 @@ public:
 	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& b) {
 		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { b });
 	}
-	template<typename T>
-	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcFlags, vk::AccessFlags dstFlags, const Buffer::View<T>& buffer) {
-		barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcFlags, dstFlags, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *buffer.buffer(), buffer.offset(), buffer.size_bytes()));
+	template<typename T = byte>
+	inline void barrier(vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask, const Buffer::View<T>& buffer) {
+		barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcAccessMask, dstAccessMask, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **buffer.buffer(), buffer.offset(), buffer.size_bytes()));
 	}
 
 	inline void transition_barrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
@@ -125,10 +121,10 @@ public:
 	}
 
 	template<typename T = byte>
-	inline const Texture::View& upload_image(const shared_ptr<Buffer>& src, const Texture::View& dst, uint32_t level = 0) {
+	inline const Texture::View& copy_buffer_to_image(const Buffer::View<T>& src, const Texture::View& dst, uint32_t level = 0) {
 		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyBufferToImage(*hold_resource(src), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
-			vk::BufferImageCopy(0, 0, 0, dst.subresource(level), {}, dst.texture()->extent()) });
+		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
+			vk::BufferImageCopy(src.offset(), 0, 0, dst.subresource(level), {}, dst.texture()->extent()) });
 		return dst;
 	}
 
@@ -181,7 +177,7 @@ public:
 		if (range.size != sizeof(T)*M*N) throw invalid_argument("argument size (" + to_string(sizeof(T)*M*N) + ") must match push constant size (" + to_string(range.size) +")");
 		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T)*M*N, value.data());
 	}
-	template<ranges::range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
+	template<ranges::contiguous_range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
 	inline void push_constant(const string& name, const R& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
 		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
@@ -207,17 +203,7 @@ public:
 		(fn(sets), ...);
 	}
 
-	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
-		if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
-		hold_resource(descriptorSet);
-		
-		descriptorSet->flush_writes();
-		if (!mBoundFramebuffer) transition_images(*descriptorSet);
-
-		if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
-		mBoundDescriptorSets[index] = descriptorSet;
-		mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
-	}
+	STRATUM_API void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets);
 	inline void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet) {
 		if (index < mBoundDescriptorSets.size() && mBoundDescriptorSets[index] == descriptorSet) return;
 		bind_descriptor_set(index, descriptorSet, {});

@@ -71,12 +71,13 @@ void Application::loop() {
     float deltaTime = chrono::duration_cast<chrono::duration<float>>(t1 - t0).count();
     t0 = t1;
 
+    auto commandBuffer = mWindow.mInstance.device().get_command_buffer("Frame");
+    
     {
       ProfilerRegion ps("Application::OnUpdate");
-      OnUpdate(deltaTime);
+      OnUpdate(*commandBuffer, deltaTime);
     }
       
-    auto commandBuffer = mWindow.mInstance.device().get_command_buffer("Frame");
     if (auto backBuffer = mWindow.acquire_image(*commandBuffer)) {
 
       unordered_map<RenderAttachmentId, pair<Texture::View, vk::ClearValue>> attachments {

@@ -4,46 +4,13 @@
 
 namespace stm {
 
-class GeometryDescription {
-	vk::Format mFormat;
-	uint32_t mElementStride;
-	uint32_t mOffset;
-	vk::VertexInputRate mInputRate;
-};
-
 class Geometry {
 public:
-	struct Attribute {
-	private:
-		Buffer::StrideView mBuffer;
+	struct AttributeDescription {
+		uint32_t mElementStride;
 		vk::Format mFormat;
 		uint32_t mOffset;
 		vk::VertexInputRate mInputRate;
-
-	public:
-		Attribute() = default;
-		Attribute(const Attribute&) = default;
-		Attribute(Attribute&&) = default;
-		inline Attribute(const Buffer::StrideView& b, vk::Format fmt, uint32_t offset = 0, vk::VertexInputRate inputRate = vk::VertexInputRate::eVertex)
-			: mBuffer(b), mFormat(fmt), mOffset(offset), mInputRate(inputRate) {}
-		
-		Attribute& operator=(const Attribute&) = default;
-		Attribute& operator=(Attribute&&) = default;
-		bool operator==(const Attribute&) const = default;
-
-		inline Attribute& operator=(const Buffer::StrideView& b) {
-			if (mBuffer && b.stride() != mBuffer.stride()) throw invalid_argument("Cannot assign buffer with different stride");
-			mBuffer = b;
-			return *this;
-		}
-		
-		inline operator bool() const { return !mBuffer.empty(); }
-		
-		inline const auto& buffer() const { return mBuffer; }
-		inline vk::Format format() const { return mFormat; }
-    inline uint32_t offset() const { return mOffset; }
-		inline uint32_t stride() const { return texel_size(mFormat);}
-		inline const vk::VertexInputRate& input_rate() const { return mInputRate; }
 	};
 	enum class AttributeType {
 		ePosition,
@@ -56,55 +23,101 @@ public:
 		eBlendIndices,
 		eBlendWeight
 	};
-
-	using attribute_map_t = unordered_map<AttributeType, vector<Attribute>>;
-	using iterator = attribute_map_t::iterator;
-	using const_iterator = attribute_map_t::const_iterator;
+	using Attribute = pair<AttributeDescription, Buffer::StrideView>;
 
 	Geometry() = default;
 	Geometry(Geometry&&) = default;
 	Geometry(const Geometry&) = default;
-	inline Geometry(vk::PrimitiveTopology topology) : mTopology(topology) {}
-	inline Geometry(vk::PrimitiveTopology topology, const unordered_map<AttributeType, vector<Attribute>>& attributes) : mTopology(topology), mAttributes(attributes) {}
+	inline Geometry(const unordered_map<AttributeType, vector<Attribute>>& attributes) : mAttributes(attributes) {}
+	template<same_as<AttributeType> ... Types>
+	inline Geometry(Types...types) { ( mAttributes[types].push_back({}), ...); }
 
 	Geometry& operator=(const Geometry&) = default;
 	Geometry& operator=(Geometry&&) = default;
 
-	inline vk::PrimitiveTopology& topology() { return mTopology; }
-	inline const vk::PrimitiveTopology& topology() const { return mTopology; }
+	inline auto begin() { return mAttributes.begin(); }
+	inline auto end() { return mAttributes.end(); }
+	inline auto begin() const { return mAttributes.begin(); }
+	inline auto end() const { return mAttributes.end(); }
 
-	inline iterator begin() { return mAttributes.begin(); }
-	inline iterator end() { return mAttributes.end(); }
-	inline const_iterator begin() const { return mAttributes.begin(); }
-	inline const_iterator end() const { return mAttributes.end(); }
-
+	inline optional<Attribute> find(const AttributeType& t, uint32_t index = 0) const {
+		auto it = mAttributes.find(t);
+		if (it != mAttributes.end() && it->second.size() > index)
+			return it->second[index];
+		else
+			return nullopt;
+	}
 	inline const vector<Attribute>& at(const AttributeType& t) const { return mAttributes.at(t); }
 	
 	inline vector<Attribute>& operator[](const AttributeType& t) { return mAttributes[t]; }
 	inline const vector<Attribute>& operator[](const AttributeType& t) const { return mAttributes.at(t); }
 
 	STRATUM_API void bind(CommandBuffer& commandBuffer) const;
-	STRATUM_API void draw(CommandBuffer& commandBuffer, uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0) const;
-	STRATUM_API void drawIndexed(CommandBuffer& commandBuffer, const Buffer::StrideView& indices, uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstIndex = 0, uint32_t vertexOffset = 0, uint32_t firstInstance = 0) const;
 
 private:
+	unordered_map<AttributeType, vector<Attribute>> mAttributes;
+};
+
+class SpirvModule;
+struct GeometryStateDescription {
+	unordered_map<Geometry::AttributeType, vector<pair<Geometry::AttributeDescription, uint32_t/*binding index*/>>> mAttributes;
 	vk::PrimitiveTopology mTopology;
-	attribute_map_t mAttributes;
+	vk::IndexType mIndexType;
+	
+	GeometryStateDescription() = default;
+	GeometryStateDescription(const GeometryStateDescription&) = default;
+	GeometryStateDescription(GeometryStateDescription&&) = default;
+	GeometryStateDescription& operator=(const GeometryStateDescription&) = default;
+	GeometryStateDescription& operator=(GeometryStateDescription&&) = default;
+	inline GeometryStateDescription(vk::PrimitiveTopology topo, vk::IndexType indexType = vk::IndexType::eUint16) : mTopology(topo), mIndexType(indexType) {}
+	STRATUM_API GeometryStateDescription(const SpirvModule& vertexShader, const Geometry& geometry, vk::PrimitiveTopology topology, vk::IndexType indexType); 
+};
+
+class Mesh {
+private:
+	shared_ptr<Geometry> mGeometry;
+	Buffer::StrideView mIndices;
+	vk::PrimitiveTopology mTopology = vk::PrimitiveTopology::eTriangleList;
+public:
+	Mesh() = default;
+	Mesh(const Mesh&) = default;
+	Mesh(Mesh&&) = default;
+	Mesh& operator=(const Mesh&) = default;
+	Mesh& operator=(Mesh&&) = default;
+	inline Mesh(const shared_ptr<Geometry> geometry, Buffer::StrideView indices, vk::PrimitiveTopology topology)
+		: mGeometry(geometry), mIndices(indices), mTopology(topology) {}
+	
+	inline auto& geometry() { return mGeometry; }
+	inline auto& indices() { return mIndices; }
+	inline auto& topology() { return mTopology; }
+	inline const auto& geometry() const { return mGeometry; }
+	inline const auto& indices() const { return mIndices; }
+	inline const auto& topology() const { return mTopology; }
+
+	inline GeometryStateDescription description(const SpirvModule& vertexShader) const {
+		return GeometryStateDescription(vertexShader, *mGeometry, mTopology, (mIndices.stride() == sizeof(uint32_t)) ? vk::IndexType::eUint32 : (mIndices.stride() == sizeof(uint16_t)) ? vk::IndexType::eUint16 : vk::IndexType::eUint8EXT);
+	}
+
+	inline vector<Geometry::Attribute>& operator[](const Geometry::AttributeType& t) { return mGeometry->operator[](t); }
+	inline const vector<Geometry::Attribute>& operator[](const Geometry::AttributeType& t) const { return mGeometry->operator[](t); }
+
+	STRATUM_API void bind(CommandBuffer& commandBuffer) const;
 };
 
 }
 
 namespace std {
 template<>
-struct hash<stm::Geometry::Attribute> {
-	inline size_t operator()(const stm::Geometry::Attribute& v) const {
-		return stm::hash_args(v.format(), v.offset(), v.input_rate());
+struct hash<stm::Geometry::AttributeDescription> {
+	inline size_t operator()(const stm::Geometry::AttributeDescription& v) const {
+		return stm::hash_args(v.mFormat, v.mOffset, v.mInputRate);
 	}
 };
+
 template<>
-struct hash<stm::Geometry> {
-	inline size_t operator()(const stm::Geometry& g) const {
-		return stm::hash_args(g.topology(), g|views::values);
+struct hash<stm::GeometryStateDescription> {
+	inline size_t operator()(const stm::GeometryStateDescription& v) const {
+		return stm::hash_args(v.mAttributes, v.mTopology, v.mIndexType);
 	}
 };
 

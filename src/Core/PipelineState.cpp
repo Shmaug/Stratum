@@ -2,6 +2,40 @@
 
 using namespace stm;
 
+uint32_t PipelineState::descriptor_count(const string& name) const {
+	for (const auto&[stage, spirv] : mModules)
+		if (auto it = spirv->descriptors().find(name); it != spirv->descriptors().end()) {
+			uint32_t count = 1;
+			for (const auto& v : it->second.mArraySize)
+				if (v.index() == 0)
+					// array size is a literal
+					count *= get<uint32_t>(v);
+				else
+					// array size is a specialization constant
+					count *= specialization_constant(get<string>(v));
+			return count;
+		}
+	return 0;
+}
+
+stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayIndex) {		
+	auto desc_it = mDescriptors.find(name);
+	if (desc_it != mDescriptors.end()) {
+		auto it = desc_it->second.find(arrayIndex);
+		if (it != desc_it->second.end())
+			return it->second;
+	}
+
+	for (const auto&[stage, spirv] : mModules)
+		if (spirv->descriptors().find(name) != spirv->descriptors().end()) {
+			auto desc_it = mDescriptors.emplace(name, unordered_map<uint32_t, stm::Descriptor>()).first;
+			auto it = desc_it->second.emplace(arrayIndex, stm::Descriptor()).first;
+			return it->second;
+		}
+	
+	throw invalid_argument("Descriptor " + name + " does not exist");
+}
+
 void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 	for (auto& [name, p] : mDescriptors)
 		for (auto& [arrayIndex, d] : p)
@@ -10,74 +44,83 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 					view.texture()->transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
 }
 
-shared_ptr<GraphicsPipeline> PipelineState::bind_pipeline(CommandBuffer& commandBuffer, const Geometry& geometry, vk::ShaderStageFlags stageMask) {
-	ProfilerRegion ps("PipelineState::bind");
-
+const shared_ptr<GraphicsPipeline>& PipelineState::get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription, vk::ShaderStageFlags stageMask) {
 	vector<Pipeline::ShaderStage> stages;
 	stages.reserve(mModules.size());
-	for (const shared_ptr<SpirvModule>& spirv : mModules)
-		if (spirv->stage() & stageMask)
+	for (const auto& [stage, spirv] : mModules)
+		if (stage & stageMask)
 			stages.emplace_back(spirv, mSpecializationConstants);
 
-	size_t key;
-	{
-		ProfilerRegion ps("hash_args");
-		key = hash_args(
-			commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), geometry,
-			stages, mImmutableSamplers|views::transform([](const auto& s) -> const vk::SamplerCreateInfo& { return s.second->create_info(); }),
-			mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
-	}
+	ProfilerRegion ps("PipelineState::get_pipeline");
+	size_t key = hash_args(renderPass, subpassIndex, geometryDescription, stageMask, mSpecializationConstants|views::values, mImmutableSamplers|views::values, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
+	
 	auto p_it = mPipelines.find(key);
 	if (p_it == mPipelines.end())
-		p_it = mPipelines.emplace(key, make_shared<GraphicsPipeline>(mName,
-				commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
-				geometry, stages, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates) ).first;
-	
-	const auto& pipeline = p_it->second;
-	commandBuffer.bind_pipeline(pipeline);
-	
-	{
-		ProfilerRegion ps("Update mDescriptorSets");
-		
-		auto& descriptorSets = mDescriptorSets[pipeline.get()];
-		descriptorSets.clear();
-
-		for (auto& [id, entries] : mDescriptors) {
-			for (const auto& stage : pipeline->stages())
-				if (auto it = stage.spirv()->descriptors().find(id); it != stage.spirv()->descriptors().end()) {
-					auto ds_it = descriptorSets.find(it->second.mSet);
-					if (ds_it == descriptorSets.end())
-						ds_it = descriptorSets.emplace(it->second.mSet,
-							make_shared<DescriptorSet>(pipeline->descriptor_set_layouts()[it->second.mSet], mName+"/DescriptorSet"+to_string(it->second.mSet))).first;
-					for (const auto&[arrayIndex,entry] : entries) {
-						const Descriptor* d = ds_it->second->find(it->second.mBinding, arrayIndex);
-						if (!d || *d != entry) ds_it->second->insert_or_assign(it->second.mBinding, arrayIndex, entry);
-					}
-				}
-		}
-	}
-	
-	return pipeline;
+		p_it = mPipelines.emplace(key, make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, geometryDescription, stages, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates)).first;
+	return p_it->second;
 }
 
-void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) const {
+void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) {
 	ProfilerRegion ps("PipelineState::bind_descriptor_sets");
 	
+	const Pipeline& pipeline = *commandBuffer.bound_pipeline();
+
+	vector<shared_ptr<DescriptorSet>> descriptorSets(pipeline.descriptor_set_layouts().size());
+	for (uint32_t i = 0; i < descriptorSets.size(); i++) {
+		// fetch the bindings for the current set index
+		unordered_map<string, const SpirvModule::DescriptorBinding*> bindings;
+			for (auto& [id, descriptors] : mDescriptors)
+				for (const auto& stage : pipeline.stages())
+					if (auto it = stage.spirv()->descriptors().find(id); it != stage.spirv()->descriptors().end() && it->second.mSet == i)
+						bindings[id] = &it->second;
+		
+		// find DescriptorSets matching current layout
+		const shared_ptr<DescriptorSetLayout>& layout = pipeline.descriptor_set_layouts()[i];
+		auto[first, last] = mDescriptorSets.equal_range(layout.get());
+		for (auto[layout, descriptorSet] : ranges::subrange(first, last)) {
+			// find outdated/nonexistant descriptors
+			bool found = true;
+			for (const auto& [id, descriptors] : mDescriptors) {
+				for (const auto&[arrayIndex, descriptor] : descriptors)
+					if (const Descriptor* d = descriptorSet->find(bindings.at(id)->mBinding, arrayIndex);
+							d && *d == descriptor)
+						continue;
+					else if (!descriptorSet->in_use()) {
+						// write the descriptor if possible
+						descriptorSet->insert_or_assign(bindings.at(id)->mBinding, arrayIndex, descriptor);
+					} else {
+						found = false;
+						break;
+					}
+				if (!found) break;
+			}
+			if (found) {
+				descriptorSets[i] = descriptorSet;
+				break;
+			}
+		}
+		// create new DescriptorSet if necessary
+		if (!descriptorSets[i]) {
+			descriptorSets[i] = make_shared<DescriptorSet>(layout, mName+"/DescriptorSet"+to_string(i));
+			for (auto& [id, descriptors] : mDescriptors)
+				if (auto it = bindings.find(id); it != bindings.end())
+					for (const auto&[arrayIndex, descriptor] : descriptors)
+						descriptorSets[i]->insert_or_assign(it->second->mBinding, arrayIndex, descriptor);
+		}
+	}
 	unordered_map<uint32_t, vector<pair<uint32_t, uint32_t>>> offsetMap;
 	for (const auto&[id,offset] : dynamicOffsets)
 		for (const auto& stage : commandBuffer.bound_pipeline()->stages())
 			if (auto it = stage.spirv()->descriptors().find(id); it != stage.spirv()->descriptors().end())
 				offsetMap[it->second.mSet].emplace_back(make_pair(it->second.mBinding, offset));
-
-	vector<uint32_t> offsetVec;
-	for (const auto&[index, ds] : mDescriptorSets.at(commandBuffer.bound_pipeline().get())) {
-		offsetVec.clear();
-		if (auto it = offsetMap.find(index); it != offsetMap.end()) {
-			offsetVec.resize(it->second.size());
-			ranges::transform(it->second, offsetVec.begin(), &pair<uint32_t,uint32_t>::second);
+	vector<uint32_t> offsets;
+	for (uint32_t i = 0; i < descriptorSets.size(); i++) {
+		offsets.clear();
+		if (auto it = offsetMap.find(i); it != offsetMap.end()) {
+			offsets.resize(it->second.size());
+			ranges::transform(it->second, offsets.begin(), &pair<uint32_t,uint32_t>::second);
 		}
-
-		commandBuffer.bind_descriptor_set(index, ds, offsetVec);
+		commandBuffer.bind_descriptor_set(i, descriptorSets[i], offsets);
 	}
 }
 

@@ -9,7 +9,7 @@ namespace stm {
 class Application {
 public:
 	NodeEvent<> PreUpdate;
-	NodeEvent<float> OnUpdate;
+	NodeEvent<CommandBuffer&, float> OnUpdate;
 
 	STRATUM_API Application(Node& node, Window& window);
 

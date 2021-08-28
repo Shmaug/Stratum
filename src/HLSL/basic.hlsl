@@ -7,10 +7,10 @@
 
 #include "transform.hlsli"
 
-[[vk::constant_id(0)]] const uint gTextureCount = 1;
+[[vk::constant_id(0)]] const uint gTextureCount = 8;
 
-[[vk::binding(0)]] Texture2D<float4> gTextures[gTextureCount];
-[[vk::binding(1)]] SamplerState gSampler;
+[[vk::binding(0)]] SamplerState gSampler;
+[[vk::binding(1)]] Texture2D<float4> gTextures[gTextureCount];
 
 [[vk::push_constant]] cbuffer {
 	TransformData gWorldToCamera;
@@ -32,7 +32,9 @@ float4 color_texture_vs(in float3 vertex : POSITION, inout float2 uv : TEXCOORD0
 	uv = gTextureST.xy*uv + gTextureST.zw;
 	return project_point(gProjection, transform_point(gWorldToCamera, vertex));
 }
-float4 color_texture_fs(float2 uv : TEXCOORD0, float4 color : COLOR) : SV_Target0 { return color * gTextures[(gTextureCount>1) ? gTextureIndex : 0].Sample(gSampler, uv); }
+float4 color_texture_fs(float2 uv : TEXCOORD0, float4 color : COLOR) : SV_Target0 {
+	return color * gTextures[(gTextureCount>1) ? gTextureIndex : 0].Sample(gSampler, uv);
+}
 
 float4 skybox_vs(in uint vertexId : SV_VertexID, out float2 clipPos : TEXCOORD0) : SV_Position {
 	static const float2 quad[] = {

@@ -8,33 +8,29 @@ Node& NodeGraph::emplace(const string& name) {
   mNodes.emplace(ptr, move(node));
   return *ptr;
 }
-void NodeGraph::erase(Node& node) {
-  while (true) {
-    auto[first,last] = mEdges.equal_range(&node);
-    if (first == last) break;
-    first->second->clear_parent();
-  }
-  node.clear_parent();
-  mNodes.erase(&node);
-}
 void NodeGraph::erase_recurse(Node& node) {
-  stack<Node*> nodes;
+  list<Node*> nodes;
   stack<Node*> todo;
   todo.push(&node);
   while (!todo.empty()) {
-    nodes.push(todo.top());
+    nodes.push_back(todo.top());
     auto[first,last] = mEdges.equal_range(todo.top());
     todo.pop();
     for (auto[_,n] : ranges::subrange(first,last))
       todo.push(n);
   }
-  while (!nodes.empty()) {
-    erase(*nodes.top());
-    nodes.pop();
-  }
+  for (Node* n : nodes|views::reverse)
+    erase(*n);
 }
 
 Node::~Node() {
+  auto[first,last] = mNodeGraph.mEdges.equal_range(this);
+  for (const auto&[_,child] : ranges::subrange(first, last))
+    if (mParent)
+      child->set_parent(*mParent);
+    else
+      child->clear_parent();
+  
   clear_parent();
   for (auto edge_it = mNodeGraph.mEdges.find(this); edge_it != mNodeGraph.mEdges.end(); ) {
     edge_it->second->clear_parent();

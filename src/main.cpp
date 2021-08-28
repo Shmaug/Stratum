@@ -53,6 +53,8 @@ template<> inline void type_gui_fn(LightData& light) {
     ImGui::EndCombo();
   }
   ImGui::CheckboxFlags("Shadow map", &light.mFlags, LightFlags_Shadowmap);
+  if (light.mFlags&LightFlags_Shadowmap)
+    ImGui::CheckboxFlags("Right Handed", &light.mShadowProjection.Mode, ProjectionMode_RightHanded);
 }
 template<> inline void type_gui_fn(DynamicRenderPass& rp) {
   for (auto& sp : rp.subpasses()) {
@@ -79,7 +81,14 @@ template<> inline void type_gui_fn(RasterScene::Camera& cam) {
   if (cam.mProjectionMode&ProjectionMode_Perspective)
     ImGui::DragFloat("Vertical FoV", &cam.mVerticalFoV, .1f, 0.00390625, numbers::pi_v<float>);
   else
-    ImGui::DragFloat("Orthographic Height", &cam.mOrthographicHeight, .1f);
+    ImGui::DragFloat("Vertical Size", &cam.mOrthographicHeight, .1f);
+}
+template<> inline void type_gui_fn(PipelineState& pipeline) {
+  ImGui::Text("%llu pipelines", pipeline.pipelines().size());
+  ImGui::Text("%llu descriptor sets", pipeline.descriptor_sets().size());
+}
+template<> inline void type_gui_fn(RasterScene& scene) {
+  ImGui::DragFloat("Environment Gamma", &scene.background()->push_constant<float>("gEnvironmentGamma"), .01f);
 }
 
 inline void components_gui_fn(Node& node) {
@@ -99,7 +108,8 @@ inline void components_gui_fn(Node& node) {
   component_gui_fn.operator()<TransformData>(node);
   component_gui_fn.operator()<LightData>(node);
   component_gui_fn.operator()<RasterScene::Camera>(node);
-  component_gui_fn.operator()<RasterScene::Submesh>(node);
+  component_gui_fn.operator()<RasterScene::MeshInstance>(node);
+  component_gui_fn.operator()<PipelineState>(node);
 }
 
 inline void node_gui_fn(Node& n, Node*& selected) {
@@ -121,6 +131,7 @@ int main(int argc, char** argv) {
   Node& root = gNodeGraph.emplace("Instance");
 	Instance& instance = *root.make_component<Instance>(argc, argv);
 	
+  #pragma region load spirv files
   #ifdef _WIN32
   wchar_t exepath[MAX_PATH];
   GetModuleFileNameW(NULL, exepath, MAX_PATH);
@@ -130,25 +141,50 @@ int main(int argc, char** argv) {
     ranges::uninitialized_fill(exepath, 0);
   #endif
   load_spirv_modules(*root.make_child("SPIR-V Modules").make_component<spirv_module_map>(), instance.device(), fs::path(exepath).parent_path()/"SPIR-V");
+  #pragma endregion
 
-  auto scene = root.make_child("RasterScene").make_component<RasterScene>();
+  enum AssetType {
+    eEnvironmentMap,
+    eScene
+  };
+  vector<tuple<fs::path, string, AssetType>> assets;
+  for (const string& filepath : instance.find_arguments("assetsFolder"))
+    for (const auto& entry : fs::recursive_directory_iterator(filepath)) {
+      if (entry.path().extension() == ".gltf")
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eScene);
+      else if (entry.path().extension() == ".hdr")
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eEnvironmentMap);
+    }
+
   auto app = root.make_child("Application").make_component<Application>(instance.window());
   auto& mainPass = *app->render_pass();
+  auto scene = root.make_child("RasterScene").make_component<RasterScene>();
   
-  scene.listen(mainPass.mPass.PreProcess, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
-    scene->pre_render(commandBuffer, framebuffer, scene.node().find_in_descendants<RasterScene::Camera>());
-  });
-  scene.listen(mainPass.OnDraw, [&](CommandBuffer& commandBuffer) {
-    scene->draw(commandBuffer);
-  });
-	
-
+  #pragma region imgui
   auto imgui = app.node().make_child("ImGui").make_component<Gui>();
 
   Node* selected = nullptr;
   root.listen(imgui->OnGui, [&](CommandBuffer& commandBuffer) {
-
-    Profiler::on_gui();
+    if (ImGui::Begin("Load Asset")) {
+      for (const auto&[filepath, name, type] : assets)
+        if (ImGui::Button(name.c_str()))
+          switch (type) {
+            case AssetType::eScene:
+              scene->load_gltf(commandBuffer, filepath);
+              break;
+            case AssetType::eEnvironmentMap: {
+              auto[pixels,extent] = Texture::load(instance.device(), filepath);
+              commandBuffer.barrier(vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead, pixels);
+              Texture::View tex = make_shared<Texture>(instance.device(), name, extent, pixels.format(), 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
+              commandBuffer.copy_buffer_to_image(pixels, tex);
+              tex.texture()->generate_mip_maps(commandBuffer);
+              scene->background()->push_constant<float>("gEnvironmentGamma") = 2.2f;
+              scene->background()->descriptor("gTextures") = sampled_texture_descriptor(tex);
+              break;
+            }
+          }
+    }
+    ImGui::End();
 
     if (ImGui::Begin("Scene Graph")) {
       ImGui::Columns(2);
@@ -161,39 +197,24 @@ int main(int argc, char** argv) {
       }
     }
     ImGui::End();
+
+    Profiler::on_gui();
   });
 
-  imgui.listen(app->OnUpdate, [&](float deltaTime) { imgui->new_frame(instance.window(), deltaTime); });
-  imgui.listen(mainPass.mPass.PreProcess, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
-    imgui->render_gui(commandBuffer);
-  }, EventPriority::eFirst + 100);
-  imgui.listen(mainPass.OnDraw, [&](CommandBuffer& commandBuffer) {
-    imgui->draw(commandBuffer);
-  }, EventPriority::eLast);
-
-  {
-    auto commandBuffer = instance.device().get_command_buffer("Application::Application");
-    
-    imgui->create_textures(*commandBuffer);
-    
-    for (const string& envMap : instance.find_arguments("environmentMap")) {
-      auto[pixels,extent] = Texture::load(instance.device(), envMap);
-      Texture::View tex = make_shared<Texture>(instance.device(), "Environment Map", extent, pixels.format(), 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
-      commandBuffer->upload_image(pixels.buffer(), tex);
-      tex.texture()->generate_mip_maps(*commandBuffer);
-      scene->set_skybox(tex.texture());
-    }
-    for (const string& filepath : instance.find_arguments("load_gltf"))
-      scene->load_gltf(*commandBuffer, filepath);
-    
-    instance.device().submit(commandBuffer);
-  }
+  imgui.listen(app->OnUpdate, [&](CommandBuffer& commandBuffer, float deltaTime) { imgui->update(commandBuffer, deltaTime); });
+  imgui.listen(mainPass.mPass.PreProcess, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) { imgui->render_gui(commandBuffer); }, EventPriority::eFirst + 1024);
+  imgui.listen(mainPass.OnDraw, [&](CommandBuffer& commandBuffer) { imgui->draw(commandBuffer); }, EventPriority::eLast);
+  #pragma endregion
 
   auto camera = scene.node().find_in_descendants<RasterScene::Camera>();
+  if (!camera) {
+    camera = scene.node().make_child("Camera").make_component<RasterScene::Camera>(ProjectionMode_Perspective, 1024, radians(70.f));
+    camera.node().make_component<TransformData>(float3(0,0,-1), 1.f, make_quatf(0,0,0,1));
+  }
   auto cameraTransform = camera.node().find_in_ancestor<TransformData>();
-	Vector2f euler = Vector2f::Zero();
-  root.listen(app->OnUpdate, [&](float deltaTime) {
-    Window& window = instance.window();
+  Vector2f euler = Vector2f::Zero();
+  root.listen(app->OnUpdate, [&](CommandBuffer& commandBuffer, float deltaTime) {
+    Window& window = commandBuffer.mDevice.mInstance.window();
 
     if (!ImGui::GetIO().WantCaptureMouse) {
       if (window.pressed(KeyCode::eMouse2)) {
@@ -201,7 +222,7 @@ int main(int argc, char** argv) {
         euler.x() = clamp(euler.x(), -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
         quatf rx = angle_axis(euler.x(), float3(1,0,0));
         quatf ry = angle_axis(euler.y(), float3(0,1,0));
-        cameraTransform->Rotation = qmul(rx, ry);
+        cameraTransform->Rotation = qmul(ry, rx);
       }
     }
     if (!ImGui::GetIO().WantCaptureKeyboard) {
@@ -213,6 +234,15 @@ int main(int argc, char** argv) {
       if (window.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
       cameraTransform->Translation += rotate_vector(cameraTransform->Rotation, mv*deltaTime);
     }
+  });
+  scene.listen(mainPass.mPass.PreProcess, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
+    scene->pre_render(commandBuffer, framebuffer);
+  });
+  scene.listen(scene->OnGizmos, [&](RasterScene::Gizmos& g) {
+    //g.quad(TransformData(float3::Zero(), 1.f, cameraTransform->Rotation));
+  });
+  scene.listen(mainPass.OnDraw, [&](CommandBuffer& commandBuffer) {
+    scene->draw(commandBuffer, camera);
   });
 
   app->loop();

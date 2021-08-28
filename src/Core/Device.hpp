@@ -11,12 +11,15 @@ class Semaphore;
 
 class DeviceResource {
 private:
+	friend class CommandBuffer;
 	string mName;
+	unordered_set<CommandBuffer*> mTracking;
 public:
 	Device& mDevice;
 	inline DeviceResource(Device& device, const string& name) : mDevice(device), mName(name) {}
 	inline virtual ~DeviceResource() {}
 	inline const string& name() const { return mName; }
+	inline bool in_use() const { return !mTracking.empty(); }
 };
 
 class Device {
@@ -127,7 +130,6 @@ private:
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
 	locked_object<vk::DescriptorPool> mDescriptorPool;
-
 };
 
 }

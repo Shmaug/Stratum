@@ -1,7 +1,7 @@
 #pragma once
 
 #include "NodeGraph.hpp"
-#include <Core/PipelineState.hpp>
+#include <Core/CommandBuffer.hpp>
 
 namespace stm {
 

@@ -61,8 +61,8 @@ inline ArrayType<T,M,K> mul(const ArrayType<T,M,N>& a, const ArrayType<T,N,K>& b
 	return a.matrix()*b.matrix();
 }
 
-template<typename T> inline const T& min(const T& a, const T& b) { return std::min(a,b); }
-template<typename T> inline const T& max(const T& a, const T& b) { return std::max(a,b); }
+using std::min;
+using std::max;
 template<typename T, int M, int N> inline ArrayType<T,M,N> max(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.max(b); }
 template<typename T, int M, int N> inline ArrayType<T,M,N> min(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.min(b); }
 

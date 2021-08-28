@@ -10,9 +10,9 @@ namespace stm {
 class Gui {
 private:
 	Node& mNode;
-	shared_ptr<PipelineState> mPipeline;
-	Geometry mGeometry;
-	Buffer::View<ImDrawIdx>  mIndices;
+	component_ptr<PipelineState> mPipeline;
+	Mesh mMesh;
+	bool mUploadFonts = true;
 	ImGuiContext* mContext;
 	const ImDrawData* mDrawData;
 	
@@ -31,9 +31,7 @@ public:
 			[](void* ptr, void* user_data) { ::operator delete(ptr); });
 	}
 
-	STRATUM_API void create_textures(CommandBuffer& commandBuffer);
-
-	STRATUM_API void new_frame(const Window& window, float deltaTime) const;
+	STRATUM_API void update(CommandBuffer& commandBuffer, float deltaTime);
 	STRATUM_API void render_gui(CommandBuffer& commandBuffer);
 	STRATUM_API void draw(CommandBuffer& commandBuffer) const;
 };

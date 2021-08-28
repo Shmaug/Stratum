@@ -21,6 +21,13 @@ CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFa
 	mCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 	mState = CommandBufferState::eRecording;
 }
+CommandBuffer::~CommandBuffer() {
+	if (mState == CommandBufferState::eInFlight)
+		fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Destroying CommandBuffer [%s] that is in-flight!\n", name().c_str());
+	clear();
+	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
+}
+
 
 void CommandBuffer::begin_label(const string& text, const Vector4f& color) {
 	if (vkCmdBeginDebugUtilsLabelEXT) {
@@ -36,6 +43,8 @@ void CommandBuffer::end_label() {
 }
 
 void CommandBuffer::clear() {
+	for (const auto& resource : mHeldResources)
+		resource->mTracking.erase(this); 
 	mHeldResources.clear();
 	mPrimitiveCount = 0;
 	mBoundFramebuffer.reset();
@@ -54,6 +63,19 @@ void CommandBuffer::reset(const string& name) {
 
 	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 	mState = CommandBufferState::eRecording;
+}
+
+
+void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
+	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
+	hold_resource(descriptorSet);
+	
+	descriptorSet->flush_writes();
+	if (!mBoundFramebuffer) transition_images(*descriptorSet);
+
+	if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
+	mBoundDescriptorSets[index] = descriptorSet;
+	mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
 }
 
 void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxyNoTemporaries<const vk::ClearValue>& clearValues, vk::SubpassContents contents) {

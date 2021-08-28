@@ -57,12 +57,10 @@ class component_ptr {
 public:
 	component_ptr() = default;
 	component_ptr(const component_ptr&) = default;
-	inline component_ptr(component_ptr&& c) : mNode(c.mNode), mComponent(c.mComponent) {
-		c.mNode = nullptr;
-		c.mComponent = nullptr;
-	}
-	inline component_ptr(Node* n, T* c) : mNode(n), mComponent(c) {};
-	inline component_ptr(const Node* n, T* c) : mNode(const_cast<Node*>(n)), mComponent(c) {};
+	inline component_ptr(nullptr_t) {}
+	inline component_ptr(component_ptr&& c) : mNode(c.mNode), mComponent(c.mComponent) { c.reset(); }
+	inline component_ptr(Node* n, T* c) : mNode(n), mComponent(c) {}
+	inline component_ptr(const Node* n, T* c) : mNode(const_cast<Node*>(n)), mComponent(c) {}
 
 	component_ptr& operator=(const component_ptr&) = default;
 	inline component_ptr& operator=(component_ptr&& c) {
@@ -79,6 +77,7 @@ public:
 	inline T& operator*() const { return *mComponent; }
 	inline T* operator->() const { return mComponent; }
 	inline T* get() const { return mComponent; }
+	inline void reset() { mNode = nullptr; mComponent = nullptr; }
 
 	template<typename... Args, typename F>
 	inline void listen(NodeEvent<Args...>& nodeEvent, F&& fn, uint32_t priority = EventPriority::eDefault) const {
@@ -113,7 +112,7 @@ public:
 	template<typename T> inline size_t count() const { return count(typeid(T)); }
 
 	STRATUM_API Node& emplace(const string& name);
-	STRATUM_API void erase(Node& node);
+	inline void erase(Node& node) { mNodes.erase(&node); }
 	STRATUM_API void erase_recurse(Node& node);
 
 	template<typename T> inline size_t component_count() const {
@@ -304,8 +303,8 @@ private:
 template<typename... Args>
 inline void NodeEvent<Args...>::bind_listener(const Node& listener, function_t&& fn, uint32_t priority) {
 	mListeners.emplace_back(&listener, forward<function_t>(fn), priority);
-	ranges::push_heap(mListeners, greater<uint32_t>(), [](const auto& a) { return get<uint32_t>(a); });
-	if (mNodeGraph == nullptr) mNodeGraph = &listener.node_graph();
+	ranges::stable_sort(mListeners, {}, [](const auto& a) { return get<uint32_t>(a); });
+	if (!mNodeGraph) mNodeGraph = &listener.node_graph();
 }
 
 }
