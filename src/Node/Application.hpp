@@ -8,7 +8,7 @@ namespace stm {
 
 class Application {
 public:
-	NodeEvent<> PreUpdate;
+	NodeEvent<> PreFrame;
 	NodeEvent<CommandBuffer&, float> OnUpdate;
 
 	STRATUM_API Application(Node& node, Window& window);

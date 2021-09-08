@@ -237,21 +237,26 @@ private:
 	Vector2f mCursorDelta;
 	float mScrollDelta;
 	unordered_set<KeyCode> mButtons;
+	string mInputCharacters;
 public:
 	inline void clear_deltas() {
 		mCursorDelta = Vector2f::Zero();
 		mScrollDelta = 0;
+		mInputCharacters.clear();
 	}
 	inline void add_cursor_delta(const Vector2f& delta) { mCursorDelta += delta; }
 	inline void add_scroll_delta(float delta) { mScrollDelta += delta; }
+	inline void add_input_character(char c) { mInputCharacters.push_back(c); };
+	inline void set_button(KeyCode key) { mButtons.emplace(key); }
+	inline void unset_button(KeyCode key) { mButtons.erase(key); }
+
 	inline Vector2f& cursor_pos() { return mCursorPos; }
 	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
 	inline const Vector2f& cursor_pos() const { return mCursorPos; }
 	inline const Vector2f& cursor_delta() const { return mCursorDelta; }
 	inline float scroll_delta() const { return mScrollDelta; }
+	inline const string& input_characters() const { return mInputCharacters; };
 	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
-	inline void set_button(KeyCode key) { mButtons.emplace(key); }
-	inline void unset_button(KeyCode key) { mButtons.erase(key); }
 };
 
 class Window {

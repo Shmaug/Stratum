@@ -58,10 +58,6 @@ public:
 
 	template<typename T = byte>
 	class View {
-	private:
-		shared_ptr<Buffer> mBuffer;
-		vk::DeviceSize mOffset;
-		vk::DeviceSize mSize;
 	public:
 		using value_type = T;
 		using size_type = vk::DeviceSize;
@@ -89,7 +85,7 @@ public:
 
 		inline operator bool() const { return !empty(); }
 		
-		inline const auto& buffer() const { return mBuffer; }
+		inline const shared_ptr<Buffer>& buffer() const { return mBuffer; }
     inline vk::DeviceSize offset() const { return mOffset; }
 
     inline bool empty() const { return !mBuffer || mSize == 0; }
@@ -106,6 +102,11 @@ public:
 
 		inline iterator begin() const { return data(); }
 		inline iterator end() const { return data() + mSize; }
+		
+	private:
+		shared_ptr<Buffer> mBuffer;
+		vk::DeviceSize mOffset;
+		vk::DeviceSize mSize;
 	};
 
 	class StrideView : public View<byte> {
@@ -206,6 +207,7 @@ public:
 	}
 
 	inline const shared_ptr<Buffer>& buffer() const { return mBuffer; }
+	inline Buffer::StrideView buffer_view() const { return Buffer::StrideView(mBuffer, sizeof(T)); }
 
 	inline size_type empty() const { return mSize == 0; }
 	inline size_type size() const { return mSize; }
@@ -251,6 +253,10 @@ public:
 		for (size_type i = 0; i < mSize; i++)
 			at(i).~T();
 		mSize = 0;
+	}
+	inline void reset() {
+		clear();
+		mBuffer.reset();
 	}
 
 	inline reference front() { return *data(); }

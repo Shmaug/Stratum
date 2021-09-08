@@ -255,7 +255,8 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 }
 
 void Profiler::on_gui() {
-  if (!mFrameHistory.empty() && ImGui::Begin("Profiler")) {
+  if (mFrameHistory.size()<2) return;
+  if (ImGui::Begin("Profiler")) {
     vector<float> frameTimings(mFrameHistory.size());
     ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
       return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();

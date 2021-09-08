@@ -1,5 +1,6 @@
 #include "RasterScene.hpp"
-#include <Core/Window.hpp>
+#include "Application.hpp"
+#include "Gui.hpp"
 
 #define TINYGLTF_USE_CPP14
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -8,6 +9,130 @@
 
 using namespace stm;
 using namespace stm::hlsl;
+
+#pragma region inspector gui + gizmo functions
+template<typename T> inline void type_gizmo_fn(RasterScene::PushGeometry&, T&) {}
+template<> inline void type_gizmo_fn(RasterScene::PushGeometry& pg, LightData& light) {
+  pg.quad(light.mLightToWorld.Translation, 0, float2::Ones(), float4(light.mEmission[0], light.mEmission[1], light.mEmission[2], 1.f));
+}
+
+template<typename T> inline void type_gui_fn(T&) {}
+template<> inline void type_gui_fn(Instance& instance) {
+  ImGui::Text("Vulkan %u.%u.%u", 
+    VK_API_VERSION_MAJOR(instance.vulkan_version()),
+    VK_API_VERSION_MINOR(instance.vulkan_version()),
+    VK_API_VERSION_PATCH(instance.vulkan_version()) );
+
+  VmaStats stats;
+  vmaCalculateStats(instance.device().allocator(), &stats);
+  auto used = format_bytes(stats.total.usedBytes);
+  auto unused = format_bytes(stats.total.usedBytes);
+  ImGui::LabelText("Used memory", "%zu %s", used.first, used.second);
+  ImGui::LabelText("Unused memory", "%zu %s", unused.first, unused.second);
+  ImGui::LabelText("Device allocations", "%u", stats.total.blockCount);
+
+  ImGui::LabelText("Window resolution", "%ux%u", instance.window().swapchain_extent().width, instance.window().swapchain_extent().height);
+  ImGui::LabelText("Window format", to_string(instance.window().surface_format().format).c_str());
+  ImGui::LabelText("Window color space", to_string(instance.window().surface_format().colorSpace).c_str());
+}
+template<> inline void type_gui_fn(spirv_module_map& spirv) {
+  for (const auto&[name, spv] : spirv) {
+    ImGui::LabelText(name.c_str(), "%s | %s", spv->entry_point().c_str(), to_string(spv->stage()).c_str());
+  }
+}
+template<> inline void type_gui_fn(TransformData& t) {
+  ImGui::DragFloat3("Translation", t.Translation.data(), .1f);
+  ImGui::DragFloat("Scale", &t.Scale, .05f);
+  if (ImGui::DragFloat4("Rotation (XYZW)", t.Rotation.xyz.data(), .1f, -1, 1))
+    t.Rotation = normalize(t.Rotation);
+}
+template<> inline void type_gui_fn(LightData& light) {
+  if (ImGui::BeginListBox("Light to world")) {
+    type_gui_fn(light.mLightToWorld);
+    ImGui::EndListBox();
+  }
+
+  ImGui::DragFloat3("Emission", light.mEmission.data());
+  ImGui::DragFloat("Shadow bias", &light.mShadowBias, .1f, 0, 4);
+  const char* items[] { "Distant", "Point", "Spot" };
+  if (ImGui::BeginCombo("Type", items[light.mType])) {
+    for (uint32_t i = 0; i < ranges::size(items); i++)
+      if (ImGui::Selectable(items[i], light.mType==i))
+        light.mType = i;
+    ImGui::EndCombo();
+  }
+  ImGui::CheckboxFlags("Shadow map", &light.mFlags, LightFlags_Shadowmap);
+  if (light.mFlags&LightFlags_Shadowmap)
+    ImGui::DragFloat("Shadow Near Plane", &light.mShadowProjection.Near, 0.1f, -1, 1);
+}
+template<> inline void type_gui_fn(DynamicRenderPass& rp) {
+  for (auto& sp : rp.subpasses()) {
+    if (ImGui::BeginListBox(sp->name().c_str())) {
+      for (auto&[attachment, a] : sp->description().attachments()) {
+          ImGui::Text(attachment.c_str());
+          const char* items[] { "Input", "Color", "Resolve", "DepthStencil", "Preserve" };
+          if (ImGui::BeginCombo("Type", items[a.mType])) {
+            for (uint32_t i = 0; i < ranges::size(items); i++)
+              if (ImGui::Selectable(items[i], a.mType==i))
+                a.mType = (AttachmentType)i;
+            ImGui::EndCombo();
+          }
+      }
+      ImGui::EndListBox();
+    }
+  }
+}
+template<> inline void type_gui_fn(RasterScene::Camera& cam) {
+  ImGui::CheckboxFlags("Orthogrpahic", &cam.mProjectionMode, ProjectionMode_Orthographic);
+  ImGui::DragFloat("Near Plane", &cam.mNear, 0.01f, -1, 1);
+  if (cam.mProjectionMode&ProjectionMode_Orthographic)
+    ImGui::DragFloat("Vertical Size", &cam.mOrthographicHeight, .01f);
+  else
+    ImGui::DragFloat("Vertical FoV", &cam.mVerticalFoV, .01f, 0.00390625, numbers::pi_v<float>);
+}
+template<> inline void type_gui_fn(PipelineState& pipeline) {
+  ImGui::Text("%llu pipelines", pipeline.pipelines().size());
+  ImGui::Text("%llu descriptor sets", pipeline.descriptor_sets().size());
+}
+template<> inline void type_gui_fn(RasterScene& scene) {
+  ImGui::DragFloat("Environment Gamma", &scene.background()->push_constant<float>("gEnvironmentGamma"), .01f);
+  if (ImGui::BeginCombo("Main Camera", scene.main_camera().node().name().c_str())) {
+    scene.node().for_each_descendant<RasterScene::Camera>([&](component_ptr<RasterScene::Camera> c) {
+      if (ImGui::Selectable(c.node().name().c_str(), scene.main_camera() == c))
+        scene.main_camera(c);
+    });
+    ImGui::EndCombo();
+  }
+}
+
+template<typename...Types>
+inline void component_interface_fns(RasterScene::PushGeometry& pg, Node& node) {
+  auto component_gui_fn = []<typename T>(RasterScene::PushGeometry& pg, Node& node) {
+    component_ptr<T> ptr = node.find<T>();
+    if (ptr) {
+      ImGui::Text(typeid(T).name());
+      type_gui_fn(*ptr);
+      type_gizmo_fn(pg, *ptr);
+    }
+  };
+  (component_gui_fn.operator()<Types>(pg, node), ...);
+}
+
+inline void node_gui_fn(Node& n, Node*& selected) {
+  ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick;
+  if (&n == selected) flags |= ImGuiTreeNodeFlags_Selected;
+  if (n.children().empty()) flags |= ImGuiTreeNodeFlags_Leaf;
+  ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+  if (ImGui::TreeNodeEx(n.name().c_str(), flags)) {
+    if (ImGui::IsItemClicked())
+      selected = &n;
+    for (Node& c : n.children()) {
+      node_gui_fn(c, selected);
+    }
+    ImGui::TreePop();
+  }
+}
+#pragma endregion
 
 hlsl::TransformData RasterScene::node_to_world(const Node& node) {
 	TransformData transform(float3(0,0,0), 1.f, make_quatf(0,0,0,1));
@@ -21,30 +146,34 @@ hlsl::TransformData RasterScene::node_to_world(const Node& node) {
 }
 
 RasterScene::RasterScene(Node& node) : mNode(node) {
+	auto app = mNode.node_graph().find_components<Application>().front();
 	const spirv_module_map& spirv = *mNode.node_graph().find_components<spirv_module_map>().front();
 
-	auto sampler = make_shared<Sampler>(spirv.begin()->second->mDevice, "gSampler", vk::SamplerCreateInfo({},
+	auto sampler = make_shared<Sampler>(app->window().mInstance.device(), "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
 	
 	mGeometryPipeline= node.make_child("Geometry Pipeline").make_component<PipelineState>("Opaque Geometry", spirv.at("pbr_vs"), spirv.at("pbr_fs"));
+	mGeometryPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	mGeometryPipeline->set_immutable_sampler("gSampler", sampler);
 	mGeometryPipeline->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(sampler->mDevice, "gShadowSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
-		0, true, 2, true, vk::CompareOp::eLess, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
+		0, true, 2, true, vk::CompareOp::eGreater, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
 	
 	mBackgroundPipeline = node.make_child("Background Pipeline").make_component<PipelineState>("Background", spirv.at("basic_skybox_vs"), spirv.at("basic_skybox_fs"));
+	mBackgroundPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	mBackgroundPipeline->raster_state().cullMode = vk::CullModeFlagBits::eNone;
-	mBackgroundPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eEqual;
 	mBackgroundPipeline->set_immutable_sampler("gSampler", sampler);
 	mBackgroundPipeline->specialization_constant("gTextureCount") = 1;
 	mBackgroundPipeline->descriptor("gTextures") = sampled_texture_descriptor(Texture::View());
 
-	mGizmos = make_unique<Gizmos>(sampler->mDevice, *this, node.make_child("Gizmo Pipeline").make_component<PipelineState>("Gizmos", spirv.at("basic_color_texture_vs"), spirv.at("basic_color_texture_fs")));
-	mGizmos->mPipeline->raster_state().cullMode = vk::CullModeFlagBits::eNone;
-	mGizmos->mPipeline->set_immutable_sampler("gSampler", sampler);
+	mBlankTexture = make_shared<Texture>(app->window().mInstance.device(), "blank", vk::Extent3D(2, 2, 1), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
+	
+	mPushGeometry = make_unique<PushGeometry>(sampler->mDevice, *this, node.make_child("Gizmo Pipeline").make_component<PipelineState>("Gizmos", spirv.at("basic_color_texture_vs"), spirv.at("basic_color_texture_fs")));
+	mPushGeometry->mPipeline->set_immutable_sampler("gSampler", sampler);
+	mPushGeometry->mPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 
 	mShadowNode = node.make_child("ShadowMap DynamicRenderPass").make_component<DynamicRenderPass>();
 	auto& shadowPass = *mShadowNode->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mShadowNode, "shadowPass"));
@@ -53,17 +182,119 @@ RasterScene::RasterScene(Node& node) : mNode(node) {
 		vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 		vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
 	
+	mMainCamera = mNode.make_child("Default Camera").make_component<RasterScene::Camera>(0, 1/1024.f, radians(70.f));
+	mMainCamera.node().make_component<TransformData>(float3::Ones(), 1.f, make_quatf(0,0,0,1));
+	
 	mNode.listen(shadowPass.OnDraw, [&](CommandBuffer& commandBuffer) {
 		mNode.for_each_descendant<LightData>([&](auto light) {
-			const auto& extent = commandBuffer.bound_framebuffer()->extent();
-			vk::Viewport vp(light->mShadowST[2]*extent.width, light->mShadowST[3]*extent.height, light->mShadowST[0]*extent.width, light->mShadowST[1]*extent.height, 0, 1);
-			commandBuffer->setViewport(0, vp);
-			commandBuffer->setScissor(0, vk::Rect2D( { (int32_t)vp.x, (int32_t)vp.y }, { (uint32_t)ceilf(vp.width), (uint32_t)ceilf(vp.height) } ));
-			mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light->mLightToWorld);
-			mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light->mShadowProjection;
-			mDrawData->draw(commandBuffer, false);
+			if (light->mFlags&LightFlags_Shadowmap) {
+				const auto& extent = commandBuffer.bound_framebuffer()->extent();
+				vk::Viewport vp(light->mShadowST[2]*extent.width, light->mShadowST[3]*extent.height, light->mShadowST[0]*extent.width, light->mShadowST[1]*extent.height, 0, 1);
+				vk::Rect2D scissor( { (int32_t)vp.x, (int32_t)vp.y }, { (uint32_t)ceilf(vp.width), (uint32_t)ceilf(vp.height) } );
+				vp.y += vp.height;
+				vp.height = -vp.height;
+				commandBuffer->setViewport(0, vp);
+				commandBuffer->setScissor(0, scissor);
+				mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light->mLightToWorld);
+				mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light->mShadowProjection;
+				mDrawData->draw(commandBuffer, false);
+			}
 		});
 	});
+
+  mNode.listen(app->render_pass()->mPass.PreProcess, bind_front(&RasterScene::pre_render, this));
+  mNode.listen(app->render_pass()->OnDraw, [&](CommandBuffer& commandBuffer) { draw(commandBuffer, mMainCamera); });
+  mNode.listen(app->OnUpdate, [=,this](CommandBuffer& commandBuffer, float deltaTime) { mPushGeometry->clear(); }, EventPriority::eFirst + 32);
+
+  enum AssetType {
+    eEnvironmentMap,
+    eScene
+  };
+  vector<tuple<fs::path, string, AssetType>> assets;
+  for (const string& filepath : app->window().mInstance.find_arguments("assetsFolder"))
+    for (const auto& entry : fs::recursive_directory_iterator(filepath)) {
+      if (entry.path().extension() == ".gltf")
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eScene);
+      else if (entry.path().extension() == ".hdr")
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eEnvironmentMap);
+    }
+  
+  mNode.listen(app->OnUpdate, [=,this](CommandBuffer& commandBuffer, float deltaTime) {
+		auto gui = app.node().find_in_descendants<Gui>();
+		if (!gui) return;
+		gui->set_context();
+		
+    Profiler::on_gui();
+    
+    if (ImGui::Begin("Load Asset")) {
+      for (const auto&[filepath, name, type] : assets)
+        if (ImGui::Button(name.c_str()))
+          switch (type) {
+            case AssetType::eScene:
+              load_gltf(commandBuffer, filepath);
+              break;
+            case AssetType::eEnvironmentMap: {
+              auto[pixels,extent] = Texture::load(commandBuffer.mDevice, filepath);
+              Texture::View tex = make_shared<Texture>(commandBuffer.mDevice, name, extent, pixels.format(), 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
+              commandBuffer.copy_buffer_to_image(pixels, tex);
+              tex.texture()->generate_mip_maps(commandBuffer);
+              mBackgroundPipeline->push_constant<float>("gEnvironmentGamma") = 2.2f;
+              mBackgroundPipeline->descriptor("gTextures") = sampled_texture_descriptor(tex);
+              break;
+            }
+          }
+    }
+    ImGui::End();
+    
+    // scenegraph inspector
+    if (ImGui::Begin("Scene Graph")) {
+      ImGui::Columns(2);
+  		static Node* selected = nullptr;
+      node_gui_fn(mNode.root(), selected);
+      ImGui::NextColumn();
+      if (selected) {
+        if (ImGui::BeginChild(selected->name().c_str()))
+          component_interface_fns<
+            Application,
+            Instance,
+            spirv_module_map,
+            RasterScene,
+            DynamicRenderPass,
+            Gui,
+            TransformData,
+            LightData,
+            RasterScene::Camera,
+            RasterScene::MeshInstance,
+            PipelineState
+          >(push_geometry(), *selected);
+        ImGui::EndChild();
+      }
+    }
+    ImGui::End();
+
+    // camera controls
+    Window& window = commandBuffer.mDevice.mInstance.window();
+    auto cameraTransform = mMainCamera.node().find_in_ancestor<TransformData>();
+    float fwd = (mMainCamera->mNear < 0) ? -1 : 1;
+    if (!ImGui::GetIO().WantCaptureMouse) {
+      if (window.pressed(KeyCode::eMouse2)) {
+				static float2 euler = float2::Zero();
+				euler.y() += window.cursor_delta().x() * .0025f;
+        euler.x() = clamp(euler.x() + window.cursor_delta().y() * .0025f, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
+        quatf rx = angle_axis(euler.x(), float3(1,0,0));
+        quatf ry = angle_axis(euler.y(), float3(0,1,0));
+        cameraTransform->Rotation = qmul(ry, rx);
+      }
+    }
+    if (!ImGui::GetIO().WantCaptureKeyboard) {
+      float3 mv = float3(0,0,0);
+      if (window.pressed(KeyCode::eKeyD)) mv += float3( 1,0,0);
+      if (window.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
+      if (window.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
+      if (window.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
+      cameraTransform->Translation += rotate_vector(cameraTransform->Rotation, mv*deltaTime);
+    }
+  });
 }
 
 void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filename) {
@@ -95,7 +326,6 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
 		Buffer::View<byte> pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
 		memcpy(pixels.data(), image.image.data(), pixels.size_bytes());
-		commandBuffer.barrier(vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead, pixels);
 		
 		static const unordered_map<int, std::array<vk::Format,4>> formatMap {
 			{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, 	{ vk::Format::eR8Unorm, vk::Format::eR8G8Unorm, vk::Format::eR8G8B8Unorm, vk::Format::eR8G8B8A8Unorm } },
@@ -229,7 +459,9 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 						{ "texcoord", 	Geometry::AttributeType::eTexcoord },
 						{ "color", 			Geometry::AttributeType::eColor },
 						{ "psize", 			Geometry::AttributeType::ePointSize },
-						{ "pointsize", 	Geometry::AttributeType::ePointSize }
+						{ "pointsize", 	Geometry::AttributeType::ePointSize },
+						{ "joints",     Geometry::AttributeType::eBlendIndex },
+						{ "weights",    Geometry::AttributeType::eBlendWeight }
 					};
 					attributeType = semanticMap.at(typeName);
 				}
@@ -299,16 +531,16 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 			light->mEmission = (Map<const Array3d>(l.color.data()) * l.intensity).cast<float>();
 			if (l.type == "directional") {
 				light->mType = LightType_Distant;
-				light->mShadowProjection = make_orthographic(16, 16, 0, 0, 512, true);
+				light->mShadowProjection = make_orthographic(float2(16, 16), float2::Zero(), -1/1024.f);
 			} else if (l.type == "point") {
 				light->mType = LightType_Point;
-				light->mShadowProjection = make_perspective(numbers::pi_v<float>/2, 1, 0, 0, 128, true);
+				light->mShadowProjection = make_perspective(numbers::pi_v<float>/2, 1, float2::Zero(), -1/1024.f);
 			} else if (l.type == "spot") {
 				light->mType = LightType_Spot;
 				double co = cos(l.spot.outerConeAngle);
 				light->mSpotAngleScale = (float)(1/(cos(l.spot.innerConeAngle) - co));
 				light->mSpotAngleOffset = -(float)(co * light->mSpotAngleScale);
-				light->mShadowProjection = make_perspective((float)l.spot.outerConeAngle, 1, 0, 0, 128, true);
+				light->mShadowProjection = make_perspective((float)l.spot.outerConeAngle, 1, float2::Zero(), -1/1024.f);
 			}
 			light->mFlags = LightFlags_Shadowmap;
 			light->mShadowBias = .000001f;
@@ -318,9 +550,9 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		if (node.camera != -1) {
 			const tinygltf::Camera& cam = model.cameras[node.camera];
 			if (cam.type == "perspective")
-				dst.make_child(cam.name).make_component<Camera>(ProjectionMode_RightHanded|ProjectionMode_Perspective, (float)cam.perspective.zfar, (float)cam.perspective.yfov);
+				dst.make_child(cam.name).make_component<Camera>(0, -(float)cam.perspective.znear, (float)cam.perspective.yfov);
 			else if (cam.type == "orthographic")
-				dst.make_child(cam.name).make_component<Camera>(ProjectionMode_RightHanded, (float)cam.orthographic.zfar, (float)cam.orthographic.ymag);
+				dst.make_child(cam.name).make_component<Camera>(ProjectionMode_Orthographic, -(float)cam.orthographic.znear, (float)cam.orthographic.ymag);
 		}
 	}
 
@@ -334,33 +566,28 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 void RasterScene::pre_render(CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
 	ProfilerRegion s("RasterScene::pre_render", commandBuffer);
 
-	if (!mBlankTexture) {
-		mBlankTexture = make_shared<Texture>(commandBuffer.mDevice, "blank", vk::Extent3D(2, 2, 1), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
+	if (!mDrawData) {
+		mDrawData = make_unique<DrawData>(*this);
+		
 		Buffer::View<uint32_t> staging = make_shared<Buffer>(commandBuffer.mDevice, "blank upload", 16, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_COPY);
 		memset(staging.data(), ~(0u), staging.size_bytes());
-		commandBuffer.barrier(vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead, staging);
 		commandBuffer.copy_buffer_to_image(staging, mBlankTexture);
 	}
+	mDrawData->clear();
 
-	if (mDrawData) mDrawData->clear();
-	else mDrawData = make_unique<DrawData>(*this);
-	
 	buffer_vector<TransformData> transforms(commandBuffer.mDevice);
-	buffer_vector<LightData> lights(commandBuffer.mDevice);
-	
-	{
-		ProfilerRegion s("Compute transforms");
-		mNode.for_each_descendant<MeshInstance>([&](const component_ptr<MeshInstance>& instance) {
-			instance->mInstanceIndex = (uint32_t)transforms.size();
-			transforms.emplace_back(node_to_world(instance.node()));
-			mDrawData->add_instance(instance);
-		});
+	mNode.for_each_descendant<MeshInstance>([&](const component_ptr<MeshInstance>& instance) {
+		instance->mInstanceIndex = (uint32_t)transforms.size();
+		transforms.emplace_back(node_to_world(instance.node()));
+		mDrawData->add_instance(instance);
+	});
+	if (!transforms.empty()) {
+		buffer_vector<LightData> lights(commandBuffer.mDevice);
 		mNode.for_each_descendant<LightData>([&](const component_ptr<LightData>& light) {
 			light->mLightToWorld = node_to_world(light.node());
 			lights.emplace_back(*light);
 		});
-	}
-	if (!transforms.empty()) {
+
 		Texture::View shadowMap;
 		Descriptor& descriptor = mGeometryPipeline->descriptor("gShadowMap");
 		if (descriptor.index() == 0) {
@@ -375,33 +602,27 @@ void RasterScene::pre_render(CommandBuffer& commandBuffer, const shared_ptr<Fram
 		mGeometryPipeline->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
 		mGeometryPipeline->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
 		mGeometryPipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lights.size();
-		mShadowNode->render(commandBuffer, { { "gShadowMap", { shadowMap, vk::ClearValue({1.f, 0}) } } });
+		mShadowNode->render(commandBuffer, { { "gShadowMap", { shadowMap, vk::ClearValue({0.f, 0}) } } });
 	}
 
-	mGizmos->clear();
-
-	OnGizmos(*mGizmos);
-	
 	mGeometryPipeline->transition_images(commandBuffer);
 	mBackgroundPipeline->transition_images(commandBuffer);
-	mGizmos->pre_render(commandBuffer, *this);
+
+	mPushGeometry->pre_render(commandBuffer);
 }
 void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, bool doShading) const {
 	const auto& framebuffer = commandBuffer.bound_framebuffer();
 	auto worldToCamera = inverse(node_to_world(camera.node()));
-	auto projection = (camera->mProjectionMode & ProjectionMode_Perspective) ?
-		make_perspective(camera->mVerticalFoV, (float)framebuffer->extent().height/(float)framebuffer->extent().width, 0, 0, camera->mFar, camera->mProjectionMode&ProjectionMode_RightHanded) :
-		make_orthographic(camera->mOrthographicHeight, (float)framebuffer->extent().height/(float)framebuffer->extent().width, 0, 0, camera->mFar, camera->mProjectionMode&ProjectionMode_RightHanded);
+	auto projection = (camera->mProjectionMode & ProjectionMode_Orthographic) ?
+		make_orthographic(float2(camera->mOrthographicHeight, (float)framebuffer->extent().height/(float)framebuffer->extent().width), float2::Zero(), camera->mNear) :
+		make_perspective(camera->mVerticalFoV, (float)framebuffer->extent().height/(float)framebuffer->extent().width, float2::Zero(), camera->mNear);
 
 	mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
 	mGeometryPipeline->push_constant<ProjectionData>("gProjection") = projection;
 	mDrawData->draw(commandBuffer, doShading);
 
-	if (doShading) {		
-		mGizmos->mPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
-		mGizmos->mPipeline->push_constant<ProjectionData>("gProjection") = projection;
-		mGizmos->draw(commandBuffer);
-
+	if (doShading) {
+		mPushGeometry->draw(commandBuffer, worldToCamera, projection);
 		if (get<Texture::View>(mBackgroundPipeline->descriptor("gTextures"))) {
 			mBackgroundPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
 			mBackgroundPipeline->push_constant<ProjectionData>("gProjection") = projection;
@@ -417,7 +638,7 @@ void RasterScene::DrawData::clear() {
 	for (auto&[geometry, instances] : mMeshInstances) instances.clear();
 }
 void RasterScene::DrawData::draw(CommandBuffer& commandBuffer, bool doShading) const {
-	ProfilerRegion s("RasterScene::draw", commandBuffer);
+	ProfilerRegion ps("RasterScene::draw", commandBuffer);
 	for (const auto&[geometryHash, instances] : mMeshInstances) {
 		commandBuffer.bind_pipeline(
 			mGeometryPipeline->get_pipeline(
@@ -436,74 +657,96 @@ void RasterScene::DrawData::draw(CommandBuffer& commandBuffer, bool doShading) c
 	}
 }
 
-void RasterScene::Gizmos::clear() {
-	mGizmos.clear();
-	mVertices.clear();
-	mIndices.clear();
-}
-void RasterScene::Gizmos::pre_render(CommandBuffer& commandBuffer, RasterScene& scene) {
-	if (mIndices.empty()) return;
+#define SPHERE_RESOLUTION 32
+const array<uint16_t,6> gQuadIndices { 0,1,2, 0,2,3 };
 
-	mPipeline->specialization_constant("gTextureCount") = max(1u, (uint32_t)mTextures.size());
-	if (mTextures.empty()) {
-		Descriptor& descriptor = mPipeline->descriptor("gTextures", 0);
-		if (descriptor.index() != 0 || !get<Texture::View>(descriptor))
-			descriptor = sampled_texture_descriptor(scene.mBlankTexture);
+void RasterScene::PushGeometry::clear() {
+	mInstances.clear();
+	mVertices.reset();
+	mIndices.reset();
+	
+	{
+		// TODO: replace this with circle
+		uint32_t firstIndex = (uint32_t)mIndices.size();
+		mVertices.resize(mVertices.size() + SPHERE_RESOLUTION*SPHERE_RESOLUTION);
+		mIndices.resize(mIndices.size() + (SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*gQuadIndices.size());
+		for (uint32_t i = 0; i < SPHERE_RESOLUTION; i++) {
+			const float theta = float(i)/float(SPHERE_RESOLUTION-1);
+			const float sinTheta = sinf(theta);
+			for (uint32_t j = 0; j < SPHERE_RESOLUTION; j++) {
+				const float phi = float(j)/float(SPHERE_RESOLUTION-1);
+				mVertices[j + i*SPHERE_RESOLUTION].mColor = float4::Ones();
+				mVertices[j + i*SPHERE_RESOLUTION].mPosition = float3(cosf(phi)*sinTheta, cosf(theta), sinf(phi)*sinTheta);
+				mVertices[j + i*SPHERE_RESOLUTION].mTexcoord = float2(phi, theta);
+				if (i < SPHERE_RESOLUTION-1 && j < SPHERE_RESOLUTION-1)
+					ranges::transform(gQuadIndices, mIndices.begin() + firstIndex + j + i*(SPHERE_RESOLUTION-1), [](auto i) { return i + j + i*(SPHERE_RESOLUTION-1); });
+			}
+		}
 	}
+	{
+		uint32_t firstIndex = (uint32_t)mIndices.size();
+		mIndices.resize(mIndices.size() + gQuadIndices.size());
+		ranges::copy(gQuadIndices, mIndices.begin());
+	}
+}
+void RasterScene::PushGeometry::pre_render(CommandBuffer& commandBuffer) {
+	if (mInstances.empty()) return;
+
+	mPipeline->specialization_constant("gTextureCount") = (uint32_t)mTextures.size();
+	for (const auto&[tex, idx] : mTextures)
+		mPipeline->descriptor("gTextures", idx) = sampled_texture_descriptor(tex);
 	mPipeline->transition_images(commandBuffer);
 
-	mDrawIndices = commandBuffer.copy_buffer(mIndices, vk::BufferUsageFlagBits::eIndexBuffer);
-	auto verts = commandBuffer.copy_buffer(mVertices, vk::BufferUsageFlagBits::eVertexBuffer);
-	if (!mDrawGeometry) {
-		mDrawGeometry = make_shared<Geometry>(Geometry::AttributeType::ePosition, Geometry::AttributeType::eTexcoord, Geometry::AttributeType::eColor);
-		(*mDrawGeometry)[Geometry::AttributeType::ePosition][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32Sfloat,    offsetof(vertex_t, mPosition), vk::VertexInputRate::eVertex);
-		(*mDrawGeometry)[Geometry::AttributeType::eTexcoord][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32Sfloat,       offsetof(vertex_t, mTexcoord), vk::VertexInputRate::eVertex);
-		(*mDrawGeometry)[Geometry::AttributeType::eColor   ][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32A32Sfloat, offsetof(vertex_t, mColor   ), vk::VertexInputRate::eVertex);
+	if (!mDrawData.first) {
+		mDrawData.first = make_shared<Geometry>(Geometry::AttributeType::ePosition, Geometry::AttributeType::eTexcoord, Geometry::AttributeType::eColor);
+		(*mDrawData.first)[Geometry::AttributeType::ePosition][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32Sfloat,    offsetof(vertex_t, mPosition), vk::VertexInputRate::eVertex);
+		(*mDrawData.first)[Geometry::AttributeType::eTexcoord][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32Sfloat,       offsetof(vertex_t, mTexcoord), vk::VertexInputRate::eVertex);
+		(*mDrawData.first)[Geometry::AttributeType::eColor   ][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32A32Sfloat, offsetof(vertex_t, mColor   ), vk::VertexInputRate::eVertex);
 	}
-	(*mDrawGeometry)[Geometry::AttributeType::ePosition][0].second = verts;
-	(*mDrawGeometry)[Geometry::AttributeType::eTexcoord][0].second = verts;
-	(*mDrawGeometry)[Geometry::AttributeType::eColor   ][0].second = verts;
+	(*mDrawData.first)[Geometry::AttributeType::ePosition][0].second = mVertices.buffer_view();
+	(*mDrawData.first)[Geometry::AttributeType::eTexcoord][0].second = mVertices.buffer_view();
+	(*mDrawData.first)[Geometry::AttributeType::eColor   ][0].second = mVertices.buffer_view();
+	mDrawData.second = mIndices.buffer_view();
 }
-void RasterScene::Gizmos::draw(CommandBuffer& commandBuffer) const {
-	for (const Gizmo& g : mGizmos) {
-		Mesh mesh(mDrawGeometry, mDrawIndices, g.mTopology);
+void RasterScene::PushGeometry::draw(CommandBuffer& commandBuffer, const TransformData& worldToCamera, const ProjectionData& projection) const {
+	mPipeline->push_constant<ProjectionData>("gProjection") = projection;
+	for (const Instance& i : mInstances) {
+		if (i.mTransform.Rotation.xyz.isZero() && i.mTransform.Rotation.w == 0)
+			mPipeline->push_constant<TransformData>("gWorldToCamera") = TransformData(transform_point(worldToCamera, i.mTransform.Translation), worldToCamera.Scale*i.mTransform.Scale, make_quatf(0,0,0,1));
+		else
+			mPipeline->push_constant<TransformData>("gWorldToCamera") = tmul(worldToCamera, i.mTransform);
+		mPipeline->push_constant<float4>("gColor") = i.mColor;
+		mPipeline->push_constant<float4>("gTextureST") = i.mTextureST;
+		mPipeline->push_constant<uint32_t>("gTextureIndex") = i.mTextureIndex;
+		
+		Mesh mesh(mDrawData.first, mDrawData.second, i.mTopology);
 		commandBuffer.bind_pipeline(mPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), mesh.description(*mPipeline->stage(vk::ShaderStageFlagBits::eVertex))));
 		mPipeline->bind_descriptor_sets(commandBuffer);
 		mPipeline->push_constants(commandBuffer);
-		commandBuffer.push_constant("gTextureIndex", g.mTextureIndex);
-		commandBuffer.push_constant("gTextureST", g.mTextureST);
-		commandBuffer.push_constant("gColor", g.mColor);
-		commandBuffer->drawIndexed(g.mIndexCount, 1, g.mFirstIndex, g.mFirstVertex, 0);
+		mesh.bind(commandBuffer);
+		commandBuffer->drawIndexed(i.mIndexCount, 1, i.mFirstIndex, i.mFirstVertex, 0);
 	}
 }
 
-void RasterScene::Gizmos::cube(const hlsl::TransformData& transform, const hlsl::float4& color) {
-
-}
-void RasterScene::Gizmos::sphere(const hlsl::TransformData& transform, const hlsl::float4& color) {
-
-}
-void RasterScene::Gizmos::quad(const hlsl::TransformData& transform, const hlsl::float4& color, const Texture::View& texture, const hlsl::float4& textureST) {
-	uint32_t t = ~0;
-	if (texture) {
-		if (auto it = mTextures.find(texture); it != mTextures.end())
-			t = it->second;
-		else {
-			t = (uint32_t)mTextures.size();
-			mTextures.emplace(texture, t);
-			mPipeline->descriptor("gTextures", t) = sampled_texture_descriptor(texture);
-		}
+uint32_t RasterScene::PushGeometry::texture_index(const Texture::View& texture) {
+	uint32_t tidx = ~0;
+	if (auto it = mTextures.find(texture); it != mTextures.end())
+		tidx = it->second;
+	else {
+		tidx = (uint32_t)mTextures.size();
+		mTextures.emplace(texture, tidx);
 	}
-	mGizmos.emplace_back(6, (uint32_t)mVertices.size(), (uint32_t)mIndices.size(), color, textureST, t, vk::PrimitiveTopology::eTriangleList);
+	return tidx;
+}
 
-	mVertices.emplace_back(transform_point(transform, float3(-1,-1,0)), color, float2(0,0));
-	mVertices.emplace_back(transform_point(transform, float3( 1,-1,0)), color, float2(1,0));
-	mVertices.emplace_back(transform_point(transform, float3(-1, 1,0)), color, float2(0,1));
-	mVertices.emplace_back(transform_point(transform, float3( 1, 1,0)), color, float2(1,1));
-	mIndices.emplace_back(0);
-	mIndices.emplace_back(1);
-	mIndices.emplace_back(2);
-	mIndices.emplace_back(1);
-	mIndices.emplace_back(3);
-	mIndices.emplace_back(2);
+void RasterScene::PushGeometry::sphere(const float3& position, float size, const float4& color, const Texture::View& texture, const float4& textureST) {
+	mInstances.emplace_back((SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*6, 0, 0, vk::PrimitiveTopology::eTriangleList, TransformData(position, size, make_quatf(0,0,0,1)), color, textureST, texture_index(texture ? texture : mBlankTexture));
+}
+void RasterScene::PushGeometry::quad(const float3& position, float rotation, const float2& size, const float4& color, const Texture::View& texture, const float4& textureST) {
+	mInstances.emplace_back(6, (uint32_t)mVertices.size(), (SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*6, vk::PrimitiveTopology::eTriangleList, TransformData(position, 1.f, make_quatf(0,0,0,0)), float4::Ones(), textureST, texture_index(texture ? texture : mBlankTexture));
+	float2 sz = size/2;
+	mVertices.emplace_back(float3( sz[0],-sz[1],0), color, float2(1,0));
+	mVertices.emplace_back(float3( sz[0], sz[1],0), color, float2(1,1));
+	mVertices.emplace_back(float3(-sz[0], sz[1],0), color, float2(0,1));
+	mVertices.emplace_back(float3(-sz[0],-sz[1],0), color, float2(0,0));
 }

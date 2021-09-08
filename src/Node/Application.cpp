@@ -1,6 +1,8 @@
 #include "Application.hpp"
+#include "RasterScene.hpp"
 
 using namespace stm;
+using namespace stm::hlsl;
 
 Application::Application(Node& node, Window& window) : mNode(node), mWindow(window) {
   mWindowRenderNode = mNode.make_child(node.name() + " DynamicRenderPass").make_component<DynamicRenderPass>();
@@ -37,6 +39,8 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
     commandBuffer->setScissor(0, vk::Rect2D({}, extent));
   }, EventPriority::eFirst);
 
+
+  // load plugins
   for (const string& plugin_info : window.mInstance.find_arguments("load_plugin")) {
     size_t s0 = plugin_info.find(';');
     fs::path pluginFile(plugin_info.substr(0,s0));
@@ -53,14 +57,16 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
 }
 
 void Application::loop() {
+  vector<pair<Texture::View, Texture::View>> renderBuffers(mWindow.back_buffer_count());
+
   size_t frameCount = 0;
   auto t0 = chrono::high_resolution_clock::now();
   while (true) {
     ProfilerRegion ps("Frame " + to_string(frameCount++));
 
     {
-      ProfilerRegion ps("Application::PreUpdate");
-      PreUpdate();
+      ProfilerRegion ps("Application::PreFrame");
+      PreFrame();
     }
 
     mWindow.mInstance.poll_events();
@@ -77,29 +83,31 @@ void Application::loop() {
       ProfilerRegion ps("Application::OnUpdate");
       OnUpdate(*commandBuffer, deltaTime);
     }
-      
+    
     if (auto backBuffer = mWindow.acquire_image(*commandBuffer)) {
-
       unordered_map<RenderAttachmentId, pair<Texture::View, vk::ClearValue>> attachments {
         { "backBuffer", { backBuffer, vk::ClearColorValue(std::array<float,4>{0,0,0,0}) } }
       };
-      if (auto colorMS = mMainPass->find_attachment("colorMS")) {
-        ProfilerRegion ps("make colorMS attachment");
-        attachments["colorMS"].first = make_shared<Texture>(commandBuffer->mDevice, "colorMS", backBuffer.texture()->extent(), colorMS->mDescription, vk::ImageUsageFlagBits::eColorAttachment);
-      }
       if (auto depth = mMainPass->find_attachment("depthBuffer")) {
-        ProfilerRegion ps("make depth attachment");
-        attachments["depthBuffer"] = { make_shared<Texture>(commandBuffer->mDevice, "depthBuffer", backBuffer.texture()->extent(), depth->mDescription, vk::ImageUsageFlagBits::eDepthStencilAttachment),
-          vk::ClearDepthStencilValue(1.f, 0) };
+        if (!renderBuffers[mWindow.back_buffer_index()].first || renderBuffers[mWindow.back_buffer_index()].first.texture()->extent() != mWindow.back_buffer().texture()->extent()) {
+          ProfilerRegion ps("make depth attachment");
+          renderBuffers[mWindow.back_buffer_index()].first = make_shared<Texture>(commandBuffer->mDevice, "depthBuffer", backBuffer.texture()->extent(), depth->mDescription, vk::ImageUsageFlagBits::eDepthStencilAttachment);
+        }
+        attachments["depthBuffer"] = { renderBuffers[mWindow.back_buffer_index()].first, vk::ClearDepthStencilValue(0.f, 0) };
       }
-      mMainPass->mPass.render(*commandBuffer, attachments);
+      if (auto colorMS = mMainPass->find_attachment("colorMS")) {
+        if (!renderBuffers[mWindow.back_buffer_index()].second || renderBuffers[mWindow.back_buffer_index()].second.texture()->extent() != mWindow.back_buffer().texture()->extent()) {
+          ProfilerRegion ps("make colorMS attachment");
+          renderBuffers[mWindow.back_buffer_index()].second = make_shared<Texture>(commandBuffer->mDevice, "colorMS", backBuffer.texture()->extent(), colorMS->mDescription, vk::ImageUsageFlagBits::eColorAttachment);
+        }
+        attachments["colorMS"].first = renderBuffers[mWindow.back_buffer_index()].second;
+      }
       
-
-      auto semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");
+      mMainPass->mPass.render(*commandBuffer, attachments);
 
       pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> waits(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eColorAttachmentOutput);
+      auto semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");
       commandBuffer->mDevice.submit(commandBuffer, waits, semaphore);
-      
       mWindow.present(**semaphore);
     }
   }

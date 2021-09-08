@@ -73,5 +73,5 @@
 #define PLUGIN_API
 #endif // #ifdef __linux
 
-#include <eigen3/Eigen/Geometry>
+#include <Eigen/Dense>
 #include <vulkan/vulkan.hpp>

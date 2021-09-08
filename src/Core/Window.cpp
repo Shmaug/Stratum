@@ -292,6 +292,8 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		mClientRect.extent = vk::Extent2D( (uint32_t)((int32_t)cr.right - (int32_t)cr.left), (uint32_t)((int32_t)cr.bottom - (int32_t)cr.top) );
 		break;
 	}
+	case WM_CHAR:
+		mInputState.add_input_character(wParam);
 	case WM_INPUT: {
 		uint32_t dwSize = 0;
 		GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));

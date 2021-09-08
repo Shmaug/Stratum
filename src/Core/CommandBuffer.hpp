@@ -161,29 +161,18 @@ public:
 		return true;
 	}
 	
-	template<typename T> requires(is_trivially_copyable_v<T>)
+	template<typename T>
 	inline void push_constant(const string& name, const T& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
 		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
 		const auto& range = it->second;
-		if (range.size != sizeof(T)) throw invalid_argument("argument size (" + to_string(sizeof(T)) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
-	}
-	template<typename T, int M, int N> requires(is_trivially_copyable_v<T> && M != Eigen::Dynamic && N != Eigen::Dynamic)
-	inline void push_constant(const string& name, const Eigen::Array<T,M,N>& value) {
-		auto it = mBoundPipeline->push_constants().find(name);
-		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
-		const auto& range = it->second;
-		if (range.size != sizeof(T)*M*N) throw invalid_argument("argument size (" + to_string(sizeof(T)*M*N) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T)*M*N, value.data());
-	}
-	template<ranges::contiguous_range R> requires(is_trivially_copyable_v<ranges::range_value_t<R>>)
-	inline void push_constant(const string& name, const R& value) {
-		auto it = mBoundPipeline->push_constants().find(name);
-		if (it == mBoundPipeline->push_constants().end()) throw invalid_argument("push constant not found");
-		const auto& range = it->second;
-		if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
-		mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, (uint32_t)(ranges::size(value)*sizeof(ranges::range_value_t<R>)), ranges::data(value));
+		if constexpr (ranges::contiguous_range<T>) {
+			if (range.size != ranges::size(value)*sizeof(ranges::range_value_t<T>)) throw invalid_argument("argument size must match push constant size (" + to_string(range.size) +")");
+			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, range.size, ranges::data(value));
+		} else {
+			if (range.size != sizeof(T)) throw invalid_argument("argument size must match push constant size (" + to_string(range.size) +")");
+			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
+		}
 	}
 
 	template<typename...T> requires(same_as<T,DescriptorSet> && ...)
@@ -209,11 +198,13 @@ public:
 		bind_descriptor_set(index, descriptorSet, {});
 	}
 
-	template<typename T>
+	template<typename T=byte>
 	inline void bind_vertex_buffer(uint32_t index, const Buffer::View<T>& view) {
-		if (mBoundVertexBuffers[index] != view) {
-			mBoundVertexBuffers[index] = view;
+		auto& b = mBoundVertexBuffers[index];
+		if (b != view) {
+			b = view;
 			mCommandBuffer.bindVertexBuffers(index, **view.buffer(), view.offset());
+			hold_resource(view);
 		}
 	}
 	template<ranges::input_range R>
@@ -228,6 +219,7 @@ public:
 			if (mBoundVertexBuffers[index + i] != v) {
 				needBind = true;
 				mBoundVertexBuffers[index + i] = v;
+				hold_resource(v);
 			}
 			i++;
 		}
@@ -242,8 +234,16 @@ public:
 			else if (view.stride() == sizeof(uint8_t))  type = vk::IndexTypeValue<uint8_t>::value;
 			else throw invalid_argument("invalid stride for index buffer");
 			mCommandBuffer.bindIndexBuffer(**view.buffer(), view.offset(), type);
+			hold_resource(view);
 		}
 	}
+
+	inline Buffer::View<byte> current_vertex_buffer(uint32_t index) {
+		auto it = mBoundVertexBuffers.find(index);
+		if (it == mBoundVertexBuffers.end()) return {};
+		else return it->second;
+	}
+	inline const Buffer::StrideView& current_index_buffer() { return mBoundIndexBuffer; }
 
 	size_t mPrimitiveCount;
 

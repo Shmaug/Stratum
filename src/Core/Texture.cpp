@@ -119,21 +119,17 @@ void Texture::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStage
 }
 
 void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
-	// Transition mip 0 to vk::ImageLayout::eTransferSrcOptimal
-	commandBuffer.transition_barrier(mImage, { mAspect, 0, 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferSrcOptimal);
-	// Transition all other mips to vk::ImageLayout::eTransferDstOptimal
-	commandBuffer.transition_barrier(mImage, { mAspect, 1, mMipLevels - 1, 0, mArrayLayers }, mTrackedStageFlags, vk::PipelineStageFlagBits::eTransfer, mTrackedLayout, vk::ImageLayout::eTransferDstOptimal);
-
+	transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
 	vk::ImageBlit blit = {};
 	blit.srcOffsets[0] = blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
+	blit.srcOffsets[1] = vk::Offset3D((int32_t)mExtent.width, (int32_t)mExtent.height, (int32_t)mExtent.depth);
 	blit.srcSubresource.baseArrayLayer = 0;
 	blit.srcSubresource.layerCount = mArrayLayers;
 	blit.srcSubresource.aspectMask = mAspect;
 	blit.dstSubresource = blit.srcSubresource;
-
-	blit.srcOffsets[1] = vk::Offset3D((int32_t)mExtent.width, (int32_t)mExtent.height, (int32_t)mExtent.depth);
-
 	for (uint32_t i = 1; i < mMipLevels; i++) {
+		// Transition mip level i-1 to vk::ImageLayout::eTransferSrcOptimal
+		commandBuffer.transition_barrier(mImage, { mAspect, i-1, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
 		// Blit mip level i-1 into mip level i
 		blit.srcSubresource.mipLevel = i - 1;
 		blit.dstSubresource.mipLevel = i;
@@ -144,12 +140,9 @@ void Texture::generate_mip_maps(CommandBuffer& commandBuffer) {
 			mImage, vk::ImageLayout::eTransferSrcOptimal,
 			mImage, vk::ImageLayout::eTransferDstOptimal,
 			blit, vk::Filter::eLinear);
-
 		blit.srcOffsets[1] = blit.dstOffsets[1];
-		
-		// Transition this mip level to vk::ImageLayout::eTransferSrcOptimal
-		commandBuffer.transition_barrier(mImage, { mAspect, i, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
 	}
+	commandBuffer.transition_barrier(mImage, { mAspect, mMipLevels-1, 1, 0, mArrayLayers }, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal);
 
 	mTrackedLayout = vk::ImageLayout::eTransferSrcOptimal;
 	mTrackedStageFlags = vk::PipelineStageFlagBits::eTransfer;

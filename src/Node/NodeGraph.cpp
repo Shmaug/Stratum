@@ -3,9 +3,8 @@
 using namespace stm;
 
 Node& NodeGraph::emplace(const string& name) {
-  auto node = make_unique<Node>(*this, name);
-  Node* ptr = node.get();
-  mNodes.emplace(ptr, move(node));
+  Node* ptr = new Node(*this, name);
+  mNodes.emplace(ptr, ptr);
   return *ptr;
 }
 void NodeGraph::erase_recurse(Node& node) {

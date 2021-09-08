@@ -168,7 +168,6 @@ public:
 	Node(const Node&) = delete;
 
 	Node(Node&&) = default;
-	inline Node(NodeGraph& nodeGraph, const string& name) : mNodeGraph(nodeGraph), mName(name) {}
 	STRATUM_API ~Node();
 
 	inline const string& name() const { return mName; }
@@ -180,6 +179,12 @@ public:
 	}
 	STRATUM_API void clear_parent();
 	STRATUM_API void set_parent(Node& parent);
+
+	inline Node& root() {
+		Node* r = this;
+		while (r->mParent) r = r->mParent;
+		return *r;
+	}
 
 	template<typename T, typename... Args> requires(constructible_from<T, Args...>)
 	inline component_ptr<T> make_component(Args&&... args) {
@@ -296,8 +301,10 @@ public:
 private:
 	NodeGraph& mNodeGraph;
 	string mName;
-	Node* mParent = nullptr;
+	Node* mParent;
 	unordered_set<type_index> mComponents;
+	friend class NodeGraph;
+	inline Node(NodeGraph& nodeGraph, const string& name) : mNodeGraph(nodeGraph), mName(name), mParent(nullptr) {}
 };
 
 template<typename... Args>

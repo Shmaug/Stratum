@@ -20,7 +20,7 @@ public:
 		eColor,
 		eTexcoord,
 		ePointSize,
-		eBlendIndices,
+		eBlendIndex,
 		eBlendWeight
 	};
 	using Attribute = pair<AttributeDescription, Buffer::StrideView>;
@@ -127,7 +127,7 @@ inline string to_string(const stm::Geometry::AttributeType& value) {
 		case stm::Geometry::AttributeType::eNormal: return "Normal";
 		case stm::Geometry::AttributeType::eTangent: return "Tangent";
 		case stm::Geometry::AttributeType::eBinormal: return "Binormal";
-		case stm::Geometry::AttributeType::eBlendIndices: return "BlendIndices";
+		case stm::Geometry::AttributeType::eBlendIndex: return "BlendIndex";
 		case stm::Geometry::AttributeType::eBlendWeight: return "BlendWeight";
 		case stm::Geometry::AttributeType::eColor: return "Color";
 		case stm::Geometry::AttributeType::ePointSize: return "PointSize";

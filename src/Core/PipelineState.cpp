@@ -39,9 +39,10 @@ stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayInd
 void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 	for (auto& [name, p] : mDescriptors)
 		for (auto& [arrayIndex, d] : p)
-			if (d.index() == 0)
-				if (Texture::View view = get<Texture::View>(d))
-					view.texture()->transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
+			if (d.index() == 0) {
+				Texture::View view = get<Texture::View>(d);
+				if (view) view.texture()->transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
+			}
 }
 
 const shared_ptr<GraphicsPipeline>& PipelineState::get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription, vk::ShaderStageFlags stageMask) {

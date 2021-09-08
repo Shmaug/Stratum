@@ -39,12 +39,12 @@ v2f vs(
 	float2 texcoord : TEXCOORD,
 	uint instanceId : SV_InstanceID) {
 	v2f o;
-	TransformData objectToCamera = tmul(gWorldToCamera, gTransforms[instanceId]);
-	o.posCamera.xyz = transform_point(objectToCamera, vertex);
+	o.posCamera.xyz = transform_point(gWorldToCamera, transform_point(gTransforms[instanceId], vertex));
 	o.position      = project_point(gProjection, o.posCamera.xyz);
-	o.normal.xyz    = transform_vector(objectToCamera, normal);
-	o.tangent.xyz   = transform_vector(objectToCamera, tangent);
-	float3 bitangent = cross(o.normal.xyz, o.tangent.xyz);
+	quatf q = qmul(gWorldToCamera.Rotation, gTransforms[instanceId].Rotation);
+	o.normal.xyz    = rotate_vector(q, normal);
+	o.tangent.xyz   = rotate_vector(q, tangent);
+	float3 bitangent = cross(o.tangent.xyz, o.normal.xyz);
 	o.normal.w = bitangent.x;
 	o.tangent.w = bitangent.y;
 	o.posCamera.w = bitangent.z;
@@ -57,7 +57,7 @@ float4 SampleLight(LightData light, float3 posCamera) {
 	float3 lightCoord = transform_point(inverse(lightToCamera), posCamera);
 	float3 dir = 0;
 	float atten = 0;
-	float zdir = (light.mShadowProjection.Mode & ProjectionMode_RightHanded) ? 1 : -1;
+	float zdir = sign(light.mShadowProjection.Near);
 	if (light.mType == LightType_Distant) {
 		dir = rotate_vector(lightToCamera.Rotation, float3(0,0,zdir));
 		atten = 1;
@@ -69,7 +69,7 @@ float4 SampleLight(LightData light, float3 posCamera) {
 			atten *= pow2(light.mSpotAngleScale*saturate(sqrt(len)*zdir*lightCoord.z) + light.mSpotAngleOffset);
 	}
 	if (atten > 0 && (light.mFlags & LightFlags_Shadowmap) == LightFlags_Shadowmap) {
-		float3 shadowCoord = project_point(light.mShadowProjection, lightCoord);
+		float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, lightCoord));
 		if (all(abs(shadowCoord.xy) < 1)) {
 			shadowCoord.y = -shadowCoord.y;
 			atten *= gShadowMap.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z);
