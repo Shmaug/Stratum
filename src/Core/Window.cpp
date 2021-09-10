@@ -99,9 +99,9 @@ stm::Window::~Window() {
 Texture::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	ProfilerRegion ps("Window::acquire_image", commandBuffer);
 	
-	if (!mSwapchain) {
+	if (!mSwapchain || mSwapchainImages[0].texture()->usage() != mImageUsage) {
 		create_swapchain(commandBuffer.mDevice);
-		if (!mSwapchain) Texture::View();
+		if (!mSwapchain) return Texture::View();
 	}
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
@@ -198,7 +198,7 @@ void stm::Window::create_swapchain(Device& device) {
 	mSwapchainDevice->set_debug_name(mSurface, "WindowSurface");
 	
 	mPresentQueueFamily = mSwapchainDevice->find_queue_family(mSurface);
-	if (!mPresentQueueFamily) throw runtime_error("Device does not support the window surface!");
+	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
 	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->physical().getSurfaceCapabilitiesKHR(mSurface);
 	auto formats 							 = mSwapchainDevice->physical().getSurfaceFormatsKHR(mSurface);
@@ -213,9 +213,10 @@ void stm::Window::create_swapchain(Device& device) {
 	// select the format of the swapchain
 	mSurfaceFormat = formats[0];
 	for (const vk::SurfaceFormatKHR& format : formats)
-		if (format.format == vk::Format::eR8G8B8A8Unorm)
+		if (format.format == vk::Format::eR8G8B8A8Unorm) {
 			mSurfaceFormat = format;
-		else if (format.format == vk::Format::eB8G8R8A8Unorm)
+			break;
+		}	else if (format.format == vk::Format::eB8G8R8A8Unorm)
 			mSurfaceFormat = format;
 
 	vector<vk::PresentModeKHR> preferredPresentModes { vk::PresentModeKHR::eMailbox };
@@ -232,7 +233,7 @@ void stm::Window::create_swapchain(Device& device) {
 	createInfo.imageColorSpace = mSurfaceFormat.colorSpace;
 	createInfo.imageExtent = mSwapchainExtent;
 	createInfo.imageArrayLayers = 1;
-	createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+	createInfo.imageUsage = mImageUsage;
 	createInfo.imageSharingMode = vk::SharingMode::eExclusive;
 	createInfo.preTransform = capabilities.currentTransform;
 	createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;

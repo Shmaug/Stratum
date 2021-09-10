@@ -177,10 +177,14 @@ SpirvModule::SpirvModule(Device& device, const fs::path& spv) : DeviceResource(d
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eInputAttachment, spirv_array_size(j, v), v["input_attachment_index"]));
 	for (const auto& v : j["textures"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eCombinedImageSampler, spirv_array_size(j, v)));
-	for (const auto& v : j["images"])
+	for (const auto& v : j["images"]) {
+		
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageImage, spirv_array_size(j, v))); // TODO: texelbuffer
-	for (const auto& v : j["separate_images"])
+	}
+	for (const auto& v : j["separate_images"]) {
+		
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampledImage, spirv_array_size(j, v)));
+	}
 	for (const auto& v : j["separate_samplers"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampler, spirv_array_size(j, v)));
 	for (const auto& v : j["ubos"])

@@ -149,8 +149,10 @@ private:
 		}
 		inline void erase(const Node* node) {
 			auto it = mComponents.find(node);
-			mDestructor(it->second);
-			mComponents.erase(it);
+			if (it != mComponents.end()) {
+				mDestructor(it->second);
+				mComponents.erase(it);
+			}
 		}
 	};
 	unordered_map<const Node*, unique_ptr<Node>> mNodes;
@@ -213,8 +215,10 @@ public:
 	
 	inline void erase(type_index type) {
 		auto cmap_it = mNodeGraph.mComponentMap.find(type);
-	 	cmap_it->second.erase(this);
-		mComponents.erase(type);
+		if (cmap_it != mNodeGraph.mComponentMap.end()) {
+			cmap_it->second.erase(this);
+			mComponents.erase(type);
+		}
 	}
 	template<typename T>
 	inline void erase() { erase(typeid(T)); }

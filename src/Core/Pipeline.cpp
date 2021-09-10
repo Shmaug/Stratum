@@ -13,7 +13,7 @@ Pipeline::ShaderStage::ShaderStage(const shared_ptr<SpirvModule>& spirv, const u
   }
 }
 
-Pipeline::Pipeline(Device& device, const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : DeviceResource(device, name) {
+Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : DeviceResource(stages.begin()->spirv()->mDevice, name) {
   mStages.resize(stages.size());
   ranges::copy(stages, mStages.begin());
 
@@ -78,7 +78,7 @@ Pipeline::Pipeline(Device& device, const string& name, const vk::ArrayProxy<cons
   // create descriptorsetlayouts
   mDescriptorSetLayouts.resize(bindings.size());
   for (uint32_t i = 0; i < bindings.size(); i++)
-    mDescriptorSetLayouts[i] = make_shared<DescriptorSetLayout>(device, name+"/DescriptorSet"+to_string(i), bindings[i]);
+    mDescriptorSetLayouts[i] = make_shared<DescriptorSetLayout>(mDevice, name+"/DescriptorSet"+to_string(i), bindings[i]);
   
   vector<vk::DescriptorSetLayout> layouts(mDescriptorSetLayouts.size());
   ranges::transform(mDescriptorSetLayouts, layouts.begin(), &DescriptorSetLayout::operator const vk::DescriptorSetLayout &);
@@ -86,7 +86,7 @@ Pipeline::Pipeline(Device& device, const string& name, const vk::ArrayProxy<cons
   mLayout = mDevice->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, layouts, pcranges));
 }
 
-ComputePipeline::ComputePipeline(Device& device, const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : Pipeline(device, name, stage, immutableSamplers) {
+ComputePipeline::ComputePipeline(const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : Pipeline(name, stage, immutableSamplers) {
   vector<uint32_t> data;
   vector<vk::SpecializationMapEntry> entries;
   stage.get_specialization_info(entries, data);
@@ -100,7 +100,7 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
 		const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers,
 		const vk::PipelineRasterizationStateCreateInfo& rasterState, bool sampleShading,
 		const vk::PipelineDepthStencilStateCreateInfo& depthStencilState, const vector<vk::PipelineColorBlendAttachmentState>& blendStates,
-		const vector<vk::DynamicState>& dynamicStates) : Pipeline(renderPass.mDevice, name, stages, immutableSamplers) {
+		const vector<vk::DynamicState>& dynamicStates) : Pipeline(name, stages, immutableSamplers) {
 
   vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
   for (const auto& desc : renderPass.subpasses()[subpassIndex].attachments() | views::values) {

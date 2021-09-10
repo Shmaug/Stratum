@@ -53,9 +53,8 @@ Gui::Gui(Node& node) : mNode(node) {
 
 	const spirv_module_map& spirv = *mNode.node_graph().find_components<spirv_module_map>().front();
 	const auto& basic_color_texture_fs = spirv.at("basic_color_texture_fs");
-	mPipeline = mNode.make_child("Pipeline").make_component<PipelineState>("Gui", spirv.at("basic_color_texture_vs"), basic_color_texture_fs);
+	mPipeline = mNode.make_child("Pipeline").make_component<GraphicsPipelineState>("Gui", spirv.at("basic_color_texture_vs"), basic_color_texture_fs);
 	mPipeline->raster_state().setFrontFace(vk::FrontFace::eClockwise);
-	mPipeline->sample_shading(true);
 	mPipeline->depth_stencil().setDepthTestEnable(false);
 	mPipeline->depth_stencil().setDepthWriteEnable(false);
 	mPipeline->blend_states() = { vk::PipelineColorBlendAttachmentState(true,
@@ -74,11 +73,58 @@ Gui::Gui(Node& node) : mNode(node) {
 	mMesh[Geometry::AttributeType::eTexcoord][0].first = Geometry::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, uv ), vk::VertexInputRate::eVertex);
 	mMesh[Geometry::AttributeType::eColor   ][0].first = Geometry::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex);
 
-
-	// gui
 	auto app = mNode.find_in_ancestor<Application>();
+	const auto& backBuffer = app->render_pass()->attachment("backBuffer").mDescription;
+  
+	mRenderNode = mNode.make_child(node.name() + " DynamicRenderPass").make_component<DynamicRenderPass>();
+  mRenderPass = mRenderNode->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mRenderNode, "renderPass"));
+  mRenderPass->emplace_attachment("backBuffer", AttachmentType::eColor, blend_mode_state(),
+    vk::AttachmentDescription({},
+      backBuffer.format, vk::SampleCountFlagBits::e1,
+      vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+      vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
+	mNode.listen(mRenderPass->OnDraw, [&](CommandBuffer& commandBuffer) {
+		if (!mDrawData || mDrawData->CmdListsCount <= 0) return;
+
+		ProfilerRegion ps("Draw Gui", commandBuffer);
+
+		float2 scale = Map<const float2>(&mDrawData->DisplaySize.x);
+		float2 offset = Map<const float2>(&mDrawData->DisplayPos.x);
+
+		mPipeline->push_constant<TransformData>("gWorldToCamera") = TransformData(float3(0,0,1), 1, make_quatf(0,0,0,1));
+		mPipeline->push_constant<ProjectionData>("gProjection") = make_orthographic(scale, -float2::Ones() - offset*2/scale, 0, 1);
+		mPipeline->push_constant<float4>("gTextureST") = float4(1,1,0,0);
+		mPipeline->push_constant<float4>("gColor") = float4::Ones();
+
+		commandBuffer.bind_pipeline(mPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), mMesh.description(*mPipeline->stage(vk::ShaderStageFlagBits::eVertex))));
+		mPipeline->bind_descriptor_sets(commandBuffer);
+		mPipeline->push_constants(commandBuffer);
+		
+		commandBuffer->setViewport(0, vk::Viewport(mDrawData->DisplayPos.x, mDrawData->DisplayPos.y, mDrawData->DisplaySize.x, mDrawData->DisplaySize.y, 0, 1));
+		
+		mMesh.bind(commandBuffer);
+
+		uint32_t voff = 0, ioff = 0;
+		for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
+			for (const ImDrawCmd& cmd : cmdList->CmdBuffer)
+				if (cmd.UserCallback) {
+					// TODO: reset render state callback
+					// if (cmd->UserCallback == ResetRenderState)
+					cmd.UserCallback(cmdList, &cmd);
+				} else {
+					vk::Offset2D offset((int32_t)cmd.ClipRect.x, (int32_t)cmd.ClipRect.y);
+					vk::Extent2D extent((uint32_t)(cmd.ClipRect.z - cmd.ClipRect.x), (uint32_t)(cmd.ClipRect.w - cmd.ClipRect.y));
+					commandBuffer->setScissor(0, vk::Rect2D(offset, extent));
+					commandBuffer->drawIndexed(cmd.ElemCount, 1, ioff + cmd.IdxOffset, voff + cmd.VtxOffset, 0);
+				}
+			voff += cmdList->VtxBuffer.size();
+			ioff += cmdList->IdxBuffer.size();
+		}
+	}, EventPriority::eLast - 16);
+
+
 	mNode.listen(app->OnUpdate, [&](CommandBuffer& commandBuffer, float deltaTime) {
-		ProfilerRegion ps("ImGui::NewFrame");
+		ProfilerRegion ps("Update Gui");
 
 		set_context();
 		ImGuiIO& io = ImGui::GetIO();
@@ -115,7 +161,7 @@ Gui::Gui(Node& node) : mNode(node) {
 	}, EventPriority::eFirst + 16);
 
 	mNode.listen(app->OnUpdate, [&](CommandBuffer& commandBuffer, float deltaTime) {
-		ProfilerRegion ps("Render ImGui)");
+		ProfilerRegion ps("Render Gui");
 		set_context();
 		ImGui::Render();
 
@@ -141,44 +187,9 @@ Gui::Gui(Node& node) : mNode(node) {
 		}
 	 }, EventPriority::eLast - 16);
 	
-	mNode.listen(app->render_pass()->OnDraw, [&](CommandBuffer& commandBuffer) {
-		if (!mDrawData || mDrawData->CmdListsCount <= 0) return;
-
-		ProfilerRegion ps("Gui::draw", commandBuffer);
-
-		float2 scale = Map<const float2>(&mDrawData->DisplaySize.x);
-		float2 offset = Map<const float2>(&mDrawData->DisplayPos.x);
-
-		mPipeline->push_constant<TransformData>("gWorldToCamera") = TransformData(float3(0,0,1), 1, make_quatf(0,0,0,1));
-		mPipeline->push_constant<ProjectionData>("gProjection") = make_orthographic(scale, -float2::Ones() - offset*2/scale, 0);
-		mPipeline->push_constant<float4>("gTextureST") = float4(1,1,0,0);
-		mPipeline->push_constant<float4>("gColor") = float4::Ones();
-
-		commandBuffer.bind_pipeline(mPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), mMesh.description(*mPipeline->stage(vk::ShaderStageFlagBits::eVertex))));
-		mPipeline->bind_descriptor_sets(commandBuffer);
-		mPipeline->push_constants(commandBuffer);
-		
-		commandBuffer->setViewport(0, vk::Viewport(mDrawData->DisplayPos.x, mDrawData->DisplayPos.y, mDrawData->DisplaySize.x, mDrawData->DisplaySize.y, 0, 1));
-		
-		mMesh.bind(commandBuffer);
-
-		uint32_t voff = 0, ioff = 0;
-		for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
-			for (const ImDrawCmd& cmd : cmdList->CmdBuffer)
-				if (cmd.UserCallback) {
-					// TODO: reset render state callback
-					// if (cmd->UserCallback == ResetRenderState)
-					cmd.UserCallback(cmdList, &cmd);
-				} else {
-					vk::Offset2D offset((int32_t)cmd.ClipRect.x, (int32_t)cmd.ClipRect.y);
-					vk::Extent2D extent((uint32_t)(cmd.ClipRect.z - cmd.ClipRect.x), (uint32_t)(cmd.ClipRect.w - cmd.ClipRect.y));
-					commandBuffer->setScissor(0, vk::Rect2D(offset, extent));
-					commandBuffer->drawIndexed(cmd.ElemCount, 1, ioff + cmd.IdxOffset, voff + cmd.VtxOffset, 0);
-				}
-			voff += cmdList->VtxBuffer.size();
-			ioff += cmdList->IdxBuffer.size();
-		}
-	}, EventPriority::eLast - 16);
+	mNode.listen(app->render_pass()->mPass.PostProcess, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
+		mRenderNode->render(commandBuffer, { { "backBuffer", { framebuffer->at("backBuffer"), {} } } } );
+	}, EventPriority::eLast - 32);
 }
 Gui::~Gui() {
 	ImGui::DestroyContext(mContext);

@@ -19,6 +19,12 @@ using uint = uint32_t;
 
 template<typename T, int M, int N = 1> using ArrayType = Eigen::Array<T, M, N, Eigen::ColMajor, M, N>;
 
+using char2    	= ArrayType<int8_t, 2>;
+using char3    	= ArrayType<int8_t, 3>;
+using char4    	= ArrayType<int8_t, 4>;
+using uchar2   	= ArrayType<int8_t, 2>;
+using uchar3   	= ArrayType<int8_t, 3>;
+using uchar4   	= ArrayType<int8_t, 4>;
 using int2    	= ArrayType<int32_t, 2>;
 using int3    	= ArrayType<int32_t, 3>;
 using int4    	= ArrayType<int32_t, 4>;
@@ -109,6 +115,9 @@ template<typename R, typename T> concept range_of = ranges::range<R> && same_as<
 #pragma region misc math expressions
 template<unsigned_integral T>
 constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
+
+template<typename T> requires(is_arithmetic_v<T>)
+constexpr T sign(T x) { return (x == 0) ? 0 : (x < 0) ? -1 : 1; }
 
 template<floating_point T> constexpr T degrees(const T& r) { return r * (T)180/numbers::pi_v<float>; }
 template<floating_point T> constexpr T radians(const T& d) { return d * numbers::pi_v<float>/(T)180; }

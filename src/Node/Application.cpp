@@ -38,22 +38,6 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
     commandBuffer->setViewport(0, vk::Viewport(0, (float)extent.height, (float)extent.width, -(float)extent.height, 0, 1));
     commandBuffer->setScissor(0, vk::Rect2D({}, extent));
   }, EventPriority::eFirst);
-
-
-  // load plugins
-  for (const string& plugin_info : window.mInstance.find_arguments("load_plugin")) {
-    size_t s0 = plugin_info.find(';');
-    fs::path pluginFile(plugin_info.substr(0,s0));
-    auto plugin = mNode.make_child(pluginFile.stem().string()).make_component<dynamic_library>(pluginFile);
-    while (s0 != string::npos) {
-      s0++;
-      size_t s1 = plugin_info.find(';', s0);
-      string fn = plugin_info.substr(s0, (s1 == string::npos) ? s1 : s1-s0);
-      cout << "Calling " << pluginFile << ":" << fn << endl;
-      plugin->invoke<void, Node&>(fn, ref(plugin.node()));
-      s0 = s1;
-    }
-  }
 }
 
 void Application::loop() {
@@ -84,26 +68,31 @@ void Application::loop() {
       OnUpdate(*commandBuffer, deltaTime);
     }
     
+    if (mWindow.back_buffer_usage() != mBackBufferUsage)
+      mWindow.back_buffer_usage(mWindow.back_buffer_usage() | mBackBufferUsage);
+    
     if (auto backBuffer = mWindow.acquire_image(*commandBuffer)) {
-      unordered_map<RenderAttachmentId, pair<Texture::View, vk::ClearValue>> attachments {
-        { "backBuffer", { backBuffer, vk::ClearColorValue(std::array<float,4>{0,0,0,0}) } }
-      };
-      if (auto depth = mMainPass->find_attachment("depthBuffer")) {
-        if (!renderBuffers[mWindow.back_buffer_index()].first || renderBuffers[mWindow.back_buffer_index()].first.texture()->extent() != mWindow.back_buffer().texture()->extent()) {
-          ProfilerRegion ps("make depth attachment");
-          renderBuffers[mWindow.back_buffer_index()].first = make_shared<Texture>(commandBuffer->mDevice, "depthBuffer", backBuffer.texture()->extent(), depth->mDescription, vk::ImageUsageFlagBits::eDepthStencilAttachment);
-        }
-        attachments["depthBuffer"] = { renderBuffers[mWindow.back_buffer_index()].first, vk::ClearDepthStencilValue(0.f, 0) };
-      }
-      if (auto colorMS = mMainPass->find_attachment("colorMS")) {
-        if (!renderBuffers[mWindow.back_buffer_index()].second || renderBuffers[mWindow.back_buffer_index()].second.texture()->extent() != mWindow.back_buffer().texture()->extent()) {
-          ProfilerRegion ps("make colorMS attachment");
-          renderBuffers[mWindow.back_buffer_index()].second = make_shared<Texture>(commandBuffer->mDevice, "colorMS", backBuffer.texture()->extent(), colorMS->mDescription, vk::ImageUsageFlagBits::eColorAttachment);
-        }
-        attachments["colorMS"].first = renderBuffers[mWindow.back_buffer_index()].second;
-      }
+      auto&[depthBuffer, colorMS] = renderBuffers[mWindow.back_buffer_index()];
       
+      if (!depthBuffer || depthBuffer.texture()->usage() != mDepthBufferUsage || depthBuffer.texture()->extent() != mWindow.back_buffer().texture()->extent())
+        if (auto desc = mMainPass->find_attachment("depthBuffer")) {
+          ProfilerRegion ps("make depth attachment");
+          depthBuffer = make_shared<Texture>(commandBuffer->mDevice, "depthBuffer", backBuffer.texture()->extent(), desc->mDescription, mDepthBufferUsage);
+        }
+      if (!colorMS || colorMS.texture()->extent() != mWindow.back_buffer().texture()->extent())
+        if (auto desc = mMainPass->find_attachment("colorMS")) {
+          ProfilerRegion ps("make colorMS attachment");
+          colorMS = make_shared<Texture>(commandBuffer->mDevice, "colorMS", backBuffer.texture()->extent(), desc->mDescription, vk::ImageUsageFlagBits::eColorAttachment);
+        }
+      
+      unordered_map<RenderAttachmentId, pair<Texture::View, vk::ClearValue>> attachments {
+        { "backBuffer", { backBuffer, vk::ClearColorValue(std::array<float,4>{0,0,0,0}) } },
+        { "depthBuffer", { depthBuffer, vk::ClearDepthStencilValue(0.f, 0) } },
+        { "colorMS", { colorMS, {}}}
+      };
       mMainPass->mPass.render(*commandBuffer, attachments);
+
+      backBuffer.transition_barrier(*commandBuffer, vk::ImageLayout::ePresentSrcKHR);
 
       pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> waits(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eColorAttachmentOutput);
       auto semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");

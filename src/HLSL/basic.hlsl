@@ -51,7 +51,7 @@ float4 skybox_vs(in uint vertexId : SV_VertexID, out float2 clipPos : TEXCOORD0)
 	return float4(clipPos, 0, 1);
 }
 float4 skybox_fs(float2 clipPos : TEXCOORD0) : SV_Target0 {
-	float3 ray = rotate_vector(inverse(gWorldToCamera.Rotation), normalize(back_project(gProjection, clipPos)));
+	float3 ray = rotate_vector(inverse(gWorldToCamera.mRotation), normalize(back_project(gProjection, float3(clipPos,abs(gProjection.mNear)))));
 	float4 color = gTextures[(gTextureCount>1) ? gTextureIndex : 0].SampleLevel(gSampler, float2(atan2(ray.z, ray.x)*M_1_PI*.5 + .5, acos(ray.y)*M_1_PI), 0);
 	color.rgb = pow(color.rgb, 1/gEnvironmentGamma);
 	return color;

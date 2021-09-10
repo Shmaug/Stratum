@@ -10,10 +10,37 @@
 using namespace stm;
 using namespace stm::hlsl;
 
+hlsl::TransformData RasterScene::node_to_world(const Node& node) {
+	TransformData transform(float3(0,0,0), 1.f, make_quatf(0,0,0,1));
+	const Node* p = &node;
+	while (p != nullptr) {
+		auto c = p->find<hlsl::TransformData>();
+		if (c) transform = tmul(*c, transform);
+		p = p->parent();
+	}
+	return transform;
+}
+
 #pragma region inspector gui + gizmo functions
-template<typename T> inline void type_gizmo_fn(RasterScene::PushGeometry&, T&) {}
-template<> inline void type_gizmo_fn(RasterScene::PushGeometry& pg, LightData& light) {
-  pg.quad(light.mLightToWorld.Translation, 0, float2::Ones(), float4(light.mEmission[0], light.mEmission[1], light.mEmission[2], 1.f));
+inline void axis_arrows(RasterScene::DynamicGeometry& g, const TransformData& transform) {
+	static const array<RasterScene::DynamicGeometry::vertex_t, 6> axisVertices {
+		RasterScene::DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0xFF,0,0,0xFF), float2(0,0) ),
+		RasterScene::DynamicGeometry::vertex_t( float3(1,0,0), uchar4(0xFF,0,0,0xFF), float2(1,0) ),
+		RasterScene::DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0,0xFF,0,0xFF), float2(0,0) ),
+		RasterScene::DynamicGeometry::vertex_t( float3(0,1,0), uchar4(0,0xFF,0,0xFF), float2(1,0) ),
+		RasterScene::DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0,0,0xFF,0xFF), float2(0,0) ),
+		RasterScene::DynamicGeometry::vertex_t( float3(0,0,1), uchar4(0,0,0xFF,0xFF), float2(1,0) ),
+	};
+	static const array<uint16_t,6> axisIndices { 0,1, 2,3, 4,5 };
+	g.add_instance(axisVertices, axisIndices, vk::PrimitiveTopology::eLineList, transform);
+}
+
+template<typename T> inline void type_gizmo_fn(RasterScene::DynamicGeometry&, const component_ptr<T>&) {}
+template<> inline void type_gizmo_fn(RasterScene::DynamicGeometry& g, const component_ptr<LightData>& light) {
+	axis_arrows(g, light->mLightToWorld);
+}
+template<> inline void type_gizmo_fn(RasterScene::DynamicGeometry& g, const component_ptr<TransformData>& transform) {
+	axis_arrows(g, RasterScene::node_to_world(transform.node()));
 }
 
 template<typename T> inline void type_gui_fn(T&) {}
@@ -41,10 +68,10 @@ template<> inline void type_gui_fn(spirv_module_map& spirv) {
   }
 }
 template<> inline void type_gui_fn(TransformData& t) {
-  ImGui::DragFloat3("Translation", t.Translation.data(), .1f);
-  ImGui::DragFloat("Scale", &t.Scale, .05f);
-  if (ImGui::DragFloat4("Rotation (XYZW)", t.Rotation.xyz.data(), .1f, -1, 1))
-    t.Rotation = normalize(t.Rotation);
+  ImGui::DragFloat3("mTranslation", t.mTranslation.data(), .1f);
+  ImGui::DragFloat("Scale", &t.mScale, .05f);
+  if (ImGui::DragFloat4("Rotation (XYZW)", t.mRotation.xyz.data(), .1f, -1, 1))
+    t.mRotation = normalize(t.mRotation);
 }
 template<> inline void type_gui_fn(LightData& light) {
   if (ImGui::BeginListBox("Light to world")) {
@@ -62,8 +89,10 @@ template<> inline void type_gui_fn(LightData& light) {
     ImGui::EndCombo();
   }
   ImGui::CheckboxFlags("Shadow map", &light.mFlags, LightFlags_Shadowmap);
-  if (light.mFlags&LightFlags_Shadowmap)
-    ImGui::DragFloat("Shadow Near Plane", &light.mShadowProjection.Near, 0.1f, -1, 1);
+  if (light.mFlags&LightFlags_Shadowmap) {
+    ImGui::DragFloat("Shadow Near Plane", &light.mShadowProjection.mNear, 0.01f, -1, 1);
+    ImGui::DragFloat("Shadow Far Plane", &light.mShadowProjection.mNear, 0.1f, -1024, 1024);
+	}
 }
 template<> inline void type_gui_fn(DynamicRenderPass& rp) {
   for (auto& sp : rp.subpasses()) {
@@ -85,12 +114,13 @@ template<> inline void type_gui_fn(DynamicRenderPass& rp) {
 template<> inline void type_gui_fn(RasterScene::Camera& cam) {
   ImGui::CheckboxFlags("Orthogrpahic", &cam.mProjectionMode, ProjectionMode_Orthographic);
   ImGui::DragFloat("Near Plane", &cam.mNear, 0.01f, -1, 1);
+  ImGui::DragFloat("Far Plane", &cam.mFar, 0.1f, -1024, 1024);
   if (cam.mProjectionMode&ProjectionMode_Orthographic)
     ImGui::DragFloat("Vertical Size", &cam.mOrthographicHeight, .01f);
   else
     ImGui::DragFloat("Vertical FoV", &cam.mVerticalFoV, .01f, 0.00390625, numbers::pi_v<float>);
 }
-template<> inline void type_gui_fn(PipelineState& pipeline) {
+template<> inline void type_gui_fn(GraphicsPipelineState& pipeline) {
   ImGui::Text("%llu pipelines", pipeline.pipelines().size());
   ImGui::Text("%llu descriptor sets", pipeline.descriptor_sets().size());
 }
@@ -106,13 +136,13 @@ template<> inline void type_gui_fn(RasterScene& scene) {
 }
 
 template<typename...Types>
-inline void component_interface_fns(RasterScene::PushGeometry& pg, Node& node) {
-  auto component_gui_fn = []<typename T>(RasterScene::PushGeometry& pg, Node& node) {
+inline void component_interface_fns(RasterScene::DynamicGeometry& pg, Node& node) {
+  auto component_gui_fn = []<typename T>(RasterScene::DynamicGeometry& pg, Node& node) {
     component_ptr<T> ptr = node.find<T>();
     if (ptr) {
       ImGui::Text(typeid(T).name());
       type_gui_fn(*ptr);
-      type_gizmo_fn(pg, *ptr);
+      type_gizmo_fn(pg, ptr);
     }
   };
   (component_gui_fn.operator()<Types>(pg, node), ...);
@@ -126,24 +156,12 @@ inline void node_gui_fn(Node& n, Node*& selected) {
   if (ImGui::TreeNodeEx(n.name().c_str(), flags)) {
     if (ImGui::IsItemClicked())
       selected = &n;
-    for (Node& c : n.children()) {
+    for (Node& c : n.children())
       node_gui_fn(c, selected);
-    }
     ImGui::TreePop();
   }
 }
 #pragma endregion
-
-hlsl::TransformData RasterScene::node_to_world(const Node& node) {
-	TransformData transform(float3(0,0,0), 1.f, make_quatf(0,0,0,1));
-	const Node* p = &node;
-	while (p != nullptr) {
-		auto c = p->find<hlsl::TransformData>();
-		if (c) transform = tmul(*c, transform);
-		p = p->parent();
-	}
-	return transform;
-}
 
 RasterScene::RasterScene(Node& node) : mNode(node) {
 	auto app = mNode.node_graph().find_components<Application>().front();
@@ -154,16 +172,17 @@ RasterScene::RasterScene(Node& node) : mNode(node) {
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
 	
-	mGeometryPipeline= node.make_child("Geometry Pipeline").make_component<PipelineState>("Opaque Geometry", spirv.at("pbr_vs"), spirv.at("pbr_fs"));
+	mGeometryPipeline= node.make_child("Geometry Pipeline").make_component<GraphicsPipelineState>("Opaque Geometry", spirv.at("pbr_vs"), spirv.at("pbr_fs"));
 	mGeometryPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	mGeometryPipeline->set_immutable_sampler("gSampler", sampler);
 	mGeometryPipeline->set_immutable_sampler("gShadowSampler", make_shared<Sampler>(sampler->mDevice, "gShadowSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder, vk::SamplerAddressMode::eClampToBorder,
-		0, true, 2, true, vk::CompareOp::eGreater, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatOpaqueWhite)));
+		0, true, 2, true, vk::CompareOp::eGreaterOrEqual, 0, VK_LOD_CLAMP_NONE, vk::BorderColor::eFloatTransparentBlack)));
 	
-	mBackgroundPipeline = node.make_child("Background Pipeline").make_component<PipelineState>("Background", spirv.at("basic_skybox_vs"), spirv.at("basic_skybox_fs"));
+	mBackgroundPipeline = node.make_child("Background Pipeline").make_component<GraphicsPipelineState>("Background", spirv.at("basic_skybox_vs"), spirv.at("basic_skybox_fs"));
 	mBackgroundPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
+	mBackgroundPipeline->depth_stencil().depthWriteEnable = false;
 	mBackgroundPipeline->raster_state().cullMode = vk::CullModeFlagBits::eNone;
 	mBackgroundPipeline->set_immutable_sampler("gSampler", sampler);
 	mBackgroundPipeline->specialization_constant("gTextureCount") = 1;
@@ -171,9 +190,9 @@ RasterScene::RasterScene(Node& node) : mNode(node) {
 
 	mBlankTexture = make_shared<Texture>(app->window().mInstance.device(), "blank", vk::Extent3D(2, 2, 1), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
 	
-	mPushGeometry = make_unique<PushGeometry>(sampler->mDevice, *this, node.make_child("Gizmo Pipeline").make_component<PipelineState>("Gizmos", spirv.at("basic_color_texture_vs"), spirv.at("basic_color_texture_fs")));
-	mPushGeometry->mPipeline->set_immutable_sampler("gSampler", sampler);
-	mPushGeometry->mPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
+	mDynamicGeometry = make_unique<DynamicGeometry>(sampler->mDevice, *this, node.make_child("Gizmo Pipeline").make_component<GraphicsPipelineState>("Gizmos", spirv.at("basic_color_texture_vs"), spirv.at("basic_color_texture_fs")));
+	mDynamicGeometry->mPipeline->set_immutable_sampler("gSampler", sampler);
+	mDynamicGeometry->mPipeline->depth_stencil().depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 
 	mShadowNode = node.make_child("ShadowMap DynamicRenderPass").make_component<DynamicRenderPass>();
 	auto& shadowPass = *mShadowNode->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mShadowNode, "shadowPass"));
@@ -182,30 +201,9 @@ RasterScene::RasterScene(Node& node) : mNode(node) {
 		vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
 		vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal));
 	
-	mMainCamera = mNode.make_child("Default Camera").make_component<RasterScene::Camera>(0, 1/1024.f, radians(70.f));
+	mMainCamera = mNode.make_child("Default Camera").make_component<RasterScene::Camera>(0, -1/1024.f, -numeric_limits<float>::infinity(), radians(70.f));
 	mMainCamera.node().make_component<TransformData>(float3::Ones(), 1.f, make_quatf(0,0,0,1));
 	
-	mNode.listen(shadowPass.OnDraw, [&](CommandBuffer& commandBuffer) {
-		mNode.for_each_descendant<LightData>([&](auto light) {
-			if (light->mFlags&LightFlags_Shadowmap) {
-				const auto& extent = commandBuffer.bound_framebuffer()->extent();
-				vk::Viewport vp(light->mShadowST[2]*extent.width, light->mShadowST[3]*extent.height, light->mShadowST[0]*extent.width, light->mShadowST[1]*extent.height, 0, 1);
-				vk::Rect2D scissor( { (int32_t)vp.x, (int32_t)vp.y }, { (uint32_t)ceilf(vp.width), (uint32_t)ceilf(vp.height) } );
-				vp.y += vp.height;
-				vp.height = -vp.height;
-				commandBuffer->setViewport(0, vp);
-				commandBuffer->setScissor(0, scissor);
-				mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light->mLightToWorld);
-				mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light->mShadowProjection;
-				mDrawData->draw(commandBuffer, false);
-			}
-		});
-	});
-
-  mNode.listen(app->render_pass()->mPass.PreProcess, bind_front(&RasterScene::pre_render, this));
-  mNode.listen(app->render_pass()->OnDraw, [&](CommandBuffer& commandBuffer) { draw(commandBuffer, mMainCamera); });
-  mNode.listen(app->OnUpdate, [=,this](CommandBuffer& commandBuffer, float deltaTime) { mPushGeometry->clear(); }, EventPriority::eFirst + 32);
-
   enum AssetType {
     eEnvironmentMap,
     eScene
@@ -265,36 +263,61 @@ RasterScene::RasterScene(Node& node) : mNode(node) {
             LightData,
             RasterScene::Camera,
             RasterScene::MeshInstance,
-            PipelineState
-          >(push_geometry(), *selected);
+            GraphicsPipelineState
+          >(dynamic_geometry(), *selected);
         ImGui::EndChild();
       }
     }
     ImGui::End();
 
     // camera controls
-    Window& window = commandBuffer.mDevice.mInstance.window();
-    auto cameraTransform = mMainCamera.node().find_in_ancestor<TransformData>();
-    float fwd = (mMainCamera->mNear < 0) ? -1 : 1;
-    if (!ImGui::GetIO().WantCaptureMouse) {
-      if (window.pressed(KeyCode::eMouse2)) {
-				static float2 euler = float2::Zero();
-				euler.y() += window.cursor_delta().x() * .0025f;
-        euler.x() = clamp(euler.x() + window.cursor_delta().y() * .0025f, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
-        quatf rx = angle_axis(euler.x(), float3(1,0,0));
-        quatf ry = angle_axis(euler.y(), float3(0,1,0));
-        cameraTransform->Rotation = qmul(ry, rx);
-      }
-    }
-    if (!ImGui::GetIO().WantCaptureKeyboard) {
-      float3 mv = float3(0,0,0);
-      if (window.pressed(KeyCode::eKeyD)) mv += float3( 1,0,0);
-      if (window.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
-      if (window.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
-      if (window.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
-      cameraTransform->Translation += rotate_vector(cameraTransform->Rotation, mv*deltaTime);
-    }
+		if (mMainCamera) {
+    	Window& window = commandBuffer.mDevice.mInstance.window();
+			auto cameraTransform = mMainCamera.node().find_in_ancestor<TransformData>();
+			float fwd = (mMainCamera->mNear < 0) ? -1 : 1;
+			if (!ImGui::GetIO().WantCaptureMouse) {
+				if (window.pressed(KeyCode::eMouse2)) {
+					static const float gMouseSensitivity = 0.002f;
+					static float2 euler = float2::Zero();
+					euler.y() += window.cursor_delta().x()*fwd * gMouseSensitivity;
+					euler.x() = clamp(euler.x() + window.cursor_delta().y() * gMouseSensitivity, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
+					quatf rx = angle_axis(euler.x(), float3(fwd,0,0));
+					quatf ry = angle_axis(euler.y(), float3(0,1,0));
+					cameraTransform->mRotation = qmul(ry, rx);
+				}
+			}
+			if (!ImGui::GetIO().WantCaptureKeyboard) {
+				float3 mv = float3(0,0,0);
+				if (window.pressed(KeyCode::eKeyD)) mv += float3( 1,0,0);
+				if (window.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
+				if (window.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
+				if (window.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
+				cameraTransform->mTranslation += rotate_vector(cameraTransform->mRotation, mv*deltaTime);
+			}
+		}
   });
+	
+	mNode.listen(shadowPass.OnDraw, [&](CommandBuffer& commandBuffer) {
+		mNode.for_each_descendant<LightData>([&](auto light) {
+			if (light->mFlags&LightFlags_Shadowmap) {
+				const auto& extent = commandBuffer.bound_framebuffer()->extent();
+				vk::Viewport vp(light->mShadowST[2]*extent.width, light->mShadowST[3]*extent.height, light->mShadowST[0]*extent.width, light->mShadowST[1]*extent.height, 0, 1);
+				vk::Rect2D scissor( { (int32_t)vp.x, (int32_t)vp.y }, { (uint32_t)ceilf(vp.width), (uint32_t)ceilf(vp.height) } );
+				// flip viewport
+				vp.y += vp.height;
+				vp.height = -vp.height;
+				commandBuffer->setViewport(0, vp);
+				commandBuffer->setScissor(0, scissor);
+				mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light->mLightToWorld);
+				mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light->mShadowProjection;
+				mDrawData->draw(commandBuffer, false);
+			}
+		});
+	});
+
+  mNode.listen(app->OnUpdate, [=,this](CommandBuffer& commandBuffer, float deltaTime) { mDynamicGeometry->clear(); }, EventPriority::eFirst + 32);
+  mNode.listen(app->render_pass()->mPass.PreProcess, bind_front(&RasterScene::pre_render, this));
+  mNode.listen(app->render_pass()->OnDraw, [&](CommandBuffer& commandBuffer) { draw(commandBuffer, mMainCamera); });
 }
 
 void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filename) {
@@ -515,9 +538,9 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		
 		if (!node.translation.empty() || !node.rotation.empty() || !node.scale.empty()) {
 			auto transform = dst.make_component<TransformData>(float3::Zero(), 1.f, make_quatf(0,0,0,1));
-			if (!node.translation.empty()) transform->Translation = Map<const Array3d>(node.translation.data()).cast<float>();
-			if (!node.rotation.empty()) 	 transform->Rotation = make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]);
-			if (!node.scale.empty()) 			 transform->Scale = (float)Map<const Vector3d>(node.scale.data()).norm();
+			if (!node.translation.empty()) transform->mTranslation = Map<const Array3d>(node.translation.data()).cast<float>();
+			if (!node.rotation.empty()) 	 transform->mRotation = make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]);
+			if (!node.scale.empty()) 			 transform->mScale = (float)Map<const Vector3d>(node.scale.data()).norm();
 		}
 
 		if (node.mesh < model.meshes.size())
@@ -531,16 +554,16 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 			light->mEmission = (Map<const Array3d>(l.color.data()) * l.intensity).cast<float>();
 			if (l.type == "directional") {
 				light->mType = LightType_Distant;
-				light->mShadowProjection = make_orthographic(float2(16, 16), float2::Zero(), -1/1024.f);
+				light->mShadowProjection = make_orthographic(float2(16, 16), float2::Zero(), -.0125f, -512.f);
 			} else if (l.type == "point") {
 				light->mType = LightType_Point;
-				light->mShadowProjection = make_perspective(numbers::pi_v<float>/2, 1, float2::Zero(), -1/1024.f);
+				light->mShadowProjection = make_perspective(numbers::pi_v<float>/2, 1, float2::Zero(), -.0125f, -512.f);
 			} else if (l.type == "spot") {
 				light->mType = LightType_Spot;
 				double co = cos(l.spot.outerConeAngle);
 				light->mSpotAngleScale = (float)(1/(cos(l.spot.innerConeAngle) - co));
 				light->mSpotAngleOffset = -(float)(co * light->mSpotAngleScale);
-				light->mShadowProjection = make_perspective((float)l.spot.outerConeAngle, 1, float2::Zero(), -1/1024.f);
+				light->mShadowProjection = make_perspective((float)l.spot.outerConeAngle, 1, float2::Zero(), -.0125f, -512.f);
 			}
 			light->mFlags = LightFlags_Shadowmap;
 			light->mShadowBias = .000001f;
@@ -550,9 +573,9 @@ void RasterScene::load_gltf(CommandBuffer& commandBuffer, const fs::path& filena
 		if (node.camera != -1) {
 			const tinygltf::Camera& cam = model.cameras[node.camera];
 			if (cam.type == "perspective")
-				dst.make_child(cam.name).make_component<Camera>(0, -(float)cam.perspective.znear, (float)cam.perspective.yfov);
+				dst.make_child(cam.name).make_component<Camera>(0, -(float)cam.perspective.znear, (float)cam.perspective.zfar, (float)cam.perspective.yfov);
 			else if (cam.type == "orthographic")
-				dst.make_child(cam.name).make_component<Camera>(ProjectionMode_Orthographic, -(float)cam.orthographic.znear, (float)cam.orthographic.ymag);
+				dst.make_child(cam.name).make_component<Camera>(ProjectionMode_Orthographic, -(float)cam.orthographic.znear, (float)cam.orthographic.zfar, (float)cam.orthographic.ymag);
 		}
 	}
 
@@ -600,29 +623,32 @@ void RasterScene::pre_render(CommandBuffer& commandBuffer, const shared_ptr<Fram
 			mGeometryPipeline->descriptor("gShadowMap") = sampled_texture_descriptor(shadowMap);
 		}
 		mGeometryPipeline->descriptor("gTransforms") = commandBuffer.copy_buffer(transforms, vk::BufferUsageFlagBits::eStorageBuffer);
-		mGeometryPipeline->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
 		mGeometryPipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lights.size();
+		if (lights.empty())
+			mGeometryPipeline->descriptor("gLights") = Buffer::View<LightData>(make_shared<Buffer>(commandBuffer.mDevice, "gLights", sizeof(LightData), vk::BufferUsageFlagBits::eStorageBuffer));
+		else
+			mGeometryPipeline->descriptor("gLights") = commandBuffer.copy_buffer(lights, vk::BufferUsageFlagBits::eStorageBuffer);
 		mShadowNode->render(commandBuffer, { { "gShadowMap", { shadowMap, vk::ClearValue({0.f, 0}) } } });
 	}
 
 	mGeometryPipeline->transition_images(commandBuffer);
 	mBackgroundPipeline->transition_images(commandBuffer);
 
-	mPushGeometry->pre_render(commandBuffer);
+	mDynamicGeometry->pre_render(commandBuffer);
 }
 void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, bool doShading) const {
 	const auto& framebuffer = commandBuffer.bound_framebuffer();
 	auto worldToCamera = inverse(node_to_world(camera.node()));
 	auto projection = (camera->mProjectionMode & ProjectionMode_Orthographic) ?
-		make_orthographic(float2(camera->mOrthographicHeight, (float)framebuffer->extent().height/(float)framebuffer->extent().width), float2::Zero(), camera->mNear) :
-		make_perspective(camera->mVerticalFoV, (float)framebuffer->extent().height/(float)framebuffer->extent().width, float2::Zero(), camera->mNear);
+		make_orthographic(float2(camera->mOrthographicHeight, (float)framebuffer->extent().height/(float)framebuffer->extent().width), float2::Zero(), camera->mNear, camera->mFar) :
+		make_perspective(camera->mVerticalFoV, (float)framebuffer->extent().height/(float)framebuffer->extent().width, float2::Zero(), camera->mNear, camera->mFar);
 
 	mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
 	mGeometryPipeline->push_constant<ProjectionData>("gProjection") = projection;
 	mDrawData->draw(commandBuffer, doShading);
 
 	if (doShading) {
-		mPushGeometry->draw(commandBuffer, worldToCamera, projection);
+		mDynamicGeometry->draw(commandBuffer, worldToCamera, projection);
 		if (get<Texture::View>(mBackgroundPipeline->descriptor("gTextures"))) {
 			mBackgroundPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
 			mBackgroundPipeline->push_constant<ProjectionData>("gProjection") = projection;
@@ -657,39 +683,13 @@ void RasterScene::DrawData::draw(CommandBuffer& commandBuffer, bool doShading) c
 	}
 }
 
-#define SPHERE_RESOLUTION 32
-const array<uint16_t,6> gQuadIndices { 0,1,2, 0,2,3 };
 
-void RasterScene::PushGeometry::clear() {
+void RasterScene::DynamicGeometry::clear() {
 	mInstances.clear();
 	mVertices.reset();
 	mIndices.reset();
-	
-	{
-		// TODO: replace this with circle
-		uint32_t firstIndex = (uint32_t)mIndices.size();
-		mVertices.resize(mVertices.size() + SPHERE_RESOLUTION*SPHERE_RESOLUTION);
-		mIndices.resize(mIndices.size() + (SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*gQuadIndices.size());
-		for (uint32_t i = 0; i < SPHERE_RESOLUTION; i++) {
-			const float theta = float(i)/float(SPHERE_RESOLUTION-1);
-			const float sinTheta = sinf(theta);
-			for (uint32_t j = 0; j < SPHERE_RESOLUTION; j++) {
-				const float phi = float(j)/float(SPHERE_RESOLUTION-1);
-				mVertices[j + i*SPHERE_RESOLUTION].mColor = float4::Ones();
-				mVertices[j + i*SPHERE_RESOLUTION].mPosition = float3(cosf(phi)*sinTheta, cosf(theta), sinf(phi)*sinTheta);
-				mVertices[j + i*SPHERE_RESOLUTION].mTexcoord = float2(phi, theta);
-				if (i < SPHERE_RESOLUTION-1 && j < SPHERE_RESOLUTION-1)
-					ranges::transform(gQuadIndices, mIndices.begin() + firstIndex + j + i*(SPHERE_RESOLUTION-1), [](auto i) { return i + j + i*(SPHERE_RESOLUTION-1); });
-			}
-		}
-	}
-	{
-		uint32_t firstIndex = (uint32_t)mIndices.size();
-		mIndices.resize(mIndices.size() + gQuadIndices.size());
-		ranges::copy(gQuadIndices, mIndices.begin());
-	}
 }
-void RasterScene::PushGeometry::pre_render(CommandBuffer& commandBuffer) {
+void RasterScene::DynamicGeometry::pre_render(CommandBuffer& commandBuffer) {
 	if (mInstances.empty()) return;
 
 	mPipeline->specialization_constant("gTextureCount") = (uint32_t)mTextures.size();
@@ -699,22 +699,20 @@ void RasterScene::PushGeometry::pre_render(CommandBuffer& commandBuffer) {
 
 	if (!mDrawData.first) {
 		mDrawData.first = make_shared<Geometry>(Geometry::AttributeType::ePosition, Geometry::AttributeType::eTexcoord, Geometry::AttributeType::eColor);
-		(*mDrawData.first)[Geometry::AttributeType::ePosition][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32Sfloat,    offsetof(vertex_t, mPosition), vk::VertexInputRate::eVertex);
-		(*mDrawData.first)[Geometry::AttributeType::eTexcoord][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32Sfloat,       offsetof(vertex_t, mTexcoord), vk::VertexInputRate::eVertex);
-		(*mDrawData.first)[Geometry::AttributeType::eColor   ][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32A32Sfloat, offsetof(vertex_t, mColor   ), vk::VertexInputRate::eVertex);
+		(*mDrawData.first)[Geometry::AttributeType::ePosition][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32B32Sfloat, offsetof(vertex_t, mPosition), vk::VertexInputRate::eVertex);
+		(*mDrawData.first)[Geometry::AttributeType::eColor   ][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR8G8B8A8Unorm,   offsetof(vertex_t, mColor   ), vk::VertexInputRate::eVertex);
+		(*mDrawData.first)[Geometry::AttributeType::eTexcoord][0].first = Geometry::AttributeDescription(sizeof(vertex_t), vk::Format::eR32G32Sfloat,    offsetof(vertex_t, mTexcoord), vk::VertexInputRate::eVertex);
 	}
 	(*mDrawData.first)[Geometry::AttributeType::ePosition][0].second = mVertices.buffer_view();
 	(*mDrawData.first)[Geometry::AttributeType::eTexcoord][0].second = mVertices.buffer_view();
 	(*mDrawData.first)[Geometry::AttributeType::eColor   ][0].second = mVertices.buffer_view();
 	mDrawData.second = mIndices.buffer_view();
 }
-void RasterScene::PushGeometry::draw(CommandBuffer& commandBuffer, const TransformData& worldToCamera, const ProjectionData& projection) const {
+void RasterScene::DynamicGeometry::draw(CommandBuffer& commandBuffer, const TransformData& worldToCamera, const ProjectionData& projection) const {
+	commandBuffer->setLineWidth(1.5f);
 	mPipeline->push_constant<ProjectionData>("gProjection") = projection;
 	for (const Instance& i : mInstances) {
-		if (i.mTransform.Rotation.xyz.isZero() && i.mTransform.Rotation.w == 0)
-			mPipeline->push_constant<TransformData>("gWorldToCamera") = TransformData(transform_point(worldToCamera, i.mTransform.Translation), worldToCamera.Scale*i.mTransform.Scale, make_quatf(0,0,0,1));
-		else
-			mPipeline->push_constant<TransformData>("gWorldToCamera") = tmul(worldToCamera, i.mTransform);
+		mPipeline->push_constant<TransformData>("gWorldToCamera") = tmul(worldToCamera, i.mTransform);
 		mPipeline->push_constant<float4>("gColor") = i.mColor;
 		mPipeline->push_constant<float4>("gTextureST") = i.mTextureST;
 		mPipeline->push_constant<uint32_t>("gTextureIndex") = i.mTextureIndex;
@@ -728,7 +726,7 @@ void RasterScene::PushGeometry::draw(CommandBuffer& commandBuffer, const Transfo
 	}
 }
 
-uint32_t RasterScene::PushGeometry::texture_index(const Texture::View& texture) {
+uint32_t RasterScene::DynamicGeometry::texture_index(const Texture::View& texture) {
 	uint32_t tidx = ~0;
 	if (auto it = mTextures.find(texture); it != mTextures.end())
 		tidx = it->second;
@@ -737,16 +735,4 @@ uint32_t RasterScene::PushGeometry::texture_index(const Texture::View& texture) 
 		mTextures.emplace(texture, tidx);
 	}
 	return tidx;
-}
-
-void RasterScene::PushGeometry::sphere(const float3& position, float size, const float4& color, const Texture::View& texture, const float4& textureST) {
-	mInstances.emplace_back((SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*6, 0, 0, vk::PrimitiveTopology::eTriangleList, TransformData(position, size, make_quatf(0,0,0,1)), color, textureST, texture_index(texture ? texture : mBlankTexture));
-}
-void RasterScene::PushGeometry::quad(const float3& position, float rotation, const float2& size, const float4& color, const Texture::View& texture, const float4& textureST) {
-	mInstances.emplace_back(6, (uint32_t)mVertices.size(), (SPHERE_RESOLUTION-1)*(SPHERE_RESOLUTION-1)*6, vk::PrimitiveTopology::eTriangleList, TransformData(position, 1.f, make_quatf(0,0,0,0)), float4::Ones(), textureST, texture_index(texture ? texture : mBlankTexture));
-	float2 sz = size/2;
-	mVertices.emplace_back(float3( sz[0],-sz[1],0), color, float2(1,0));
-	mVertices.emplace_back(float3( sz[0], sz[1],0), color, float2(1,1));
-	mVertices.emplace_back(float3(-sz[0], sz[1],0), color, float2(0,1));
-	mVertices.emplace_back(float3(-sz[0],-sz[1],0), color, float2(0,0));
 }

@@ -41,7 +41,7 @@ v2f vs(
 	v2f o;
 	o.posCamera.xyz = transform_point(gWorldToCamera, transform_point(gTransforms[instanceId], vertex));
 	o.position      = project_point(gProjection, o.posCamera.xyz);
-	quatf q = qmul(gWorldToCamera.Rotation, gTransforms[instanceId].Rotation);
+	quatf q = qmul(gWorldToCamera.mRotation, gTransforms[instanceId].mRotation);
 	o.normal.xyz    = rotate_vector(q, normal);
 	o.tangent.xyz   = rotate_vector(q, tangent);
 	float3 bitangent = cross(o.tangent.xyz, o.normal.xyz);
@@ -57,22 +57,22 @@ float4 SampleLight(LightData light, float3 posCamera) {
 	float3 lightCoord = transform_point(inverse(lightToCamera), posCamera);
 	float3 dir = 0;
 	float atten = 0;
-	float zdir = sign(light.mShadowProjection.Near);
+	float zdir = sign(light.mShadowProjection.mNear);
 	if (light.mType == LightType_Distant) {
-		dir = rotate_vector(lightToCamera.Rotation, float3(0,0,zdir));
+		dir = rotate_vector(lightToCamera.mRotation, float3(0,0,-zdir));
 		atten = 1;
 	} else {
 		float len = 1/dot(lightCoord,lightCoord)
-		dir = normalize(lightToCamera.Translation - posCamera);
+		dir = normalize(lightToCamera.mTranslation - posCamera);
 		atten = len;
 		if (light.mFlags & LightType_Spot)
-			atten *= pow2(light.mSpotAngleScale*saturate(sqrt(len)*zdir*lightCoord.z) + light.mSpotAngleOffset);
+			atten *= pow2(light.mSpotAngleScale*saturate(-sqrt(len)*zdir*lightCoord.z) + light.mSpotAngleOffset);
 	}
 	if (atten > 0 && (light.mFlags & LightFlags_Shadowmap) == LightFlags_Shadowmap) {
 		float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, lightCoord));
 		if (all(abs(shadowCoord.xy) < 1)) {
 			shadowCoord.y = -shadowCoord.y;
-			atten *= gShadowMap.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z);
+			atten *= gShadowMap.SampleCmp(gShadowSampler, saturate(shadowCoord.xy*.5 + .5)*light.mShadowST.xy + light.mShadowST.zw, shadowCoord.z + light.mShadowBias);
 		}
 	}
 	return float4(dir, atten);

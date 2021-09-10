@@ -88,23 +88,22 @@ public:
 	inline RenderPass(Device& device, const string& name, R&& subpassDescriptions) : DeviceResource(device, name), mHash(0) {
 		ranges::copy(subpassDescriptions, back_inserter(mSubpassDescriptions));
 		
-		struct SubpassData {
-			vector<vk::AttachmentReference> mInputAttachments;
-			vector<vk::AttachmentReference> mColorAttachments;
-			vector<vk::AttachmentReference> mResolveAttachments;
-			vector<uint32_t> mPreserveAttachments;
-			vk::AttachmentReference mDepthAttachment;
-		};
-		vector<SubpassData> subpassData(mSubpassDescriptions.size());
+		vector<tuple<
+			vector<vk::AttachmentReference>,
+			vector<vk::AttachmentReference>,
+			vector<vk::AttachmentReference>,
+			vector<uint32_t>,
+			vk::AttachmentReference >> subpassData(mSubpassDescriptions.size());
 		vector<vk::SubpassDescription> subpasses(mSubpassDescriptions.size());
 		vector<vk::SubpassDependency> dependencies;
 		vector<vk::AttachmentDescription> attachments;
 
 		for (uint32_t i = 0; i < mSubpassDescriptions.size(); i++) {
-			auto& sd = subpassData[i];
+			auto&[inputAttachments, colorAttachments, resolveAttachments, preserveAttachments, depthAttachment] = subpassData[i];
 
 			mHash = hash_combine(mHash, hash_args(mSubpassDescriptions[i].attachments()));
 
+			bool hasDepth = false;
 			for (const auto& [attachmentName,attachment] : mSubpassDescriptions[i].attachments()) {
 				uint32_t attachmentIndex;
 				const auto& vkdesc = attachment.mDescription;
@@ -123,19 +122,20 @@ public:
 				}
 				switch (attachment.mType) {
 					case AttachmentType::eColor:
-						sd.mColorAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
+						colorAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
 					case AttachmentType::eDepthStencil:
-						sd.mDepthAttachment = vk::AttachmentReference(attachmentIndex, vkdesc.initialLayout);
+						hasDepth = true;
+						depthAttachment = vk::AttachmentReference(attachmentIndex, vkdesc.initialLayout);
 						break;
 					case AttachmentType::eResolve:
-						sd.mResolveAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
+						resolveAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
 					case AttachmentType::eInput:
-						sd.mInputAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
+						inputAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
 					case AttachmentType::ePreserve:
-						sd.mPreserveAttachments.emplace_back(attachmentIndex);
+						preserveAttachments.emplace_back(attachmentIndex);
 						break;
 				}
 
@@ -162,13 +162,9 @@ public:
 					dependencies.emplace_back(dep);
 			}
 
-			auto& sp = subpasses[i];
-			sp.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-			sp.pDepthStencilAttachment = &sd.mDepthAttachment;
-			sp.setColorAttachments(sd.mColorAttachments);
-			sp.setInputAttachments(sd.mInputAttachments);
-			sp.setPreserveAttachments(sd.mPreserveAttachments);
-			sp.setResolveAttachments(sd.mResolveAttachments);
+			subpasses[i] = vk::SubpassDescription(
+				{}, vk::PipelineBindPoint::eGraphics,
+				inputAttachments, colorAttachments, resolveAttachments, hasDepth ? &depthAttachment : nullptr, preserveAttachments);
 		}
 
 		mRenderPass = mDevice->createRenderPass(vk::RenderPassCreateInfo({}, attachments, subpasses, dependencies));

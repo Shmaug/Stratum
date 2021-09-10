@@ -45,22 +45,6 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 			}
 }
 
-const shared_ptr<GraphicsPipeline>& PipelineState::get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription, vk::ShaderStageFlags stageMask) {
-	vector<Pipeline::ShaderStage> stages;
-	stages.reserve(mModules.size());
-	for (const auto& [stage, spirv] : mModules)
-		if (stage & stageMask)
-			stages.emplace_back(spirv, mSpecializationConstants);
-
-	ProfilerRegion ps("PipelineState::get_pipeline");
-	size_t key = hash_args(renderPass, subpassIndex, geometryDescription, stageMask, mSpecializationConstants|views::values, mImmutableSamplers|views::values, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
-	
-	auto p_it = mPipelines.find(key);
-	if (p_it == mPipelines.end())
-		p_it = mPipelines.emplace(key, make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, geometryDescription, stages, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates)).first;
-	return p_it->second;
-}
-
 void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) {
 	ProfilerRegion ps("PipelineState::bind_descriptor_sets");
 	
@@ -133,4 +117,33 @@ void PipelineState::push_constants(CommandBuffer& commandBuffer) const {
 			if (range.size != value.size()) throw invalid_argument("argument size (" + to_string(value.size()) + ") must match push constant size (" + to_string(range.size) +")");
 			commandBuffer->pushConstants(commandBuffer.bound_pipeline()->layout(), range.stageFlags, range.offset, (uint32_t)value.size(), value.data());
 		}
+}
+
+shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline() {
+	Pipeline::ShaderStage stage(mModules.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants);
+
+	ProfilerRegion ps("PipelineState::get_pipeline");
+	size_t key = hash_args(stage, mSpecializationConstants|views::values, mImmutableSamplers|views::values);
+	
+	auto pipeline = find_pipeline(key);
+	if (pipeline) return static_pointer_cast<ComputePipeline>(pipeline);
+	pipeline = make_shared<ComputePipeline>(mName, stage, mImmutableSamplers);
+	add_pipeline(key, pipeline);
+	return static_pointer_cast<ComputePipeline>(pipeline);;
+}
+
+shared_ptr<GraphicsPipeline> GraphicsPipelineState::get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription, vk::ShaderStageFlags stageMask) {
+	vector<Pipeline::ShaderStage> stages;
+	stages.reserve(mModules.size());
+	for (const auto& [stage, spirv] : mModules)
+		if (stage & stageMask)
+			stages.emplace_back(spirv, mSpecializationConstants);
+
+	ProfilerRegion ps("PipelineState::get_pipeline");
+	size_t key = hash_args(renderPass, subpassIndex, geometryDescription, stageMask, mSpecializationConstants|views::values, mImmutableSamplers|views::values, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
+	
+	auto pipeline = find_pipeline(key);
+	if (pipeline) return static_pointer_cast<GraphicsPipeline>(pipeline);;
+	pipeline = make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, geometryDescription, stages, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
+	return static_pointer_cast<GraphicsPipeline>(pipeline);;
 }

@@ -25,7 +25,22 @@ int main(int argc, char** argv) {
 
   auto app = root.make_child("Application").make_component<Application>(instance.window());
   auto gui = app.node().make_child("ImGui").make_component<Gui>();
-  auto scene = root.make_child("RasterScene").make_component<RasterScene>();
+  auto scene = app.node().make_child("RasterScene").make_component<RasterScene>();
+
+  // load plugins
+  for (const string& plugin_info : instance.find_arguments("load_plugin")) {
+    size_t s0 = plugin_info.find(';');
+    fs::path pluginFile(plugin_info.substr(0,s0));
+    auto plugin = scene.node().make_child(pluginFile.stem().string()).make_component<dynamic_library>(pluginFile);
+    while (s0 != string::npos) {
+      s0++;
+      size_t s1 = plugin_info.find(';', s0);
+      string fn = plugin_info.substr(s0, (s1 == string::npos) ? s1 : s1-s0);
+      cout << "Calling " << pluginFile << ":" << fn << endl;
+      plugin->invoke<void, Node&>(fn, ref(plugin.node()));
+      s0 = s1;
+    }
+  }
 
   app->loop();
 

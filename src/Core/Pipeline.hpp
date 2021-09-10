@@ -44,7 +44,7 @@ protected:
 	vector<shared_ptr<DescriptorSetLayout>> mDescriptorSetLayouts;
 	unordered_multimap<string, vk::PushConstantRange> mPushConstants;
 
-	STRATUM_API Pipeline(Device& device, const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
+	STRATUM_API Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
 
 public:
 	inline ~Pipeline() {
@@ -69,7 +69,7 @@ public:
 
 class ComputePipeline : public Pipeline {
 public:
-	STRATUM_API ComputePipeline(Device& device, const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
+	STRATUM_API ComputePipeline(const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
 	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eCompute; }
 	inline const auto& workgroup_size() const { return stages().front().spirv()->workgroup_size(); }
 };

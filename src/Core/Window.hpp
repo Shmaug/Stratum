@@ -285,6 +285,8 @@ public:
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
 	inline const Texture::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
 	inline const Texture::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
+	inline void back_buffer_usage(vk::ImageUsageFlags usage) { mImageUsage = usage; }
+	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mImageUsage; }
 
 #ifdef WIN32
 	inline HWND handle() const { return mHwnd; }
@@ -337,6 +339,7 @@ private:
 	vector<shared_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
+	vk::ImageUsageFlags mImageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
 	size_t mPresentCount = 0;

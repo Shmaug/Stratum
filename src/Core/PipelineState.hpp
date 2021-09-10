@@ -40,18 +40,6 @@ public:
 		return (it == mModules.end()) ? nullptr : it->second;
 	}
 
-	inline void sample_shading(bool v) { mSampleShading = v; }
-	inline const auto& sample_shading() const { return mSampleShading; }
-
-	inline auto& raster_state() { return mRasterState; }
-	inline const auto& raster_state() const { return mRasterState; }
-
-	inline auto& blend_states() { return mBlendStates; }
-	inline const auto& blend_states() const { return mBlendStates; }
-
-	inline auto& depth_stencil() { return mDepthStencilState; }
-	inline const auto& depth_stencil() const { return mDepthStencilState; }
-
 	template<typename T>
 	inline T& push_constant(const string& name) {
 		auto it = mPushConstants.find(name);
@@ -86,20 +74,14 @@ public:
 
 	STRATUM_API void transition_images(CommandBuffer& commandBuffer) const;
 
-	STRATUM_API const shared_ptr<GraphicsPipeline>& get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription = {}, vk::ShaderStageFlags stageMask = vk::ShaderStageFlagBits::eAll);
+	inline auto descriptor_sets() const { return mDescriptorSets | views::values; }
 	STRATUM_API void bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string,uint32_t>& dynamicOffsets = {});
 	STRATUM_API void push_constants(CommandBuffer& commandBuffer) const;
-
+	
 	inline auto pipelines() const { return mPipelines | views::values; }
-	inline auto descriptor_sets() const { return mDescriptorSets | views::values; }
 
-private:
+protected:
 	string mName;
-
-	vk::PipelineRasterizationStateCreateInfo mRasterState = { {}, false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack };
-	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState = vk::PipelineDepthStencilStateCreateInfo({}, true, true, vk::CompareOp::eLessOrEqual);
-	vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
-	bool mSampleShading = false;
 
 	map<vk::ShaderStageFlags, shared_ptr<SpirvModule>> mModules;
 	unordered_map<string, uint32_t> mSpecializationConstants;
@@ -107,8 +89,53 @@ private:
 	unordered_map<string, unordered_map<uint32_t, stm::Descriptor>> mDescriptors;
 	unordered_map<string, vector<byte>> mPushConstants;
 
-	unordered_map<size_t, shared_ptr<GraphicsPipeline>> mPipelines;
+	unordered_map<size_t, shared_ptr<Pipeline>> mPipelines;
 	unordered_multimap<const DescriptorSetLayout*, shared_ptr<DescriptorSet>> mDescriptorSets;
+	
+	inline shared_ptr<Pipeline> find_pipeline(size_t key) const {
+		auto it = mPipelines.find(key);
+		if (it == mPipelines.end())
+			return {};
+		else
+			return it->second;
+	}
+	inline void add_pipeline(size_t key, const shared_ptr<Pipeline>& pipeline) { 
+		mPipelines.emplace(key, pipeline);
+	}
+};
+
+class ComputePipelineState : public PipelineState {
+public:
+	inline ComputePipelineState(const string& name, const shared_ptr<SpirvModule>& module) : PipelineState(name, { module }) {}
+	STRATUM_API shared_ptr<ComputePipeline> get_pipeline();
+};
+
+class GraphicsPipelineState : public PipelineState {
+public:
+	inline GraphicsPipelineState(const string& name, const vk::ArrayProxy<const shared_ptr<SpirvModule>>& modules) : PipelineState(name, modules) {}
+	template<convertible_to<SpirvModule>... Args>
+	inline GraphicsPipelineState(const string& name, const shared_ptr<Args>&... args) : PipelineState(name, { args... }) {}
+
+
+	inline void sample_shading(bool v) { mSampleShading = v; }
+	inline const auto& sample_shading() const { return mSampleShading; }
+
+	inline auto& raster_state() { return mRasterState; }
+	inline const auto& raster_state() const { return mRasterState; }
+
+	inline auto& blend_states() { return mBlendStates; }
+	inline const auto& blend_states() const { return mBlendStates; }
+
+	inline auto& depth_stencil() { return mDepthStencilState; }
+	inline const auto& depth_stencil() const { return mDepthStencilState; }
+
+	STRATUM_API shared_ptr<GraphicsPipeline> get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription = {}, vk::ShaderStageFlags stageMask = vk::ShaderStageFlagBits::eAll);
+
+private:
+	vk::PipelineRasterizationStateCreateInfo mRasterState = { {}, false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack };
+	vk::PipelineDepthStencilStateCreateInfo mDepthStencilState = vk::PipelineDepthStencilStateCreateInfo({}, true, true, vk::CompareOp::eLessOrEqual);
+	vector<vk::PipelineColorBlendAttachmentState> mBlendStates;
+	bool mSampleShading = false;
 };
 
 }
