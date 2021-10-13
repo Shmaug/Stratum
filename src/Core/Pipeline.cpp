@@ -1,28 +1,20 @@
 #include "Pipeline.hpp"
+#include "CommandBuffer.hpp"
 
 using namespace stm;
 using namespace stm::hlsl;
 
-Pipeline::ShaderStage::ShaderStage(const shared_ptr<SpirvModule>& spirv, const unordered_map<string, uint32_t>& specializationConstants) : mSpirv(spirv) {
-  for (const auto&[name, p] : mSpirv->specialization_constants()) {
-    const auto[id,defaultValue] = p;
-    if (auto it = specializationConstants.find(name); it != specializationConstants.end())
-      mSpecializationConstants.emplace(name, it->second);
-    else
-      mSpecializationConstants.emplace(name, defaultValue);
-  }
-}
-
-Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : DeviceResource(stages.begin()->spirv()->mDevice, name) {
-  mStages.resize(stages.size());
-  ranges::copy(stages, mStages.begin());
+Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderSpecialization>& shaders, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : DeviceResource(shaders.begin()->mShader->mDevice, name) {
+  ProfilerRegion ps("Pipeline::Pipeline");
+  mShaders.resize(shaders.size());
+  ranges::copy(shaders, mShaders.begin());
 
   vector<vk::PushConstantRange> pcranges;
   vector<unordered_map<uint32_t, DescriptorSetLayout::Binding>> bindings;
 
-  for (const auto& stage : mStages) {
+  for (const auto& shader : mShaders) {
     // gather bindings
-    for (const auto&[id, binding] : stage.spirv()->descriptors()) {
+    for (const auto&[id, binding] : shader.mShader->descriptors()) {
       uint32_t c = 1;
       for (const auto& v : binding.mArraySize)
         if (v.index() == 0)
@@ -30,26 +22,30 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& 
           c *= get<uint32_t>(v);
         else
           // array size is a specialization constant
-          c *= stage.specialization_constants().at(get<string>(v));
+          c *= shader.mSpecializationConstants.at(get<string>(v));
+          
+      auto flag_it = shader.mDescriptorBindingFlags.find(id);
 
       if (bindings.size() <= binding.mSet) bindings.resize(binding.mSet + 1);
       auto it = bindings[binding.mSet].find(binding.mBinding);
       if (it == bindings[binding.mSet].end())
-        it = bindings[binding.mSet].emplace(binding.mBinding, DescriptorSetLayout::Binding(binding.mDescriptorType, stage.spirv()->stage(), c)).first;
+        it = bindings[binding.mSet].emplace(binding.mBinding, DescriptorSetLayout::Binding(binding.mDescriptorType, c, {}, shader.mShader->stage(), (flag_it != shader.mDescriptorBindingFlags.end()) ? flag_it->second : vk::DescriptorBindingFlags{} )).first;
       else {
-        it->second.mStageFlags |= stage.spirv()->stage();
-        if (it->second.mDescriptorCount != c) throw logic_error("SPIR-V modules contain with different counts at the same binding");
-        if (it->second.mDescriptorType != binding.mDescriptorType) throw logic_error("SPIR-V modules contain descriptors of different types at the same binding");
+        it->second.mStageFlags |= shader.mShader->stage();
+        if (flag_it != shader.mDescriptorBindingFlags.end())
+          it->second.mBindingFlags |= flag_it->second;
+        if (it->second.mDescriptorCount != c) throw logic_error("Shader modules contain descriptors with different counts at the same binding");
+        if (it->second.mDescriptorType != binding.mDescriptorType) throw logic_error("Shader modules contain descriptors of different types at the same binding");
       }
       if (auto s = immutableSamplers.find(id); s != immutableSamplers.end())
         it->second.mImmutableSamplers.push_back(s->second);
     }
     
     // gather push constants
-    if (!stage.spirv()->push_constants().empty()) {
+    if (!shader.mShader->push_constants().empty()) {
       uint32_t rangeBegin = numeric_limits<uint32_t>::max();
       uint32_t rangeEnd = 0;
-      for (const auto& [id, p] : stage.spirv()->push_constants()) {
+      for (const auto& [id, p] : shader.mShader->push_constants()) {
         uint32_t sz = p.mTypeSize;
         if (!p.mArraySize.empty()) {
           sz = p.mArrayStride;
@@ -59,19 +55,19 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& 
               sz *= get<uint32_t>(v);
             else
               // array size is a specialization constant
-              sz *= stage.specialization_constants().at(get<string>(v));
+              sz *= shader.mSpecializationConstants.at(get<string>(v));
         }
         rangeBegin = std::min(rangeBegin, p.mOffset);
         rangeEnd   = std::max(rangeEnd  , p.mOffset + sz);
 
         if (auto it = mPushConstants.find(id); it != mPushConstants.end()) {
           if (it->second.offset != p.mOffset || it->second.size != sz)
-            throw logic_error("Push constant [" + id + ", stage = " + to_string(stage.spirv()->stage()) + " offset = " + to_string(p.mOffset) + ", size = " + to_string(sz) + " ] does not match push constant found other stage(s): " + to_string(it->second));
-          it->second.stageFlags |= stage.spirv()->stage();
+            throw logic_error("Push constant [" + id + ", stage = " + to_string(shader.mShader->stage()) + " offset = " + to_string(p.mOffset) + ", size = " + to_string(sz) + " ] does not match push constant found other stage(s): " + to_string(it->second));
+          it->second.stageFlags |= shader.mShader->stage();
         } else
-          mPushConstants.emplace(id, vk::PushConstantRange(stage.spirv()->stage(), p.mOffset, sz));
+          mPushConstants.emplace(id, vk::PushConstantRange(shader.mShader->stage(), p.mOffset, sz));
       }
-      pcranges.emplace_back(stage.spirv()->stage(), rangeBegin, rangeEnd);
+      pcranges.emplace_back(shader.mShader->stage(), rangeBegin, rangeEnd);
     }
   }
 
@@ -86,21 +82,23 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderStage>& 
   mLayout = mDevice->createPipelineLayout(vk::PipelineLayoutCreateInfo({}, layouts, pcranges));
 }
 
-ComputePipeline::ComputePipeline(const string& name, const ShaderStage& stage, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : Pipeline(name, stage, immutableSamplers) {
+ComputePipeline::ComputePipeline(const string& name, const ShaderSpecialization& shader, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : Pipeline(name, shader, immutableSamplers) {
+  ProfilerRegion ps("ComputePipeline::ComputePipeline");
   vector<uint32_t> data;
   vector<vk::SpecializationMapEntry> entries;
-  stage.get_specialization_info(entries, data);
-  vk::SpecializationInfo specializationInfo((uint32_t)entries.size(), entries.data(), data.size(), data.data());
-  vk::PipelineShaderStageCreateInfo stageInfo({}, stage.spirv()->stage(), **stage.spirv(), stage.spirv()->entry_point().c_str(), specializationInfo.mapEntryCount ? nullptr : &specializationInfo);
+  shader.get_specialization_info(entries, data);
+  vk::SpecializationInfo specializationInfo((uint32_t)entries.size(), entries.data(), data.size()*sizeof(uint32_t), data.data());
+  vk::PipelineShaderStageCreateInfo stageInfo({}, shader.mShader->stage(), **shader.mShader, shader.mShader->entry_point().c_str(), specializationInfo.mapEntryCount ? &specializationInfo : nullptr);
   mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(), vk::ComputePipelineCreateInfo({}, stageInfo, mLayout)).value;
   mDevice.set_debug_name(mPipeline, name);
 }
 
-GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& renderPass, uint32_t subpassIndex, const GeometryStateDescription& geometryDescription,
-		const vk::ArrayProxy<const ShaderStage>& stages, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers,
+GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& renderPass, uint32_t subpassIndex, const VertexLayoutDescription& vertexDescription,
+		const vk::ArrayProxy<const ShaderSpecialization>& shaders, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers,
 		const vk::PipelineRasterizationStateCreateInfo& rasterState, bool sampleShading,
 		const vk::PipelineDepthStencilStateCreateInfo& depthStencilState, const vector<vk::PipelineColorBlendAttachmentState>& blendStates,
-		const vector<vk::DynamicState>& dynamicStates) : Pipeline(name, stages, immutableSamplers) {
+		const vector<vk::DynamicState>& dynamicStates) : Pipeline(name, shaders, immutableSamplers) {
+  ProfilerRegion ps("GraphicsPipeline::GraphicsPipeline");
 
   vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
   for (const auto& desc : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
@@ -119,32 +117,32 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
     }
 
   // vertex inputs
-  mGeometryDescription = geometryDescription;
+  mGeometryDescription = vertexDescription;
   vector<vk::VertexInputAttributeDescription> attributes;
   vector<vk::VertexInputBindingDescription> bindings;
-  for (const auto& [type, vertexInput] : stages.front().spirv()->stage_inputs()) {
+  for (const auto& [type, vertexInput] : shaders.front().mShader->stage_inputs()) {
     const auto&[attribute, bindingIndex] = mGeometryDescription.mAttributes.at(vertexInput.mAttributeType)[vertexInput.mTypeIndex];
     attributes.emplace_back(vertexInput.mLocation, bindingIndex, attribute.mFormat, attribute.mOffset);
     if (bindings.size() <= bindingIndex) bindings.resize(bindingIndex + 1);
     bindings[bindingIndex].binding = bindingIndex;
     bindings[bindingIndex].inputRate = attribute.mInputRate;
-    bindings[bindingIndex].stride = attribute.mElementStride;
+    bindings[bindingIndex].stride = attribute.mStride;
   }
   vk::PipelineVertexInputStateCreateInfo vertexInfo({}, bindings, attributes);
   
   // specialization constants
-  vector<tuple<vk::SpecializationInfo, vector<vk::SpecializationMapEntry>, vector<uint32_t>>> specializationInfos(stages.size());
-  vector<vk::PipelineShaderStageCreateInfo> vkstages(stages.size());
-  for (uint32_t i = 0; i < stages.size(); i++) {
-    const ShaderStage& stage = stages.data()[i];
+  vector<tuple<vk::SpecializationInfo, vector<vk::SpecializationMapEntry>, vector<uint32_t>>> specializationInfos(shaders.size());
+  vector<vk::PipelineShaderStageCreateInfo> vkstages(shaders.size());
+  for (uint32_t i = 0; i < shaders.size(); i++) {
+    const ShaderSpecialization& stage = shaders.data()[i];
     auto&[info,entries,data] = specializationInfos[i];
     stage.get_specialization_info(entries, data);
     info = vk::SpecializationInfo((uint32_t)entries.size(), entries.data(), data.size()*sizeof(uint32_t), data.data());
-    vkstages[i] = vk::PipelineShaderStageCreateInfo({}, stage.spirv()->stage(), **stage.spirv(), stage.spirv()->entry_point().c_str(), info.mapEntryCount ? &info : nullptr);
+    vkstages[i] = vk::PipelineShaderStageCreateInfo({}, stage.mShader->stage(), **stage.mShader, stage.mShader->entry_point().c_str(), info.mapEntryCount ? &info : nullptr);
   }
   mDepthStencilState = depthStencilState;
   mDynamicStates = dynamicStates;
-  mInputAssemblyState = { {}, geometryDescription.mTopology };
+  mInputAssemblyState = { {}, vertexDescription.mTopology };
   mViewportState = { {}, 1, nullptr, 1, nullptr };
   mRasterizationState = rasterState;
   mMultisampleState = { {}, sampleCount, sampleShading };

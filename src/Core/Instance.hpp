@@ -62,6 +62,9 @@ public:
 
 private:
 	vk::Instance mInstance;
+	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+	vk::DynamicLoader mDynamicLoader;
+	#endif
 	unique_ptr<stm::Device> mDevice;
 	unique_ptr<stm::Window> mWindow;
 	vector<string> mCommandLine;

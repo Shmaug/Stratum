@@ -96,12 +96,12 @@ stm::Window::~Window() {
 #endif
 }
 
-Texture::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
+Image::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	ProfilerRegion ps("Window::acquire_image", commandBuffer);
 	
-	if (!mSwapchain || mSwapchainImages[0].texture()->usage() != mImageUsage) {
+	if (!mSwapchain || mSwapchainImages[0].image()->usage() != mImageUsage) {
 		create_swapchain(commandBuffer.mDevice);
-		if (!mSwapchain) return Texture::View();
+		if (!mSwapchain) return Image::View();
 	}
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
@@ -109,7 +109,7 @@ Texture::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
 	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
 		destroy_swapchain();
-		return Texture::View(); // swapchain failed to create (happens when window is minimized, etc)
+		return Image::View(); // swapchain failed to create (happens when window is minimized, etc)
 	}
 	mBackBufferIndex = result.value;
 	return back_buffer();
@@ -253,8 +253,8 @@ void stm::Window::create_swapchain(Device& device) {
 	// create per-frame image views and semaphores
 	for (uint32_t i = 0; i < images.size(); i++) {
 		mSwapchainDevice->set_debug_name(images[i], "swapchain"+to_string(i));
-		mSwapchainImages[i] = Texture::View(
-			make_shared<Texture>(images[i], *mSwapchainDevice, "swapchain"+to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
+		mSwapchainImages[i] = Image::View(
+			make_shared<Image>(images[i], *mSwapchainDevice, "swapchain"+to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
 			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
 		mImageAvailableSemaphores[i] = make_shared<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
 	}
@@ -322,7 +322,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		}
 		if (raw.header.dwType == RIM_TYPEKEYBOARD) {
 			USHORT key = raw.data.keyboard.VKey;
-			if (key == VK_LMENU || key == VK_RMENU) key = VK_MENU;
+			if      (key == VK_LMENU || key == VK_RMENU) key = VK_MENU;
 			else if (key == VK_LCONTROL || key == VK_RCONTROL) key = VK_CONTROL;
 			else if (key == VK_LSHIFT || key == VK_RSHIFT) key = VK_SHIFT;
 			
@@ -330,8 +330,14 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 				mInputState.unset_button((KeyCode)key);
 			else {
 				mInputState.set_button((KeyCode)key);
-				if (key == KeyCode::eKeyEnter && mInputState.pressed(KeyCode::eKeyAlt))
-					fullscreen(!fullscreen());
+				if (mInputState.pressed(KeyCode::eKeyAlt)) {
+					if (key == KeyCode::eKeyEnter)
+						fullscreen(!fullscreen());
+					else if (key == KeyCode::eKeyF4) {
+						DestroyWindow(mHwnd);
+						mHwnd = nullptr;
+					}
+				}
 			}
 		}
 		POINT pt;

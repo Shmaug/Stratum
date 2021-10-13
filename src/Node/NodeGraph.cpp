@@ -7,34 +7,18 @@ Node& NodeGraph::emplace(const string& name) {
   mNodes.emplace(ptr, ptr);
   return *ptr;
 }
-void NodeGraph::erase_recurse(Node& node) {
-  list<Node*> nodes;
-  stack<Node*> todo;
-  todo.push(&node);
-  while (!todo.empty()) {
-    nodes.push_back(todo.top());
-    auto[first,last] = mEdges.equal_range(todo.top());
-    todo.pop();
-    for (auto[_,n] : ranges::subrange(first,last))
-      todo.push(n);
-  }
-  for (Node* n : nodes|views::reverse)
-    erase(*n);
-}
 
 Node::~Node() {
-  auto[first,last] = mNodeGraph.mEdges.equal_range(this);
-  for (const auto&[_,child] : ranges::subrange(first, last))
-    if (mParent)
-      child->set_parent(*mParent);
-    else
-      child->clear_parent();
-  
-  clear_parent();
   for (auto edge_it = mNodeGraph.mEdges.find(this); edge_it != mNodeGraph.mEdges.end(); ) {
-    edge_it->second->clear_parent();
+    if (mParent)
+      edge_it->second->set_parent(*mParent);
+    else
+      edge_it->second->clear_parent();
+    
     edge_it = mNodeGraph.mEdges.find(this);
   }
+  clear_parent();
+
   for (type_index t : mComponents)
     mNodeGraph.mComponentMap.at(t).erase(this);
 }

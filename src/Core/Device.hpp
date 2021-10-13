@@ -87,6 +87,13 @@ public:
 	inline vk::PipelineCache pipeline_cache() const { return mPipelineCache; }
 	inline VmaAllocator allocator() const { return mAllocator; }
 
+	inline const vk::PhysicalDeviceFeatures& features() const  { return mFeatures; }
+	inline const vk::PhysicalDeviceDescriptorIndexingFeatures& descriptor_indexing_features() const  { return mDescriptorIndexingFeatures; }
+	inline const vk::PhysicalDeviceBufferDeviceAddressFeatures& buffer_device_address() const  { return mBufferDeviceAddressFeatures; }
+	inline const vk::PhysicalDeviceAccelerationStructureFeaturesKHR& acceleration_structure_features() const  { return mAccelerationStructureFeatures; }
+	inline const vk::PhysicalDeviceRayQueryFeaturesKHR& ray_query_features() const  { return mRayQueryFeatures; }
+	inline const vk::PhysicalDeviceRayTracingPipelineFeaturesKHR& ray_tracing_pipeline_features() const  { return mRayTracingPipelineFeatures; }
+
 	template<typename T> inline vk::DeviceSize min_uniform_buffer_offset_alignment() {
 		return (sizeof(T) + mLimits.minUniformBufferOffsetAlignment - 1) & ~(mLimits.minUniformBufferOffsetAlignment - 1);
 	}
@@ -101,13 +108,11 @@ public:
 
 	template<typename T> requires(convertible_to<decltype(T::objectType), vk::ObjectType>)
 	inline T& set_debug_name(T& object, const string& name) {
-		if (mSetDebugUtilsObjectNameEXT) {
-			vk::DebugUtilsObjectNameInfoEXT info = {};
-			info.objectHandle = *reinterpret_cast<const uint64_t*>(&object);
-			info.objectType = T::objectType;
-			info.pObjectName = name.c_str();
-			mSetDebugUtilsObjectNameEXT(mDevice, reinterpret_cast<VkDebugUtilsObjectNameInfoEXT*>(&info));
-		}
+		vk::DebugUtilsObjectNameInfoEXT info = {};
+		info.objectHandle = *reinterpret_cast<const uint64_t*>(&object);
+		info.objectType = T::objectType;
+		info.pObjectName = name.c_str();
+		mDevice.setDebugUtilsObjectNameEXT(info);
 		return object;
 	}
 	
@@ -119,14 +124,20 @@ private:
 	friend class Instance;
 	friend class DescriptorSet;
 	friend class CommandBuffer;
-
+	friend class DescriptorSetLayout;
+	friend class Pipeline;
 	vk::Device mDevice;
  	vk::PhysicalDevice mPhysicalDevice;
 	VmaAllocator mAllocator;
 	vk::PipelineCache mPipelineCache;
 	
+	vk::PhysicalDeviceFeatures mFeatures;
+	vk::PhysicalDeviceBufferDeviceAddressFeatures mBufferDeviceAddressFeatures;
+	vk::PhysicalDeviceDescriptorIndexingFeatures mDescriptorIndexingFeatures;
+	vk::PhysicalDeviceAccelerationStructureFeaturesKHR mAccelerationStructureFeatures;
+	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR mRayTracingPipelineFeatures;
+	vk::PhysicalDeviceRayQueryFeaturesKHR mRayQueryFeatures;
 	vk::PhysicalDeviceLimits mLimits;
-	PFN_vkSetDebugUtilsObjectNameEXT mSetDebugUtilsObjectNameEXT = nullptr;
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
 	locked_object<vk::DescriptorPool> mDescriptorPool;

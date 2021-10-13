@@ -1,4 +1,4 @@
-#include "SpirvModule.hpp"
+#include "ShaderModule.hpp"
 
 #include <json.hpp>
 
@@ -52,22 +52,22 @@ auto spirv_array_size(const nlohmann::json& j, const nlohmann::json& v) {
 	}
 	return dst;
 }
-pair<Geometry::AttributeType, uint32_t> attribute_type(const string& name) {
-	static const unordered_map<string, Geometry::AttributeType> gAttributeTypeMap {
-		{ "vertex", Geometry::AttributeType::ePosition },
-		{ "position", Geometry::AttributeType::ePosition },
-		{ "pos", Geometry::AttributeType::ePosition },
-		{ "normal", Geometry::AttributeType::eNormal },
-		{ "tangent", Geometry::AttributeType::eTangent },
-		{ "binormal", Geometry::AttributeType::eBinormal },
-		{ "joints", Geometry::AttributeType::eBlendIndex },
-		{ "blendindices", Geometry::AttributeType::eBlendIndex },
-		{ "weights", Geometry::AttributeType::eBlendWeight },
-		{ "blendweight", Geometry::AttributeType::eBlendWeight },
-		{ "color", Geometry::AttributeType::eColor },
-		{ "pointsize", Geometry::AttributeType::ePointSize },
-		{ "texcoord", Geometry::AttributeType::eTexcoord },
-		{ "uv", Geometry::AttributeType::eTexcoord }
+pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(const string& name) {
+	static const unordered_map<string, VertexArrayObject::AttributeType> gAttributeTypeMap {
+		{ "vertex", VertexArrayObject::AttributeType::ePosition },
+		{ "position", VertexArrayObject::AttributeType::ePosition },
+		{ "pos", VertexArrayObject::AttributeType::ePosition },
+		{ "normal", VertexArrayObject::AttributeType::eNormal },
+		{ "tangent", VertexArrayObject::AttributeType::eTangent },
+		{ "binormal", VertexArrayObject::AttributeType::eBinormal },
+		{ "joints", VertexArrayObject::AttributeType::eBlendIndex },
+		{ "blendindices", VertexArrayObject::AttributeType::eBlendIndex },
+		{ "weights", VertexArrayObject::AttributeType::eBlendWeight },
+		{ "blendweight", VertexArrayObject::AttributeType::eBlendWeight },
+		{ "color", VertexArrayObject::AttributeType::eColor },
+		{ "pointsize", VertexArrayObject::AttributeType::ePointSize },
+		{ "texcoord", VertexArrayObject::AttributeType::eTexcoord },
+		{ "uv", VertexArrayObject::AttributeType::eTexcoord }
 	};
 	for (const auto& [id,attribType] : gAttributeTypeMap)
 		if (size_t pos = name.find(id); pos != string::npos)
@@ -75,16 +75,16 @@ pair<Geometry::AttributeType, uint32_t> attribute_type(const string& name) {
 				return make_pair(attribType,  stoi(id.substr(pos+id.size())));
 			else
 				return make_pair(attribType,  0u);
-	return make_pair(Geometry::AttributeType::eTexcoord, 0u);
+	return make_pair(VertexArrayObject::AttributeType::eTexcoord, 0u);
 }
 
-SpirvModule::SpirvModule(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
+ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
 	fs::path json_path = fs::path(spv).replace_extension("json");
 	std::ifstream s(json_path);
 	if (!s.is_open()) throw runtime_error("Could not open " + json_path.string());
 	
-	auto spirv = read_file<vector<uint32_t>>(spv);
-	mShaderModule = device->createShaderModule(vk::ShaderModuleCreateInfo({}, spirv));
+	auto shader = read_file<vector<uint32_t>>(spv);
+	mShaderModule = device->createShaderModule(vk::ShaderModuleCreateInfo({}, shader));
 	
 	nlohmann::json j;
 	s >> j;
@@ -121,8 +121,19 @@ SpirvModule::SpirvModule(Device& device, const fs::path& spv) : DeviceResource(d
 	mStage = gStageMap.at(j["entryPoints"][0]["mode"]);
 	ranges::copy(j["entryPoints"][0]["workgroup_size"], mWorkgroupSize.begin());
 	
-	for (const auto& v : j["specialization_constants"])
-		mSpecializationConstants.emplace(v["name"], make_pair(v["id"], v["default_value"]));
+	for (const auto& v : j["specialization_constants"]) {
+		uint32_t defaultValue = 0;
+		if (v["type"] == "int")
+			defaultValue = v["default_value"].get<int32_t>();
+		else if (v["type"] == "uint")
+			defaultValue = v["default_value"].get<uint32_t>();
+		else if (v["type"] == "float") {
+			float f = v["default_value"].get<float>();
+			defaultValue = *reinterpret_cast<uint32_t*>(&f);
+		} else if (v["type"] == "bool")
+			defaultValue = v["default_value"].get<bool>();
+		mSpecializationConstants.emplace(v["name"], make_pair(v["id"], defaultValue));
+	}
 		
 	for (const auto& v : j["push_constants"])
 		for (const auto& c : j["types"][v["type"].get<string>()]["members"]) {
@@ -192,5 +203,14 @@ SpirvModule::SpirvModule(Device& device, const fs::path& spv) : DeviceResource(d
 	for (const auto& v : j["ssbos"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageBuffer, spirv_array_size(j, v)));
 
+	for (const auto& v : j["acceleration_structures"])
+		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eAccelerationStructureKHR, spirv_array_size(j, v)));
+
 	cout << "Loaded " << spv << endl;
+}
+
+void ShaderModule::load_from_dir(ShaderDatabase& dst, Device& device, const fs::path& dir) {
+	for (const fs::path& p : fs::directory_iterator(dir))
+		if (p.extension() == ".spv")
+			dst.emplace(p.stem().string(), make_shared<ShaderModule>(device, p)).first->first;
 }

@@ -39,7 +39,6 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
     message(STATUS "Creating target for ${SRC_PATH}:${ENTRY_POINT}")
     
     if (dxc IN_LIST COMPILE_CMD)
-      list(APPEND COMPILE_CMD "-spirv")
       list(APPEND COMPILE_CMD "-Fo" "${SPV_PATH}")
     else()
       # glsc
@@ -66,17 +65,19 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
 endfunction()
 
 function(stm_add_shaders)
-  cmake_parse_arguments(PARSED "" "" "SOURCES;ADD_DEPENDS;INCLUDES" ${ARGN})
+  cmake_parse_arguments(PARSED "" "" "SOURCES;DEPENDS;INCLUDES" ${ARGN})
 
   foreach(SHADER_FILE ${PARSED_SOURCES})
-    stm_compile_shader("${SHADER_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/SPIR-V" INCLUDES ${PARSED_INCLUDES})
+    stm_compile_shader("${SHADER_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders" INCLUDES ${PARSED_INCLUDES})
     
-    foreach(DEP ${PARSED_ADD_DEPENDS})
-      add_dependencies(${DEP} ${DST_TARGETS})
-    endforeach()
+    if (DST_TARGETS)
+      foreach(DEP ${PARSED_DEPENDS})
+        add_dependencies(${DEP} ${DST_TARGETS})
+      endforeach()
+    endif()
 
     foreach(DST_FILE ${DST_FILES})
-        install(FILES ${DST_FILE} DESTINATION bin/SPIR-V)
+        install(FILES ${DST_FILE} DESTINATION bin/Shaders)
     endforeach()
   endforeach()
 endfunction()

@@ -27,7 +27,7 @@ public:
 	inline const shared_ptr<DescriptorSet>& bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
 
 	// Label a region for a tool such as RenderDoc
-	STRATUM_API void begin_label(const string& label, const Vector4f& color = { 1,1,1,0 });
+	STRATUM_API void begin_label(const string& label, const Array4f& color = { 1,1,1,0 });
 	STRATUM_API void end_label();
 
 	STRATUM_API void reset(const string& name = "Command Buffer");
@@ -51,45 +51,28 @@ public:
 		hold_resource(v.buffer());
 		return v;
 	}
-	inline const Texture::View& hold_resource(const Texture::View& v) {
-		hold_resource(v.texture());
+	inline const Image::View& hold_resource(const Image::View& v) {
+		hold_resource(v.image());
 		return v;
 	}
 
-	inline void memory_barrier(vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, { vk::MemoryBarrier(srcAccessMask, dstAccessMask) }, {}, {});
+	inline void barrier(const vk::ArrayProxy<const vk::MemoryBarrier>& b, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, b, {}, {});
 	}
-	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::BufferMemoryBarrier& b) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, { b }, {});
+	inline void barrier(const vk::ArrayProxy<const vk::BufferMemoryBarrier>& b, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, b, {});
 	}
-	inline void barrier(vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, const vk::ImageMemoryBarrier& b) {
-		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, { b });
+	inline void barrier(const vk::ArrayProxy<const vk::ImageMemoryBarrier>& b, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage) {
+		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, b);
 	}
 	template<typename T = byte>
-	inline void barrier(vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask, const Buffer::View<T>& buffer) {
-		barrier(srcStage, dstStage, vk::BufferMemoryBarrier(srcAccessMask, dstAccessMask, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **buffer.buffer(), buffer.offset(), buffer.size_bytes()));
-	}
-
-	inline void transition_barrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		transition_barrier(image, subresourceRange, guess_stage(oldLayout), guess_stage(newLayout), oldLayout, newLayout);
-	}
-	inline void transition_barrier(vk::Image image, const vk::ImageSubresourceRange& subresourceRange, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::ImageLayout oldLayout, vk::ImageLayout newLayout) {
-		if (oldLayout == newLayout) return;
-		vk::ImageMemoryBarrier b = {};
-		b.oldLayout = oldLayout;
-		b.newLayout = newLayout;
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.image = image;
-		b.subresourceRange = subresourceRange;
-		b.srcAccessMask = guess_access_flags(oldLayout);
-		b.dstAccessMask = guess_access_flags(newLayout);
-		barrier(srcStage, dstStage, b);
+	inline void barrier(const Buffer::View<T>& buffer, vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask) {
+		barrier(vk::BufferMemoryBarrier(srcAccessMask, dstAccessMask, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **buffer.buffer(), buffer.offset(), buffer.size_bytes()), srcStage, dstStage);
 	}
 
 	template<typename T = byte, typename S = T>
 	inline const Buffer::View<S>& copy_buffer(const Buffer::View<T>& src, const Buffer::View<S>& dst) {
-		if (src.size_bytes() != dst.size_bytes()) throw invalid_argument("src and dst must be the same size");
+		if (src.size_bytes() > dst.size_bytes()) throw invalid_argument("src size must be less than or equal to dst size");
 		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst.buffer()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
 		return dst;
 	}
@@ -106,25 +89,32 @@ public:
 		return Buffer::View<T>(dst);
 	}
 
-	inline const Texture::View& copy_image(const Texture::View& src, const Texture::View& dst, uint32_t level = 0) {
-		vector<vk::ImageCopy> copies;
-		if (level == 0) {
-			copies.resize(src.subresource_range().levelCount);
-			for (uint32_t i = 0; i < copies.size(); i++)
-			copies[i] = vk::ImageCopy(src.subresource(i), {}, dst.subresource(i), {}, src.texture()->extent());
-		} else
-			copies.emplace_back(src.subresource(level), vk::Offset3D(), dst.subresource(level), vk::Offset3D(), src.texture()->extent());
-		src.texture()->transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
-		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyImage(*hold_resource(src.texture()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, copies);
+	inline const Image::View& copy_image(const Image::View& src, const Image::View& dst) {
+		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		vector<vk::ImageCopy> copies(src.subresource_range().levelCount);
+		for (uint32_t i = 0; i < copies.size(); i++)
+			copies[i] = vk::ImageCopy(src.subresource(i), vk::Offset3D{}, src.subresource(i), vk::Offset3D{}, src.extent());
+		mCommandBuffer.copyImage(*hold_resource(src.image()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, copies);
+		return dst;
+	}
+	inline const Image::View& resolve_image(const Image::View& src, const Image::View& dst) {
+		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		vector<vk::ImageResolve> resolves(src.subresource_range().levelCount);
+		for (uint32_t i = 0; i < resolves.size(); i++)
+			resolves[i] = vk::ImageResolve(src.subresource(i), vk::Offset3D{}, src.subresource(i), vk::Offset3D{}, src.extent());
+		mCommandBuffer.resolveImage(*hold_resource(src.image()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, resolves);
 		return dst;
 	}
 
 	template<typename T = byte>
-	inline const Texture::View& copy_buffer_to_image(const Buffer::View<T>& src, const Texture::View& dst, uint32_t level = 0) {
-		dst.texture()->transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.texture()), vk::ImageLayout::eTransferDstOptimal, {
-			vk::BufferImageCopy(src.offset(), 0, 0, dst.subresource(level), {}, dst.texture()->extent()) });
+	inline const Image::View& copy_buffer_to_image(const Buffer::View<T>& src, const Image::View& dst) {
+		vector<vk::BufferImageCopy> copies(dst.subresource_range().levelCount);
+		for (uint32_t i = 0; i < dst.subresource_range().levelCount; i++)
+			copies[i] = vk::BufferImageCopy(src.offset(), 0, 0, dst.subresource(i), {}, dst.extent());
+		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, copies);
 		return dst;
 	}
 
@@ -133,27 +123,27 @@ public:
 	inline void dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
 	
 	// dispatch on ceil(size / workgroupSize)
-	inline void dispatch_align(const vk::Extent2D& dim) {
+	inline void dispatch_over(const vk::Extent2D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
 			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
 			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1],
 			1);
 	}
-	inline void dispatch_align(const vk::Extent3D& dim) {
+	inline void dispatch_over(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
 			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
 			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1], 
 			(dim.depth + cp->workgroup_size()[2] - 1) / cp->workgroup_size()[2]);
 	}
-	inline void dispatch_align(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_align(vk::Extent3D(x,y,z)); }
+	inline void dispatch_over(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_over(vk::Extent3D(x,y,z)); }
 
 	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxyNoTemporaries<const vk::ClearValue>& clearValues, vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void end_render_pass();
 
-	inline bool bind_pipeline(shared_ptr<Pipeline> pipeline) {
+	inline bool bind_pipeline(const shared_ptr<Pipeline>& pipeline) {
 		if (mBoundPipeline == pipeline) return false;
 		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
@@ -173,23 +163,6 @@ public:
 			if (range.size != sizeof(T)) throw invalid_argument("argument size must match push constant size (" + to_string(range.size) +")");
 			mCommandBuffer.pushConstants(mBoundPipeline->layout(), range.stageFlags, range.offset, sizeof(T), &value);
 		}
-	}
-
-	template<typename...T> requires(same_as<T,DescriptorSet> && ...)
-	inline void transition_images(T&... sets) {
-		auto fn = [&](auto& descriptorSet) {
-			for (auto&[idx, entry] : descriptorSet.mDescriptors)
-				switch (descriptorSet.layout_at(idx >> 32).mDescriptorType) {
-					case vk::DescriptorType::eCombinedImageSampler:
-					case vk::DescriptorType::eInputAttachment:
-					case vk::DescriptorType::eSampledImage:
-					case vk::DescriptorType::eStorageImage:
-						get<Texture::View>(entry).texture()->transition_barrier(*this, get<vk::ImageLayout>(entry));
-						break;
-				}
-		};
-		(sets.flush_writes(), ...);
-		(fn(sets), ...);
 	}
 
 	STRATUM_API void bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets);
@@ -251,9 +224,6 @@ private:
 	friend class Device;
 
 	enum class CommandBufferState { eRecording, eInFlight, eDone };
-
-	PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT = 0;
-	PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT = 0;
 	
 	STRATUM_API void clear();
 	inline bool clear_if_done() {

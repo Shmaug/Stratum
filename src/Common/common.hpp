@@ -31,6 +31,12 @@ using int4    	= ArrayType<int32_t, 4>;
 using uint2   	= ArrayType<int32_t, 2>;
 using uint3   	= ArrayType<int32_t, 3>;
 using uint4   	= ArrayType<int32_t, 4>;
+using long2    	= ArrayType<int64_t, 2>;
+using long3    	= ArrayType<int64_t, 3>;
+using long4    	= ArrayType<int64_t, 4>;
+using ulong2   	= ArrayType<int64_t, 2>;
+using ulong3   	= ArrayType<int64_t, 3>;
+using ulong4   	= ArrayType<int64_t, 4>;
 using float2  	= ArrayType<float, 2>;
 using float3  	= ArrayType<float, 3>;
 using float4  	= ArrayType<float, 4>;
@@ -69,16 +75,16 @@ inline ArrayType<T,M,K> mul(const ArrayType<T,M,N>& a, const ArrayType<T,N,K>& b
 
 using std::min;
 using std::max;
-template<typename T, int M, int N> inline ArrayType<T,M,N> max(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.max(b); }
-template<typename T, int M, int N> inline ArrayType<T,M,N> min(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.min(b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> max(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.max(b); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> min(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.min(b); }
 
 template<typename T, int M, int N>
-inline ArrayType<T,M,N> saturate(ArrayType<T,M,N> v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
+inline ArrayType<T,M,N> saturate(const ArrayType<T,M,N>& v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
 
-template<typename T, int M, int N> inline T dot(ArrayType<T,M,N> a, ArrayType<T,M,N> b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int M, int N> inline T length(ArrayType<T,M,N> a) { return a.norm(); }
-template<typename T, int M, int N> inline ArrayType<T,M,N> normalize(ArrayType<T,M,N> a) { return a.matrix().normalized(); }
-template<typename T> inline ArrayType<T,3> cross(ArrayType<T,3> a, ArrayType<T,3> b) { return a.matrix().cross(b.matrix()); }
+template<typename T, int M, int N> inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int M, int N> inline T length(const ArrayType<T,M,N>& a) { return a.norm(); }
+template<typename T, int M, int N> inline ArrayType<T,M,N> normalize(const ArrayType<T,M,N>& a) { return a.matrix().normalized(); }
+template<typename T> inline ArrayType<T,3> cross(const ArrayType<T,3>& a, const ArrayType<T,3>& b) { return a.matrix().cross(b.matrix()); }
 
 }
 

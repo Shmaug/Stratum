@@ -1,57 +1,67 @@
 #pragma once
 
-#include "Texture.hpp"
+#include "Image.hpp"
 
 namespace stm {
 
 using Descriptor = variant<
-	tuple<Texture::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
+	tuple<Image::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
 	Buffer::StrideView,											// storage/uniform buffer, stride used for dynamic offsets to work
 	Buffer::TexelView, 											// texel buffer
 	vector<byte>, 													// inline uniform buffer data
 	vk::AccelerationStructureKHR						// acceleration structure
 >;
 
-template<typename T> requires(same_as<T,Texture::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
 constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
-template<typename T> requires(same_as<T,Texture::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
 constexpr const T& get(const stm::Descriptor& d) { return get<T>(get<0>(d)); }
 
-inline Descriptor texture_descriptor(const Texture::View& texture, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler) {
-	return variant_alternative_t<0,Descriptor>{texture, layout, sampler};
+inline Descriptor image_descriptor(const Image::View& image, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler) {
+	return variant_alternative_t<0,Descriptor>{image, layout, sampler};
 }
 inline Descriptor sampler_descriptor(const shared_ptr<Sampler>& sampler) {
-	return texture_descriptor(Texture::View(), vk::ImageLayout::eUndefined, sampler);
+	return image_descriptor(Image::View(), vk::ImageLayout::eUndefined, sampler);
 }
-inline Descriptor storage_texture_descriptor(const Texture::View& texture) {
-	return texture_descriptor(texture, vk::ImageLayout::eGeneral, nullptr);
+inline Descriptor storage_image_descriptor(const Image::View& image) {
+	return image_descriptor(image, vk::ImageLayout::eGeneral, nullptr);
 }
-inline Descriptor sampled_texture_descriptor(const Texture::View& texture, const shared_ptr<Sampler>& sampler = nullptr) {
-	return texture_descriptor(texture, vk::ImageLayout::eShaderReadOnlyOptimal, sampler);
+inline Descriptor sampled_image_descriptor(const Image::View& image, const shared_ptr<Sampler>& sampler = nullptr) {
+	return image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, sampler);
 }
 
 class DescriptorSetLayout : public DeviceResource {
+	friend struct std::hash<DescriptorSetLayout>;
 public:
 	struct Binding {
 		vk::DescriptorType mDescriptorType;
-		vk::ShaderStageFlags mStageFlags;
 		uint32_t mDescriptorCount;
 		vector<shared_ptr<Sampler>> mImmutableSamplers;
+		vk::ShaderStageFlags mStageFlags;
+		vk::DescriptorBindingFlags mBindingFlags;
 	};
 
 	inline DescriptorSetLayout(Device& device, const string& name, const unordered_map<uint32_t, Binding>& bindings = {}, vk::DescriptorSetLayoutCreateFlags flags = {}) : DeviceResource(device, name), mFlags(flags), mBindings(bindings) {
 		forward_list<vector<vk::Sampler>> immutableSamplers; // store for duration of vk::DescriptorSetLayoutCreateInfo
 		vector<vk::DescriptorSetLayoutBinding> vkbindings;
+		vector<vk::DescriptorBindingFlags> bindingFlags;
+		bool hasBindingFlags = false;
 		for (auto&[i, binding] : mBindings) {
 			if (binding.mDescriptorType == vk::DescriptorType::eUniformBufferDynamic || binding.mDescriptorType == vk::DescriptorType::eStorageBufferDynamic)
 				mDynamicBindings.emplace(i);
 			auto& b = vkbindings.emplace_back(i, binding.mDescriptorType, binding.mDescriptorCount, binding.mStageFlags);
-			if (!binding.mImmutableSamplers.empty()) {
-					b.pImmutableSamplers = immutableSamplers.emplace_front(binding.mImmutableSamplers.size()).data(),
-				ranges::transform(binding.mImmutableSamplers, const_cast<vk::Sampler*>(b.pImmutableSamplers), [](const shared_ptr<Sampler>& v){ return **v; });
-			}
+			bindingFlags.emplace_back(binding.mBindingFlags);
+			if (binding.mBindingFlags != vk::DescriptorBindingFlags{0}) hasBindingFlags = true;
+			if (!binding.mImmutableSamplers.empty())
+					b.pImmutableSamplers = immutableSamplers.emplace_front(
+						binding.mImmutableSamplers.size()).data(),
+						ranges::transform(binding.mImmutableSamplers, const_cast<vk::Sampler*>(b.pImmutableSamplers), [](const shared_ptr<Sampler>& v){ return **v; });
 		}
-		mLayout = mDevice->createDescriptorSetLayout(vk::DescriptorSetLayoutCreateInfo(mFlags, vkbindings));
+		vk::DescriptorSetLayoutCreateInfo createInfo(mFlags, vkbindings);
+		vk::DescriptorSetLayoutBindingFlagsCreateInfo flagInfo(bindingFlags);
+		if (hasBindingFlags) createInfo.pNext = &flagInfo;
+		mLayout = mDevice->createDescriptorSetLayout(createInfo);
+		mHashValue = hash_args(mFlags, vkbindings);
 	}
 	inline ~DescriptorSetLayout() {
 		mDevice->destroyDescriptorSetLayout(mLayout);
@@ -73,6 +83,7 @@ private:
 	vk::DescriptorSetLayoutCreateFlags mFlags;
 	unordered_map<uint32_t, Binding> mBindings;
 	unordered_set<uint32_t> mDynamicBindings;
+	size_t mHashValue;
 };
 
 class DescriptorSet : public DeviceResource {
@@ -133,75 +144,16 @@ public:
 	}
 	inline void insert_or_assign(uint32_t binding, const Descriptor& entry) { insert_or_assign(binding, 0, entry); }
 
-	inline void flush_writes() {
-		if (mPendingWrites.empty()) return;
-
-		struct WriteInfo {
-			vk::DescriptorImageInfo  mImageInfo;
-			vk::DescriptorBufferInfo mBufferInfo;
-			vk::WriteDescriptorSetInlineUniformBlockEXT mInlineInfo;
-			vk::WriteDescriptorSetAccelerationStructureKHR mAccelerationStructureInfo;
-		};
-		vector<WriteInfo> infos;
-		vector<vk::WriteDescriptorSet> writes;
-		vector<vk::CopyDescriptorSet> copies;
-		writes.reserve(mPendingWrites.size());
-		infos.reserve(mPendingWrites.size());
-		for (uint64_t idx : mPendingWrites) {
-			const auto& binding = mLayout->at(idx >> 32);
-			auto& entry = mDescriptors.at(idx);
-			auto& info = infos.emplace_back();
-			auto& write = writes.emplace_back(vk::WriteDescriptorSet(mDescriptorSet, idx >> 32, idx & ~uint32_t(0), 1, binding.mDescriptorType));
-			switch (write.descriptorType) {
-			case vk::DescriptorType::eInputAttachment:
-			case vk::DescriptorType::eSampledImage:
-			case vk::DescriptorType::eStorageImage:
-			case vk::DescriptorType::eCombinedImageSampler:
-			case vk::DescriptorType::eSampler: {
-				info.mImageInfo.imageLayout = get<vk::ImageLayout>(entry);
-				info.mImageInfo.imageView = *get<Texture::View>(entry);
-				if (write.descriptorType == vk::DescriptorType::eCombinedImageSampler || write.descriptorType == vk::DescriptorType::eSampler)
-					info.mImageInfo.sampler = **get<shared_ptr<Sampler>>(entry);
-				write.pImageInfo = &info.mImageInfo;
-				break;
-			}
-
-			case vk::DescriptorType::eUniformBufferDynamic:
-			case vk::DescriptorType::eStorageBufferDynamic:
-			case vk::DescriptorType::eUniformBuffer:
-			case vk::DescriptorType::eStorageBuffer: {
-				const auto& view = get<Buffer::StrideView>(entry);
-				info.mBufferInfo.buffer = **view.buffer();
-				info.mBufferInfo.offset = view.offset();
-				if (write.descriptorType == vk::DescriptorType::eUniformBufferDynamic || write.descriptorType == vk::DescriptorType::eStorageBufferDynamic)
-					info.mBufferInfo.range = view.stride();
-				else
-					info.mBufferInfo.range = view.size_bytes();
-				write.pBufferInfo = &info.mBufferInfo;
-				break;
-			}
-
-			case vk::DescriptorType::eUniformTexelBuffer:
-			case vk::DescriptorType::eStorageTexelBuffer:
-				write.pTexelBufferView = get<Buffer::TexelView>(entry).operator->();
-				break;
-
-			case vk::DescriptorType::eInlineUniformBlockEXT:
-				info.mInlineInfo.setData<byte>(get<vector<byte>>(entry));
-				write.descriptorCount = info.mInlineInfo.dataSize;
-				write.pNext = &info.mInlineInfo;
-				break;
-
-			case vk::DescriptorType::eAccelerationStructureKHR:
-				info.mAccelerationStructureInfo.accelerationStructureCount = 1;
-				info.mAccelerationStructureInfo.pAccelerationStructures = &get<vk::AccelerationStructureKHR>(entry);
-				write.pNext = &info.mAccelerationStructureInfo;
-				break;
-			}
-		}
-		mDevice->updateDescriptorSets(writes, copies);
-		mPendingWrites.clear();
-	}
+	STRATUM_API void flush_writes();
+	STRATUM_API void transition_images(CommandBuffer& commandBuffer);
 };
 
+}
+
+namespace std {
+template<> struct hash<stm::DescriptorSetLayout> {
+	inline size_t operator()(const stm::DescriptorSetLayout& l) const {
+		return l.mHashValue;
+	}
+};
 }

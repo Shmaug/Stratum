@@ -1,5 +1,7 @@
 #include "Instance.hpp"
 
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+
 #include "Window.hpp"
 #include "CommandBuffer.hpp"
 
@@ -46,7 +48,11 @@ LRESULT CALLBACK Instance::window_procedure(HWND hwnd, UINT message, WPARAM wPar
 
 Instance::Instance(int argc, char** argv) {
 	gInstance = this;
-	
+
+	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(mDynamicLoader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
+	#endif
+
 	mCommandLine.resize(argc);
 	ranges::copy_n(argv, argc, mCommandLine.begin());
 
@@ -67,29 +73,34 @@ Instance::Instance(int argc, char** argv) {
 		}
 	}
 
-
-	bool debugMessenger = find_argument("debugMessenger").has_value();
 	uint32_t deviceIndex = 0;
 	if (auto index = find_argument("deviceIndex"))
 		deviceIndex = stoi(*index);
-	if (debugMessenger)
-		mOptions.emplace("layer", "VK_LAYER_KHRONOS_validation");
-	if (ranges::count(find_arguments("layer"), "VK_LAYER_KHRONOS_validation")) {
-		mOptions.emplace("extension", "VK_EXT_debug_report");
-		mOptions.emplace("extension", "VK_EXT_debug_utils");
-		mOptions.emplace("extension", "VK_EXT_validation_features");
-	}
-	if (ranges::count(find_arguments("layer"), "VK_LAYER_RENDERDOC_Capture"))
-		mOptions.emplace("noPipelineCache", "");
 
 	unordered_set<string> validationLayers;
 	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+	unordered_set<string> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 	
-	for (const auto& layer : find_arguments("layer"))
-		validationLayers.emplace(layer);
-	for (const auto& ext : find_arguments("extension"))
-		instanceExtensions.emplace(ext);
+	for (const auto& layer : find_arguments("validationLayer")) validationLayers.emplace(layer);
+	for (const auto& ext : find_arguments("instanceExtension")) instanceExtensions.emplace(ext);
+	for (const auto& ext : find_arguments("deviceExtension")) deviceExtensions.emplace(ext);
+	bool debugMessenger = find_argument("debugMessenger").has_value();
 	
+	if (debugMessenger) validationLayers.emplace("VK_LAYER_KHRONOS_validation");
+	if (validationLayers.contains("VK_LAYER_KHRONOS_validation")) {
+		instanceExtensions.emplace(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+		instanceExtensions.emplace(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		instanceExtensions.emplace(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+	}
+
+	if (deviceExtensions.contains(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
+		deviceExtensions.emplace(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+		deviceExtensions.emplace(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+		deviceExtensions.emplace(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+	}
+	if (deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
+		deviceExtensions.emplace(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+
 	#ifdef WIN32
 	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
@@ -110,36 +121,32 @@ Instance::Instance(int argc, char** argv) {
 				it++;
 	}
 
+	vector<const char*> layers;
+	vector<const char*> instanceExts;
+	vector<const char*> deviceExts;
+	for (const string& s : validationLayers) layers.push_back(s.c_str());
+	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
+	for (const string& s : deviceExtensions) deviceExts.push_back(s.c_str());
+
 	vk::ApplicationInfo appInfo = {};
 	appInfo.pApplicationName = "StratumApplication";
 	appInfo.applicationVersion = VK_MAKE_VERSION(0,0,0);
 	appInfo.pEngineName = "Stratum";
 	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR,STRATUM_VERSION_MINOR, 0);
 	appInfo.apiVersion = mVulkanApiVersion = VK_API_VERSION_1_2;
-	
-	vector<const char*> instanceExts;
-	vector<const char*> layers;
-	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
-	for (const string& s : validationLayers) layers.push_back(s.c_str());
-
-	cout << "Creating vulkan instance with " << validationLayers.size() << " layers and " << instanceExtensions.size() << " extensions...";
 	mInstance = vk::createInstance(vk::InstanceCreateInfo({}, &appInfo, layers, instanceExts));
-	cout << " Done" << endl;
+
+	
+	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+  VULKAN_HPP_DEFAULT_DISPATCHER.init(mInstance);
+	#endif
 
 	if (debugMessenger) {
-		auto vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)mInstance.getProcAddr("vkCreateDebugUtilsMessengerEXT");
-		vk::DebugUtilsMessengerCreateInfoEXT msgr({},
+		cout << "Creating debug messenger...";
+		mDebugMessenger = mInstance.createDebugUtilsMessengerEXT(vk::DebugUtilsMessengerCreateInfoEXT({},
 			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError, 
 			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
-			DebugCallback);
-		cout << "Creating debug messenger...";
-		vk::Result result = (vk::Result)vkCreateDebugUtilsMessengerEXT(mInstance, reinterpret_cast<VkDebugUtilsMessengerCreateInfoEXT*>(&msgr), nullptr, reinterpret_cast<VkDebugUtilsMessengerEXT*>(&mDebugMessenger));
-		if (result == vk::Result::eSuccess)
-			cout << " Done" << endl;
-		else {
-			cout << "Failed!" << endl;
-			mDebugMessenger = nullptr;
-		}
+			DebugCallback));
 	}
 
 	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
@@ -216,11 +223,6 @@ Instance::Instance(int argc, char** argv) {
 	
 	if (find_argument("fullscreen")) mWindow->fullscreen(true);
 	
-	unordered_set<string> deviceExtensions {
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-		VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-		VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME
-	};
 	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, layers, mWindow->back_buffer_count());
 	mWindow->create_swapchain(*mDevice);
 }
@@ -228,10 +230,8 @@ Instance::~Instance() {
 	mWindow.reset();
 	mDevice.reset();
 
-	if (mDebugMessenger) {
-		auto vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(mInstance, "vkDestroyDebugUtilsMessengerEXT");
-		vkDestroyDebugUtilsMessengerEXT(mInstance, mDebugMessenger, nullptr);
-	}
+	if (mDebugMessenger)
+		mInstance.destroyDebugUtilsMessengerEXT(mDebugMessenger, nullptr);
 
 	mInstance.destroy();
 
@@ -246,7 +246,7 @@ Instance::~Instance() {
 void Instance::poll_events() const {
 	ProfilerRegion ps("Instance::poll_events");
 	mWindow->mInputStateLast = mWindow->mInputState;
-	mWindow->mInputState.clear_deltas();
+	mWindow->mInputState.clear();
 
 	#ifdef WIN32
 	MSG msg = {};

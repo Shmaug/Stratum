@@ -1,11 +1,13 @@
 #pragma once
 
-#include "Geometry.hpp"
+#include "Mesh.hpp"
 #include "DescriptorSet.hpp"
 
 namespace stm {
 
-class SpirvModule : public DeviceResource {
+using ShaderDatabase = unordered_map<string, shared_ptr<ShaderModule>>;
+
+class ShaderModule : public DeviceResource {
 public:
 	struct DescriptorBinding {
 		uint32_t mSet;
@@ -23,12 +25,12 @@ public:
 	struct Variable {
 		uint32_t mLocation;
 		vk::Format mFormat;
-		Geometry::AttributeType mAttributeType;
+		VertexArrayObject::AttributeType mAttributeType;
 		uint32_t mTypeIndex;
 	};
 
-	STRATUM_API SpirvModule(Device& device, const fs::path& spv);
-	inline ~SpirvModule() { if (mShaderModule) mDevice->destroyShaderModule(mShaderModule); }
+	STRATUM_API ShaderModule(Device& device, const fs::path& spv);
+	inline ~ShaderModule() { if (mShaderModule) mDevice->destroyShaderModule(mShaderModule); }
 	
 	inline vk::ShaderModule* operator->() { return &mShaderModule; }
 	inline vk::ShaderModule& operator*() { return mShaderModule; }
@@ -44,8 +46,10 @@ public:
 	inline const auto& descriptors() const { return mDescriptorMap; }
 	inline const auto& workgroup_size() const { return mWorkgroupSize; }
 
+	STRATUM_API static void load_from_dir(ShaderDatabase& dst, Device& device, const fs::path& dir);
+
 private:
-	vk::ShaderModule mShaderModule; // created when the SpirvModule is used to create a Pipeline
+	vk::ShaderModule mShaderModule; // created when the ShaderModule is used to create a Pipeline
 	vk::ShaderStageFlagBits mStage;
 	string mEntryPoint;
 	unordered_map<string, DescriptorBinding> mDescriptorMap;
@@ -56,20 +60,13 @@ private:
 	array<uint32_t,3> mWorkgroupSize;
 };
 
-using spirv_module_map = unordered_map<string, shared_ptr<SpirvModule>>;
-inline void load_spirv_modules(spirv_module_map& dst, Device& device, const fs::path& dir) {
-	for (const fs::path& p : fs::directory_iterator(dir))
-		if (p.extension() == ".spv")
-			dst.emplace(p.stem().string(), make_shared<SpirvModule>(device, p)).first->first;
-}
-
 }
 
 namespace std {
 
-template<> struct hash<stm::SpirvModule> {
-	inline size_t operator()(const stm::SpirvModule& v) const {
-		return stm::hash_args((const vk::ShaderModule&)v);
+template<> struct hash<stm::ShaderModule> {
+	inline size_t operator()(const stm::ShaderModule& v) const {
+		return stm::hash_args(*v);
 	}
 };
 

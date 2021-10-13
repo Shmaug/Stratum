@@ -125,6 +125,16 @@ inline float3 rgb_to_hsv(float3 rgb) {
 	return float3(hcv[0], hcv[1] / (hcv[2] + 1e-6f), hcv[2]);
 }
 
+inline float2 cartesian_to_spherical_uv(float3 xyz) {
+	return float2(atan2(xyz[2], xyz[0])*M_1_PI*.5 + .5, acos(xyz[1])*M_1_PI);
+}
+inline float3 spherical_uv_to_cartesian(float2 uv) {
+	uv[0] = uv[0]*2 - 1;
+	uv *= M_PI;
+	float sinPhi = sin(uv[1]);
+	return float3(sinPhi*cos(uv[0]), cos(uv[1]), sinPhi*sin(uv[0]));
+}
+
 inline float2 ray_sphere(float3 origin, float3 dir, float3 p, float r) {
 	float3 f = origin - p;
 	float a = dot(dir, dir);

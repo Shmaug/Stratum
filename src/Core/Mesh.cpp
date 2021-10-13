@@ -1,9 +1,9 @@
-#include "Geometry.hpp"
+#include "Mesh.hpp"
 #include "CommandBuffer.hpp"
 
 using namespace stm;
 
-GeometryStateDescription::GeometryStateDescription(const SpirvModule& vertexShader, const Geometry& geometry, vk::PrimitiveTopology topology, vk::IndexType indexType)
+VertexLayoutDescription::VertexLayoutDescription(const ShaderModule& vertexShader, const VertexArrayObject& vertexData, vk::PrimitiveTopology topology, vk::IndexType indexType)
   : mTopology(topology), mIndexType(indexType) {
   struct stride_view_hash {
     inline size_t operator()(const Buffer::StrideView& v) const {
@@ -12,8 +12,8 @@ GeometryStateDescription::GeometryStateDescription(const SpirvModule& vertexShad
   };
   unordered_map<Buffer::StrideView, uint32_t, stride_view_hash> uniqueBuffers;
   for (const auto&[id, v] : vertexShader.stage_inputs()) {
-    optional<Geometry::Attribute> attrib = geometry.find(v.mAttributeType, v.mTypeIndex);
-    if (!attrib) throw logic_error("Geometry does not contain required shader input " + to_string(v.mAttributeType) + "." + to_string(v.mTypeIndex));
+    optional<VertexArrayObject::Attribute> attrib = vertexData.find(v.mAttributeType, v.mTypeIndex);
+    if (!attrib) throw logic_error("VertexArrayObject does not contain required shader input " + to_string(v.mAttributeType) + "." + to_string(v.mTypeIndex));
 
     auto& dstAttribs = mAttributes[v.mAttributeType];
     if (dstAttribs.size() <= v.mTypeIndex)
@@ -29,15 +29,15 @@ GeometryStateDescription::GeometryStateDescription(const SpirvModule& vertexShad
   }
 }
 
-void Geometry::bind(CommandBuffer& commandBuffer) const {
+void VertexArrayObject::bind(CommandBuffer& commandBuffer) const {
   auto pipeline = dynamic_pointer_cast<GraphicsPipeline>(commandBuffer.bound_pipeline());
   if (!pipeline) throw logic_error("cannot draw a mesh without a bound graphics pipeline\n");
   
-  for (const auto&[type, attributes] : dynamic_cast<GraphicsPipeline*>(commandBuffer.bound_pipeline().get())->geometry_state().mAttributes)
+  for (const auto&[type, attributes] : dynamic_cast<GraphicsPipeline*>(commandBuffer.bound_pipeline().get())->vertex_layout().mAttributes)
     for (uint32_t i = 0; i < attributes.size(); i++)
       commandBuffer.bind_vertex_buffer(attributes[i].second, mAttributes.at(type)[i].second);
 }
 void Mesh::bind(CommandBuffer& commandBuffer) const {
-  mGeometry->bind(commandBuffer);
+  mVertices->bind(commandBuffer);
   commandBuffer.bind_index_buffer(mIndices);
 }

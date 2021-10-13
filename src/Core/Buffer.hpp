@@ -18,30 +18,12 @@ private:
 	friend class TexelView;
 
 public:
-	inline Buffer(Buffer&& v) : DeviceResource(v.mDevice,v.name()), mBuffer(v.mBuffer), mMemory(move(v.mMemory)), mSize(v.mSize), mUsage(v.mUsage), mSharingMode(v.mSharingMode), mTexelViews(move(v.mTexelViews)) {
-		v.mBuffer = nullptr;
-		v.mSize = 0;
-	}
-	inline Buffer(const Buffer&) = delete;
-	inline Buffer(const shared_ptr<Device::MemoryAllocation>& memory, const string& name, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
-		: DeviceResource(memory->mDevice, name), mSize(memory->size()), mUsage(usage), mSharingMode(sharingMode) {
-		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
-		mDevice.set_debug_name(mBuffer, name);
-		mMemory = memory;
-		vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
-	}
-	inline Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::SharingMode sharingMode = vk::SharingMode::eExclusive)
-		: DeviceResource(device, name), mSize(size), mUsage(usage), mSharingMode(sharingMode)  {
-		mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
-		mDevice.set_debug_name(mBuffer, name);
-		mMemory = make_shared<Device::MemoryAllocation>(mDevice, mDevice->getBufferMemoryRequirements(mBuffer), memoryUsage);
-		vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
-	}
-	inline ~Buffer() {
-		for (auto it = mTexelViews.begin(); it != mTexelViews.end(); it++)
-			mDevice->destroyBufferView(it->second);
-		mDevice->destroyBuffer(mBuffer);
-	}
+	Buffer() = delete;
+	Buffer(const Buffer&) = delete;
+	STRATUM_API Buffer(Buffer&& v);
+	STRATUM_API Buffer(const shared_ptr<Device::MemoryAllocation>& memory, const string& name, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
+	STRATUM_API Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
+	STRATUM_API ~Buffer();
 	
 	inline vk::Buffer& operator*() { return mBuffer; }
 	inline vk::Buffer* operator->() { return &mBuffer; }
@@ -49,12 +31,21 @@ public:
 	inline const vk::Buffer* operator->() const { return &mBuffer; }
 	inline operator bool() const { return mBuffer; }
 
+	inline void bind_memory(const shared_ptr<Device::MemoryAllocation>& mem) {
+		mMemory = mem;
+  	vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
+	}
 	inline const shared_ptr<Device::MemoryAllocation>& memory() const { return mMemory; }
 	inline vk::BufferUsageFlags usage() const { return mUsage; }
 	inline vk::SharingMode sharing_mode() const { return mSharingMode; }
 
 	inline vk::DeviceSize size() const { return mSize; }
 	inline byte* data() const { return mMemory->data(); }
+	#if VK_KHR_buffer_device_address
+	inline vk::DeviceSize device_address() const {
+		return mDevice->getBufferAddress(vk::BufferDeviceAddressInfo(mBuffer));
+	}
+	#endif
 
 	template<typename T = byte>
 	class View {
@@ -67,14 +58,18 @@ public:
 
 		View() = default;
 		View(View&&) = default;
-		View(const View&) = default;
-		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
+		inline View(const View& v, size_t elementOffset = 0, size_t elementCount = VK_WHOLE_SIZE) : mBuffer(v.mBuffer), mOffset(v.mOffset + elementOffset*sizeof(T)) {
 			if (mBuffer) {
-				mSize = (elementCount == VK_WHOLE_SIZE) ? (mBuffer->size() - byteOffset)/sizeof(T) : elementCount;
-				if (mOffset + mSize > mBuffer->size()) throw out_of_range("view size out of bounds");
+				mSize = (elementCount == VK_WHOLE_SIZE) ? (v.size() - elementOffset) : elementCount;
+				if (mOffset + mSize*sizeof(T) > mBuffer->size()) throw out_of_range("view size out of bounds");
 			}
 		}
-
+		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
+			if (mBuffer) {
+				mSize = (elementCount == VK_WHOLE_SIZE) ? (mBuffer->size() - mOffset)/sizeof(T) : elementCount;
+				if (mOffset + mSize*sizeof(T) > mBuffer->size()) throw out_of_range("view size out of bounds");
+			}
+		}
 		inline operator View<byte>() const {
 			return View<byte>(mBuffer, mOffset, size_bytes());
 		}
@@ -93,7 +88,12 @@ public:
 		inline size_type size() const { return mSize; }
     inline vk::DeviceSize size_bytes() const { return mSize*sizeof(T); }
 		inline pointer data() const { return reinterpret_cast<pointer>(mBuffer->data() + offset()); }
-		
+		#if VK_KHR_buffer_device_address
+		inline vk::DeviceSize device_address() const {
+			return mBuffer->device_address() + mOffset;
+		}
+		#endif
+
 		inline T& at(size_type index) const { return data()[index]; }
 		inline T& operator[](size_type index) const { return at(index); }
 
@@ -154,15 +154,7 @@ public:
 			mHashKey = hash_args(offset(), size_bytes(), mFormat);
 		}
 		
-		inline const vk::BufferView& operator*() const {
-			if (auto it = buffer()->mTexelViews.find(mHashKey); it != buffer()->mTexelViews.end())
-				return it->second;
-			else {
-				vk::BufferView v = buffer()->mDevice->createBufferView(vk::BufferViewCreateInfo({}, **buffer(), mFormat, offset(), size_bytes()));
-				buffer()->mDevice.set_debug_name(v, buffer()->name()+"/View");
-				return buffer()->mTexelViews.emplace(mHashKey, v).first->second;
-			}
-		}
+		STRATUM_API const vk::BufferView& operator*() const;
 		inline const vk::BufferView* operator->() const { return &operator*(); }
 
 		TexelView& operator=(const TexelView&) = default;
@@ -174,7 +166,7 @@ public:
 	};
 };
 
-template<class T>
+template<class T, size_t _Alignment = 0>
 class buffer_vector {
 public:
 	using value_type = T;
@@ -231,7 +223,8 @@ public:
 				requirements = mDevice->getBufferMemoryRequirements(tmp);
 				mDevice->destroyBuffer(tmp);
 			}
-			requirements.alignment = max(requirements.alignment, alignof(T));
+			if constexpr (_Alignment > 0)
+				requirements.alignment = align_up(requirements.alignment, _Alignment);
 			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector<"+string(typeid(T).name())+">", mBufferUsage, mSharingMode);
 			if (mBuffer) memcpy(b->data(), mBuffer->data(), mBuffer->size());
 			mBuffer = b;

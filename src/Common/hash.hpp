@@ -24,6 +24,11 @@ constexpr size_t hash_array(const T(& arr)[N]) {
 		return hash_combine(hash_array<T,N-1>(arr), hasher(arr[N-1]));
 }
 
+template<hashable T>
+inline size_t hash_args(const T& v) {
+	return hash<T>()(v);
+}
+
 template<typename T> requires(!hashable<T> && !ranges::range<T>)
 inline size_t hash_args(const T& v) {
 	class hash_streambuf : public basic_streambuf<char, char_traits<char>> {
@@ -41,24 +46,26 @@ inline size_t hash_args(const T& v) {
 	return h.mValue;
 }
 
-template<hashable T>
-inline size_t hash_args(const T& v) {
-	return hash<T>()(v);
-}
-
 template<ranges::range R> requires(!hashable<R>)
 inline size_t hash_args(const R& r) {
 	auto it = ranges::begin(r);
 	if (it == ranges::end(r)) return 0;
-	size_t h = hash_args(*it);
-	while (++it != ranges::end(r))
-		h = hash_combine(h, hash_args(*it));
+	size_t h = 0;
+	do {
+		if constexpr(is_specialization_v<R::value_type, pair>)
+			h = hash_combine(h, hash_combine(hash_args(it->first), hash_args(it->second)));
+		else
+			h = hash_combine(h, hash_args(*it));
+	} while (++it != ranges::end(r));
 	return h;
 }
 
 template<typename Tx, typename... Ty>
 inline size_t hash_args(const Tx& x, const Ty&... y) {
-	return hash_combine(hash_args<Tx>(x), hash_args<Ty...>(y...));
+	if constexpr(sizeof...(Ty) == 0)
+		return hash_args(x);
+	else
+		return hash_combine(hash_args<Tx>(x), hash_args<Ty...>(y...));
 }
 
 }

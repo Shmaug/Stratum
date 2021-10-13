@@ -69,8 +69,8 @@ inline void createPlotGridlines(const Range2f& ssRange, const Range2f& outRange,
   }
 }
 
-template<ranges::random_access_range R, typename OnSampleSelectedFunc>
-inline void DrawPlot(const R& data, const float width, const float height, const OnSampleSelectedFunc& onSampleSelected) {
+template<ranges::random_access_range R>
+inline void DrawPlot(const R& data, const float width, const float height, const auto& onSampleSelected) {
   assert(ranges::size(data) > 1);
 
   auto ImLerp = [](const ImVec2& a, const ImVec2& b, const ImVec2& t) { return ImVec2(a.x + (b.x - a.x) * t.x, a.y + (b.y - a.y) * t.y); };
@@ -255,24 +255,27 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 }
 
 void Profiler::on_gui() {
-  if (mFrameHistory.size()<2) return;
+  if (mFrameHistory.size() < 2) return;
   if (ImGui::Begin("Profiler")) {
     vector<float> frameTimings(mFrameHistory.size());
     ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
       return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();
     });
 
+    float timeAccum = 0; 
+    uint32_t frameCount = 0;
+    for (frameCount = 0; frameCount < frameTimings.size(); frameCount++)
+      timeAccum += frameTimings[frameCount];
+    ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
+
     const float graphScale = 2;
     
     float width = ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x;
     mFrameHistoryCount = size_t(width / graphScale);
-    width = min(width, graphScale*frameTimings.size());
     
     const float height = ImGui::GetWindowContentRegionMax().y - ImGui::GetWindowContentRegionMin().y;
 
-    DrawPlot(frameTimings, width, height/4, [&](const size_t idx) {
-      mTimelineSample = *next(mFrameHistory.begin(), idx+1);
-    });
+    DrawPlot(frameTimings, min(width, graphScale*frameTimings.size()), height/4, [&](const size_t idx) { mTimelineSample = *next(mFrameHistory.begin(), idx+1); });
     DrawTimeline(mTimelineSample ? *mTimelineSample : **mFrameHistory.begin(), width);
   }
   ImGui::End();

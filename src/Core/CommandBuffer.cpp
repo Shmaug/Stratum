@@ -4,9 +4,6 @@ using namespace stm;
 
 CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level)
 	: DeviceResource(device, name), mQueueFamily(queueFamily) {
-	vkCmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)mDevice.mInstance->getProcAddr("vkCmdBeginDebugUtilsLabelEXT");
-	vkCmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)mDevice.mInstance->getProcAddr("vkCmdEndDebugUtilsLabelEXT");
-	
 	mCompletionFence = make_unique<Fence>(device, name + "/CompletionFence");
 	mCommandPool = queueFamily->mCommandBuffers.at(this_thread::get_id()).first;
 
@@ -29,17 +26,14 @@ CommandBuffer::~CommandBuffer() {
 }
 
 
-void CommandBuffer::begin_label(const string& text, const Vector4f& color) {
-	if (vkCmdBeginDebugUtilsLabelEXT) {
-		vk::DebugUtilsLabelEXT label = {};
-		memcpy(label.color, &color, sizeof(color));
-		label.pLabelName = text.c_str();
-		vkCmdBeginDebugUtilsLabelEXT(mCommandBuffer, reinterpret_cast<VkDebugUtilsLabelEXT*>(&label));
-	}
+void CommandBuffer::begin_label(const string& text, const Array4f& color) {
+	vk::DebugUtilsLabelEXT label = {};
+	memcpy(label.color, &color, sizeof(color));
+	label.pLabelName = text.c_str();
+	mCommandBuffer.beginDebugUtilsLabelEXT(label);
 }
 void CommandBuffer::end_label() {
-	if (vkCmdEndDebugUtilsLabelEXT)
-		vkCmdEndDebugUtilsLabelEXT(mCommandBuffer);
+	mCommandBuffer.endDebugUtilsLabelEXT();
 }
 
 void CommandBuffer::clear() {
@@ -70,8 +64,10 @@ void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<Descrip
 	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 	hold_resource(descriptorSet);
 	
-	descriptorSet->flush_writes();
-	if (!mBoundFramebuffer) transition_images(*descriptorSet);
+	if (!mBoundFramebuffer)
+		descriptorSet->transition_images(*this);
+	else
+		descriptorSet->flush_writes();
 
 	if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
 	mBoundDescriptorSets[index] = descriptorSet;
@@ -82,7 +78,7 @@ void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, 
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < framebuffer->size(); i++)
-		(*framebuffer)[i].texture()->transition_barrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
+		(*framebuffer)[i].image()->transition_barrier(*this, get<vk::AttachmentDescription>(renderPass->attachments()[i]).initialLayout);
 
 	mCommandBuffer.beginRenderPass(vk::RenderPassBeginInfo(**renderPass, **framebuffer, renderArea, clearValues), contents);
 
@@ -98,9 +94,14 @@ void CommandBuffer::next_subpass(vk::SubpassContents contents) {
 		const string& attachmentName = mBoundFramebuffer->render_pass().attachments()[i].second;
 		auto layout = mBoundFramebuffer->render_pass().subpasses()[mSubpassIndex].at(attachmentName).mDescription.initialLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
-		attachment.texture()->mTrackedLayout = layout;
-		attachment.texture()->mTrackedStageFlags = guess_stage(layout);
-		attachment.texture()->mTrackedAccessFlags = guess_access_flags(layout);
+		uint32_t aspectMask = (uint32_t)attachment.subresource_range().aspectMask;
+		while (aspectMask) {
+			uint32_t aspect = 1 << countr_zero(aspectMask);
+			aspectMask &= ~aspect;
+			for (uint32_t layer = attachment.subresource_range().baseArrayLayer; layer < attachment.subresource_range().baseArrayLayer+attachment.subresource_range().layerCount; layer++)
+				for (uint32_t level = attachment.subresource_range().baseMipLevel; level < attachment.subresource_range().baseMipLevel+attachment.subresource_range().levelCount; level++)
+					attachment.image()->tracked_state((vk::ImageAspectFlags)aspect, layer, level) = make_tuple(layout, guess_stage(layout), guess_access_flags(layout));
+		}
 	}
 }
 void CommandBuffer::end_render_pass() {
@@ -110,9 +111,14 @@ void CommandBuffer::end_render_pass() {
 	for (uint32_t i = 0; i < mBoundFramebuffer->render_pass().attachments().size(); i++) {
 		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().attachments()[i]).finalLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
-		attachment.texture()->mTrackedLayout = layout;
-		attachment.texture()->mTrackedStageFlags = guess_stage(layout);
-		attachment.texture()->mTrackedAccessFlags = guess_access_flags(layout);
+		uint32_t aspectMask = (uint32_t)attachment.subresource_range().aspectMask;
+		while (aspectMask) {
+			uint32_t aspect = 1 << countr_zero(aspectMask);
+			aspectMask &= ~aspect;
+			for (uint32_t layer = attachment.subresource_range().baseArrayLayer; layer < attachment.subresource_range().baseArrayLayer+attachment.subresource_range().layerCount; layer++)
+				for (uint32_t level = attachment.subresource_range().baseMipLevel; level < attachment.subresource_range().baseMipLevel+attachment.subresource_range().levelCount; level++)
+					attachment.image()->tracked_state((vk::ImageAspectFlags)aspect, layer, level) = make_tuple(layout, guess_stage(layout), guess_access_flags(layout));
+		}
 	}
 	
 	mBoundFramebuffer = nullptr;

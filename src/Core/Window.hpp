@@ -233,27 +233,31 @@ enum KeyCode {
 
 class MouseKeyboardState {
 private:
-	Vector2f mCursorPos;
-	Vector2f mCursorDelta;
+	friend class Instance;
+	friend class Window;
+
+	Array2f mCursorPos;
+	Array2f mCursorDelta;
 	float mScrollDelta;
 	unordered_set<KeyCode> mButtons;
 	string mInputCharacters;
-public:
-	inline void clear_deltas() {
-		mCursorDelta = Vector2f::Zero();
+	
+	inline void clear() {
+		mCursorDelta = Array2f::Zero();
 		mScrollDelta = 0;
 		mInputCharacters.clear();
 	}
-	inline void add_cursor_delta(const Vector2f& delta) { mCursorDelta += delta; }
+	inline void add_cursor_delta(const Array2f& delta) { mCursorDelta += delta; }
 	inline void add_scroll_delta(float delta) { mScrollDelta += delta; }
 	inline void add_input_character(char c) { mInputCharacters.push_back(c); };
 	inline void set_button(KeyCode key) { mButtons.emplace(key); }
 	inline void unset_button(KeyCode key) { mButtons.erase(key); }
 
-	inline Vector2f& cursor_pos() { return mCursorPos; }
+public:
+	inline Array2f& cursor_pos() { return mCursorPos; }
 	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
-	inline const Vector2f& cursor_pos() const { return mCursorPos; }
-	inline const Vector2f& cursor_delta() const { return mCursorDelta; }
+	inline const Array2f& cursor_pos() const { return mCursorPos; }
+	inline const Array2f& cursor_delta() const { return mCursorDelta; }
 	inline float scroll_delta() const { return mScrollDelta; }
 	inline const string& input_characters() const { return mInputCharacters; };
 	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
@@ -283,8 +287,8 @@ public:
 
 	inline uint32_t back_buffer_count() const { return (uint32_t)mSwapchainImages.size(); }
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
-	inline const Texture::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
-	inline const Texture::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
+	inline const Image::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
+	inline const Image::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
 	inline void back_buffer_usage(vk::ImageUsageFlags usage) { mImageUsage = usage; }
 	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mImageUsage; }
 
@@ -297,7 +301,7 @@ public:
 
 	STRATUM_API void resize(uint32_t w, uint32_t h);
 
-	STRATUM_API Texture::View acquire_image(CommandBuffer& commandBuffer);
+	STRATUM_API Image::View acquire_image(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores = {});
 	// Number of times present has been called
@@ -307,22 +311,12 @@ public:
 	inline bool lock_mouse() const { return mLockMouse; }
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
-	// position reported by the OS
-	inline const Vector2f& cursor_pos() const { return mInputState.cursor_pos(); }
-	inline const Vector2f& cursor_pos_last() const { return mInputStateLast.cursor_pos(); }
-	// Note that cursor_delta != cursor_pos_last - cursor_pos, as cursor_delta comes from raw input
-	inline const Vector2f& cursor_delta() const { return mInputState.cursor_delta(); }
-	inline float scroll_delta() const { return mInputState.scroll_delta(); }
-	inline bool pressed(KeyCode key) const { return mInputState.pressed(key); }
-	inline bool released(KeyCode key) const { return !mInputState.pressed(key); }
-	inline bool pressed_redge(KeyCode key) const { return mInputState.pressed(key) && !mInputStateLast.pressed(key); }
-	inline bool released_redge(KeyCode key) const { return mInputStateLast.pressed(key) && !mInputState.pressed(key); }
 
-	inline Vector2f clip_to_window(const Vector2f& clip) const {
+	inline Array2f clip_to_window(const Array2f& clip) const {
 		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
 	}
-	inline Vector2f window_to_clip(const Vector2f& screen) const {
-		Vector2f r = screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones();
+	inline Array2f window_to_clip(const Array2f& screen) const {
+		Array2f r = screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones();
 		r.y() = -r.y();
 		return r;
 	}
@@ -335,7 +329,7 @@ private:
 	Device* mSwapchainDevice = nullptr;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
-	vector<Texture::View> mSwapchainImages;
+	vector<Image::View> mSwapchainImages;
 	vector<shared_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
@@ -355,7 +349,7 @@ private:
 
 	friend class Instance;
 #ifdef WIN32
-	HWND mHwnd = NULL;
+	HWND mHwnd;
 	RECT mWindowedRect;
 	STRATUM_API void handle_message(UINT message, WPARAM wParam, LPARAM lParam);
 #endif

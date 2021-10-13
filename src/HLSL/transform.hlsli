@@ -13,10 +13,9 @@ struct ProjectionData {
 	float2 Offset;
 	float mNear;
 	float mFar;
-	uint mMode;
+	uint mOrthographic;
+	uint pad;
 };
-
-#define ProjectionMode_Orthographic 1
 
 inline float3 transform_vector(TransformData t, float3 v) {
 	return rotate_vector(t.mRotation, v*t.mScale);
@@ -44,8 +43,7 @@ inline ProjectionData make_orthographic(float2 size, float2 offset, float znear,
 	r.mScale = 2/size;
 	r.Offset = offset;
 	r.mNear = znear;
-	r.mFar = zfar;
-	r.mMode = ProjectionMode_Orthographic;
+	r.mFar = -abs(zfar);
 	return r;
 }
 inline ProjectionData make_perspective(float fovy, float aspect /* width/height */, float2 offset, float znear, float zfar) {
@@ -54,21 +52,21 @@ inline ProjectionData make_perspective(float fovy, float aspect /* width/height 
 	r.mScale[0] = aspect*r.mScale[1];
 	r.Offset = offset;
 	r.mNear = znear;
-	r.mFar = zfar;
-	r.mMode = 0;
+	r.mFar = abs(zfar);
 	return r;
 }
 
+// uses reversed z (1 at near plane -> 0 at far plane)
 inline float4 project_point(ProjectionData t, float3 v) {
 	float4 r;
 	r[0] = v[0]*t.mScale[0] + t.Offset[0];
 	r[1] = v[1]*t.mScale[1] + t.Offset[1];
-	if (t.mMode & ProjectionMode_Orthographic) {
-		// reversed z
-		r[2] = (v[2] - t.mFar)/(t.mNear - t.mFar);
+	if (t.mFar < 0) {
+		// orthographic
+		r[2] = (v[2] - (-t.mFar)*sign(t.mNear))/(t.mNear - t.mFar);
 		r[3] = 1;
 	} else {
-		// infinite far plane, reversed z
+		// perspective, infinite far plane
 		r[2] = abs(t.mNear);
 		r[3] = v[2]*sign(t.mNear);
 	}
@@ -78,11 +76,22 @@ inline float3 back_project(ProjectionData t, float3 v) {
 	float3 r;
 	r[0] = (v[0] - t.Offset[0])/t.mScale[0];
 	r[1] = (v[1] - t.Offset[0])/t.mScale[1];
-	if (t.mMode & ProjectionMode_Orthographic) {
+	if (t.mOrthographic) {
 		r[2] = t.mFar + r[2]*(t.mNear - t.mFar);
 	} else
 		r[2] = t.mNear/v[2];
 	return r;
 }
+
+#ifndef __cplusplus
+inline float3x4 to_float3x4(TransformData t) {
+	float4x3 m;
+	m[0] = rotate_vector(t.mRotation, float3(1,0,0));
+	m[1] = rotate_vector(t.mRotation, float3(0,1,0));
+	m[2] = rotate_vector(t.mRotation, float3(0,0,1));
+	m[3] = t.mTranslation;
+	return transpose(m);
+}
+#endif
 
 #endif
