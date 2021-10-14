@@ -59,12 +59,16 @@ void RayTraceScene::create_pipelines() {
 	mTracePipeline = mNode.make_child("pbr_rt_render").make_component<ComputePipelineState>("pbr_rt_render", shaders.at("pbr_rt_render"));
 	mTracePipeline->set_immutable_sampler("gSampler", sampler);
 	mTracePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+	mTracePipeline->push_constant<float>("gExposure") = 1.f;
+	mTracePipeline->push_constant<float>("gGamma") = 2.2f;
 }
 
 void RayTraceScene::on_inspector_gui() {
 	ImGui::InputScalar("Sample Count", ImGuiDataType_U32, &mTracePipeline->specialization_constant("gSampleCount"));
 	ImGui::InputScalar("Bounces", ImGuiDataType_U32, &mTracePipeline->specialization_constant("gMaxBounces"));
 	ImGui::InputScalar("Debug Mode", ImGuiDataType_U32, &mTracePipeline->specialization_constant("gDebugMode"));
+	ImGui::DragFloat("Exposure", &mTracePipeline->push_constant<float>("gExposure"));
+	ImGui::DragFloat("Gamma", &mTracePipeline->push_constant<float>("gGamma"));
 	ImGui::CheckboxFlags("Background Importance Sampling", &mTracePipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_BG_IS);
 }
 
@@ -93,6 +97,18 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 		auto it = images.find(image);
 		return (it == images.end()) ? images.emplace(image, (uint32_t)images.size()).first->second : it->second;
 	};
+
+	auto envMap = mNode.find_in_descendants<EnvironmentMap>();
+	if (envMap) {
+		mTracePipeline->descriptor("gEnvironmentConditionalDistribution") = sampled_image_descriptor(envMap->mConditionalDistribution);
+		mTracePipeline->descriptor("gEnvironmentMarginalDistribution") = sampled_image_descriptor(envMap->mMarginalDistribution);
+		mTracePipeline->specialization_constant("gEnvironmentMap") = find_image_index(envMap->mImage);
+	} else {
+		mTracePipeline->specialization_constant("gEnvironmentMap") = -1;
+		Image::View blank = make_shared<Image>(commandBuffer.mDevice, "blank", vk::Extent3D(2, 2,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled);
+		mTracePipeline->descriptor("gEnvironmentConditionalDistribution") = sampled_image_descriptor(blank);
+		mTracePipeline->descriptor("gEnvironmentMarginalDistribution") = sampled_image_descriptor(blank);
+	}
 
 	mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
 		if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
@@ -146,15 +162,15 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 			inds.mOcclusionChannel = prim->mMaterial->mOcclusionImageComponent;
 			MaterialData& m = materials.emplace_back();
 			m.mAlbedo = prim->mMaterial->mAlbedo;
-			m.mImageIndices = pack_image_indices(inds);
+			m.mRoughness = prim->mMaterial->mRoughness;
 			m.mEmission = prim->mMaterial->mEmission;
 			m.mMetallic = prim->mMaterial->mMetallic;
-			m.mRoughness = prim->mMaterial->mRoughness;
 			m.mAbsorption = prim->mMaterial->mAbsorption;
 			m.mIndexOfRefraction = prim->mMaterial->mIndexOfRefraction;
 			m.mTransmission = prim->mMaterial->mTransmission;
 			m.mNormalScale = prim->mMaterial->mNormalScale;
 			m.mOcclusionScale = prim->mMaterial->mOcclusionScale;
+			m.mImageIndices = pack_image_indices(inds);
 		}
 
 		TransformData transform = node_to_world(prim.node());
@@ -187,6 +203,8 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 	// copy vertices and indices
 	Buffer::View<VertexData> vertices = make_shared<Buffer>(commandBuffer.mDevice, "gVertices", max(totalVertexCount,1u)*sizeof(VertexData), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	Buffer::View<byte> indices = make_shared<Buffer>(commandBuffer.mDevice, "gIndices", align_up(max(totalIndexBufferSize,1u), sizeof(uint32_t)), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+	commandBuffer.hold_resource(vertices);
+	commandBuffer.hold_resource(indices);
 	mCopyVerticesPipeline->descriptor("gVertices") = vertices;
 	for (uint32_t i = 0; i < instanceBLAS.size(); i++) {
 		InstanceData& d = instanceDatas[i];
@@ -234,12 +252,15 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 	memcpy(instanceBuf->data(), instanceDatas.data(), sizeof(InstanceData)*instanceDatas.size());
 	memcpy(materialBuf->data(), materials.data(), sizeof(MaterialInfo)*materials.size());
 
+	commandBuffer.hold_resource(instanceBuf);
+	commandBuffer.hold_resource(materialBuf);
+
 	commandBuffer.barrier(vertices, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 	commandBuffer.barrier(indices, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 
 	mTracePipeline->descriptor("gScene") = **mTopLevel;
-	mTracePipeline->descriptor("gInstances") = commandBuffer.hold_resource(Buffer::View<InstanceData>(instanceBuf));
-	mTracePipeline->descriptor("gMaterials") = commandBuffer.hold_resource(Buffer::View<MaterialInfo>(materialBuf));
+	mTracePipeline->descriptor("gInstances") = Buffer::View<InstanceData>(instanceBuf);
+	mTracePipeline->descriptor("gMaterials") = Buffer::View<MaterialInfo>(materialBuf);
 	mTracePipeline->descriptor("gVertices") = vertices;
 	mTracePipeline->descriptor("gIndices") = indices;
 	//mTracePipeline->descriptor("gLights") = lights.buffer_view();
@@ -262,18 +283,6 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 		mTracePipeline->descriptor("gNoiseLUT") = sampled_image_descriptor(noiseImg);
 	}
 	*/
-
-	auto envMap = mNode.find_in_descendants<EnvironmentMap>();
-	if (envMap) {
-		mTracePipeline->descriptor("gEnvironmentConditionalDistribution") = sampled_image_descriptor(envMap->mConditionalDistribution);
-		mTracePipeline->descriptor("gEnvironmentMarginalDistribution") = sampled_image_descriptor(envMap->mMarginalDistribution);
-		mTracePipeline->specialization_constant("gEnvironmentMap") = find_image_index(envMap->mImage);
-	} else {
-		mTracePipeline->specialization_constant("gEnvironmentMap") = -1;
-		Image::View blank = make_shared<Image>(commandBuffer.mDevice, "blank", vk::Extent3D(2, 2,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled);
-		mTracePipeline->descriptor("gEnvironmentConditionalDistribution") = sampled_image_descriptor(blank);
-		mTracePipeline->descriptor("gEnvironmentMarginalDistribution") = sampled_image_descriptor(blank);
-	}
 
 	for (const auto&[image, index] : images)
 		mTracePipeline->descriptor("gImages", index) = sampled_image_descriptor(image);

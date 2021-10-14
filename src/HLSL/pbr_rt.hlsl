@@ -5,7 +5,17 @@
 
 #ifndef COPY_KERNELS
 
-#define gImageCount 32
+#define DEBUG_NONE 0
+#define DEBUG_ALBEDO 1
+#define DEBUG_METALLIC 2
+#define DEBUG_ROUGHNESS 3
+#define DEBUG_SMOOTH_NORMALS 4
+#define DEBUG_GEOMETRY_NORMALS 5
+#define DEBUG_EMISSION 6
+#define DEBUG_PDF 7
+#define DEBUG_BG_PDF 8
+
+#define gImageCount 64
 [[vk::constant_id(0)]] const uint gSampleCount = 1;
 [[vk::constant_id(1)]] const uint gMaxBounces = 5;
 [[vk::constant_id(2)]] const uint gRussianRouletteDepth = 3;
@@ -31,6 +41,8 @@
 	uint2 gScreenResolution;
 	uint gLightCount;
 	uint gRandomSeed;
+	float gExposure;
+	float gGamma;
 } gPushConstants;
 
 class RandomSampler {
@@ -154,11 +166,10 @@ SurfaceData surface_attributes(uint instanceIndex, uint primitiveIndex, float2 b
 	sfc.Ng = cross(v1.mPositionU.xyz, v2.mPositionU.xyz);
 
 	sfc.v.mPositionU.xyz = transform_point(sfc.instance.mTransform, sfc.v.mPositionU.xyz);
-	sfc.v.mNormalV.xyz = transform_vector(sfc.instance.mTransform, sfc.v.mNormalV.xyz);
+	sfc.v.mNormalV.xyz = normalize(transform_vector(sfc.instance.mTransform, sfc.v.mNormalV.xyz));
 	sfc.v.mTangent.xyz = transform_vector(sfc.instance.mTransform, sfc.v.mTangent.xyz);
-	// ortho-normalize
-	sfc.v.mTangent.xyz = normalize(sfc.v.mTangent.xyz - sfc.v.mNormalV.xyz * dot(sfc.v.mNormalV.xyz, sfc.v.mTangent.xyz));	
 	sfc.Ng = transform_vector(sfc.instance.mTransform, sfc.Ng);
+
 	sfc.area = length(sfc.Ng);
 	sfc.Ng /= sfc.area;
 	sfc.area /= 2;
@@ -176,19 +187,19 @@ MaterialData material_attributes(inout SurfaceData sfc) {
 	if (inds.mNormal < gImageCount) {
 		float3 bump = gImages[NonUniformResourceIndex(inds.mNormal)].SampleLevel(gSampler, texcoord.xy, texcoord.z).xyz*2 - 1;
 		bump.xy *= md.mNormalScale;
-		sfc.v.mNormalV.xyz = bump.x*sfc.v.mTangent.xyz + bump.y*cross(sfc.v.mTangent.xyz, sfc.v.mNormalV.xyz) + bump.z*sfc.v.mNormalV.xyz;
+		sfc.v.mNormalV.xyz = normalize(bump.x*sfc.v.mTangent.xyz + bump.y*cross(sfc.v.mTangent.xyz, sfc.v.mNormalV.xyz) + bump.z*sfc.v.mNormalV.xyz);
 	}
 	// ortho-normalize
 	sfc.v.mTangent.xyz = normalize(sfc.v.mTangent.xyz - sfc.v.mNormalV.xyz * dot(sfc.v.mNormalV.xyz, sfc.v.mTangent.xyz));
 	return md;
 }
 
-float EnvPdf(float3 omega_in) {
+float EnvPdf(float3 omega_in, out float2 uv) {
 	uint2 hdrResolution;
 	uint mips;
 	gImages[gEnvironmentMap].GetDimensions(0, hdrResolution.x, hdrResolution.y, mips);
 	float theta = acos(clamp(omega_in.y, -1, 1));
-	float2 uv = float2((M_PI + atan2(omega_in.z, omega_in.x)) * (1 / (2*M_PI)), theta * (1 / M_PI));
+	uv = float2(atan2(omega_in.z, omega_in.x)/M_PI *.5 + .5, theta / M_PI);
 	float pdf = gEnvironmentConditionalDistribution.SampleLevel(gSampler, uv, 0).y * gEnvironmentMarginalDistribution.SampleLevel(gSampler, float2(uv.y, 0), 0).y;
 	return (pdf * hdrResolution.x*hdrResolution.y) / (2 * M_PI * M_PI * sin(theta));
 }
@@ -216,7 +227,7 @@ float3 sample_environment(inout RandomSampler rng, out float3 omega_in, out floa
 
 
 // this function performs the direct lighting calculation
-float3 direct_light(inout RayQuery<RAY_FLAG_NONE> rayQuery, inout RandomSampler rng, float3 omega_out, SurfaceData sfc, DisneyMaterial mat) {
+float3 direct_light(inout RayQuery<RAY_FLAG_NONE> rayQuery, inout RandomSampler rng, float3 V, SurfaceData sfc, DisneyMaterial mat) {
 	float3 Li = 0;
 	RayDesc shadowRay;
 	shadowRay.Origin = ray_offset(sfc.v.mPositionU.xyz, sfc.Ng);
@@ -232,7 +243,7 @@ float3 direct_light(inout RayQuery<RAY_FLAG_NONE> rayQuery, inout RandomSampler 
 			rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
 			if (!do_ray_query(rayQuery)) {
 				float pdf_bsdf;
-				float3 f = DisneyEval(mat, omega_out, sfc.v.mNormalV.xyz, omega_in, pdf_bsdf);
+				float3 f = DisneyEval(mat, V, sfc.v.mNormalV.xyz, omega_in, pdf_bsdf);
 				if (pdf_bsdf > 0) {
 					float misWeight = powerHeuristic(pdf_light, pdf_bsdf);
 					Li += misWeight * f * abs(dot(omega_in, sfc.v.mNormalV.xyz)) * bg / pdf_light;
@@ -332,7 +343,6 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 	float3 throughput = 1;
 	bool isEmitter = false;
 	float pdf_bsdf = 1;
-	float3 absorption = 0;
 	
 	RayQuery<RAY_FLAG_NONE> rayQuery;
 	for (uint bounceIndex = 0; bounceIndex < gMaxBounces && any(throughput > 1e-6); bounceIndex++) {
@@ -340,14 +350,23 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 		rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, ray);
 		if (!do_ray_query(rayQuery)) {
 			if (gEnvironmentMap < gImageCount) {
-				float pdf_bg = EnvPdf(ray.Direction);
-				float theta = acos(clamp(ray.Direction.y, -1, 1));
-				float2 uv = float2((M_PI + atan2(ray.Direction.z, ray.Direction.x)) * (1 / (2*M_PI)), theta * (1 / M_PI));
+				float2 uv;
+				float pdf_bg = EnvPdf(ray.Direction, uv);
 				float3 bg = gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb;
 				if (bounceIndex > 0)
 					bg *= powerHeuristic(pdf_bsdf, pdf_bg);
 				else if (gDebugMode == DEBUG_PDF)
 					return pdf_bg;
+				else if (gDebugMode == DEBUG_BG_PDF) {
+					float c = 0;
+					for (uint i = 0; i < 128; i++) {
+						float3 test;
+						float pdf_test;
+						sample_environment(rng, test, pdf_test);
+						c += pow(saturate(dot(test,ray.Direction)), 200);
+					}
+					return c;
+				}
 
 				radiance += bg * throughput;				
 			}
@@ -360,6 +379,7 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 		if      (gDebugMode == DEBUG_ALBEDO) return material.mAlbedo;
 		else if (gDebugMode == DEBUG_METALLIC) return material.mMetallic;
 		else if (gDebugMode == DEBUG_ROUGHNESS) return material.mRoughness;
+		else if (gDebugMode == DEBUG_EMISSION) return material.mEmission;
 		else if (gDebugMode == DEBUG_GEOMETRY_NORMALS) return sfc.Ng*.5 + .5;
 		else if (gDebugMode == DEBUG_SMOOTH_NORMALS) return sfc.v.mNormalV.xyz*.5 + .5;
 
@@ -406,14 +426,14 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 
 		// Russian roulette
 		if (bounceIndex >= gRussianRouletteDepth) {
-		    float q = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001, 0.95);
-		    if (rng.next_sample() > q)
-		        break;
-		    throughput /= q;
+			float q = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001, 0.95);
+			if (rng.next_sample() > q)
+				break;
+			throughput /= q;
 		}
 
 		ray.Direction = omega_in;
-		ray.Origin = ray_offset(sfc.v.mPositionU.xyz, sfc.Ng);
+		ray.Origin = ray_offset(sfc.v.mPositionU.xyz, dot(omega_in, sfc.Ng) < 0 ? -sfc.Ng : sfc.Ng);
 		ray.TMin = 0;
 		ray.TMax = 1.#INF;
 	}
@@ -444,7 +464,7 @@ void render(uint3 index : SV_DispatchThreadID) {
 	for (uint i = 0; i < gSampleCount; i++)
 		radiance += PathTrace(rng, ray);
 	radiance /= gSampleCount;
-	gRenderTarget[index.xy] = float4(radiance,1);
+	gRenderTarget[index.xy] = float4(pow(gPushConstants.gExposure*radiance, 1/gPushConstants.gGamma),1);
 }
 
 #else

@@ -21,15 +21,15 @@ struct LightData {
 
 struct MaterialData {
   float3 mAlbedo;
-	uint mImageIndices;
+  float mRoughness;
   float3 mEmission;
 	float mMetallic;
 	float3 mAbsorption;
-  float mRoughness;
 	float mNormalScale; // scaledNormal = normalize((<sampled normal image value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))
 	float mOcclusionScale; // lerp(color, color * <sampled occlusion image value>, <occlusion strength>)
 	float mIndexOfRefraction;
 	float mTransmission;
+	uint mImageIndices;
 };
 struct ImageIndices {
 	uint mAlbedo;

@@ -39,18 +39,20 @@ void EnvironmentMap::build_distributions(const span<float>& img, const vk::Exten
 			pdf2D[j*extent.width + i] = weight;
 			cdf2D[j*extent.width + i] = rowWeightSum;
 		}
+		float invRowSum = 1/rowWeightSum;
 		for (uint32_t i = 0; i < extent.width; i++) {
-			pdf2D[j*extent.width + i] /= rowWeightSum;
-			cdf2D[j*extent.width + i] /= rowWeightSum;
+			pdf2D[j*extent.width + i] *= invRowSum;
+			cdf2D[j*extent.width + i] *= invRowSum;
 		}
 		colWeightSum += rowWeightSum;
 		pdf1D[j] = rowWeightSum;
 		cdf1D[j] = colWeightSum;
 	}
 
+	float invColSum = 1/colWeightSum;
 	for (int j = 0; j < extent.height; j++) {
-		cdf1D[j] /= colWeightSum;
-		pdf1D[j] /= colWeightSum;
+		cdf1D[j] *= invColSum;
+		pdf1D[j] *= invColSum;
 	}
 
 	auto LowerBound = [](const vector<float>& array, uint32_t lower, uint32_t upper, float value) {
@@ -65,15 +67,13 @@ void EnvironmentMap::build_distributions(const span<float>& img, const vk::Exten
 	};
 
 	for (uint32_t i = 0; i < extent.height; i++) {
-		float invHeight = (float)(i + 1) / extent.height;
-		uint32_t row = LowerBound(cdf1D, 0, extent.height, invHeight);
+		uint32_t row = LowerBound(cdf1D, 0, extent.height, (float)(i + 1) / extent.height);
 		marginalDistData[2*i  ] = row / (float)extent.height;
 		marginalDistData[2*i+1] = pdf1D[i];
 	}
 	for (uint32_t j = 0; j < extent.height; j++)
 		for (uint32_t i = 0; i < extent.width; i++) {
-			float invWidth = (float)(i + 1) / extent.width;
-			uint32_t col = LowerBound(cdf2D, j*extent.width, (j + 1)*extent.width, invWidth) - j * extent.width;
+			uint32_t col = LowerBound(cdf2D, j*extent.width, (j + 1)*extent.width, (float)(i + 1) / extent.width) - j * extent.width;
 			conditionalDistData[2*(j*extent.width + i)  ] = col / (float)extent.width;
 			conditionalDistData[2*(j*extent.width + i)+1] = pdf2D[j*extent.width + i];
 		}

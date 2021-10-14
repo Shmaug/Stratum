@@ -52,7 +52,7 @@ struct DisneyMaterial {
     float eta;
 };
 
-float3 EvalDielectricReflection(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, inout float pdf) {
+float3 EvalDielectricReflection(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
     pdf = 0;
     if (dot(N, L) <= 0)
 		return 0;
@@ -66,7 +66,7 @@ float3 EvalDielectricReflection(DisneyMaterial mat, float3 V, float3 N, float3 L
     return mat.albedo * F * D * G;
 }
 
-float3 EvalDielectricRefraction(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, inout float pdf) {
+float3 EvalDielectricRefraction(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
     pdf = 0;
     if (dot(N, L) >= 0)
         return 0;
@@ -81,7 +81,7 @@ float3 EvalDielectricRefraction(DisneyMaterial mat, float3 V, float3 N, float3 L
     return mat.albedo * (1.0 - F) * D * G * abs(dot(V, H)) * abs(dot(L, H)) * 4.0 * mat.eta * mat.eta / (denomSqrt * denomSqrt);
 }
 
-float3 EvalSpecular(DisneyMaterial mat, float3 Cspec0, float3 V, float3 N, float3 L, float3 H, inout float pdf) {
+float3 EvalSpecular(DisneyMaterial mat, float3 Cspec0, float3 V, float3 N, float3 L, float3 H, out float pdf) {
     pdf = 0;
     if (dot(N, L) <= 0)
         return 0;
@@ -95,7 +95,7 @@ float3 EvalSpecular(DisneyMaterial mat, float3 Cspec0, float3 V, float3 N, float
     return F * D * G;
 }
 
-float3 EvalClearcoat(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, inout float pdf) {
+float3 EvalClearcoat(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
     pdf = 0.0;
     if (dot(N, L) <= 0.0)
         return 0;
@@ -109,7 +109,7 @@ float3 EvalClearcoat(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H,
     return 0.25 * mat.clearcoat * F * D * G;
 }
 
-float3 EvalDiffuse(DisneyMaterial mat, float3 Csheen, float3 V, float3 N, float3 L, float3 H, inout float pdf) {
+float3 EvalDiffuse(DisneyMaterial mat, float3 Csheen, float3 V, float3 N, float3 L, float3 H, out float pdf) {
     pdf = 0.0;
     if (dot(N, L) <= 0.0)
         return 0;
@@ -132,7 +132,7 @@ float3 EvalDiffuse(DisneyMaterial mat, float3 Csheen, float3 V, float3 N, float3
     return ((1 / M_PI) * lerp(Fd, ss, mat.subsurface) * mat.albedo + Fsheen) * (1.0 - mat.metallic);
 }
 
-float3 DisneySample(inout RandomSampler rng, DisneyMaterial mat, float3 V, float3 N, float3 T, inout float3 L, inout float pdf) {
+float3 DisneySample(inout RandomSampler rng, DisneyMaterial mat, float3 V, float3 N, float3 T, out float3 L, out float pdf) {
     pdf = 0;
     float3 f = 0;
     
@@ -221,7 +221,7 @@ float3 DisneySample(inout RandomSampler rng, DisneyMaterial mat, float3 V, float
     return f;
 }
 
-float3 DisneyEval(DisneyMaterial mat, float3 V, float3 N, float3 L, inout float pdf) {
+float3 DisneyEval(DisneyMaterial mat, float3 V, float3 N, float3 L, out float pdf) {
     float3 H;
     bool refl = dot(N, L) > 0.0;
 

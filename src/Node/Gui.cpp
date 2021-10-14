@@ -364,7 +364,7 @@ Gui::Gui(Node& node) : mNode(node) {
 								envMap->mMarginalDistribution = Image::View(
 									make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.height,1,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled), 
 									0, 1, 0, 1, {}, {}, vk::ImageViewType::e2D);
-								envMap->mConditionalDistribution = make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.height,extent.width,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled);
+								envMap->mConditionalDistribution = make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.width, extent.height, 1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled);
 								commandBuffer.copy_buffer_to_image(marginalDistData, envMap->mMarginalDistribution);
 								commandBuffer.copy_buffer_to_image(conditionalDistData, envMap->mConditionalDistribution);
 							}
