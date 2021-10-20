@@ -131,11 +131,11 @@ float sample_shadow(LightData light, float3 posLight) {
 float4 fs(v2f i) : SV_Target0 {
 	MaterialData material = gMaterials[gMaterialIndex];
 	ImageIndices inds = unpack_image_indices(material.mImageIndices);
-	float4 baseColor = material.mBaseColor;
+	float4 baseColor = float4(material.mAlbedo, 1 - material.mTransmission);
 	float2 metallicRoughness = float2(material.mMetallic, material.mRoughness);
 	float3 emission = material.mEmission;
 	
-	if (inds.mBaseColor < gImageCount) baseColor *= gImages[inds.mBaseColor].Sample(gSampler, i.texcoord);
+	if (inds.mAlbedo < gImageCount) baseColor *= gImages[inds.mAlbedo].Sample(gSampler, i.texcoord);
 	
 	if (gAlphaClip >= 0 && baseColor.a < gAlphaClip) discard;
 	

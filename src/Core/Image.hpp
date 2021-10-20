@@ -156,7 +156,7 @@ public:
 		inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout newLayout) const {
 			mImage->transition_barrier(commandBuffer, guess_stage(newLayout), newLayout, guess_access_flags(newLayout), mSubresource);
 		}
-		inline void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags dstStage, vk::ImageLayout newLayout, vk::AccessFlagBits accessFlags) const {
+		inline void transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFlags dstStage, vk::ImageLayout newLayout, vk::AccessFlags accessFlags) const {
 			mImage->transition_barrier(commandBuffer, dstStage, newLayout, accessFlags, mSubresource);
 		}
 	};

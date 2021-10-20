@@ -32,7 +32,12 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
       endif()
     endif()
     
-    set(DST_NAME "${SRC_NAME}_${ENTRY_POINT}")
+    if (${ENTRY_POINT} STREQUAL "main")
+      set(DST_NAME "${SRC_NAME}")
+    else()
+      set(DST_NAME "${SRC_NAME}_${ENTRY_POINT}")
+    endif()
+    
     set(SPV_PATH "${DST_FOLDER}/${DST_NAME}.spv")
     set(SPV_JSON_PATH "${DST_FOLDER}/${DST_NAME}.json")
 

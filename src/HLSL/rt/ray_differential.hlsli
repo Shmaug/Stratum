@@ -1,4 +1,4 @@
-#include "math.hlsli"
+#include "../math.hlsli"
 
 struct differential {
   float dx;

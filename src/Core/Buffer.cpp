@@ -14,12 +14,15 @@ Buffer::Buffer(const shared_ptr<Device::MemoryAllocation>& memory, const string&
   mMemory = memory;
   vmaBindBufferMemory(mDevice.allocator(), mMemory->allocation(), mBuffer);
 }
-Buffer::Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage, vk::SharingMode sharingMode)
+Buffer::Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage, uint32_t alignment, vk::SharingMode sharingMode)
   : DeviceResource(device, name), mSize(size), mUsage(usage), mSharingMode(sharingMode)  {
   mBuffer = mDevice->createBuffer(vk::BufferCreateInfo({}, mSize, mUsage, mSharingMode));
   mDevice.set_debug_name(mBuffer, name);
-  if (memoryUsage != VMA_MEMORY_USAGE_UNKNOWN)
-    bind_memory(make_shared<Device::MemoryAllocation>(mDevice, mDevice->getBufferMemoryRequirements(mBuffer), memoryUsage));
+  if (memoryUsage != VMA_MEMORY_USAGE_UNKNOWN) {
+    vk::MemoryRequirements requirements = mDevice->getBufferMemoryRequirements(mBuffer);
+    if (alignment != 0) requirements.alignment = align_up(requirements.alignment, alignment);
+    bind_memory(make_shared<Device::MemoryAllocation>(mDevice, requirements, memoryUsage));
+  }
 }
 Buffer::~Buffer() {
   for (auto it = mTexelViews.begin(); it != mTexelViews.end(); it++)

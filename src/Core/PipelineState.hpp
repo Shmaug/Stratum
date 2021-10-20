@@ -99,7 +99,7 @@ public:
 protected:
 	string mName;
 
-	map<vk::ShaderStageFlags, shared_ptr<ShaderModule>> mShaders;
+	map<vk::ShaderStageFlagBits, shared_ptr<ShaderModule>> mShaders;
 	unordered_map<string, uint32_t> mSpecializationConstants;
 	unordered_map<string, shared_ptr<Sampler>> mImmutableSamplers;
 	unordered_map<string, vector<byte>> mPushConstants;

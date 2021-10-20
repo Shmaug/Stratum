@@ -198,8 +198,12 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 	}
 	for (const auto& v : j["separate_samplers"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampler, spirv_array_size(j, v)));
-	for (const auto& v : j["ubos"])
-		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eUniformBuffer, spirv_array_size(j, v)));
+	for (const auto& v : j["ubos"]) {
+		string n = v["name"];
+		auto t = j["types"][v["type"].get<string>()];
+		if (t["name"] == n && n.starts_with("type.")) n = n.substr(5);
+		mDescriptorMap.emplace(n, DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eUniformBuffer, spirv_array_size(j, v)));
+	}
 	for (const auto& v : j["ssbos"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageBuffer, spirv_array_size(j, v)));
 

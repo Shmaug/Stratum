@@ -89,6 +89,24 @@ public:
 		return Buffer::View<T>(dst);
 	}
 
+	inline const Image::View& blit_image(const Image::View& src, const Image::View& dst, vk::Filter filter = vk::Filter::eLinear) {
+		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		vector<vk::ImageBlit> blits(src.subresource_range().levelCount);
+		for (uint32_t i = 0; i < blits.size(); i++) {
+			array<vk::Offset3D,2> srcOffset;
+			srcOffset[1].x = src.extent().width;
+			srcOffset[1].y = src.extent().height;
+			srcOffset[1].z = src.extent().depth;
+			array<vk::Offset3D,2> dstOffset;
+			dstOffset[1].x = dst.extent().width;
+			dstOffset[1].y = dst.extent().height;
+			dstOffset[1].z = dst.extent().depth;
+			blits[i] = vk::ImageBlit(src.subresource(i), srcOffset, src.subresource(i), dstOffset);
+		}
+		mCommandBuffer.blitImage(*hold_resource(src.image()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, blits, filter);
+		return dst;
+	}
 	inline const Image::View& copy_image(const Image::View& src, const Image::View& dst) {
 		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
 		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);

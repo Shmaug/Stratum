@@ -1,19 +1,19 @@
-#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E render
-#pragma compile dxc -spirv -T cs_6_7 -D COPY_KERNELS -E copy_vertices
+#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E main
 
-#include "pbr_rt.hlsli"
+#include "rtscene.hlsli"
 
-#ifndef COPY_KERNELS
-
-#define DEBUG_NONE 0
-#define DEBUG_ALBEDO 1
-#define DEBUG_METALLIC 2
-#define DEBUG_ROUGHNESS 3
-#define DEBUG_SMOOTH_NORMALS 4
-#define DEBUG_GEOMETRY_NORMALS 5
-#define DEBUG_EMISSION 6
-#define DEBUG_PDF 7
-#define DEBUG_BG_PDF 8
+#define DEBUG_NONE 							0
+#define DEBUG_ALBEDO 						1
+#define DEBUG_METALLIC 					2
+#define DEBUG_ROUGHNESS 				3
+#define DEBUG_NORMALS_GEOMETRY 	4
+#define DEBUG_NORMALS_SMOOTH 		5
+#define DEBUG_NORMALS_BUMP 			6
+#define DEBUG_TANGENTS          7
+#define DEBUG_TANGENTS_BUMP   	8
+#define DEBUG_EMISSION 					9
+#define DEBUG_PDF 							10
+#define DEBUG_BG_PDF 						11
 
 #define gImageCount 64
 [[vk::constant_id(0)]] const uint gSampleCount = 1;
@@ -22,27 +22,34 @@
 [[vk::constant_id(3)]] const uint gDebugMode = 0;
 [[vk::constant_id(4)]] const uint gSamplingFlags = SAMPLE_FLAG_BG_IS;
 [[vk::constant_id(6)]] const uint gEnvironmentMap = -1;
+[[vk::constant_id(7)]] const bool gDemodulateAlbedo = false;
 
-[[vk::binding(0)]] RaytracingAccelerationStructure gScene;
-[[vk::binding(1)]] StructuredBuffer<VertexData> gVertices;
-[[vk::binding(2)]] ByteAddressBuffer gIndices;
-[[vk::binding(3)]] StructuredBuffer<InstanceData> gInstances;
-[[vk::binding(4)]] StructuredBuffer<MaterialData> gMaterials;
-[[vk::binding(5)]] StructuredBuffer<LightData> gLights;
-[[vk::binding(6)]] RWTexture2D<float4> gRenderTarget;
-[[vk::binding(7)]] SamplerState gSampler;
-[[vk::binding(8)]] Texture2D<float2> gEnvironmentConditionalDistribution;
-[[vk::binding(9)]] Texture2D<float2> gEnvironmentMarginalDistribution;
-[[vk::binding(10)]] Texture2D<float4> gImages[gImageCount];
+RaytracingAccelerationStructure gScene;
+StructuredBuffer<VertexData> gVertices;
+ByteAddressBuffer gIndices;
+StructuredBuffer<InstanceData> gInstances;
+StructuredBuffer<MaterialData> gMaterials;
+StructuredBuffer<LightData> gLights;
+RWTexture2D<float4> gSamples;
+RWTexture2D<float4> gNormalId;
+RWTexture2D<float2> gZ;
+RWTexture2D<float4> gAlbedo;
+RWTexture2D<float2> gPrevUV;
+SamplerState gSampler;
+Texture2D<float2> gEnvironmentConditionalDistribution;
+Texture2D<float2> gEnvironmentMarginalDistribution;
+Texture2D<float4> gImages[gImageCount];
 
-[[vk::push_constant]] const struct {
+cbuffer gCameraData {
 	TransformData gCameraToWorld;
 	ProjectionData gProjection;
-	uint2 gScreenResolution;
+	TransformData gPrevCameraToWorld;
+	ProjectionData gPrevProjection;
+};
+
+[[vk::push_constant]] const struct {
 	uint gLightCount;
 	uint gRandomSeed;
-	float gExposure;
-	float gGamma;
 } gPushConstants;
 
 class RandomSampler {
@@ -57,7 +64,8 @@ class RandomSampler {
 	}
 };
 
-#include "rt/disney.hlsli"
+#include "disney.hlsli"
+#include "a-svgf/svgf_shared.hlsli"
 
 struct SurfaceData {
 	InstanceData instance;
@@ -194,7 +202,7 @@ MaterialData material_attributes(inout SurfaceData sfc) {
 	return md;
 }
 
-float EnvPdf(float3 omega_in, out float2 uv) {
+float eval_environment(float3 omega_in, out float2 uv) {
 	uint2 hdrResolution;
 	uint mips;
 	gImages[gEnvironmentMap].GetDimensions(0, hdrResolution.x, hdrResolution.y, mips);
@@ -338,7 +346,12 @@ float3 direct_light(inout RayQuery<RAY_FLAG_NONE> rayQuery, inout RandomSampler 
 	return Li;
 }
 
-float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
+float3 trace_path(inout RandomSampler rng, RayDesc ray, out float3 primaryNormal, out float primaryT, out float3 primaryAlbedo, out uint primaryMeshId) {
+	primaryNormal = ray.Direction;
+	primaryT = 1.#INF;
+	primaryMeshId = -1;
+	primaryAlbedo = 1;
+
 	float3 radiance = 0;
 	float3 throughput = 1;
 	bool isEmitter = false;
@@ -351,21 +364,23 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 		if (!do_ray_query(rayQuery)) {
 			if (gEnvironmentMap < gImageCount) {
 				float2 uv;
-				float pdf_bg = EnvPdf(ray.Direction, uv);
+				float pdf_bg = eval_environment(ray.Direction, uv);
 				float3 bg = gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb;
 				if (bounceIndex > 0)
 					bg *= powerHeuristic(pdf_bsdf, pdf_bg);
-				else if (gDebugMode == DEBUG_PDF)
-					return pdf_bg;
-				else if (gDebugMode == DEBUG_BG_PDF) {
-					float c = 0;
-					for (uint i = 0; i < 128; i++) {
-						float3 test;
-						float pdf_test;
-						sample_environment(rng, test, pdf_test);
-						c += pow(saturate(dot(test,ray.Direction)), 200);
+				else {
+					if (gDebugMode == DEBUG_PDF)
+						return pdf_bg;
+					else if (gDebugMode == DEBUG_BG_PDF) {
+						float c = 0;
+						for (uint i = 0; i < 128; i++) {
+							float3 test;
+							float pdf_test;
+							sample_environment(rng, test, pdf_test);
+							c += pow(saturate(dot(test,ray.Direction)), 200);
+						}
+						return c;
 					}
-					return c;
 				}
 
 				radiance += bg * throughput;				
@@ -374,14 +389,28 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 		}
 
 		SurfaceData sfc = surface_attributes(rayQuery.CommittedInstanceID(), rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics());
+		
+		if (gDebugMode == DEBUG_NORMALS_SMOOTH) return sfc.v.mNormalV.xyz*.5 + .5;
+		else if (gDebugMode == DEBUG_NORMALS_GEOMETRY) return sfc.Ng*.5 + .5;
+		else if (gDebugMode == DEBUG_TANGENTS) return sfc.v.mTangent.xyz*.5 + .5;
+
 		MaterialData material = material_attributes(sfc);
+
+		if (bounceIndex == 0) {
+			primaryT = rayQuery.CommittedRayT();
+			primaryNormal = sfc.Ng;
+			primaryAlbedo = material.mAlbedo;
+			uint x = rayQuery.CommittedInstanceID();
+			uint y = rayQuery.CommittedPrimitiveIndex();
+			primaryMeshId = x ^ (y + 0x9e3779b9 + (x << 6) + (x >> 2));
+		}
 		
 		if      (gDebugMode == DEBUG_ALBEDO) return material.mAlbedo;
 		else if (gDebugMode == DEBUG_METALLIC) return material.mMetallic;
 		else if (gDebugMode == DEBUG_ROUGHNESS) return material.mRoughness;
 		else if (gDebugMode == DEBUG_EMISSION) return material.mEmission;
-		else if (gDebugMode == DEBUG_GEOMETRY_NORMALS) return sfc.Ng*.5 + .5;
-		else if (gDebugMode == DEBUG_SMOOTH_NORMALS) return sfc.v.mNormalV.xyz*.5 + .5;
+		else if (gDebugMode == DEBUG_NORMALS_BUMP) return sfc.v.mNormalV.xyz*.5 + .5;
+		else if (gDebugMode == DEBUG_TANGENTS_BUMP) return sfc.v.mTangent.xyz*.5 + .5;
 
 		radiance += throughput * material.mEmission;
 
@@ -421,7 +450,7 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 
 		if (pdf_bsdf <= 0)
 				break;
-		
+				
 		throughput *= f * abs(dot(sfc.v.mNormalV.xyz, omega_in)) / pdf_bsdf;
 
 		// Russian roulette
@@ -442,57 +471,56 @@ float3 PathTrace(inout RandomSampler rng, RayDesc ray) {
 }
 
 [numthreads(8,8,1)]
-void render(uint3 index : SV_DispatchThreadID) {
-	if (any(index.xy >= gPushConstants.gScreenResolution)) return;
+void main(uint3 index : SV_DispatchThreadID) {
+	uint2 resolution;
+	gSamples.GetDimensions(resolution.x, resolution.y);
+	if (any(index.xy > resolution)) return;
 
 	RandomSampler rng;
 	rng.v = uint4(index.xy, gPushConstants.gRandomSeed, index.x + index.y);
-
-	float2 offset = 0;// float2(rng.next_sample(), rng.next_sample());
-	float2 uv = (float2(index.xy) + offset)/float2(gPushConstants.gScreenResolution);
+	
+	float2 uv = (float2(index.xy) + 0.5)/float2(resolution);
 	float3 screenPos = float3(2*uv-1, 1);
 	screenPos.y = -screenPos.y;
-	float3 unprojected = back_project(gPushConstants.gProjection, screenPos);
-
+	float3 unprojected = back_project(gProjection, screenPos);
 	RayDesc ray;
-	ray.Direction = normalize(transform_vector(gPushConstants.gCameraToWorld, float3(unprojected.xy, sign(gPushConstants.gProjection.mNear))));
-	ray.Origin = gPushConstants.gCameraToWorld.mTranslation;
-	ray.TMin = gPushConstants.gProjection.mNear;
+	ray.Direction = normalize(transform_vector(gCameraToWorld, float3(unprojected.xy, sign(gProjection.mNear))));
+	ray.Origin = gCameraToWorld.mTranslation;
+	ray.TMin = gProjection.mNear;
 	ray.TMax = 1.#INF;
-	
+
 	float3 radiance = 0;
-	for (uint i = 0; i < gSampleCount; i++)
-		radiance += PathTrace(rng, ray);
+	float3 primaryAlbedo = 0;
+	uint primaryMeshId;
+	float primaryT = 0;
+	float3 primaryNormal = 0;
+	for (uint i = 0; i < gSampleCount; i++) {
+		float t;
+		float3 normal;
+		float pdf_path;
+		radiance += trace_path(rng, ray, normal, t, primaryAlbedo, primaryMeshId);
+		primaryT += t;
+		primaryNormal += normal;
+	}
 	radiance /= gSampleCount;
-	gRenderTarget[index.xy] = float4(pow(gPushConstants.gExposure*radiance, 1/gPushConstants.gGamma),1);
+	primaryT /= gSampleCount;
+	primaryNormal /= gSampleCount;
+	primaryAlbedo /= gSampleCount;
+
+	float4 prevPos = project_point(gPrevProjection, transform_point(inverse(gPrevCameraToWorld), ray.Origin + ray.Direction * primaryT));
+	prevPos.xyz /= prevPos.w;
+	prevPos.y = -prevPos.y;
+	prevPos.xy = prevPos.xy*.5 + .5;
+
+	if (gDemodulateAlbedo) {
+		if (primaryAlbedo.x > 0) radiance.x /= primaryAlbedo.x;
+		if (primaryAlbedo.y > 0) radiance.y /= primaryAlbedo.y;
+		if (primaryAlbedo.z > 0) radiance.z /= primaryAlbedo.z;
+	}
+	
+	gSamples[index.xy] = float4(radiance, gSampleCount);
+	gZ[index.xy] = float2(primaryT, 1/abs(normalize(transform_vector(inverse(gCameraToWorld), primaryNormal))).z);
+	gNormalId[index.xy] = float4(primaryNormal, asfloat(primaryMeshId));
+	gAlbedo[index.xy] = float4(primaryAlbedo, 0);
+	gPrevUV[index.xy] = prevPos.xy;
 }
-
-#else
-
-[[vk::binding(0,0)]] RWStructuredBuffer<VertexData> gVertices;
-[[vk::binding(1,1)]] ByteAddressBuffer gPositions;
-[[vk::binding(2,1)]] ByteAddressBuffer gNormals;
-[[vk::binding(3,1)]] ByteAddressBuffer gTangents;
-[[vk::binding(4,1)]] ByteAddressBuffer gTexcoords;
-
-[[vk::push_constant]] const struct {
-	uint gCount;
-	uint gDstOffset;
-	uint gPositionStride;
-	uint gNormalStride;
-	uint gTangentStride;
-	uint gTexcoordStride;
-} gPushConstants;
-
-[numthreads(32,1,1)]
-void copy_vertices(uint3 index : SV_DispatchThreadId) {
-	if (index.x >= gPushConstants.gCount) return;
-	VertexData v;
-	float2 uv = asfloat(gTexcoords.Load2(index.x*gPushConstants.gTexcoordStride));
-	v.mPositionU = float4(asfloat(gPositions.Load3(index.x*gPushConstants.gPositionStride)), uv.x);
-	v.mNormalV   = float4(asfloat(gNormals.Load3(index.x*gPushConstants.gNormalStride)), uv.y);
-	v.mTangent   = asfloat(gTangents.Load4(index.x*gPushConstants.gTangentStride));
-	gVertices[gPushConstants.gDstOffset + index.x] = v;
-}
-
-#endif

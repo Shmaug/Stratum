@@ -70,16 +70,3 @@ void DescriptorSet::flush_writes() {
   mDevice->updateDescriptorSets(writes, {});
   mPendingWrites.clear();
 }
-
-void DescriptorSet::transition_images(CommandBuffer& commandBuffer) {
-		flush_writes();
-		for (auto&[idx, entry] : mDescriptors)
-			switch (layout_at(idx >> 32).mDescriptorType) {
-				case vk::DescriptorType::eCombinedImageSampler:
-				case vk::DescriptorType::eInputAttachment:
-				case vk::DescriptorType::eSampledImage:
-				case vk::DescriptorType::eStorageImage:
-					get<Image::View>(entry).transition_barrier(commandBuffer, get<vk::ImageLayout>(entry));
-					break;
-			}
-}

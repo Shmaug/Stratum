@@ -236,6 +236,16 @@ inline R read_file(const fs::path& filename) {
 	return dst;
 }
 template<ranges::contiguous_range R>
+inline R read_file(const fs::path& filename, R& dst) {
+	ifstream file(filename, ios::ate | ios::binary);
+	if (!file.is_open()) return {};
+	size_t sz = (size_t)file.tellg();
+	file.seekg(0);
+	file.clear();
+	file.read(reinterpret_cast<char*>(dst.data()), sz);
+	return dst;
+}
+template<ranges::contiguous_range R>
 inline void write_file(const fs::path& filename, const R& r) {
 	ofstream file(filename, ios::ate | ios::binary);
 	file.write(reinterpret_cast<char*>(r.data()), r.size()*sizeof(ranges::range_value_t<R>));

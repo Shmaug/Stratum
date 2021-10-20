@@ -64,10 +64,7 @@ void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<Descrip
 	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 	hold_resource(descriptorSet);
 	
-	if (!mBoundFramebuffer)
-		descriptorSet->transition_images(*this);
-	else
-		descriptorSet->flush_writes();
+	descriptorSet->flush_writes();
 
 	if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
 	mBoundDescriptorSets[index] = descriptorSet;

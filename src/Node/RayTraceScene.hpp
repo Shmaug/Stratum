@@ -7,7 +7,7 @@ namespace stm {
 namespace hlsl {
 #pragma pack(push)
 #pragma pack(1)
-#include <HLSL/pbr_rt.hlsli>
+#include <HLSL/rt/rtscene.hlsli>
 #pragma pack(pop)
 }
 
@@ -28,6 +28,20 @@ private:
 
 class RayTraceScene {
 public:
+	struct RTData {
+		hlsl::TransformData mCameraToWorld;
+		hlsl::ProjectionData mProjection;
+		Image::View mSamples;
+		Image::View mNormalId;
+		Image::View mZ;
+		Image::View mPrevUV;
+		Image::View mAlbedo;
+
+		Image::View mAccumColor;
+		Image::View mAccumMoments;
+		Image::View mAccumLength;
+	};
+
 	STRATUM_API RayTraceScene(Node& node);
 
 	inline Node& node() const { return mNode; }
@@ -36,7 +50,8 @@ public:
 	
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer, const Image::View& depthBuffer) const;
+	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer) const;
+	STRATUM_API void denoise(CommandBuffer& commandBuffer, const RTData& cur, const RTData& prev, const Image::View& prevUV, const Image::View& colorBuffer) const;
 
 private:
 	struct BLAS {
@@ -49,13 +64,25 @@ private:
 		Buffer::StrideView mIndices;
 	};
 
-
 	Node& mNode;
+	shared_ptr<AccelerationStructure> mTopLevel;
+	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, BLAS> mAccelerationStructures;
+	unordered_map<MeshPrimitive*, hlsl::TransformData> mTransformHistory;
+
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	component_ptr<ComputePipelineState> mTracePipeline;
 
-	shared_ptr<AccelerationStructure> mTopLevel;
-	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, BLAS> mAccelerationStructures;
+	component_ptr<ComputePipelineState> mReprojectPipeline;
+	
+	component_ptr<ComputePipelineState> mTemporalAccumulationPipeline;
+	component_ptr<ComputePipelineState> mEstimateVariancePipeline;
+	component_ptr<ComputePipelineState> mAtrousPipeline;
+	component_ptr<ComputePipelineState> mCreateGradientSamplesPipeline;
+	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
+
+	bool     mNaiveAccumulation = true;
+	bool     mModulateAlbedo = true;
+	uint32_t mNumIterations  = 5;
 };
 
 }

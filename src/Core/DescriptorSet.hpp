@@ -145,7 +145,6 @@ public:
 	inline void insert_or_assign(uint32_t binding, const Descriptor& entry) { insert_or_assign(binding, 0, entry); }
 
 	STRATUM_API void flush_writes();
-	STRATUM_API void transition_images(CommandBuffer& commandBuffer);
 };
 
 }

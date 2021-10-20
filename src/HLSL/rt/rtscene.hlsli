@@ -1,9 +1,10 @@
-#include "scene.hlsli"
+#include "../scene.hlsli"
 
 #define SAMPLE_FLAG_BG_IS 1
 
 struct InstanceData {
 	TransformData mTransform;
+	TransformData mPrevTransform;
 	uint mMaterialIndex;
 	uint mFirstVertex;
 	uint mIndexByteOffset;

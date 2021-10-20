@@ -4,6 +4,7 @@
 #include "RayTraceScene.hpp"
 
 #include <imgui_internal.h>
+#include <stb_image_write.h>
 
 #include <Core/Window.hpp>
 
@@ -231,6 +232,19 @@ inline void inspector_gui_fn(MaterialInfo* material) {
 		ImGui::Image(&material->mOcclusionImage, ImVec2(w,w*(float)material->mOcclusionImage.extent().height/(float)material->mOcclusionImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
 	}
 }
+inline void inspector_gui_fn(Mesh* mesh) {
+	ImGui::LabelText("Topology", to_string(mesh->topology()).c_str());
+	ImGui::LabelText("Index Type", to_string(mesh->index_type()).c_str());
+	if (mesh->vertices())
+		for (const auto&[type,verts] : *mesh->vertices())
+			for (uint32_t i = 0; i < verts.size(); i++)
+				if (verts[i].second && ImGui::CollapsingHeader((to_string(type) + "_" + to_string(i)).c_str())) {
+					ImGui::LabelText("Format", to_string(verts[i].first.mFormat).c_str());
+					ImGui::LabelText("Stride", to_string(verts[i].first.mStride).c_str());
+					ImGui::LabelText("Offset", to_string(verts[i].first.mOffset).c_str());
+					ImGui::LabelText("Input Rate", to_string(verts[i].first.mInputRate).c_str());
+				}
+}
 
 inline Node* node_graph_gui_fn(Node& n) {
 	static Node* selected = nullptr;
@@ -315,6 +329,7 @@ Gui::Gui(Node& node) : mNode(node) {
 	register_inspector_gui_fn<Application>(&inspector_gui_fn);
 	register_inspector_gui_fn<EnvironmentMap>(&inspector_gui_fn);
 	register_inspector_gui_fn<MaterialInfo>(&inspector_gui_fn);
+	register_inspector_gui_fn<Mesh>(&inspector_gui_fn);
 
   enum AssetType {
     eEnvironmentMap,
@@ -354,12 +369,22 @@ Gui::Gui(Node& node) : mNode(node) {
               envMap->mGamma = 2.2f;
 
 							if (pixels.format() == vk::Format::eR32G32B32A32Sfloat) {
-								Buffer::View<float> marginalDistData = make_shared<Buffer>(commandBuffer.mDevice, "marginalDistData", extent.height*2*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-								Buffer::View<float> conditionalDistData = make_shared<Buffer>(commandBuffer.mDevice, "conditionalDistData", extent.width*extent.height*2*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-								EnvironmentMap::build_distributions(
-									span<float>(reinterpret_cast<float*>(pixels.data()), pixels.size()/sizeof(float)), vk::Extent2D(extent.width, extent.height),
-									span(marginalDistData.data(), marginalDistData.size()),
-									span(conditionalDistData.data(), conditionalDistData.size()));
+								string marginalPath = filepath.string() + ".marginal";
+								string conditionalPath = filepath.string() + ".conditional";
+								Buffer::View<float2> marginalDistData = make_shared<Buffer>(commandBuffer.mDevice, "marginalDistData", extent.height*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+								Buffer::View<float2> conditionalDistData = make_shared<Buffer>(commandBuffer.mDevice, "conditionalDistData", extent.width*extent.height*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+								if (fs::exists(marginalPath) && fs::exists(conditionalPath)) { 
+									read_file(marginalPath, marginalDistData);
+									read_file(conditionalPath, conditionalDistData);
+								} else {
+									EnvironmentMap::build_distributions(
+										span<float4>(reinterpret_cast<float4*>(pixels.data()), pixels.size()/sizeof(float4)), vk::Extent2D(extent.width, extent.height),
+										span(marginalDistData.data(), marginalDistData.size()),
+										span(conditionalDistData.data(), conditionalDistData.size()));
+									write_file(marginalPath, marginalDistData);
+									write_file(conditionalPath, conditionalDistData);
+								}
 
 								envMap->mMarginalDistribution = Image::View(
 									make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.height,1,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled), 
@@ -500,16 +525,17 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 				}
 			}
 		}
+		
+		mMesh[VertexArrayObject::AttributeType::ePosition][0].second = vertices.buffer_view();
+		mMesh[VertexArrayObject::AttributeType::eTexcoord][0].second = vertices.buffer_view();
+		mMesh[VertexArrayObject::AttributeType::eColor   ][0].second = vertices.buffer_view();
+		mMesh.indices() = indices.buffer_view();
 
 		Descriptor& imagesDescriptor = mPipeline->descriptor("gImages", 0);
 		if (imagesDescriptor.index() != 0 || !get<Image::View>(imagesDescriptor))
 			create_font_image(commandBuffer);
 
 		mPipeline->transition_images(commandBuffer);
-		mMesh[VertexArrayObject::AttributeType::ePosition][0].second = vertices.buffer_view();
-		mMesh[VertexArrayObject::AttributeType::eTexcoord][0].second = vertices.buffer_view();
-		mMesh[VertexArrayObject::AttributeType::eColor   ][0].second = vertices.buffer_view();
-		mMesh.indices() = indices.buffer_view();
 	}
 }
 void Gui::draw(CommandBuffer& commandBuffer) {

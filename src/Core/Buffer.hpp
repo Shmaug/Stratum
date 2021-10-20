@@ -22,7 +22,7 @@ public:
 	Buffer(const Buffer&) = delete;
 	STRATUM_API Buffer(Buffer&& v);
 	STRATUM_API Buffer(const shared_ptr<Device::MemoryAllocation>& memory, const string& name, vk::BufferUsageFlags usage, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
-	STRATUM_API Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
+	STRATUM_API Buffer(Device& device, const string& name, vk::DeviceSize size, vk::BufferUsageFlags usage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, uint32_t alignment = 0, vk::SharingMode sharingMode = vk::SharingMode::eExclusive);
 	STRATUM_API ~Buffer();
 	
 	inline vk::Buffer& operator*() { return mBuffer; }

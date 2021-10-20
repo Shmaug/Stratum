@@ -37,17 +37,63 @@ stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayInd
 }
 
 void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
-	for (auto& [name, p] : mDescriptors)
+	for (auto& [name, p] : mDescriptors) {
+
+		vk::PipelineStageFlags firstStage = vk::PipelineStageFlagBits::eBottomOfPipe;
+		for (const auto&[stage, spirv] : mShaders) {
+			vk::PipelineStageFlags pipelineStage;
+			switch (stage) {
+				default:
+				case vk::ShaderStageFlagBits::eVertex:
+					pipelineStage = vk::PipelineStageFlagBits::eVertexShader;
+					break;
+				case vk::ShaderStageFlagBits::eGeometry:
+					pipelineStage = vk::PipelineStageFlagBits::eGeometryShader;
+					break;
+				case vk::ShaderStageFlagBits::eTessellationControl:
+					pipelineStage = vk::PipelineStageFlagBits::eTessellationControlShader;
+					break;
+				case vk::ShaderStageFlagBits::eTessellationEvaluation:
+					pipelineStage = vk::PipelineStageFlagBits::eTessellationEvaluationShader;
+					break;
+				case vk::ShaderStageFlagBits::eFragment:
+					pipelineStage = vk::PipelineStageFlagBits::eFragmentShader;
+					break;
+				case vk::ShaderStageFlagBits::eCompute:
+					pipelineStage = vk::PipelineStageFlagBits::eComputeShader;
+					break;
+				case vk::ShaderStageFlagBits::eRaygenKHR:
+				case vk::ShaderStageFlagBits::eAnyHitKHR:
+				case vk::ShaderStageFlagBits::eIntersectionKHR:
+				case vk::ShaderStageFlagBits::eClosestHitKHR:
+				case vk::ShaderStageFlagBits::eMissKHR:
+					pipelineStage = vk::PipelineStageFlagBits::eRayTracingShaderKHR;
+					break;
+				case vk::ShaderStageFlagBits::eTaskNV:
+					pipelineStage = vk::PipelineStageFlagBits::eTaskShaderNV;
+					break;
+				case vk::ShaderStageFlagBits::eMeshNV:
+					pipelineStage = vk::PipelineStageFlagBits::eMeshShaderNV;
+					break;
+			}
+			if (pipelineStage < firstStage && spirv->descriptors().find(name) != spirv->descriptors().end())
+				firstStage = pipelineStage;
+		}
+
 		for (auto& [arrayIndex, d] : p)
 			if (d.index() == 0) {
-				Image::View view = get<Image::View>(d);
-				if (view) view.transition_barrier(commandBuffer, get<vk::ImageLayout>(d));
+				Image::View img = get<Image::View>(d);
+				if (img) img.transition_barrier(commandBuffer, firstStage, get<vk::ImageLayout>(d), guess_access_flags(get<vk::ImageLayout>(d)));
 			}
+	}
 }
 
 void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) {
 	ProfilerRegion ps("PipelineState::bind_descriptor_sets");
 	
+	if (!commandBuffer.bound_framebuffer())
+		transition_images(commandBuffer);		
+
 	const Pipeline& pipeline = *commandBuffer.bound_pipeline();
 
 	vector<shared_ptr<DescriptorSet>> descriptorSets(pipeline.descriptor_set_layouts().size());

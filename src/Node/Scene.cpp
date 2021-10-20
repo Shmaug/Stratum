@@ -22,7 +22,7 @@ TransformData node_to_world(const Node& node) {
 	return transform;
 }
 
-void EnvironmentMap::build_distributions(const span<float>& img, const vk::Extent2D& extent, span<float> marginalDistData, span<float> conditionalDistData) {
+void EnvironmentMap::build_distributions(const span<float4>& img, const vk::Extent2D& extent, span<float2> marginalDistData, span<float2> conditionalDistData) {
 	vector<float> pdf2D(extent.width*extent.height);
 	vector<float> cdf2D(extent.width*extent.height);
 
@@ -34,7 +34,7 @@ void EnvironmentMap::build_distributions(const span<float>& img, const vk::Exten
 	for (uint32_t j = 0; j < extent.height; j++) {
 		float rowWeightSum = 0;
 		for (uint32_t i = 0; i < extent.width; ++i) {
-			float weight = Vector3f::Map(img.data() + (j*extent.width + i) * 4).dot(Vector3f(0.3f, 0.6f, 0.1f));
+			float weight = img[j*extent.width + i].matrix().dot(Vector4f(0.3f, 0.6f, 0.1f, 0));
 			rowWeightSum += weight;
 			pdf2D[j*extent.width + i] = weight;
 			cdf2D[j*extent.width + i] = rowWeightSum;
@@ -68,14 +68,14 @@ void EnvironmentMap::build_distributions(const span<float>& img, const vk::Exten
 
 	for (uint32_t i = 0; i < extent.height; i++) {
 		uint32_t row = LowerBound(cdf1D, 0, extent.height, (float)(i + 1) / extent.height);
-		marginalDistData[2*i  ] = row / (float)extent.height;
-		marginalDistData[2*i+1] = pdf1D[i];
+		marginalDistData[i].x() = row / (float)extent.height;
+		marginalDistData[i].y() = pdf1D[i];
 	}
 	for (uint32_t j = 0; j < extent.height; j++)
 		for (uint32_t i = 0; i < extent.width; i++) {
 			uint32_t col = LowerBound(cdf2D, j*extent.width, (j + 1)*extent.width, (float)(i + 1) / extent.width) - j * extent.width;
-			conditionalDistData[2*(j*extent.width + i)  ] = col / (float)extent.width;
-			conditionalDistData[2*(j*extent.width + i)+1] = pdf2D[j*extent.width + i];
+			conditionalDistData[j*extent.width + i].x() = col / (float)extent.width;
+			conditionalDistData[j*extent.width + i].y() = pdf2D[j*extent.width + i];
 		}
 }
 
@@ -99,15 +99,17 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 	vector<component_ptr<MaterialInfo>> materials(model.materials.size());
 	vector<vector<component_ptr<Mesh>>> meshes(model.meshes.size());
 
+	vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eVertexBuffer|vk::BufferUsageFlagBits::eIndexBuffer|vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc;
+	#ifdef VK_KHR_buffer_device_address
+	bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
+	#endif
 	ranges::transform(model.buffers, buffers.begin(), [&](const tinygltf::Buffer& buffer) {
-		vk::BufferUsageFlags flags = vk::BufferUsageFlagBits::eVertexBuffer|vk::BufferUsageFlagBits::eIndexBuffer|vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc;
-		#ifdef VK_KHR_buffer_device_address
-		flags |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
-		#endif
 		Buffer::View<unsigned char> tmp = make_shared<Buffer>(device, buffer.name+"/Staging", buffer.data.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
 		ranges::copy(buffer.data, tmp.begin());
-		Buffer::View<unsigned char> dst = make_shared<Buffer>(device, buffer.name, buffer.data.size(), flags);
+		Buffer::View<unsigned char> dst = make_shared<Buffer>(device, buffer.name, buffer.data.size(), bufferUsage, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 		commandBuffer.copy_buffer(tmp, dst);
+		commandBuffer.barrier(dst, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eVertexInput, vk::AccessFlagBits::eVertexAttributeRead|vk::AccessFlagBits::eIndexRead);
+		commandBuffer.barrier(dst, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 		return dst.buffer();
 	});
 	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
@@ -188,6 +190,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			const tinygltf::Primitive& prim = model.meshes[i].primitives[j];
 			const auto& indicesAccessor = model.accessors[prim.indices];
 			const auto& indexBufferView = model.bufferViews[indicesAccessor.bufferView];
+			Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType), indexBufferView.byteOffset, indexBufferView.byteLength);
 
 			shared_ptr<VertexArrayObject> vertexData = make_shared<VertexArrayObject>();
 			
@@ -292,9 +295,8 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 					VertexArrayObject::AttributeDescription(accessor.ByteStride(bv), attributeFormat, (uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex),
 					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset, bv.byteLength) };
 			}
-		
-			meshes[i][j] = root.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData,
-				Buffer::StrideView(buffers[indexBufferView.buffer], tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType), indexBufferView.byteOffset, indexBufferView.byteLength), topology);
+
+			meshes[i][j] = root.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
 		}
 	}
 

@@ -41,7 +41,7 @@ struct EnvironmentMap {
 	Image::View mConditionalDistribution;
 	float mGamma;
 
-	STRATUM_API static void build_distributions(const span<float>& cols, const vk::Extent2D& extent, span<float> marginalDistData/*height,1*/, span<float> conditionalDistData /*width,height*/);
+	STRATUM_API static void build_distributions(const span<hlsl::float4>& img, const vk::Extent2D& extent, span<hlsl::float2> marginalDistData/*height,1*/, span<hlsl::float2> conditionalDistData /*width,height*/);
 };
 
 struct MaterialInfo {

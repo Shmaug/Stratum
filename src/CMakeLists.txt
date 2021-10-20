@@ -39,6 +39,10 @@ endif()
 
 file(GLOB_RECURSE STRATUM_SHADERS "**.[gh]lsl")
 stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
+file(GLOB_RECURSE STRATUM_SHADERS "**.frag")
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
+file(GLOB_RECURSE STRATUM_SHADERS "**.vert")
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
 
 # Install rules
 
