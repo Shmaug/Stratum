@@ -52,12 +52,8 @@ float compute_sigma_luminance(float center, int2 ipos) {
 	float sum = center * gaussian_kernel[0][0];
 	for (int yy = -r; yy <= r; yy++)
 		for (int xx = -r; xx <= r; xx++)
-			if (xx != 0 || yy != 0) {
-				int2 p = ipos + int2(xx, yy);
-				float v = gInput2[int3(p, 0)].g;
-				float w = gaussian_kernel[xx + 1][yy + 1];
-				sum += v * w;
-			}
+			if (xx != 0 || yy != 0)
+				sum += gInput2[int3(ipos + int2(xx, yy), 0)].g * gaussian_kernel[xx + 1][yy + 1];
 	return sqrt(max(sum, 0.0));
 }
 
@@ -72,9 +68,11 @@ class TapData {
 	float sum_luminance;
 	float sum_variance;
 	float sum_weight;
+	uint2 resolution;
 
 	void tap(int2 offset, float kernel_weight) {
 		int2 p = ipos + offset; 
+		if (any(p < 0) || any(p >= resolution)) return;
 		
 		float4 color1_p = gInput1[int3(p,0)]; 
 		float4 color2_p = gInput2[int3(p,0)]; 
@@ -82,8 +80,10 @@ class TapData {
 		float l_p       = color2_p.r;
 
 		float w_l = abs(l_p - l_center) / (sigma_l + 1e-10); 
-		float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gStepSize) + 1e-2); 
-		float w = exp(-w_l * w_l - w_z) * kernel_weight; 
+		float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gStepSize * gGradientDownsample) + 1e-2); 
+		float w = exp(-w_l * w_l - w_z) * kernel_weight;
+
+		if (isinf(w) || isnan(w)) w = 0;
 
 		sum_color     += color1_p * w; 
 		sum_luminance += l_p * w;
@@ -183,18 +183,20 @@ void atrous(inout TapData t) {
 [[numthreads(8,8,1)]]
 void main(int2 index : SV_DispatchThreadId) {
 	TapData t;
+	gOutput1.GetDimensions(t.resolution.x, t.resolution.y);
+	if (any(index.xy >= t.resolution)) return;
 	t.ipos = index.xy;
-	t.color_center1  = gInput1[index];
-	t.color_center2  = gInput2[index];
-	t.z_center       = t.color_center2.ba;
-	t.l_center       = t.color_center2.r;
-	t.sigma_l        = compute_sigma_luminance(t.color_center2.g, t.ipos) * 3.0;
-	t.sum_color      = t.color_center1;
-	t.sum_luminance  = t.color_center2.r;
-	t.sum_variance   = t.color_center2.g;
-	t.sum_weight     = 1;
+	t.color_center1 = gInput1[index];
+	t.color_center2 = gInput2[index];
+	t.z_center      = t.color_center2.ba;
+	t.l_center      = t.color_center2.r;
+	t.sigma_l       = compute_sigma_luminance(t.color_center2.g, t.ipos) * 3.0;
+	t.sum_color     = t.color_center1;
+	t.sum_luminance = t.color_center2.r;
+	t.sum_variance  = t.color_center2.g;
+	t.sum_weight    = 1;
 	
-	if (t.z_center.x > 0) { /* only filter foreground pixels */
+	if (!isinf(t.z_center.x)) { /* only filter foreground pixels */
 		if (gFilterKernelType == 0)
 			atrous(t);
 		else if (gFilterKernelType == 1)

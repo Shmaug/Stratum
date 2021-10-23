@@ -130,24 +130,30 @@ float sample_shadow(LightData light, float3 posLight) {
 
 float4 fs(v2f i) : SV_Target0 {
 	MaterialData material = gMaterials[gMaterialIndex];
-	ImageIndices inds = unpack_image_indices(material.mImageIndices);
+	ImageIndices inds;
+	inds.v = material.mImageIndices;
 	float4 baseColor = float4(material.mAlbedo, 1 - material.mTransmission);
 	float2 metallicRoughness = float2(material.mMetallic, material.mRoughness);
 	float3 emission = material.mEmission;
 	
-	if (inds.mAlbedo < gImageCount) baseColor *= gImages[inds.mAlbedo].Sample(gSampler, i.texcoord);
+	uint ti = inds.albedo();
+	if (ti < gImageCount) baseColor *= gImages[ti].Sample(gSampler, i.texcoord);
 	
 	if (gAlphaClip >= 0 && baseColor.a < gAlphaClip) discard;
 	
-	if (inds.mMetallic < gImageCount)  metallicRoughness.x = saturate(metallicRoughness.x*gImages[inds.mMetallic ].Sample(gSampler, i.texcoord)[inds.mMetallicChannel ]);
-	if (inds.mRoughness < gImageCount) metallicRoughness.y = saturate(metallicRoughness.y*gImages[inds.mRoughness].Sample(gSampler, i.texcoord)[inds.mRoughnessChannel]);
-	if (inds.mEmission < gImageCount)  emission *= gImages[inds.mEmission].Sample(gSampler, i.texcoord).rgb;
+	ti = inds.metallic();
+	if (ti < gImageCount)  metallicRoughness.x = saturate(metallicRoughness.x*gImages[ti].Sample(gSampler, i.texcoord)[inds.metallic_channel()]);
+	ti = inds.roughness();
+	if (ti < gImageCount) metallicRoughness.y = saturate(metallicRoughness.y*gImages[ti].Sample(gSampler, i.texcoord)[inds.roughness_channel()]);
+	ti = inds.emission();
+	if (ti < gImageCount)  emission *= gImages[ti].Sample(gSampler, i.texcoord).rgb;
 
 	BSDF bsdf = make_bsdf(baseColor.rgb, metallicRoughness.x, metallicRoughness.y, emission);
 
 	float3 normal = i.normal.xyz;
-	if (inds.mNormal < gImageCount) {
-		float3 bump = gImages[inds.mNormal].Sample(gSampler, i.texcoord).xyz*2 - 1;
+	ti = inds.normal();
+	if (ti < gImageCount) {
+		float3 bump = gImages[ti].Sample(gSampler, i.texcoord).xyz*2 - 1;
 		bump.xy *= material.mNormalScale;
 		normal = bump.x*i.tangent.xyz + bump.y*float3(i.normal.w, i.tangent.w, i.posCamera.w) + bump.z*i.normal.xyz;
 	}
@@ -170,8 +176,8 @@ float4 fs(v2f i) : SV_Target0 {
 	}
 	
 	float occlusion = 1;
-	if (inds.mOcclusion < gImageCount)
-		occlusion = lerp(1, gImages[inds.mOcclusion].Sample(gSampler, i.texcoord)[inds.mOcclusionChannel].r, material.mOcclusionScale);
+	ti = inds.occlusion();
+	if (ti < gImageCount) occlusion = lerp(1, gImages[ti].Sample(gSampler, i.texcoord)[inds.occlusion_channel()].r, material.mOcclusionScale);
 	
 	return float4(eval, baseColor.a);
 }

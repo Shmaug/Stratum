@@ -29,53 +29,49 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
-RWTexture2D<float4> gOutput1;
-RWTexture2D<float4> gOutput2;
-Texture2D<float4> gSamples;
-Texture2D<uint> gGradientSamples;
-Texture2D<float2> gZ;
-Texture2D<float4> gNormalId;
-Texture2D<float4> gPrevSamples;
+[[vk::binding(0)]] RWTexture2D<float4> gOutput1;
+[[vk::binding(1)]] RWTexture2D<float4> gOutput2;
+[[vk::binding(2)]] Texture2D<float4> gRadiance;
+[[vk::binding(6)]] Texture2D<float4> gPrevRadiance;
+[[vk::binding(7)]] Texture2D<float4> gAlbedo;
+[[vk::binding(8)]] Texture2D<float4> gPrevAlbedo;
+[[vk::binding(9)]] Texture2D<uint> gGradientSamples;
+[[vk::binding(10)]] Texture2D<float4> gZ;
+[[vk::binding(11)]] Texture2D<uint4> gVisibility;
 
 [[numthreads(8,8,1)]]
 void main(uint3 index : SV_DispatchThreadId) {
 	uint2 resolution;
 	gOutput1.GetDimensions(resolution.x, resolution.y);
-	if (any(index.xy > resolution)) return;
+	if (any(index.xy >= resolution)) return;
 
-	float4 frag_color1 = 0;
 	uint u = gGradientSamples[index];
-	int2 tile_pos = int2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
-	int2 ipos = index.xy + tile_pos;
-	float l_curr = luminance(gSamples[int3(ipos,0)].rgb);
+	uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
+	uint2 ipos = index.xy*gGradientDownsample + tile_pos;
+	float l_curr = luminance(gRadiance[ipos].rgb);
 	if (u >= (1u << 31)) {
 		uint idx_prev = (u >> (2 * TILE_OFFSET_SHIFT)) & ((1 << (31 - 2 * TILE_OFFSET_SHIFT)) - 1);
-		uint w,h;
-		gSamples.GetDimensions(w,h);
-		int2 ipos_prev = int2(idx_prev % w, idx_prev / w);
-		float l_prev = luminance(gPrevSamples[ipos_prev].rgb);
+		uint2 ipos_prev = int2(idx_prev % resolution.x, idx_prev / resolution.x);
+		float l_prev = luminance(gPrevRadiance[ipos_prev].rgb);
+		if (isinf(l_prev) || isnan(l_prev)) l_prev = 0;
 		gOutput1[index] = float4(max(l_curr, l_prev), l_curr - l_prev, 1, 0);
 	} else 
 		gOutput1[index] = 0;
 
-	float2 moments = float2(l_curr, l_curr * l_curr);
+	float2 moments = float2(l_curr, l_curr*l_curr);
 	float sum_w = 1.0;
-	uint mesh_id  = asuint(gNormalId[ipos].w);
-	for (int yy = 0; yy < 1; yy++) {
-		for (int xx = 0; xx < 1; xx++) {
-			int2 p = index.xy + int2(xx, yy);
-			if (any(ipos != p)) {
-				float3 rgb = gSamples[int3(p,0)].rgb;
-				uint mesh_id_p = asuint(gNormalId[int3(p,0)].w);
-				float l = luminance(rgb);
-				float w = mesh_id_p == mesh_id ? 1 : 0;
-				moments += float2(l, l * l) * w;
-				sum_w += w;
-			}
+	uint mesh_id = gVisibility[ipos].x;
+	for (int yy = 0; yy < gGradientDownsample; yy++) {
+		for (int xx = 0; xx < gGradientDownsample; xx++) {
+			int2 p = index.xy*gGradientDownsample + int2(xx, yy);
+			if (all(ipos == p)) continue;
+			if (gVisibility[int3(p,0)].x != mesh_id) continue;
+			float l = luminance(gRadiance[p].rgb);
+			if (isinf(l) || isnan(l)) l = 0;
+			moments += float2(l, l*l);
+			sum_w++;
 		}
 	}
 	moments /= sum_w;
-	float variance = max(0.0, moments[1] - moments[0] * moments[0]);
-	float2 z_curr = gZ[ipos];
-	gOutput2[index] = float4(moments[0], variance, z_curr);
+	gOutput2[index] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), gZ[ipos].xy);
 }

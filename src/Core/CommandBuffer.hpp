@@ -89,6 +89,16 @@ public:
 		return Buffer::View<T>(dst);
 	}
 
+	inline const Image::View& clear_color_image(const Image::View& img, const vk::ClearColorValue& clear) {
+		img.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.clearColorImage(*hold_resource(img.image()), vk::ImageLayout::eTransferDstOptimal, clear, img.subresource_range());
+		return img;
+	}
+	inline const Image::View& clear_color_image(const Image::View& img, const vk::ClearDepthStencilValue& clear) {
+		img.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.clearDepthStencilImage(*hold_resource(img.image()), vk::ImageLayout::eTransferDstOptimal, clear, img.subresource_range());
+		return img;
+	}
 	inline const Image::View& blit_image(const Image::View& src, const Image::View& dst, vk::Filter filter = vk::Filter::eLinear) {
 		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
 		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);

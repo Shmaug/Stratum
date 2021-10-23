@@ -17,7 +17,7 @@ constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
 template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
 constexpr const T& get(const stm::Descriptor& d) { return get<T>(get<0>(d)); }
 
-inline Descriptor image_descriptor(const Image::View& image, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler) {
+inline Descriptor image_descriptor(const Image::View& image, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler = nullptr) {
 	return variant_alternative_t<0,Descriptor>{image, layout, sampler};
 }
 inline Descriptor sampler_descriptor(const shared_ptr<Sampler>& sampler) {

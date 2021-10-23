@@ -25,6 +25,10 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#define gGradientDownsample 2
+
+#ifndef __cplusplus
+
 float luminance(in float3 color) {
 	return dot(color, float3(0.299, 0.587, 0.114));
 }
@@ -59,11 +63,11 @@ bool test_reprojected_depth(float z1, float z2, float dz) {
 #define TILE_OFFSET_SHIFT 3u
 #define TILE_OFFSET_MASK ((1u << TILE_OFFSET_SHIFT) - 1u)
 
-int2 get_gradient_tile_pos(uint idx, int gradientDownsample) {
+int2 get_gradient_tile_pos(uint idx) {
 	/* didn't store a gradient sample in the previous frame, this creates
 	   a new sample in the center of the tile */
-	if(idx < (1u<<31))
-		return gradientDownsample / 2;
+	if (idx < (1u<<31))
+		return gGradientDownsample / 2;
 
 	return int2((idx & TILE_OFFSET_MASK), (idx >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
 }
@@ -72,11 +76,12 @@ uint get_gradient_idx_from_tile_pos(int2 pos) {
 	return (1 << 31) | (pos.x) | (pos.y << TILE_OFFSET_SHIFT);
 }
 
-bool is_gradient_sample(Texture2D<float> tex_gradient, int2 ipos, int gradientDownsample) {
-	int2 ipos_grad = ipos / gradientDownsample;
+bool is_gradient_sample(Texture2D<float> tex_gradient, int2 ipos) {
+	int2 ipos_grad = ipos / gGradientDownsample;
 	uint u = tex_gradient.Load(int3(ipos_grad,0)).r;
 
 	int2 tile_pos = int2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
-	return u >= (1u << 31) && all(ipos == ipos_grad * gradientDownsample + tile_pos);
+	return u >= (1u << 31) && all(ipos == ipos_grad * gGradientDownsample + tile_pos);
  }
 
+#endif

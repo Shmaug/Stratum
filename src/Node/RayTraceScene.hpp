@@ -28,20 +28,6 @@ private:
 
 class RayTraceScene {
 public:
-	struct RTData {
-		hlsl::TransformData mCameraToWorld;
-		hlsl::ProjectionData mProjection;
-		Image::View mSamples;
-		Image::View mNormalId;
-		Image::View mZ;
-		Image::View mPrevUV;
-		Image::View mAlbedo;
-
-		Image::View mAccumColor;
-		Image::View mAccumMoments;
-		Image::View mAccumLength;
-	};
-
 	STRATUM_API RayTraceScene(Node& node);
 
 	inline Node& node() const { return mNode; }
@@ -50,8 +36,8 @@ public:
 	
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer) const;
-	STRATUM_API void denoise(CommandBuffer& commandBuffer, const RTData& cur, const RTData& prev, const Image::View& prevUV, const Image::View& colorBuffer) const;
+	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer);
+	STRATUM_API void a_svgf(CommandBuffer& commandBuffer, const Image::View& colorBuffer);
 
 private:
 	struct BLAS {
@@ -70,19 +56,47 @@ private:
 	unordered_map<MeshPrimitive*, hlsl::TransformData> mTransformHistory;
 
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
-	component_ptr<ComputePipelineState> mTracePipeline;
+	component_ptr<ComputePipelineState> mTracePrimaryRaysPipeline;
+	component_ptr<ComputePipelineState> mTraceIndirectRaysPipeline;
+	component_ptr<ComputePipelineState> mTonemapPipeline;
 
-	component_ptr<ComputePipelineState> mReprojectPipeline;
-	
+	component_ptr<ComputePipelineState> mGradientForwardProjectPipeline;
 	component_ptr<ComputePipelineState> mTemporalAccumulationPipeline;
 	component_ptr<ComputePipelineState> mEstimateVariancePipeline;
 	component_ptr<ComputePipelineState> mAtrousPipeline;
 	component_ptr<ComputePipelineState> mCreateGradientSamplesPipeline;
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 
-	bool     mNaiveAccumulation = true;
-	bool     mModulateAlbedo = true;
-	uint32_t mNumIterations  = 5;
+	bool mDenoise = false;
+	uint32_t mNumIterations = 5;
+	uint32_t mDiffAtrousIterations = 5;
+	uint32_t mHistoryTap = 0;
+
+	struct FrameData {
+		hlsl::TransformData mCameraToWorld;
+		hlsl::ProjectionData mProjection;
+
+		Image::View mVisibility;
+		
+		Image::View mRNGSeed;
+		Image::View mGradientPositions;
+		
+		Image::View mRadiance;
+		Image::View mAlbedo;
+		Image::View mNormal;
+		Image::View mZ;
+		
+		Image::View mAccumColor;
+		Image::View mAccumMoments;
+		Image::View mAccumLength;
+	};
+
+	FrameData mCurFrame, mPrevFrame;
+
+	Image::View mPrevUV;
+	Image::View mPing, mPong;
+	array<Image::View, 2> mDiffPing, mDiffPong;
+	Image::View mColorHistory, mColorHistoryUnfiltered;
 };
 
 }

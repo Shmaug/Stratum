@@ -122,7 +122,7 @@ void Application::loop() {
         commandBuffer->resolve_image(colorBuffer, swapchainImage);
       swapchainImage.transition_barrier(*commandBuffer, vk::ImageLayout::ePresentSrcKHR);
 
-      pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> waits(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
+      pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> waits(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eAllCommands);
       auto semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");
       commandBuffer->mDevice.submit(commandBuffer, waits, semaphore);
       mWindow.present(**semaphore);

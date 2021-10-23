@@ -19,6 +19,32 @@ struct LightData {
 	ProjectionData mShadowProjection;
 };
 
+class ImageIndices {
+#ifdef __cplusplus
+public:
+#endif
+	uint4 v;
+
+	inline uint albedo() 						{ return (v[0] >> 0 ) & 0xFF; }
+	inline uint normal() 						{ return (v[0] >> 8 ) & 0xFF; }
+	inline uint emission() 					{ return (v[0] >> 16) & 0xFF; }
+	inline uint metallic() 					{ return (v[0] >> 24) & 0xFF; }
+	inline uint roughness() 				{ return (v[1] >> 0 ) & 0xFF; }
+	inline uint occlusion() 				{ return (v[1] >> 16) & 0xFF; }
+	inline uint metallic_channel() 	{ return v[0] >> 30; }
+	inline uint roughness_channel() { return v[1] >> 30; }
+	inline uint occlusion_channel() { return v[2] >> 30; }
+	
+	inline void albedo(uint i) 						{ v[0] |= (i&0xFF) << 0 ; }
+	inline void normal(uint i) 						{ v[0] |= (i&0xFF) << 8 ; }
+	inline void emission(uint i) 					{ v[0] |= (i&0xFF) << 16; }
+	inline void metallic(uint i) 					{ v[0] |= (i&0xFF) << 24; }
+	inline void roughness(uint i) 				{ v[1] |= (i&0xFF) << 0 ; }
+	inline void occlusion(uint i) 				{ v[1] |= (i&0xFF) << 16; }
+	inline void metallic_channel(uint i) 	{ v[0] |= i << 30; }
+	inline void roughness_channel(uint i) { v[1] |= i << 30; }
+	inline void occlusion_channel(uint i) { v[2] |= i << 30; }
+};
 struct MaterialData {
   float3 mAlbedo;
   float mRoughness;
@@ -29,45 +55,8 @@ struct MaterialData {
 	float mOcclusionScale; // lerp(color, color * <sampled occlusion image value>, <occlusion strength>)
 	float mIndexOfRefraction;
 	float mTransmission;
-	uint mImageIndices;
+	float pad;
+	uint4 mImageIndices;
 };
-struct ImageIndices {
-	uint mAlbedo;
-	uint mNormal;
-	uint mEmission;
-	uint mMetallic;
-	uint mRoughness;
-	uint mOcclusion;
-	uint mMetallicChannel; 
-	uint mRoughnessChannel; 
-	uint mOcclusionChannel; 
-};
-
-inline uint pack_image_indices(ImageIndices v) {
-	uint r = 0;
-	r |= (v.mAlbedo   &0xF) << 0;
-	r |= (v.mNormal   &0xF) << 4;
-	r |= (v.mEmission &0xF) << 8;
-	r |= (v.mMetallic &0xF) << 12;
-	r |= (v.mRoughness&0xF) << 16;
-	r |= (v.mOcclusion&0xF) << 20;
-	r |= (v.mMetallicChannel &0x3) << 24;
-	r |= (v.mRoughnessChannel&0x3) << 26;
-	r |= (v.mOcclusionChannel&0x3) << 28;
-	return r;
-}
-inline ImageIndices unpack_image_indices(uint v) {
-	ImageIndices r;
-	r.mAlbedo           = (v >>  0) & 0xF;
-	r.mNormal           = (v >>  4) & 0xF;
-	r.mEmission         = (v >>  8) & 0xF;
-	r.mMetallic         = (v >> 12) & 0xF;
-	r.mRoughness        = (v >> 16) & 0xF;
-	r.mOcclusion        = (v >> 20) & 0xF;
-	r.mMetallicChannel  = (v >> 24) & 0x3;
-	r.mRoughnessChannel = (v >> 26) & 0x3;
-	r.mOcclusionChannel = (v >> 28) & 0x3;
-	return r;
-}
 
 #endif

@@ -30,13 +30,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "svgf_shared.hlsli"
 
 [[vk::constant_id(0)]] const uint gFilterKernelType = 1;
-[[vk::constant_id(1)]] const bool gModulateAlbedo = true;
-
+ 
 [[vk::binding(0)]] RWTexture2D<float4> gOutput;
 [[vk::binding(1)]] Texture2D<float4> gInput;
 [[vk::binding(2)]] Texture2D<float4> gAlbedo;
-[[vk::binding(3)]] Texture2D<float4> gNormalId;
-[[vk::binding(4)]] Texture2D<float2> gZ;
+[[vk::binding(3)]] Texture2D<float4> gNormal;
+[[vk::binding(4)]] Texture2D<float4> gZ;
 
 [[vk::push_constant]] cbuffer {
 	uint gIteration;
@@ -80,7 +79,7 @@ class TapData {
 		if (any(p < 0) || any(p >= resolution)) return;
 
 		float4 color_p  = gInput[p];
-		float3 normal_p = gNormalId[p].xyz;
+		float3 normal_p = gNormal[p].xyz;
 		float z_p       = gZ[p].x;
 		float l_p       = luminance(color_p.rgb);
 
@@ -88,7 +87,8 @@ class TapData {
 		float w_z = 3.0 * abs(z_p - z_center.x) / (z_center.y * length(float2(offset) * gStepSize) + 1e-2);
 		float w_n = pow(max(0, dot(normal_p, center_normal)), 128.0); 
 
-		float w = exp(-w_l * w_l - w_z) * kernel_weight * w_n; 
+		float w = exp(-w_l * w_l - w_z) * kernel_weight * w_n;
+		if (isinf(w) || isnan(w)) w = 0;
 
 		sum_color    += color_p.rgb * w; 
 		sum_variance += w * w * color_p.a; 
@@ -192,8 +192,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (any(index.xy >= t.resolution)) return;
 	t.index = index.xy;
 	t.center_color = gInput[index];
-	t.center_normal = gNormalId[index].xyz;
-	t.z_center = gZ[index];
+	t.center_normal = gNormal[index].xyz;
+	t.z_center = gZ[index].xy;
 	t.l_center = luminance(t.center_color.rgb);
 	t.sigma_l  = compute_sigma_luminance(t.center_color.a, t.index) * 3.0;
 	t.sum_color    = t.center_color.rgb;
@@ -225,7 +225,5 @@ void main(uint3 index : SV_DispatchThreadId) {
 	t.sum_color    /= t.sum_weight;
 	t.sum_variance /= t.sum_weight * t.sum_weight;
 
-	if (gModulateAlbedo)
-		t.sum_color *= gAlbedo[index].rgb;
 	gOutput[index] = float4(t.sum_color, t.sum_variance);
 }
