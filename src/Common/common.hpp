@@ -82,9 +82,12 @@ template<typename T, int M, int N>
 inline ArrayType<T,M,N> saturate(const ArrayType<T,M,N>& v) { return v.max(ArrayType<T,M,N>::Zero()).min(ArrayType<T,M,N>::Ones()); }
 
 template<typename T, int M, int N> inline T dot(const ArrayType<T,M,N>& a, const ArrayType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int M, int N> inline T length(const ArrayType<T,M,N>& a) { return a.norm(); }
+template<typename T, int M, int N> inline T length(const ArrayType<T,M,N>& a) { return a.matrix().norm(); }
 template<typename T, int M, int N> inline ArrayType<T,M,N> normalize(const ArrayType<T,M,N>& a) { return a.matrix().normalized(); }
 template<typename T> inline ArrayType<T,3> cross(const ArrayType<T,3>& a, const ArrayType<T,3>& b) { return a.matrix().cross(b.matrix()); }
+
+inline float asfloat(uint32_t v) { return *reinterpret_cast<float*>(&v); }
+inline uint32_t asuint(float v) { return *reinterpret_cast<uint32_t*>(&v); }
 
 }
 

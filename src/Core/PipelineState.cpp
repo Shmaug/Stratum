@@ -83,7 +83,7 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 		for (auto& [arrayIndex, d] : p)
 			if (d.index() == 0) {
 				Image::View img = get<Image::View>(d);
-				if (img) img.transition_barrier(commandBuffer, firstStage, get<vk::ImageLayout>(d), guess_access_flags(get<vk::ImageLayout>(d)));
+				if (img) img.transition_barrier(commandBuffer, firstStage, get<vk::ImageLayout>(d), get<vk::AccessFlags>(d));
 			}
 	}
 }

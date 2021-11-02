@@ -16,7 +16,7 @@ public:
 	AccelerationStructure() = delete;
 	AccelerationStructure(const AccelerationStructure&) = delete;
 	AccelerationStructure(AccelerationStructure&&) = delete;
-	STRATUM_API AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::AccelerationStructureGeometryKHR& geometry,  const vk::AccelerationStructureBuildRangeInfoKHR& buildRange);
+	STRATUM_API AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureGeometryKHR>& geometries, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges);
 	STRATUM_API ~AccelerationStructure();
 	inline const Buffer::View<byte>& buffer() const { return mBuffer; }
 	inline const vk::AccelerationStructureKHR* operator->() const { return &mAccelerationStructure; }
@@ -40,7 +40,7 @@ public:
 	STRATUM_API void a_svgf(CommandBuffer& commandBuffer, const Image::View& colorBuffer);
 
 private:
-	struct BLAS {
+	struct MeshAS {
 		shared_ptr<AccelerationStructure> mAccelerationStructure;
 		uint32_t mVertexCount;
 		VertexArrayObject::Attribute mPositions;
@@ -52,8 +52,9 @@ private:
 
 	Node& mNode;
 	shared_ptr<AccelerationStructure> mTopLevel;
-	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, BLAS> mAccelerationStructures;
-	unordered_map<MeshPrimitive*, hlsl::TransformData> mTransformHistory;
+	shared_ptr<AccelerationStructure> mUnitCubeAS;
+	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, MeshAS> mMeshAccelerationStructures;
+	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	component_ptr<ComputePipelineState> mTracePrimaryRaysPipeline;
@@ -68,6 +69,7 @@ private:
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 
 	bool mDenoise = false;
+	bool mRandomPerFrame = true;
 	uint32_t mNumIterations = 5;
 	uint32_t mDiffAtrousIterations = 5;
 	uint32_t mHistoryTap = 0;
@@ -79,7 +81,6 @@ private:
 		Image::View mVisibility;
 		
 		Image::View mRNGSeed;
-		Image::View mGradientPositions;
 		
 		Image::View mRadiance;
 		Image::View mAlbedo;
@@ -91,9 +92,11 @@ private:
 		Image::View mAccumLength;
 	};
 
-	FrameData mCurFrame, mPrevFrame;
+	unique_ptr<FrameData> mCurFrame, mPrevFrame;
 
 	Image::View mPrevUV;
+	Image::View mAntilagAlpha;
+	Image::View mGradientPositions;
 	Image::View mPing, mPong;
 	array<Image::View, 2> mDiffPing, mDiffPong;
 	Image::View mColorHistory, mColorHistoryUnfiltered;

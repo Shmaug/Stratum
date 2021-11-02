@@ -33,6 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 StructuredBuffer<VertexData> gVertices;
 ByteAddressBuffer gIndices;
 StructuredBuffer<InstanceData> gInstances;
+StructuredBuffer<uint> gInstanceIndexMap;
 
 RWTexture2D<uint4> gVisibility;
 Texture2D<uint4> gPrevVisibility;
@@ -42,11 +43,11 @@ RWTexture2D<float4> gZ;
 Texture2D<float4> gPrevZ;
 RWTexture2D<uint4> gRNGSeed;
 Texture2D<uint4> gPrevRNGSeed;
-RWTexture2D<float3> gPrevPos;
+RWTexture2D<float2> gPrevUV;
 RWTexture2D<uint> gGradientSamples;
 
 [[vk::push_constant]] const struct {
-	TransformData gCameraToWorld;
+	TransformData gWorldToCamera;
 	ProjectionData gProjection;
 	uint2 gResolution;
 	uint gFrameNumber;
@@ -57,7 +58,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint2 resolution;
 	gVisibility.GetDimensions(resolution.x, resolution.y);
 
-	uint2 idx_prev;
+	uint2 idx_prev = index.xy*gGradientDownsample;
 	{
 		uint2 arg = uint2(index.x + index.y*resolution.x, gPushConstants.gFrameNumber);
 		uint sum = 0;
@@ -67,33 +68,40 @@ void main(uint3 index : SV_DispatchThreadId) {
 			arg.x += ((arg.y << 4) + 0xa341316c) ^ (arg.y + sum) ^ ((arg.y >> 5) + 0xc8013ea4);
 			arg.y += ((arg.x << 4) + 0xad90777d) ^ (arg.x + sum) ^ ((arg.x >> 5) + 0x7e95761e);
 		}
-		arg %= gGradientDownsample;
-		idx_prev = index.xy*gGradientDownsample + arg;
+		idx_prev += arg%gGradientDownsample;
 	}
 
 	if (any(idx_prev >= resolution)) return;
 
-	uint res;
-
 	uint4 vis = gPrevVisibility[idx_prev];
-	float4 pos_cs_curr = project_point(gPushConstants.gProjection, transform_point(inverse(gPushConstants.gCameraToWorld), surface_attributes(gInstances[vis.x], gVertices, gIndices, vis.y, asfloat(vis.zw)).v.mPositionU.xyz));
+	if (vis.x == -1) return;
+	vis.x = gInstanceIndexMap[vis.x];
+	if (vis.x == -1) return;
+
+	SurfaceData sfc = surface_attributes(gInstances[vis.x], gVertices, gIndices, vis.y, asfloat(vis.zw));
+	float3 worldPos = sfc.v.mPositionU.xyz;
+	float4 pos_cs_curr = project_point(gPushConstants.gProjection, transform_point(gPushConstants.gWorldToCamera, worldPos));
 	pos_cs_curr.y = -pos_cs_curr.y;
-	int2 idx_curr = int2(((pos_cs_curr.xy/pos_cs_curr.w)*.5 + .5) * resolution);
+	float2 uv = (pos_cs_curr.xy/pos_cs_curr.w)*.5 + .5;
+	int2 idx_curr = int2(uv * resolution);
 	if (!test_inside_screen(idx_curr, resolution)) return;
 
-	float4 z_curr = gZ[idx_curr];
-	if (!test_reprojected_depth(z_curr.z, gPrevZ[idx_prev].x, z_curr.y)) return;
-	if (!test_reprojected_normal(gNormal[idx_curr].xyz, gPrevNormal[idx_prev].xyz)) return;
+	float3 z_curr = gZ[idx_curr].xyz;
+	float3 n_curr = gNormal[idx_curr].xyz;
+	if (z_curr.y == M_PI && !test_reprojected_depth(z_curr.z, gPrevZ[idx_prev].x, z_curr.y)) return;
+	if (z_curr.y == M_PI && !test_reprojected_normal(n_curr, gPrevNormal[idx_prev].xyz)) return;
 
-	uint2 tile_pos_curr = idx_curr/gGradientDownsample;
+	uint2 tile_pos_curr = idx_curr / gGradientDownsample;
 	uint gradient_idx_curr = get_gradient_idx_from_tile_pos(idx_curr % gGradientDownsample);
 
 	// encode position in previous frame
 	gradient_idx_curr |= (idx_prev.x + idx_prev.y * resolution.x) << (2 * TILE_OFFSET_SHIFT);
 
+	uint res;
 	InterlockedCompareExchange(gGradientSamples[tile_pos_curr], 0u, gradient_idx_curr, res);
 	if (res == 0) {
-		gVisibility[idx_curr] = gPrevVisibility[idx_curr];
+		gVisibility[idx_curr] = vis;
 		gRNGSeed[idx_curr] = gPrevRNGSeed[idx_prev];
+		gPrevUV[idx_curr] = (idx_prev + 0.5) / float2(resolution);
 	}
 }

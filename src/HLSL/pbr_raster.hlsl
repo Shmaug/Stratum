@@ -105,8 +105,11 @@ float4 light_attenuation(LightData light, TransformData lightToCamera, float3 po
 		float inv_len2 = 1/dot(posLight,posLight);
 		dir = normalize(lightToCamera.mTranslation - posCamera);
 		atten = inv_len2;
-		if (light.mType & LIGHT_TYPE_SPOT)
-			atten *= smoothstep(light.mCosOuterAngle, light.mCosInnerAngle, (zdir*posLight.z)*inv_len2);
+		if (light.mType & LIGHT_TYPE_SPOT) {
+			PackedLightData p;
+			p.v = light.mPackedData;
+			atten *= smoothstep(p.cos_outer_angle(), p.cos_inner_angle(), (zdir*posLight.z)*inv_len2);
+		}
 	}
 	return float4(dir, atten);
 }
@@ -115,17 +118,18 @@ float sample_shadow(LightData light, float3 posLight) {
 	float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, posLight));
 	shadowCoord.y = -shadowCoord.y;
 	float3 ac = abs(shadowCoord);
-	if (all(ac.xy <= 1)) {
-		uint shadowIndex = light.mShadowIndex;
-		if (light.mType == LIGHT_TYPE_POINT) {
-			float m = max3(ac);
-			if (m == ac.x) shadowIndex += (ac.x < 0) ? 1 : 0;
-			if (m == ac.y) shadowIndex += (ac.y < 0) ? 3 : 2;
-			if (m == ac.z) shadowIndex += (ac.z < 0) ? 5 : 4;
-		}
-		return gShadowMaps.SampleCmp(gShadowSampler, float3(saturate(shadowCoord.xy*.5 + .5), shadowIndex), shadowCoord.z + light.mShadowBias);
-	} else
-		return 1;
+	if (any(ac.xy < 0) || any(ac.xy > 1)) return 1;
+	PackedLightData p;
+	p.v = light.mPackedData;
+	uint shadowIndex = p.shadow_index();
+	if (shadowIndex == -1) return 1;
+	if (light.mType == LIGHT_TYPE_POINT) {
+		float m = max3(ac);
+		if (m == ac.x) shadowIndex += (ac.x < 0) ? 1 : 0;
+		if (m == ac.y) shadowIndex += (ac.y < 0) ? 3 : 2;
+		if (m == ac.z) shadowIndex += (ac.z < 0) ? 5 : 4;
+	}
+	return gShadowMaps.SampleCmp(gShadowSampler, float3(saturate(shadowCoord.xy*.5 + .5), shadowIndex), shadowCoord.z + p.shadow_bias());
 }
 
 float4 fs(v2f i) : SV_Target0 {
@@ -168,9 +172,7 @@ float4 fs(v2f i) : SV_Target0 {
 		float3 posLight = transform_point(inverse(lightToCamera), i.posCamera);
 		float4 Li = light_attenuation(light, lightToCamera, i.posCamera.xyz, posLight);
 		if (Li.w > 0) {
-			if (Li.w > 0 && light.mShadowIndex != -1)
-				Li.w *= sample_shadow(light, posLight);
-
+			Li.w *= sample_shadow(light, posLight);
 			eval += gLights[l].mEmission * Li.w * bsdf.shade_point(Li.xyz, view, normal);
 		}
 	}

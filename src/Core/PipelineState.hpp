@@ -27,7 +27,7 @@ public:
 	inline uint32_t& specialization_constant(const string& name) {
 		auto it = mSpecializationConstants.find(name);
 		if (it != mSpecializationConstants.end())
-			return it->second;
+			return it->second;//mSpecializationConstants[name];
 		for (const auto& [stage, shader] : mShaders)
 			if (auto it2 = shader->specialization_constants().find(name); it2 != shader->specialization_constants().end())
 				return mSpecializationConstants.emplace(name, it2->second.second).first->second; // default value

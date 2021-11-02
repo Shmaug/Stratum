@@ -1,5 +1,6 @@
 #include "RasterScene.hpp"
 #include "Application.hpp"
+#include "Gui.hpp"
 
 #define TINYGLTF_USE_CPP14
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -10,6 +11,145 @@ using namespace stm;
 using namespace stm::hlsl;
 
 namespace stm {
+
+static hlsl::float3 gAnimateTranslate = float3::Zero();
+static hlsl::float3 gAnimateRotate = float3::Zero();
+static hlsl::TransformData* gAnimatedTransform = nullptr;
+STRATUM_API void animate(CommandBuffer& commandBuffer, float deltaTime) {
+	if (gAnimatedTransform) {
+		gAnimatedTransform->mTranslation += rotate_vector(gAnimatedTransform->mRotation, gAnimateTranslate);
+		float r = length(gAnimateRotate);
+		if (r > 0)
+			gAnimatedTransform->mRotation = normalize(qmul(gAnimatedTransform->mRotation, angle_axis(r, gAnimateRotate/r)));
+	}
+}
+
+inline void inspector_gui_fn(Camera* cam) {
+	bool orthographic = cam->mProjectionMode == Camera::ProjectionMode::eOrthographic;
+  if (ImGui::Checkbox("Orthographic", &orthographic))
+		cam->mProjectionMode = orthographic ? Camera::ProjectionMode::eOrthographic : Camera::ProjectionMode::ePerspective;
+  ImGui::DragFloat("Near Plane", &cam->mNear, 0.01f, -1, 1);
+  ImGui::DragFloat("Far Plane", &cam->mFar, 0.1f, -1024, 1024);
+  if (orthographic)
+    ImGui::DragFloat("Vertical Size", &cam->mOrthographicHeight, .01f);
+  else
+    ImGui::DragFloat("Vertical FoV", &cam->mVerticalFoV, .01f, 0.00390625, numbers::pi_v<float>);
+}
+inline void inspector_gui_fn(TransformData* t) {
+  ImGui::DragFloat3("Translation", t->mTranslation.data(), .1f);
+  ImGui::DragFloat("Scale", &t->mScale, .05f);
+  if (ImGui::DragFloat4("Rotation (XYZW)", t->mRotation.xyz.data(), .1f, -1, 1))
+    t->mRotation = normalize(t->mRotation);
+	
+	if (gAnimatedTransform == t) {
+			if (ImGui::Button("Stop Animating")) gAnimatedTransform = nullptr;
+			ImGui::DragFloat3("Translate", gAnimateTranslate.data(), .01f);
+			ImGui::DragFloat3("Rotate", gAnimateRotate.data(), .01f);
+	} else if (ImGui::Button("Animate"))
+		gAnimatedTransform = t;
+}
+inline void inspector_gui_fn(LightData* light) {
+  if (ImGui::BeginListBox("Light to world")) {
+    inspector_gui_fn(&light->mLightToWorld);
+    ImGui::EndListBox();
+  }
+
+  ImGui::ColorEdit3("Emission", light->mEmission.data());
+  const char* items[] { "Distant", "Point", "Spot" };
+  if (ImGui::BeginCombo("Type", items[light->mType])) {
+    for (uint32_t i = 0; i < ranges::size(items); i++)
+      if (ImGui::Selectable(items[i], light->mType == i))
+        light->mType = i;
+    ImGui::EndCombo();
+  }
+
+	PackedLightData p { light->mPackedData };
+
+	if (light->mType == LIGHT_TYPE_DISTANT || light->mType == LIGHT_TYPE_POINT || light->mType == LIGHT_TYPE_SPOT) {
+		float r = p.radius();
+    if (ImGui::DragFloat("Radius", &r, 0.01f, 0, 1)) p.radius(r);
+		if (light->mType == LIGHT_TYPE_SPOT) {
+			r = acosf( p.cos_inner_angle() );
+    	if (ImGui::DragFloat("Inner Angle", &r, 0.01f, 0, M_PI)) p.cos_inner_angle(cosf(r));
+			r = acosf( p.cos_outer_angle() );
+    	if (ImGui::DragFloat("Outer Angle", &r, 0.01f, 0, M_PI)) p.cos_outer_angle(cosf(r));
+		}
+	}
+
+	bool shadowmap = p.shadow_index() != -1;
+  if (ImGui::Checkbox("Shadow map", &shadowmap)) p.shadow_index(shadowmap ? 0 : -1);
+  if (shadowmap) {
+    ImGui::DragFloat("Shadow Near Plane", &light->mShadowProjection.mNear, 0.01f, -1, 1);
+    ImGui::DragFloat("Shadow Far Plane", &light->mShadowProjection.mFar, 0.1f, -1024, 1024);
+		float shadowBias = p.shadow_bias();
+  	if (ImGui::DragFloat("Shadow bias", &shadowBias, .1f, 0, 4)) p.shadow_bias(shadowBias);
+	}
+
+	light->mPackedData = p.v;
+}
+inline void inspector_gui_fn(EnvironmentMap* environment) {
+	uint32_t w = ImGui::GetWindowSize().x;
+	if (environment->mImage) {
+		ImGui::Text("Base Color");
+		if (environment->mImage) {
+			ImGui::Text("Environment Map");
+			ImGui::Image(&environment->mImage, ImVec2(w,w*(float)environment->mImage.extent().height/(float)environment->mImage.extent().width));
+		}
+		if (environment->mConditionalDistribution) {
+			ImGui::Text("Conditional Distribution");
+			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,16));
+		}
+		if (environment->mMarginalDistribution) {
+			ImGui::Text("Marginal Distribution");
+			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,w));
+		}
+	}
+  ImGui::DragFloat("Gamma", &environment->mGamma, .01f);
+}
+inline void inspector_gui_fn(MaterialInfo* material) {
+  ImGui::ColorEdit3("Albedo", material->mAlbedo.data());
+  ImGui::ColorEdit3("Emission", material->mEmission.data(), ImGuiColorEditFlags_HDR);
+  ImGui::ColorEdit3("mAbsorption", material->mAbsorption.data(), ImGuiColorEditFlags_HDR);
+	ImGui::SliderFloat("Metallic", &material->mMetallic, 0, 1);
+  ImGui::SliderFloat("Roughness", &material->mRoughness, 0, 1);
+	ImGui::SliderFloat("Transmission", &material->mTransmission, 0, 1);
+	ImGui::SliderFloat("IOR", &material->mIndexOfRefraction, 1, 3);
+	ImGui::SliderFloat("Normal Scale", &material->mNormalScale, 0, 2);
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("normalize((<sampled normal image value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))");
+	ImGui::SliderFloat("Occlusion Scale", &material->mOcclusionScale, 0, 1);
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("lerp(color, color * <sampled occlusion image value>, <occlusion strength>)");
+	uint32_t w = ImGui::GetWindowSize().x;
+	if (material->mAlbedoImage) {
+		ImGui::Text("Albedo");
+		ImGui::Image(&material->mAlbedoImage, ImVec2(w,w*(float)material->mAlbedoImage.extent().height/(float)material->mAlbedoImage.extent().width));
+	}
+	if (material->mNormalImage) {
+		ImGui::Text("Normal");
+		ImGui::Image(&material->mNormalImage, ImVec2(w,w*(float)material->mNormalImage.extent().height/(float)material->mNormalImage.extent().width));
+	}
+	if (material->mEmissionImage) {
+		ImGui::Text("Emission Color");
+		ImGui::Image(&material->mEmissionImage, ImVec2(w,w*(float)material->mEmissionImage.extent().height/(float)material->mEmissionImage.extent().width));
+	}
+	if (material->mMetallicImage) {
+  	ImGui::SliderInt("Metallic Channel", reinterpret_cast<int*>(&material->mMetallicImageComponent), 0, 3);
+		ImVec4 ch(0,0,0,1);
+		*(&ch.x + material->mMetallicImageComponent%3) = 1;
+		ImGui::Image(&material->mMetallicImage, ImVec2(w,w*(float)material->mMetallicImage.extent().height/(float)material->mMetallicImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
+	}
+	if (material->mRoughnessImage) {
+  	ImGui::SliderInt("Roughness Channel", reinterpret_cast<int*>(&material->mRoughnessImageComponent), 0, 3);
+		ImVec4 ch(0,0,0,1);
+		*(&ch.x + material->mRoughnessImageComponent%3) = 1;
+		ImGui::Image(&material->mRoughnessImage, ImVec2(w,w*(float)material->mRoughnessImage.extent().height/(float)material->mRoughnessImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
+	}
+	if (material->mOcclusionImage) {
+  	ImGui::SliderInt("Occlusion Channel", reinterpret_cast<int*>(&material->mOcclusionImageComponent), 0, 3);
+		ImVec4 ch(0,0,0,1);
+		*(&ch.x + material->mOcclusionImageComponent%3) = 1;
+		ImGui::Image(&material->mOcclusionImage, ImVec2(w,w*(float)material->mOcclusionImage.extent().height/(float)material->mOcclusionImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
+	}
+}
 
 TransformData node_to_world(const Node& node) {
 	TransformData transform(float3(0,0,0), 1.f, make_quatf(0,0,0,1));
@@ -79,9 +219,23 @@ void EnvironmentMap::build_distributions(const span<float4>& img, const vk::Exte
 		}
 }
 
-
 void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("pbrRenderer::load_gltf", commandBuffer);
+	
+	static bool registered = false;
+	if (!registered) {
+		registered = true;
+
+		component_ptr<Gui> gui = root.node_graph().find_components<Gui>().front();
+		gui->register_inspector_gui_fn<TransformData>(&inspector_gui_fn);
+		gui->register_inspector_gui_fn<LightData>(&inspector_gui_fn);
+		gui->register_inspector_gui_fn<Camera>(&inspector_gui_fn);
+		gui->register_inspector_gui_fn<EnvironmentMap>(&inspector_gui_fn);
+		gui->register_inspector_gui_fn<MaterialInfo>(&inspector_gui_fn);
+		
+		gAnimatedTransform = nullptr;
+		root.node_graph().find_components<Application>().front()->OnUpdate.listen(gui.node(), &animate);
+	}
 
 	tinygltf::Model model;
 	tinygltf::TinyGLTF loader;
@@ -296,6 +450,31 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset, bv.byteLength) };
 			}
 
+			if (topology == vk::PrimitiveTopology::eTriangleList && !vertexData->find(VertexArrayObject::AttributeType::eTangent)) {
+				Buffer::View<float4> tangents = make_shared<Buffer>(commandBuffer.mDevice, "tangents", sizeof(float4), bufferUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+				commandBuffer->fillBuffer(**tangents.buffer(), tangents.offset(), tangents.size_bytes(), 0);
+				if (!vertexData->find(VertexArrayObject::AttributeType::eTexcoord)) {
+					(*vertexData)[VertexArrayObject::AttributeType::eTexcoord].emplace_back(VertexArrayObject::AttributeDescription(sizeof(float2), vk::Format::eR32G32Sfloat, 0, vk::VertexInputRate::eVertex), tangents);
+				} else {
+					auto positions = (*vertexData)[VertexArrayObject::AttributeType::ePosition][0].second;
+					auto texcoords = (*vertexData)[VertexArrayObject::AttributeType::eTexcoord][0].second;
+					for (uint32_t i = 0; i < indicesAccessor.count; i++) {
+						uint32_t i0 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*i);
+						uint32_t i1 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*(i+1));
+						uint32_t i2 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*(i+2));
+						if (indexBuffer.stride() < sizeof(uint32_t)) {
+							uint32_t mask = (1 << (indexBuffer.stride()*8)) - 1;
+							i0 &= mask;
+							i1 &= mask;
+							i2 &= mask;
+						}
+						
+						
+					}
+				}
+				(*vertexData)[VertexArrayObject::AttributeType::eTangent].emplace_back(VertexArrayObject::AttributeDescription(sizeof(float4), vk::Format::eR32G32B32A32Sfloat, 0, vk::VertexInputRate::eVertex), tangents);
+			}
+
 			meshes[i][j] = root.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
 		}
 	}
@@ -324,8 +503,9 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		if (light_it != node.extensions.end() && light_it->second.Has("light")) {
 			const tinygltf::Light& l = model.lights[light_it->second.Get("light").GetNumberAsInt()];
 			auto light = dst.make_child(l.name).make_component<LightData>();
-			light->mShadowBias = .0001f;
+			PackedLightData p { light->mPackedData };
 			light->mEmission = (Array3d::Map(l.color.data()) * l.intensity).cast<float>();
+			p.radius(l.extras.Has("radius") ? (float)l.extras.Get("radius").GetNumberAsDouble() : .01f);
 			if (l.type == "directional") {
 				light->mType = LIGHT_TYPE_DISTANT;
 				light->mShadowProjection = make_orthographic(float2(16, 16), float2::Zero(), -.0125f, -512.f);
@@ -334,13 +514,13 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				light->mShadowProjection = make_perspective(numbers::pi_v<float>/2, 1, float2::Zero(), -.0125f, -512.f);
 			} else if (l.type == "spot") {
 				light->mType = LIGHT_TYPE_SPOT;
-				double co = cos(l.spot.outerConeAngle);
-				light->mCosInnerAngle = (float)cos(l.spot.innerConeAngle);
-				light->mCosOuterAngle = (float)cos(l.spot.outerConeAngle);
+				p.cos_inner_angle((float)cos(l.spot.innerConeAngle));
+				p.cos_outer_angle((float)cos(l.spot.outerConeAngle));
 				light->mShadowProjection = make_perspective((float)l.spot.outerConeAngle, 1, float2::Zero(), -.0125f, -512.f);
 			}
-			light->mShadowBias = .0001f;
-			light->mShadowIndex = 0;
+			p.shadow_bias(.0001f);
+			p.shadow_index(0);
+			light->mPackedData = p.v;
 		}
 
 		if (node.camera != -1) {

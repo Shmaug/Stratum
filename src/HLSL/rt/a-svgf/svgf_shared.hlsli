@@ -56,31 +56,27 @@ bool test_inside_screen(int2 p, int2 res) {
 }
 
 bool test_reprojected_depth(float z1, float z2, float dz) {
-	float z_diff = abs(z1 - z2);
-	return z_diff < 2.0 * (dz + 1e-3);
+	return abs(z1 - z2) < 2.0 * (dz + 1e-3);
 }
 
 #define TILE_OFFSET_SHIFT 3u
 #define TILE_OFFSET_MASK ((1u << TILE_OFFSET_SHIFT) - 1u)
 
-int2 get_gradient_tile_pos(uint idx) {
+uint2 get_gradient_tile_pos(uint idx) {
 	/* didn't store a gradient sample in the previous frame, this creates
 	   a new sample in the center of the tile */
-	if (idx < (1u<<31))
-		return gGradientDownsample / 2;
-
-	return int2((idx & TILE_OFFSET_MASK), (idx >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
+	if (idx < (1u<<31)) return gGradientDownsample / 2;
+	return uint2((idx & TILE_OFFSET_MASK), (idx >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
 }
 
-uint get_gradient_idx_from_tile_pos(int2 pos) {
-	return (1 << 31) | (pos.x) | (pos.y << TILE_OFFSET_SHIFT);
+uint get_gradient_idx_from_tile_pos(uint2 pos) {
+	return (1 << 31) | pos.x | (pos.y << TILE_OFFSET_SHIFT);
 }
 
-bool is_gradient_sample(Texture2D<float> tex_gradient, int2 ipos) {
-	int2 ipos_grad = ipos / gGradientDownsample;
+bool is_gradient_sample(Texture2D<float> tex_gradient, uint2 ipos) {
+	uint2 ipos_grad = ipos / gGradientDownsample;
 	uint u = tex_gradient.Load(int3(ipos_grad,0)).r;
-
-	int2 tile_pos = int2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
+	uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
 	return u >= (1u << 31) && all(ipos == ipos_grad * gGradientDownsample + tile_pos);
  }
 

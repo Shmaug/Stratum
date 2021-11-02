@@ -1,7 +1,9 @@
 #include "../scene.hlsli"
 
-#define SAMPLE_FLAG_IS 1
-#define SAMPLE_FLAG_BG_IS 2
+#define SAMPLE_FLAG_BG_IS 1
+#define SAMPLE_FLAG_LIGHT_IS 2
+
+#define PROCEDURAL_PRIMITIVE_TYPE_LIGHT 1
 
 struct InstanceData {
 	TransformData mTransform;
@@ -31,9 +33,9 @@ SurfaceData surface_attributes(InstanceData instance, StructuredBuffer<VertexDat
 	SurfaceData sfc;
 	sfc.instance = instance;
 	// load indices
-	uint offsetBytes = sfc.instance.mIndexByteOffset + primitiveIndex*3*sfc.instance.mIndexStride;
+	uint offsetBytes = sfc.instance.mIndexByteOffset + primitiveIndex*3*(sfc.instance.mIndexStride&0xFF);
 	uint3 tri;
-	if (sfc.instance.mIndexStride == 2) {
+	if ((sfc.instance.mIndexStride&0xFF) == 2) {
 		// https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingSimpleLighting/Raytracing.hlsl
 		uint dwordAlignedOffset = offsetBytes & ~3;    
 		uint2 four16BitIndices = indices.Load2(dwordAlignedOffset);
@@ -69,7 +71,7 @@ SurfaceData surface_attributes(InstanceData instance, StructuredBuffer<VertexDat
 
 	sfc.v.mPositionU.xyz = transform_point(sfc.instance.mTransform, sfc.v.mPositionU.xyz);
 	sfc.v.mNormalV.xyz = normalize(transform_vector(sfc.instance.mTransform, sfc.v.mNormalV.xyz));
-	sfc.v.mTangent.xyz = transform_vector(sfc.instance.mTransform, sfc.v.mTangent.xyz);
+	sfc.v.mTangent.xyz = normalize(transform_vector(sfc.instance.mTransform, sfc.v.mTangent.xyz));
 	sfc.Ng = transform_vector(sfc.instance.mTransform, sfc.Ng);
 
 	sfc.area = length(sfc.Ng);

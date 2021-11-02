@@ -68,7 +68,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		for (int yy = -r; yy <= r; yy++)
 			for (int xx = -r; xx <= r; xx++) {
 				if (xx == 0 && yy == 0) continue;
-				int2 p = index.xy + int2(xx, yy);
+				int2 p = int2(index.xy) + int2(xx, yy);
 				if (any(p < 0) || any(index.xy >= resolution)) continue;
 				if (mesh_id_center != gVisibility[p].x) continue;
 

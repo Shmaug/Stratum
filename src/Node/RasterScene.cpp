@@ -67,7 +67,7 @@ void RasterScene::create_pipelines() {
 	mBackgroundPipeline->raster_state().cullMode = vk::CullModeFlagBits::eNone;
 	mBackgroundPipeline->set_immutable_sampler("gSampler", sampler);
 	mBackgroundPipeline->specialization_constant("gImageCount") = 1;
-	mBackgroundPipeline->descriptor("gImages") = sampled_image_descriptor(Image::View());
+	mBackgroundPipeline->descriptor("gImages") = image_descriptor(Image::View(), vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 }
 
 void RasterScene::update(CommandBuffer& commandBuffer) {
@@ -89,8 +89,10 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	uint32_t shadowViews = 0;
 
 	mNode.for_each_descendant<LightData>([&](const component_ptr<LightData>& light) {
-		if (light->mShadowIndex != -1) {
-			light->mShadowIndex = shadowViews;
+		PackedLightData p { light->mPackedData };
+		if (p.shadow_index() != -1) {
+			p.shadow_index(shadowViews);
+			light->mPackedData = p.v;
 			switch (light->mType) {
 				case LIGHT_TYPE_SPOT: [[fallthrough]];
 				case LIGHT_TYPE_DISTANT:
@@ -147,7 +149,7 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	auto envMap = mNode.find_in_descendants<EnvironmentMap>();
 	if (envMap) {		
 		mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") = find_image_index(envMap->mImage);
-		mBackgroundPipeline->descriptor("gImages") = sampled_image_descriptor(envMap->mImage);
+		mBackgroundPipeline->descriptor("gImages") = image_descriptor(envMap->mImage, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mBackgroundPipeline->push_constant<float>("gEnvironmentGamma") = envMap->mGamma;
 		mBackgroundPipeline->transition_images(commandBuffer);
 	} else {
@@ -156,7 +158,7 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	}
 
 	for (const auto&[image, index] : images)
-		mGeometryPipeline->descriptor("gImages", index) = sampled_image_descriptor(image);
+		mGeometryPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 	if (mGeometryPipeline->specialization_constant("gImageCount") < images.size())
 		mGeometryPipeline->specialization_constant("gImageCount") = (uint32_t)images.size();
 		
@@ -190,13 +192,14 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 		shadowMap = Image::View(
 			make_shared<Image>(commandBuffer.mDevice, "gShadowMaps", vk::Extent3D(2048,2048,1), vk::Format::eD32Sfloat, max(1u,shadowViews), 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, VMA_MEMORY_USAGE_GPU_ONLY, vk::ImageCreateFlags{}, vk::ImageType::e2D),
 			{}, {}, vk::ImageViewType::e2DArray);
-		mGeometryPipeline->descriptor("gShadowMaps") = sampled_image_descriptor(shadowMap);
+		mGeometryPipeline->descriptor("gShadowMaps") = image_descriptor(shadowMap, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 	}
 
 	if (!lights.empty()) {
 		shadowMap.image()->transition_barrier(commandBuffer, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-		for (const LightData& light : lights)
-			if (light.mShadowIndex != -1) {
+		for (const LightData& light : lights) {
+			PackedLightData p { light.mPackedData };
+			if (p.shadow_index() != -1) {
 				mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light.mShadowProjection;	
 				if (light.mType == LIGHT_TYPE_POINT) {
 					for (uint32_t i = 0; i < 6; i++) {
@@ -205,13 +208,14 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 						axis[i/2] = i%2==1 ? -1 : 1;
 						t.mRotation = qmul(t.mRotation, angle_axis(numbers::pi_v<float>/2, axis));
 						mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(t);
-						mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, light.mShadowIndex+i, 1), vk::ClearValue({0.f, 0}) } } });
+						mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index()+i, 1), vk::ClearValue({0.f, 0}) } } });
 					}
 				} else {
 					mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light.mLightToWorld);
-					mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, light.mShadowIndex, 1), vk::ClearValue({0.f, 0}) } } });
+					mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index(), 1), vk::ClearValue({0.f, 0}) } } });
 				}
 			}
+		}
 	}
 	#pragma endregion
 	

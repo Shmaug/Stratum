@@ -31,9 +31,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [[vk::constant_id(0)]] const uint gFilterKernelType = 1;
 
-[[vk::binding(0)]] RWTexture2D<float> gOutput1;
-[[vk::binding(1)]] RWTexture2D<float> gOutput2;
-[[vk::binding(2)]] Texture2D<float4> gInput1;
+[[vk::binding(0)]] RWTexture2D<float2> gOutput1;
+[[vk::binding(1)]] RWTexture2D<float4> gOutput2;
+[[vk::binding(2)]] Texture2D<float2> gInput1;
 [[vk::binding(2)]] Texture2D<float4> gInput2;
 
 [[vk::push_constant]] cbuffer {
@@ -48,23 +48,22 @@ const float gaussian_kernel[3][3] = {
 };
 
 float compute_sigma_luminance(float center, int2 ipos) {
-	const int r = 1;
 	float sum = center * gaussian_kernel[0][0];
-	for (int yy = -r; yy <= r; yy++)
-		for (int xx = -r; xx <= r; xx++)
+	for (int yy = -1; yy <= 1; yy++)
+		for (int xx = -1; xx <= 1; xx++)
 			if (xx != 0 || yy != 0)
 				sum += gInput2[int3(ipos + int2(xx, yy), 0)].g * gaussian_kernel[xx + 1][yy + 1];
-	return sqrt(max(sum, 0.0));
+	return sqrt(max(sum, 0));
 }
 
 class TapData {
 	int2 ipos;
-	float4 color_center1;
+	float2 color_center1;
 	float4 color_center2;
 	float2 z_center;
 	float l_center;
 	float sigma_l;
-	float4 sum_color;
+	float2 sum_color;
 	float sum_luminance;
 	float sum_variance;
 	float sum_weight;
@@ -74,7 +73,7 @@ class TapData {
 		int2 p = ipos + offset; 
 		if (any(p < 0) || any(p >= resolution)) return;
 		
-		float4 color1_p = gInput1[int3(p,0)]; 
+		float2 color1_p = gInput1[int3(p,0)]; 
 		float4 color2_p = gInput2[int3(p,0)]; 
 		float z_p       = color2_p.b;
 		float l_p       = color2_p.r;
@@ -190,13 +189,13 @@ void main(int2 index : SV_DispatchThreadId) {
 	t.color_center2 = gInput2[index];
 	t.z_center      = t.color_center2.ba;
 	t.l_center      = t.color_center2.r;
-	t.sigma_l       = compute_sigma_luminance(t.color_center2.g, t.ipos) * 3.0;
+	t.sigma_l       = 3*compute_sigma_luminance(t.color_center2.g, t.ipos);
 	t.sum_color     = t.color_center1;
 	t.sum_luminance = t.color_center2.r;
 	t.sum_variance  = t.color_center2.g;
 	t.sum_weight    = 1;
 	
-	if (!isinf(t.z_center.x)) { /* only filter foreground pixels */
+	if (!isinf(t.z_center.x)) { // only filter foreground pixels
 		if (gFilterKernelType == 0)
 			atrous(t);
 		else if (gFilterKernelType == 1)
@@ -205,7 +204,7 @@ void main(int2 index : SV_DispatchThreadId) {
 			box5(t);
 		else if (gFilterKernelType == 3)
 			subsampled(t);
-		else if (gFilterKernelType == 4){
+		else if (gFilterKernelType == 4) {
 			if (gStepSize == 1)
 				box3(t);
 			else
@@ -218,9 +217,10 @@ void main(int2 index : SV_DispatchThreadId) {
 		}
 	}
 
-	t.sum_color     /= t.sum_weight;
-	t.sum_luminance /= t.sum_weight;
-	t.sum_variance  /= t.sum_weight * t.sum_weight;
+	float invSum = 1/t.sum_weight;
+	t.sum_color     *= invSum;
+	t.sum_luminance *= invSum;
+	t.sum_variance  *= invSum*invSum;
 
 	gOutput1[index] = t.sum_color;
 	gOutput2[index] = float4(t.sum_luminance, t.sum_variance, t.z_center);

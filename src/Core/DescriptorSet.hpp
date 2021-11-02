@@ -5,29 +5,23 @@
 namespace stm {
 
 using Descriptor = variant<
-	tuple<Image::View, vk::ImageLayout, shared_ptr<Sampler>>, // sampler/image/combined image sampler
+	tuple<Image::View, vk::ImageLayout, vk::AccessFlags, shared_ptr<Sampler>>, // sampler/image/combined image sampler
 	Buffer::StrideView,											// storage/uniform buffer, stride used for dynamic offsets to work
 	Buffer::TexelView, 											// texel buffer
 	vector<byte>, 													// inline uniform buffer data
 	vk::AccelerationStructureKHR						// acceleration structure
 >;
 
-template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T, vk::AccessFlags> || same_as<T,shared_ptr<Sampler>>)
 constexpr T& get(stm::Descriptor& d) { return get<T>(get<0>(d)); }
-template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T,shared_ptr<Sampler>>)
+template<typename T> requires(same_as<T,Image::View> || same_as<T,vk::ImageLayout> || same_as<T, vk::AccessFlags> || same_as<T,shared_ptr<Sampler>>)
 constexpr const T& get(const stm::Descriptor& d) { return get<T>(get<0>(d)); }
 
-inline Descriptor image_descriptor(const Image::View& image, const vk::ImageLayout& layout, const shared_ptr<Sampler>& sampler = nullptr) {
-	return variant_alternative_t<0,Descriptor>{image, layout, sampler};
+inline Descriptor image_descriptor(const Image::View& image, const vk::ImageLayout& layout, const vk::AccessFlags& access, const shared_ptr<Sampler>& sampler = nullptr) {
+	return variant_alternative_t<0,Descriptor>{image, layout, access, sampler};
 }
 inline Descriptor sampler_descriptor(const shared_ptr<Sampler>& sampler) {
-	return image_descriptor(Image::View(), vk::ImageLayout::eUndefined, sampler);
-}
-inline Descriptor storage_image_descriptor(const Image::View& image) {
-	return image_descriptor(image, vk::ImageLayout::eGeneral, nullptr);
-}
-inline Descriptor sampled_image_descriptor(const Image::View& image, const shared_ptr<Sampler>& sampler = nullptr) {
-	return image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, sampler);
+	return image_descriptor(Image::View(), vk::ImageLayout::eUndefined, {}, sampler);
 }
 
 class DescriptorSetLayout : public DeviceResource {

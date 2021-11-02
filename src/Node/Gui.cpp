@@ -67,15 +67,9 @@ inline void inspector_gui_fn(Application* app) {
 	if (ImGui::Button("Reload Shaders")) {
 		app->window().mInstance.device().flush();
 		app->load_shaders();
-		app->node().for_each_descendant<Gui>([](const auto& v) {
-			v->create_pipelines();
-		});
-		app->node().for_each_descendant<RasterScene>([](const auto& v) {
-			v->create_pipelines();
-		});
-		app->node().for_each_descendant<RayTraceScene>([](const auto& v) {
-			v->create_pipelines();
-		});
+		app->node().for_each_descendant<Gui>([](const auto& v) { v->create_pipelines();	});
+		app->node().for_each_descendant<RasterScene>([](const auto& v) { v->create_pipelines();	});
+		app->node().for_each_descendant<RayTraceScene>([](const auto& v) { v->create_pipelines();	});
 	}
 	
   if (ImGui::BeginCombo("Main Camera", app->main_camera().node().name().c_str())) {
@@ -109,34 +103,6 @@ inline void inspector_gui_fn(ShaderDatabase* shader) {
     ImGui::LabelText(name.c_str(), "%s | %s", spv->entry_point().c_str(), to_string(spv->stage()).c_str());
   }
 }
-inline void inspector_gui_fn(TransformData* t) {
-  ImGui::DragFloat3("mTranslation", t->mTranslation.data(), .1f);
-  ImGui::DragFloat("Scale", &t->mScale, .05f);
-  if (ImGui::DragFloat4("Rotation (XYZW)", t->mRotation.xyz.data(), .1f, -1, 1))
-    t->mRotation = normalize(t->mRotation);
-}
-inline void inspector_gui_fn(LightData* light) {
-  if (ImGui::BeginListBox("Light to world")) {
-    inspector_gui_fn(&light->mLightToWorld);
-    ImGui::EndListBox();
-  }
-
-  ImGui::ColorEdit3("Emission", light->mEmission.data());
-  const char* items[] { "Distant", "Point", "Spot" };
-  if (ImGui::BeginCombo("Type", items[light->mType])) {
-    for (uint32_t i = 0; i < ranges::size(items); i++)
-      if (ImGui::Selectable(items[i], light->mType==i))
-        light->mType = i;
-    ImGui::EndCombo();
-  }
-	bool shadowmap = light->mShadowIndex != -1;
-  if (ImGui::Checkbox("Shadow map", &shadowmap)) light->mShadowIndex = shadowmap ? 0 : -1;
-  if (shadowmap) {
-  	ImGui::DragFloat("Shadow bias", &light->mShadowBias, .1f, 0, 4);
-    ImGui::DragFloat("Shadow Near Plane", &light->mShadowProjection.mNear, 0.01f, -1, 1);
-    ImGui::DragFloat("Shadow Far Plane", &light->mShadowProjection.mFar, 0.1f, -1024, 1024);
-	}
-}
 inline void inspector_gui_fn(DynamicRenderPass* rp) {
   for (auto& sp : rp->subpasses()) {
     if (ImGui::BeginListBox(sp->name().c_str())) {
@@ -154,83 +120,9 @@ inline void inspector_gui_fn(DynamicRenderPass* rp) {
     }
   }
 }
-inline void inspector_gui_fn(Camera* cam) {
-	bool orthographic = cam->mProjectionMode == Camera::ProjectionMode::eOrthographic;
-  if (ImGui::Checkbox("Orthographic", &orthographic))
-		cam->mProjectionMode = orthographic ? Camera::ProjectionMode::eOrthographic : Camera::ProjectionMode::ePerspective;
-  ImGui::DragFloat("Near Plane", &cam->mNear, 0.01f, -1, 1);
-  ImGui::DragFloat("Far Plane", &cam->mFar, 0.1f, -1024, 1024);
-  if (orthographic)
-    ImGui::DragFloat("Vertical Size", &cam->mOrthographicHeight, .01f);
-  else
-    ImGui::DragFloat("Vertical FoV", &cam->mVerticalFoV, .01f, 0.00390625, numbers::pi_v<float>);
-}
 inline void inspector_gui_fn(GraphicsPipelineState* pipeline) {
   ImGui::Text("%llu pipelines", pipeline->pipelines().size());
   ImGui::Text("%llu descriptor sets", pipeline->descriptor_sets().size());
-}
-inline void inspector_gui_fn(EnvironmentMap* environment) {
-	uint32_t w = ImGui::GetWindowSize().x;
-	if (environment->mImage) {
-		ImGui::Text("Base Color");
-		if (environment->mImage) {
-			ImGui::Text("Environment Map");
-			ImGui::Image(&environment->mImage, ImVec2(w,w*(float)environment->mImage.extent().height/(float)environment->mImage.extent().width));
-		}
-		if (environment->mConditionalDistribution) {
-			ImGui::Text("Conditional Distribution");
-			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,16));
-		}
-		if (environment->mMarginalDistribution) {
-			ImGui::Text("Marginal Distribution");
-			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,w));
-		}
-	}
-  ImGui::DragFloat("Gamma", &environment->mGamma, .01f);
-}
-inline void inspector_gui_fn(MaterialInfo* material) {
-  ImGui::ColorEdit3("Albedo", material->mAlbedo.data());
-  ImGui::ColorEdit3("Emission", material->mEmission.data(), ImGuiColorEditFlags_HDR);
-  ImGui::ColorEdit3("mAbsorption", material->mAbsorption.data(), ImGuiColorEditFlags_HDR);
-	ImGui::SliderFloat("Metallic", &material->mMetallic, 0, 1);
-  ImGui::SliderFloat("Roughness", &material->mRoughness, 0, 1);
-	ImGui::SliderFloat("Transmission", &material->mTransmission, 0, 1);
-	ImGui::SliderFloat("IOR", &material->mIndexOfRefraction, 1, 3);
-	ImGui::SliderFloat("Normal Scale", &material->mNormalScale, 0, 2);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("normalize((<sampled normal image value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))");
-	ImGui::SliderFloat("Occlusion Scale", &material->mOcclusionScale, 0, 1);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("lerp(color, color * <sampled occlusion image value>, <occlusion strength>)");
-	uint32_t w = ImGui::GetWindowSize().x;
-	if (material->mAlbedoImage) {
-		ImGui::Text("Albedo");
-		ImGui::Image(&material->mAlbedoImage, ImVec2(w,w*(float)material->mAlbedoImage.extent().height/(float)material->mAlbedoImage.extent().width));
-	}
-	if (material->mNormalImage) {
-		ImGui::Text("Normal");
-		ImGui::Image(&material->mNormalImage, ImVec2(w,w*(float)material->mNormalImage.extent().height/(float)material->mNormalImage.extent().width));
-	}
-	if (material->mEmissionImage) {
-		ImGui::Text("Emission Color");
-		ImGui::Image(&material->mEmissionImage, ImVec2(w,w*(float)material->mEmissionImage.extent().height/(float)material->mEmissionImage.extent().width));
-	}
-	if (material->mMetallicImage) {
-  	ImGui::SliderInt("Metallic Channel", reinterpret_cast<int*>(&material->mMetallicImageComponent), 0, 3);
-		ImVec4 ch(0,0,0,1);
-		*(&ch.x + material->mMetallicImageComponent%3) = 1;
-		ImGui::Image(&material->mMetallicImage, ImVec2(w,w*(float)material->mMetallicImage.extent().height/(float)material->mMetallicImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
-	}
-	if (material->mRoughnessImage) {
-  	ImGui::SliderInt("Roughness Channel", reinterpret_cast<int*>(&material->mRoughnessImageComponent), 0, 3);
-		ImVec4 ch(0,0,0,1);
-		*(&ch.x + material->mRoughnessImageComponent%3) = 1;
-		ImGui::Image(&material->mRoughnessImage, ImVec2(w,w*(float)material->mRoughnessImage.extent().height/(float)material->mRoughnessImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
-	}
-	if (material->mOcclusionImage) {
-  	ImGui::SliderInt("Occlusion Channel", reinterpret_cast<int*>(&material->mOcclusionImageComponent), 0, 3);
-		ImVec4 ch(0,0,0,1);
-		*(&ch.x + material->mOcclusionImageComponent%3) = 1;
-		ImGui::Image(&material->mOcclusionImage, ImVec2(w,w*(float)material->mOcclusionImage.extent().height/(float)material->mOcclusionImage.extent().width), ImVec2(0,0), ImVec2(1,1), ch);
-	}
 }
 inline void inspector_gui_fn(Mesh* mesh) {
 	ImGui::LabelText("Topology", to_string(mesh->topology()).c_str());
@@ -246,9 +138,8 @@ inline void inspector_gui_fn(Mesh* mesh) {
 				}
 }
 
-inline Node* node_graph_gui_fn(Node& n) {
-	static Node* selected = nullptr;
-  ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick;
+inline void node_graph_gui_fn(Node& n, Node*& selected) {
+  ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick|ImGuiTreeNodeFlags_OpenOnArrow;
   if (&n == selected) flags |= ImGuiTreeNodeFlags_Selected;
   if (n.children().empty()) flags |= ImGuiTreeNodeFlags_Leaf;
   ImGui::SetNextItemOpen(true, ImGuiCond_Once);
@@ -256,10 +147,9 @@ inline Node* node_graph_gui_fn(Node& n) {
     if (ImGui::IsItemClicked())
       selected = &n;
     for (Node& c : n.children())
-      node_graph_gui_fn(c);
+      node_graph_gui_fn(c, selected);
     ImGui::TreePop();
   }
-	return selected;
 }
 #pragma endregion
 
@@ -308,27 +198,21 @@ Gui::Gui(Node& node) : mNode(node) {
       vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
       vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
 	
-	mRenderPass->OnDraw.listen(mNode, bind_front(&Gui::draw, this));
-	
 	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst + 16);
-	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, placeholders::_1), EventPriority::eLast - 16);
+	mRenderPass->OnDraw.listen(mNode, bind_front(&Gui::draw, this));
 	
 	// draw after app's render_pass
 	app->main_pass()->mPass.PostProcess.listen(mNode, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
+		make_geometry(commandBuffer);
 		mRenderNode->render(commandBuffer, { { "colorBuffer", { framebuffer->at("colorBuffer"), {} } } } );
 	}, EventPriority::eLast - 16);
 	
 	#pragma region Inspector gui
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
 	register_inspector_gui_fn<ShaderDatabase>(&inspector_gui_fn);
-	register_inspector_gui_fn<TransformData>(&inspector_gui_fn);
-	register_inspector_gui_fn<LightData>(&inspector_gui_fn);
 	register_inspector_gui_fn<DynamicRenderPass>(&inspector_gui_fn);
-	register_inspector_gui_fn<Camera>(&inspector_gui_fn);
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<Application>(&inspector_gui_fn);
-	register_inspector_gui_fn<EnvironmentMap>(&inspector_gui_fn);
-	register_inspector_gui_fn<MaterialInfo>(&inspector_gui_fn);
 	register_inspector_gui_fn<Mesh>(&inspector_gui_fn);
 
   enum AssetType {
@@ -346,6 +230,8 @@ Gui::Gui(Node& node) : mNode(node) {
 
 	ranges::sort(assets, ranges::less{}, [](const auto& a) { return get<AssetType>(a); });
   
+	create_pipelines();
+
   app->OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
 		auto gui = app.node().find_in_descendants<Gui>();
 		if (!gui) return;
@@ -403,30 +289,40 @@ Gui::Gui(Node& node) : mNode(node) {
     if (ImGui::Begin("Scene Graph")) {
       ImGui::Columns(2);
 			
-			Node* selected = nullptr;
+			static Node* selected = nullptr;
 			if (ImGui::BeginChild("Scene Graph", ImVec2(), false, ImGuiWindowFlags_NoTitleBar))
-      	selected = node_graph_gui_fn(mNode.root());
+      	node_graph_gui_fn(mNode.root(), selected);
 			ImGui::EndChild();
       ImGui::NextColumn();
       if (selected) {
-        if (ImGui::BeginChild(selected->name().c_str(), ImVec2(), false)) {
+        ImGui::Text(selected->name().c_str());
+				if (ImGui::Button("Delete Node")) {
+					if (ImGui::IsKeyPressed(KeyCode::eKeyShift))
+						mNode.node_graph().erase_recurse(*selected);
+					else
+						mNode.node_graph().erase(*selected);
+					selected = nullptr;
+				} else {
+					type_index to_erase = typeid(nullptr_t);
 					for (type_index type : selected->components()) {
 						if (ImGui::CollapsingHeader(type.name())) {
-							void* ptr = selected->find(type);
-							auto it = mInspectorGuiFns.find(type);
-							if (it != mInspectorGuiFns.end())
-								it->second(ptr);
+							if (ImGui::Button("Delete Component"))
+								to_erase = type;
+							else {
+								void* ptr = selected->find(type);
+								auto it = mInspectorGuiFns.find(type);
+								if (it != mInspectorGuiFns.end())
+									it->second(ptr);
+							}
 						}
 					}
+					if (to_erase != typeid(nullptr_t)) selected->erase_component(to_erase);
 				}
-        ImGui::EndChild();
       }
     }
     ImGui::End();
   });
 	#pragma endregion
-	
-	create_pipelines();
 }
 Gui::~Gui() {
 	ImGui::DestroyContext(mContext);
@@ -460,7 +356,7 @@ void Gui::create_font_image(CommandBuffer& commandBuffer) {
 	Buffer::View<byte> staging = make_shared<Buffer>(commandBuffer.mDevice, "ImGuiNode::CreateImages/Staging", width*height*texel_size(vk::Format::eR8G8B8A8Unorm), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
 	memcpy(staging.data(), pixels, staging.size_bytes());
 	Image::View img = commandBuffer.copy_buffer_to_image(staging, make_shared<Image>(commandBuffer.mDevice, "Gui/Image", vk::Extent3D(width, height, 1), vk::Format::eR8G8B8A8Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eStorage));
-	mPipeline->descriptor("gImages", 0) = sampled_image_descriptor(img);
+	mPipeline->descriptor("gImages", 0) = image_descriptor(img, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 }
 
 void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
@@ -519,7 +415,7 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 					Image::View& view = *reinterpret_cast<Image::View*>(cmd.TextureId);
 					if (!mImageMap.contains(view)) {
 						uint32_t idx = 1 + (uint32_t)mImageMap.size();
-						mPipeline->descriptor("gImages", idx) = sampled_image_descriptor(view);
+						mPipeline->descriptor("gImages", idx) = image_descriptor(view, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 						mImageMap.emplace(view, idx);
 					}
 				}
