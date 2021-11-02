@@ -165,8 +165,8 @@ bool do_ray_query(inout RayQuery<RAY_FLAG_NONE> rayQuery) {
 				float2 st = ray_sphere(rayQuery.CandidateObjectRayOrigin(), rayQuery.CandidateObjectRayDirection(), 0, 1);
 				if (st.x < st.y) {
 					float t = st.x < 0 ? st.y : st.x;
-					//if (t <= rayQuery.CommittedRayT() && t >= rayQuery.RayTMin())
-					rayQuery.CommitProceduralPrimitiveHit(t);
+					if (t <= rayQuery.CommittedRayT() && t >= rayQuery.RayTMin())
+						rayQuery.CommitProceduralPrimitiveHit(t);
 				}
 				break;
 			}
