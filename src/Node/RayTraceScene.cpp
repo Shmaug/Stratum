@@ -39,7 +39,7 @@ AccelerationStructure::~AccelerationStructure() {
 		mDevice->destroyAccelerationStructureKHR(mAccelerationStructure);
 }
 
-RayTraceScene::RayTraceScene(Node& node) : mNode(node) {
+RayTraceScene::RayTraceScene(Node& node) : mNode(node), mCurFrame(make_unique<FrameData>()), mPrevFrame(make_unique<FrameData>()) {
 	auto app = mNode.find_in_ancestor<Application>();
   app->OnUpdate.listen(mNode, bind(&RayTraceScene::update, this, std::placeholders::_1), EventPriority::eLast - 128);
   app->main_pass()->mPass.PostProcess.listen(mNode, [&,app](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
@@ -91,48 +91,53 @@ void RayTraceScene::create_pipelines() {
 
 void RayTraceScene::on_inspector_gui() {
 	if (ImGui::CollapsingHeader("Path Tracing")) {
-		ImGui::PushItemWidth(32);
+		ImGui::PushItemWidth(40);
 		ImGui::InputScalar("Bounces", ImGuiDataType_U32, &mTraceIndirectRaysPipeline->specialization_constant("gMaxBounces"));
+		ImGui::PopItemWidth();
 		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
 		ImGui::CheckboxFlags("Importance Sample Background", &mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_BG_IS);
 		ImGui::CheckboxFlags("Importance Sample Lights", &mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_LIGHT_IS);
+		if (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") & (SAMPLE_FLAG_BG_IS|SAMPLE_FLAG_LIGHT_IS)) {
+			uint32_t rs = mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET;
+			uint32_t pmax = (~0) >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET;
+			if (ImGui::DragScalar("Reservoir Samples", ImGuiDataType_U32, &rs, 0, 0, &pmax))
+				mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") & ~(pmax<<SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET)) | (rs<<SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET);
+		}
 	}
 	if (ImGui::CollapsingHeader("Denoising")) {
 		ImGui::Checkbox("Enable Denoising", &mDenoise);
 		if (ImGui::Checkbox("Modulate Albedo", reinterpret_cast<bool*>(&mTraceIndirectRaysPipeline->specialization_constant("gDemodulateAlbedo"))))
 			mTonemapPipeline->specialization_constant("gModulateAlbedo") = mTraceIndirectRaysPipeline->specialization_constant("gDemodulateAlbedo");
 		ImGui::SliderFloat("Temporal Alpha", &mTemporalAccumulationPipeline->push_constant<float>("gTemporalAlpha"), 0, 1);
+		ImGui::PushItemWidth(40);
 		if (ImGui::CollapsingHeader("Antilag")) {
 			ImGui::Checkbox("Enable Antilag", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gAntilag")));
-			ImGui::PushItemWidth(32);
-			ImGui::InputScalar("Gradient Filter Radius", ImGuiDataType_U32, &mTemporalAccumulationPipeline->specialization_constant("gGradientFilterRadius"));
-			ImGui::PushItemWidth(32);
-			ImGui::InputScalar("Gradient Filter Iterations", ImGuiDataType_U32, &mDiffAtrousIterations);
 			ImGui::DragFloat("Antilag Scale", &mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"), .01f, 0);
+			ImGui::InputScalar("Gradient Filter Radius", ImGuiDataType_U32, &mTemporalAccumulationPipeline->specialization_constant("gGradientFilterRadius"));
+			ImGui::InputScalar("Gradient Filter Iterations", ImGuiDataType_U32, &mDiffAtrousIterations);
 		}
-		ImGui::PushItemWidth(32);
 		ImGui::InputScalar("Filter Iterations", ImGuiDataType_U32, &mNumIterations);
 		if (mNumIterations > 0) {
-			ImGui::PushItemWidth(32);
 			ImGui::InputScalar("Filter Type", ImGuiDataType_U32, &mAtrousPipeline->specialization_constant("gFilterKernelType"));
-			ImGui::PushItemWidth(32);
 			ImGui::InputScalar("History Tap Iteration", ImGuiDataType_U32, &mHistoryTap);
 		}
-		ImGui::PushItemWidth(32);
 		ImGui::DragFloat("History Length Threshold", reinterpret_cast<float*>(&mEstimateVariancePipeline->specialization_constant("gHistoryLengthThreshold")), 1);
+		ImGui::PopItemWidth();
 	}
 	if (ImGui::CollapsingHeader("Post Processing")) {
 		ImGui::Checkbox("ACES", reinterpret_cast<bool*>(&mTonemapPipeline->specialization_constant("gACES")));
-		ImGui::PushItemWidth(64);
+		ImGui::PushItemWidth(40);
 		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, 0, 10);
-		ImGui::PushItemWidth(64);
 		ImGui::DragFloat("Gamma", &mTonemapPipeline->push_constant<float>("gGamma"), .1f, 0, 5);
+		ImGui::PopItemWidth();
 		ImGui::InputScalar("Debug Mode", ImGuiDataType_U32, &mTonemapPipeline->specialization_constant("gDebugMode"));
 	}
 }
 
 void RayTraceScene::update(CommandBuffer& commandBuffer) {
-	ProfilerRegion s("RasterScene::update", commandBuffer);
+	ProfilerRegion s("RayTraceScene::update", commandBuffer);
+
+	swap(mPrevFrame, mCurFrame);
 
 	vector<vk::BufferMemoryBarrier> blasBarriers;
 
@@ -159,7 +164,13 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 	vector<MaterialData> materials;
 	unordered_map<MaterialInfo*, uint32_t> materialMap;
 	unordered_map<Image::View, uint32_t> images;
-	vector<pair<MeshAS*, uint32_t>> instanceBLAS;
+	auto find_image_index = [&](Image::View image) -> uint32_t {
+		if (!image) return ~0u;
+		auto it = images.find(image);
+		return (it == images.end()) ? images.emplace(image, (uint32_t)images.size()).first->second : it->second;
+	};
+
+	vector<tuple<MeshPrimitive*, MeshAS*, uint32_t>> instanceIndices;
 	vector<vk::AccelerationStructureInstanceKHR> instances;
 	vector<InstanceData> instanceDatas;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> transformHistory;
@@ -168,39 +179,38 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 
 	buffer_vector<LightData,16> lights(commandBuffer.mDevice, 0, vk::BufferUsageFlagBits::eStorageBuffer);
 	lights.reserve(1);
-	mNode.for_each_descendant<LightData>([&](const component_ptr<LightData>& light) {
-		light->mLightToWorld = node_to_world(light.node());
-		if (light->mType == LIGHT_TYPE_POINT || light->mType == LIGHT_TYPE_SPOT) {
+
+	{ // lights
+		ProfilerRegion s("Process lights", commandBuffer);
+		mNode.for_each_descendant<LightData>([&](const component_ptr<LightData>& light) {
+			light->mLightToWorld = node_to_world(light.node());
+			light->mWorldToLight = inverse(light->mLightToWorld);
+			float area = 1;
 			PackedLightData p { light->mPackedData };
-			p.instance_index((uint32_t)instanceDatas.size());
-			
-			TransformData prevTransform;
-			if (auto it = mTransformHistory.find(light.get()); it != mTransformHistory.end()) {
-				prevTransform = it->second.first;
-				instanceIndexMap[it->second.second] = (uint32_t)instanceDatas.size();
-			} else
-				prevTransform = light->mLightToWorld;
+			if ((light->mType == LIGHT_TYPE_POINT || light->mType == LIGHT_TYPE_SPOT) && p.radius() > 0) {
+				p.instance_index((uint32_t)instanceDatas.size());
+				area = 4*M_PI*p.radius()*p.radius();
 				
-			vk::AccelerationStructureInstanceKHR& instance = instances.emplace_back();
-			Eigen::Map<Eigen::Matrix<float, 3, 4, Eigen::RowMajor>>(&instance.transform.matrix[0][0]) = (Eigen::Translation3f(light->mLightToWorld.mTranslation[0], light->mLightToWorld.mTranslation[1], light->mLightToWorld.mTranslation[2]) *
-				Eigen::Quaternionf(light->mLightToWorld.mRotation.w, light->mLightToWorld.mRotation.xyz[0], light->mLightToWorld.mRotation.xyz[1], light->mLightToWorld.mRotation.xyz[2]) *
-				Eigen::Scaling(p.radius()*light->mLightToWorld.mScale)).matrix().topRows(3);
-			instance.instanceCustomIndex = (uint32_t)instances.size();
-			instance.mask = 0x2;
-			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**mUnitCubeAS);
+				TransformData prevTransform;
+				if (auto it = mTransformHistory.find(light.get()); it != mTransformHistory.end()) {
+					prevTransform = it->second.first;
+					instanceIndexMap[it->second.second] = (uint32_t)instanceDatas.size();
+				} else
+					prevTransform = light->mLightToWorld;
+					
+				vk::AccelerationStructureInstanceKHR& instance = instances.emplace_back();
+				Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(tmul(light->mLightToWorld, make_transform(float3::Zero(), make_quatf(0,0,0,1), float3::Constant(p.radius()))));
+				instance.instanceCustomIndex = (uint32_t)instances.size();
+				instance.mask = 0x2;
+				instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**mUnitCubeAS);
 
-			transformHistory.emplace(light.get(), make_pair(light->mLightToWorld, (uint32_t)instanceDatas.size()));
-			instanceDatas.emplace_back(light->mLightToWorld, prevTransform, -1, -1, -1, (uint32_t)lights.size() << 8);
-			light->mPackedData = p.v;
-		}
-		lights.emplace_back(*light);
-	});
-
-	auto find_image_index = [&](Image::View image) -> uint32_t {
-		if (!image) return ~0u;
-		auto it = images.find(image);
-		return (it == images.end()) ? images.emplace(image, (uint32_t)images.size()).first->second : it->second;
-	};
+				transformHistory.emplace(light.get(), make_pair(light->mLightToWorld, (uint32_t)instanceDatas.size()));
+				instanceDatas.emplace_back(light->mLightToWorld, tmul(prevTransform, light->mWorldToLight), -1, -1, -1, (uint32_t)lights.size() << 8);
+				light->mPackedData = p.v;
+			}
+			lights.emplace_back(*light);
+		});
+	}
 
 	{ // find env map
 		auto envMap = mNode.find_in_descendants<EnvironmentMap>();
@@ -216,108 +226,136 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 		}
 	}
 
-	// find instances
-	mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
-		if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
+	{ // instances
+		ProfilerRegion s("Process instances", commandBuffer);
+		mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
+			if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
 
-		// build BLAS
-		size_t key = hash_args(prim->mMesh.get(), prim->mFirstIndex, prim->mIndexCount);
-		auto it = mMeshAccelerationStructures.find(key);
-		if (it == mMeshAccelerationStructures.end()) {
-			const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
+			// build BLAS
+			size_t key = hash_args(prim->mMesh.get(), prim->mFirstIndex, prim->mIndexCount);
+			auto it = mMeshAccelerationStructures.find(key);
+			if (it == mMeshAccelerationStructures.end()) {
+				const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
+				
+				if (prim->mMesh->index_type() != vk::IndexType::eUint32 && prim->mMesh->index_type() != vk::IndexType::eUint16)
+					return;
+
+				vk::AccelerationStructureGeometryTrianglesDataKHR triangles;
+				triangles.vertexFormat = vertexPosDesc.mFormat;
+				triangles.vertexData = commandBuffer.hold_resource(positions).device_address();
+				triangles.vertexStride = vertexPosDesc.mStride;
+				triangles.maxVertex = (uint32_t)(positions.size_bytes()/vertexPosDesc.mStride);
+				triangles.indexType = prim->mMesh->index_type();
+				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address() + prim->mFirstIndex*prim->mMesh->indices().stride();
+				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mIndexCount/3);
+				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name()+"/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
+				blasBarriers.emplace_back(
+					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
+					VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+					**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
+
+				
+				if (mMeshVertices.find(prim->mMesh.get()) == mMeshVertices.end()) {
+					Buffer::View<VertexData>& vertices = mMeshVertices.emplace(prim->mMesh.get(),
+						make_shared<Buffer>(commandBuffer.mDevice, prim.node().name()+"/VertexData", triangles.maxVertex*sizeof(VertexData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eShaderDeviceAddress)).first->second;
+					
+					// copy vertex data
+					auto positions = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
+					auto normals = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
+					auto tangents = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTangent)[0];
+					auto texcoords = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTexcoord)[0];
+					
+					commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
+					mCopyVerticesPipeline->descriptor("gVertices") = vertices;
+					mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(positions.second, positions.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gNormals")   = Buffer::View(normals.second, normals.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gTangents")  = Buffer::View(tangents.second, tangents.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gTexcoords") = Buffer::View(texcoords.second, texcoords.first.mOffset);
+					mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = vertices.size();
+					mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = positions.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = normals.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords.first.mStride;
+					mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);
+					mCopyVerticesPipeline->push_constants(commandBuffer);
+					commandBuffer.dispatch_over(triangles.maxVertex);
+					commandBuffer.barrier(vertices, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
+				}
+
+				it = mMeshAccelerationStructures.emplace(key, MeshAS { as, Buffer::StrideView(
+						prim->mMesh->indices().buffer(),
+						prim->mMesh->indices().stride(),
+						prim->mMesh->indices().offset() + prim->mFirstIndex*prim->mMesh->indices().stride(),
+						prim->mIndexCount*prim->mMesh->indices().stride()) }).first;
+			}
 			
-			if (prim->mMesh->index_type() != vk::IndexType::eUint32 && prim->mMesh->index_type() != vk::IndexType::eUint16)
-				return;
+			// append unique materials to materials list
+			auto materialMap_it = materialMap.find(prim->mMaterial.get());
+			if (materialMap_it == materialMap.end()) {
+				materialMap_it = materialMap.emplace(prim->mMaterial.get(), (uint32_t)materials.size()).first;
+				ImageIndices inds { uint4::Zero() };
+				inds.albedo(find_image_index(prim->mMaterial->mAlbedoImage));
+				inds.normal(find_image_index(prim->mMaterial->mNormalImage));
+				inds.emission(find_image_index(prim->mMaterial->mEmissionImage));
+				inds.metallic(find_image_index(prim->mMaterial->mMetallicImage));
+				inds.roughness(find_image_index(prim->mMaterial->mRoughnessImage));
+				inds.occlusion(find_image_index(prim->mMaterial->mOcclusionImage));
+				inds.metallic_channel(prim->mMaterial->mMetallicImageComponent);
+				inds.roughness_channel(prim->mMaterial->mRoughnessImageComponent);
+				inds.occlusion_channel(prim->mMaterial->mOcclusionImageComponent);
+				MaterialData& m = materials.emplace_back();
+				m.mAlbedo = prim->mMaterial->mAlbedo;
+				m.mRoughness = prim->mMaterial->mRoughness;
+				m.mEmission = prim->mMaterial->mEmission;
+				m.mMetallic = prim->mMaterial->mMetallic;
+				m.mAbsorption = prim->mMaterial->mAbsorption;
+				m.mNormalScale = prim->mMaterial->mNormalScale;
+				m.mOcclusionScale = prim->mMaterial->mOcclusionScale;
+				m.mIndexOfRefraction = prim->mMaterial->mIndexOfRefraction;
+				m.mTransmission = prim->mMaterial->mTransmission;
+				m.mImageIndices = inds.v;
+			}
+				
+			TransformData transform = node_to_world(prim.node());
+			TransformData prevTransform;
+			if (auto transform_it = mTransformHistory.find(prim.get()); transform_it != mTransformHistory.end()) {
+				prevTransform = transform_it->second.first;
+				instanceIndexMap[transform_it->second.second] = (uint32_t)instanceDatas.size();
+			} else
+				prevTransform = transform;
 
-			vk::AccelerationStructureGeometryTrianglesDataKHR triangles;
-			triangles.vertexFormat = vertexPosDesc.mFormat;
-			triangles.vertexData = commandBuffer.hold_resource(positions).device_address();
-			triangles.vertexStride = vertexPosDesc.mStride;
-			triangles.maxVertex = (uint32_t)(positions.size_bytes()/vertexPosDesc.mStride);
-			triangles.indexType = prim->mMesh->index_type();
-			triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address() + prim->mFirstIndex*prim->mMesh->indices().stride();
-			vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, vk::GeometryFlagBitsKHR::eOpaque);
-			vk::AccelerationStructureBuildRangeInfoKHR range(prim->mIndexCount/3);
-			auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name()+"/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
-			blasBarriers.emplace_back(
-				vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
-				VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-				**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
+			uint32_t lightIndex = 0;
+			if ((prim->mMaterial->mEmission.array() > Array3f::Zero()).any()) {
+				LightData light;
+				light.mLightToWorld = transform;
+				light.mType = LIGHT_TYPE_MESH;
+				light.mEmission = prim->mMaterial->mEmission;
+				PackedLightData p { float4::Zero() };
+				p.instance_index((uint32_t)instanceDatas.size());
+				p.prim_count(prim->mIndexCount/3);
+				light.mPackedData = p.v;
+				lightIndex = (uint32_t)lights.size();
+				lights.emplace_back(light);
+			}
 
-			it = mMeshAccelerationStructures.emplace(key, MeshAS { as, triangles.maxVertex, 
-				prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0],
-				prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0],
-				prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTangent)[0],
-				prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTexcoord)[0],
-				Buffer::StrideView(prim->mMesh->indices().buffer(), prim->mMesh->indices().stride(), prim->mMesh->indices().offset() + prim->mFirstIndex*prim->mMesh->indices().stride()) }).first;
-		}
-		
-		// append unique materials to materials list
-		auto materialMap_it = materialMap.find(prim->mMaterial.get());
-		if (materialMap_it == materialMap.end()) {
-			materialMap_it = materialMap.emplace(prim->mMaterial.get(), (uint32_t)materials.size()).first;
-			ImageIndices inds { uint4::Zero() };
-			inds.albedo(find_image_index(prim->mMaterial->mAlbedoImage));
-			inds.normal(find_image_index(prim->mMaterial->mNormalImage));
-			inds.emission(find_image_index(prim->mMaterial->mEmissionImage));
-			inds.metallic(find_image_index(prim->mMaterial->mMetallicImage));
-			inds.roughness(find_image_index(prim->mMaterial->mRoughnessImage));
-			inds.occlusion(find_image_index(prim->mMaterial->mOcclusionImage));
-			inds.metallic_channel(prim->mMaterial->mMetallicImageComponent);
-			inds.roughness_channel(prim->mMaterial->mRoughnessImageComponent);
-			inds.occlusion_channel(prim->mMaterial->mOcclusionImageComponent);
-			MaterialData& m = materials.emplace_back();
-			m.mAlbedo = prim->mMaterial->mAlbedo;
-			m.mRoughness = prim->mMaterial->mRoughness;
-			m.mEmission = prim->mMaterial->mEmission;
-			m.mMetallic = prim->mMaterial->mMetallic;
-			m.mAbsorption = prim->mMaterial->mAbsorption;
-			m.mNormalScale = prim->mMaterial->mNormalScale;
-			m.mOcclusionScale = prim->mMaterial->mOcclusionScale;
-			m.mIndexOfRefraction = prim->mMaterial->mIndexOfRefraction;
-			m.mTransmission = prim->mMaterial->mTransmission;
-			m.mImageIndices = inds.v;
-		}
-			
-		TransformData transform = node_to_world(prim.node());
-		TransformData prevTransform;
-		if (auto it = mTransformHistory.find(prim.get()); it != mTransformHistory.end()) {
-			prevTransform = it->second.first;
-			instanceIndexMap[it->second.second] = (uint32_t)instanceDatas.size();
-		} else
-			prevTransform = transform;
+			vk::AccelerationStructureInstanceKHR& instance = instances.emplace_back();
+			Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = transform.m.topLeftCorner(3,4);
+			instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
+			instance.mask = 0x1;
+			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
 
-		uint32_t lightIndex = 0;
-		if (prim->mMaterial->mEmission.any()) {
-			LightData light;
-			light.mLightToWorld = transform;
-			light.mType = LIGHT_TYPE_EMISSIVE_MATERIAL;
-			light.mEmission = prim->mMaterial->mEmission;
-			PackedLightData p { float4::Zero() };
-			p.instance_index((uint32_t)instanceDatas.size());
-			p.prim_count(prim->mIndexCount/3);
-			light.mPackedData = p.v;
-			lightIndex = (uint32_t)lights.size();
-			lights.emplace_back(light);
-		}
-
-		vk::AccelerationStructureInstanceKHR& instance = instances.emplace_back();
-		Eigen::Map<Eigen::Matrix<float, 3, 4, Eigen::RowMajor>>(&instance.transform.matrix[0][0]) = (Eigen::Translation3f(transform.mTranslation[0], transform.mTranslation[1], transform.mTranslation[2]) *
-			Eigen::Quaternionf(transform.mRotation.w, transform.mRotation.xyz[0], transform.mRotation.xyz[1], transform.mRotation.xyz[2]) *
-			Eigen::Scaling(transform.mScale)).matrix().topRows(3);
-		instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
-		instance.mask = 0x1;
-		instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
-
-		instanceBLAS.emplace_back(&it->second, (uint32_t)instanceDatas.size());
-		transformHistory.emplace(prim.get(), make_pair(transform, (uint32_t)instanceDatas.size()));
-		instanceDatas.emplace_back(transform, prevTransform, materialMap_it->second, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride() | (lightIndex << 8));
-		totalVertexCount += it->second.mVertexCount;
-		totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
-	});
-	mTransformHistory = transformHistory;
+			instanceIndices.emplace_back(prim.get(), &it->second, (uint32_t)instanceDatas.size());
+			transformHistory.emplace(prim.get(), make_pair(transform, (uint32_t)instanceDatas.size()));
+			instanceDatas.emplace_back(transform, tmul(prevTransform, inverse(transform)), materialMap_it->second, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride() | (lightIndex << 8));
+			totalVertexCount += mMeshVertices.at(prim->mMesh.get()).size();
+			totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
+		});
+		mTransformHistory = transformHistory;
+	}
 	
 	{ // Build TLAS
+		ProfilerRegion s("Build TLAS", commandBuffer);
 		commandBuffer.barrier(blasBarriers, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR);
 		vk::AccelerationStructureGeometryKHR geom { vk::GeometryTypeKHR::eInstances, vk::AccelerationStructureGeometryInstancesDataKHR() };
 		vk::AccelerationStructureBuildRangeInfoKHR range { (uint32_t)instances.size() };
@@ -333,63 +371,49 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 			vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eAccelerationStructureReadKHR);
 	}
 
-	Buffer::View<VertexData> vertices = make_shared<Buffer>(commandBuffer.mDevice, "gVertices", max(totalVertexCount,1u)*sizeof(VertexData), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
-	Buffer::View<byte> indices = make_shared<Buffer>(commandBuffer.mDevice, "gIndices", align_up(max(totalIndexBufferSize,1u), sizeof(uint32_t)), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 4);
-	{ // copy vertices and indices
-		commandBuffer.hold_resource(vertices);
-		commandBuffer.hold_resource(indices);
-		mCopyVerticesPipeline->descriptor("gVertices") = vertices;
-		for (uint32_t i = 0; i < instanceBLAS.size(); i++) {
-			MeshAS& b = *instanceBLAS[i].first;
-			InstanceData& d = instanceDatas[instanceBLAS[i].second];
-
-			// copy vertex data
-			mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(b.mPositions.second, b.mPositions.first.mOffset);
-			mCopyVerticesPipeline->descriptor("gNormals") = Buffer::View(b.mNormals.second, b.mNormals.first.mOffset);
-			mCopyVerticesPipeline->descriptor("gTangents") = Buffer::View(b.mTangents.second, b.mTangents.first.mOffset);
-			mCopyVerticesPipeline->descriptor("gTexcoords") = Buffer::View(b.mTexcoords.second, b.mTexcoords.first.mOffset);
-			mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = b.mVertexCount;
-			mCopyVerticesPipeline->push_constant<uint32_t>("gDstOffset") = d.mFirstVertex;
-			mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = b.mPositions.first.mStride;
-			mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = b.mNormals.first.mStride;
-			mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = b.mTangents.first.mStride;
-			mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = b.mTexcoords.first.mStride;
-			commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
-			mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);
-			mCopyVerticesPipeline->push_constants(commandBuffer);
-			commandBuffer.dispatch_over(b.mVertexCount);
-
-			// copy indices
-			commandBuffer.copy_buffer(b.mIndices, Buffer::View<byte>(indices.buffer(), d.mIndexByteOffset, b.mIndices.size_bytes()));
-				
-			commandBuffer.barrier(vertices, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-			commandBuffer.barrier(indices, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-		}
-	}
+	if (!mCurFrame->mVertices || mCurFrame->mVertices.size() < totalVertexCount)
+		mCurFrame->mVertices = make_shared<Buffer>(commandBuffer.mDevice, "gVertices", max(totalVertexCount,1u)*sizeof(VertexData), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+	if (!mCurFrame->mIndices || mCurFrame->mIndices.size() < totalIndexBufferSize)
+		mCurFrame->mIndices = make_shared<Buffer>(commandBuffer.mDevice, "gIndices", align_up(max(totalIndexBufferSize,1u), sizeof(uint32_t)), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 4);
+	if (!mCurFrame->mInstances || mCurFrame->mInstances.size() < instanceDatas.size())
+		mCurFrame->mInstances = make_shared<Buffer>(commandBuffer.mDevice, "InstanceDatas", sizeof(InstanceData)*max<size_t>(1, instanceDatas.size()), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mCurFrame->mMaterials || mCurFrame->mMaterials.size() < materials.size())
+		mCurFrame->mMaterials = make_shared<Buffer>(commandBuffer.mDevice, "MaterialInfos", sizeof(MaterialData)*max<size_t>(1, materials.size()), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 	
-	Buffer::View<InstanceData> instanceBuf = make_shared<Buffer>(commandBuffer.mDevice, "InstanceDatas", sizeof(InstanceData)*max<size_t>(1, instanceDatas.size()), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	Buffer::View<MaterialData> materialBuf = make_shared<Buffer>(commandBuffer.mDevice, "MaterialInfos", sizeof(MaterialData)*max<size_t>(1, materials.size()), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	memcpy(commandBuffer.hold_resource(instanceBuf).data(), instanceDatas.data(), sizeof(InstanceData)*instanceDatas.size());
-	memcpy(commandBuffer.hold_resource(materialBuf).data(), materials.data(), sizeof(MaterialData)*materials.size());
+	{ // copy vertices and indices
+		ProfilerRegion s("Copy vertex data", commandBuffer);
+		for (uint32_t i = 0; i < instanceIndices.size(); i++) {
+			const auto&[prim, blas, instanceIndex] = instanceIndices[i];
+			InstanceData& d = instanceDatas[instanceIndex];
+			Buffer::View<VertexData>& meshVertices = mMeshVertices.at(prim->mMesh.get());
+			commandBuffer.copy_buffer(meshVertices, Buffer::View<VertexData>(mCurFrame->mVertices.buffer(), d.mFirstVertex*sizeof(VertexData), meshVertices.size()));
+			commandBuffer.copy_buffer(blas->mIndices, Buffer::View<byte>(mCurFrame->mIndices.buffer(), d.mIndexByteOffset, blas->mIndices.size_bytes()));
+		}
+		commandBuffer.barrier(mCurFrame->mIndices, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		commandBuffer.barrier(mCurFrame->mVertices, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+	}
+
+	memcpy(mCurFrame->mInstances.data(), instanceDatas.data(), sizeof(InstanceData)*instanceDatas.size());
+	memcpy(mCurFrame->mMaterials.data(), materials.data(), sizeof(MaterialData)*materials.size());
 
 	mTracePrimaryRaysPipeline->descriptor("gScene") = **mTopLevel;
-	mTracePrimaryRaysPipeline->descriptor("gInstances") = instanceBuf;
-	mTracePrimaryRaysPipeline->descriptor("gMaterials") = materialBuf;
-	mTracePrimaryRaysPipeline->descriptor("gVertices") = vertices;
-	mTracePrimaryRaysPipeline->descriptor("gIndices") = indices;
+	mTracePrimaryRaysPipeline->descriptor("gInstances") = mCurFrame->mInstances;
+	mTracePrimaryRaysPipeline->descriptor("gMaterials") = mCurFrame->mMaterials;
+	mTracePrimaryRaysPipeline->descriptor("gVertices") = mCurFrame->mVertices;
+	mTracePrimaryRaysPipeline->descriptor("gIndices") = mCurFrame->mIndices;
 
-	mGradientForwardProjectPipeline->descriptor("gInstances") = instanceBuf;
+	mGradientForwardProjectPipeline->descriptor("gInstances") = mCurFrame->mInstances;
 	mGradientForwardProjectPipeline->descriptor("gInstanceIndexMap") = instanceIndexMap;
-	mGradientForwardProjectPipeline->descriptor("gVertices") = vertices;
-	mGradientForwardProjectPipeline->descriptor("gIndices") = indices;
+	mGradientForwardProjectPipeline->descriptor("gVertices") = mCurFrame->mVertices;
+	mGradientForwardProjectPipeline->descriptor("gIndices") = mCurFrame->mIndices;
 	
 	mTemporalAccumulationPipeline->descriptor("gInstanceIndexMap") = instanceIndexMap;
 	
 	mTraceIndirectRaysPipeline->descriptor("gScene") = **mTopLevel;
-	mTraceIndirectRaysPipeline->descriptor("gInstances") = instanceBuf;
-	mTraceIndirectRaysPipeline->descriptor("gMaterials") = materialBuf;
-	mTraceIndirectRaysPipeline->descriptor("gVertices") = vertices;
-	mTraceIndirectRaysPipeline->descriptor("gIndices") = indices;
+	mTraceIndirectRaysPipeline->descriptor("gInstances") = mCurFrame->mInstances;
+	mTraceIndirectRaysPipeline->descriptor("gMaterials") = mCurFrame->mMaterials;
+	mTraceIndirectRaysPipeline->descriptor("gVertices") = mCurFrame->mVertices;
+	mTraceIndirectRaysPipeline->descriptor("gIndices") = mCurFrame->mIndices;
 	
 	mTraceIndirectRaysPipeline->descriptor("gLights") = lights.buffer_view();
 	mTraceIndirectRaysPipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lights.size();
@@ -404,7 +428,7 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	ProfilerRegion ps("RayTraceScene::draw", commandBuffer);
 
 	vk::Extent3D gradExtent(colorBuffer.extent().width / gGradientDownsample, colorBuffer.extent().height / gGradientDownsample, 1);
-	if (!mCurFrame || mCurFrame->mRadiance.extent() != colorBuffer.extent()) {
+	if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != colorBuffer.extent()) {
 		mCurFrame = make_unique<FrameData>();
 		mCurFrame->mVisibility = make_shared<Image>(commandBuffer.mDevice, "gVisibility", colorBuffer.extent(), vk::Format::eR32G32B32A32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		
@@ -420,10 +444,11 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		mCurFrame->mAccumMoments = make_shared<Image>(commandBuffer.mDevice, "gAccumMoments", colorBuffer.extent(), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 	}
 	if (!mPrevUV || mPrevUV.extent() != colorBuffer.extent()) {
+		mColorHistory = make_shared<Image>(commandBuffer.mDevice, "Color history", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+		mColorHistoryUnfiltered = make_shared<Image>(commandBuffer.mDevice, "Unfiltered color history", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+		mLightSamples = make_shared<Image>(commandBuffer.mDevice, "Initial light samples", colorBuffer.extent(), vk::Format::eR32G32B32A32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		mPrevUV = make_shared<Image>(commandBuffer.mDevice, "gPrevUV", colorBuffer.extent(), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		mGradientPositions = make_shared<Image>(commandBuffer.mDevice, "gGradientPositions", gradExtent, vk::Format::eR32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
-		mColorHistory = make_shared<Image>(commandBuffer.mDevice, "color history", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
-		mColorHistoryUnfiltered = make_shared<Image>(commandBuffer.mDevice, "unfiltered color history", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		mAntilagAlpha = make_shared<Image>(commandBuffer.mDevice, "gAntilagAlpha", colorBuffer.extent(), vk::Format::eR32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc);
 		mPing = make_shared<Image>(commandBuffer.mDevice, "pong", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		mPong = make_shared<Image>(commandBuffer.mDevice, "ping", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
@@ -433,7 +458,7 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		mDiffPong[1] = make_shared<Image>(commandBuffer.mDevice, "diff pong 1", gradExtent, vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 	}
 
-	bool hasHistory = mPrevFrame && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent();
+	bool hasHistory = mPrevFrame->mRadiance && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent();
 
 	mCurFrame->mCameraToWorld = node_to_world(camera.node());
 	mCurFrame->mProjection = camera->projection((float)colorBuffer.extent().height/(float)colorBuffer.extent().width);
@@ -442,6 +467,7 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	#pragma pack(1)
 	struct CameraData {
 		TransformData gCameraToWorld;
+		TransformData gWorldToCamera;
 		ProjectionData gProjection;
 		TransformData gWorldToPrevCamera;
 		ProjectionData gPrevProjection;
@@ -449,8 +475,9 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	#pragma pack(pop)
 	Buffer::View<CameraData> cameraData = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	cameraData.data()->gCameraToWorld = mCurFrame->mCameraToWorld;
+	cameraData.data()->gWorldToCamera = inverse(mCurFrame->mCameraToWorld);
 	cameraData.data()->gProjection = mCurFrame->mProjection;
-	cameraData.data()->gWorldToPrevCamera = hasHistory ? inverse(mPrevFrame->mCameraToWorld) : inverse(mCurFrame->mCameraToWorld);
+	cameraData.data()->gWorldToPrevCamera = hasHistory ? inverse(mPrevFrame->mCameraToWorld) : cameraData.data()->gWorldToCamera;
 	cameraData.data()->gPrevProjection = hasHistory ? mPrevFrame->mProjection : mCurFrame->mProjection;
 
 	{ // Primary rays
@@ -472,7 +499,7 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	if (mTemporalAccumulationPipeline->specialization_constant("gAntilag") && hasHistory) {
 		// forward project
 		ProfilerRegion ps("Forward projection", commandBuffer);
-		mGradientForwardProjectPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(mCurFrame->mCameraToWorld);
+		mGradientForwardProjectPipeline->push_constant<TransformData>("gWorldToCamera") = cameraData.data()->gWorldToCamera;
 		mGradientForwardProjectPipeline->push_constant<ProjectionData>("gProjection") = mCurFrame->mProjection;
 		if (mRandomPerFrame) mGradientForwardProjectPipeline->push_constant<uint32_t>("gFrameNumber") = (uint32_t)commandBuffer.mDevice.mInstance.window().present_count();
 		mGradientForwardProjectPipeline->descriptor("gVisibility") = image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
@@ -494,10 +521,10 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	{ // Indirect/shading rays
 		ProfilerRegion ps("Indirect rays", commandBuffer);
 		mTraceIndirectRaysPipeline->descriptor("gCameraData") = cameraData;
-		mTraceIndirectRaysPipeline->descriptor("gVisibility")    = image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
-		mTraceIndirectRaysPipeline->descriptor("gRNGSeed")       = image_descriptor(mCurFrame->mRNGSeed, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		mTraceIndirectRaysPipeline->descriptor("gRadiance")      = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mTraceIndirectRaysPipeline->descriptor("gAlbedo")        = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mTraceIndirectRaysPipeline->descriptor("gVisibility") = image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mTraceIndirectRaysPipeline->descriptor("gRNGSeed")    = image_descriptor(mCurFrame->mRNGSeed, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mTraceIndirectRaysPipeline->descriptor("gRadiance")   = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mTraceIndirectRaysPipeline->descriptor("gAlbedo")     = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		if (mRandomPerFrame) mTraceIndirectRaysPipeline->push_constant<uint32_t>("gRandomSeed") = (uint32_t)commandBuffer.mDevice.mInstance.window().present_count();
 		commandBuffer.bind_pipeline(mTraceIndirectRaysPipeline->get_pipeline());
 		mTraceIndirectRaysPipeline->bind_descriptor_sets(commandBuffer);
@@ -631,6 +658,4 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		mTonemapPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(colorBuffer.extent());
 	}
-
-	swap(mPrevFrame, mCurFrame);
 }

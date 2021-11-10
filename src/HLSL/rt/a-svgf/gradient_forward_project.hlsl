@@ -78,9 +78,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 	vis.x = gInstanceIndexMap[vis.x];
 	if (vis.x == -1) return;
 
-	SurfaceData sfc = surface_attributes(gInstances[vis.x], gVertices, gIndices, vis.y, asfloat(vis.zw));
-	float3 worldPos = sfc.v.mPositionU.xyz;
-	float4 pos_cs_curr = project_point(gPushConstants.gProjection, transform_point(gPushConstants.gWorldToCamera, worldPos));
+	InstanceData instance = gInstances[vis.x];
+	float3 pos = surface_local_pos(instance, gVertices, gIndices, vis.y, asfloat(vis.zw));
+	float4 pos_cs_curr = project_point(gPushConstants.gProjection, transform_point(tmul(gPushConstants.gWorldToCamera, instance.mTransform), pos));
 	pos_cs_curr.y = -pos_cs_curr.y;
 	float2 uv = (pos_cs_curr.xy/pos_cs_curr.w)*.5 + .5;
 	int2 idx_curr = int2(uv * resolution);

@@ -33,22 +33,8 @@ float luminance(in float3 color) {
 	return dot(color, float3(0.299, 0.587, 0.114));
 }
 
-float3 rgb_to_yuv(float3 rgb) {
-	return mul(float3x3(
-		0.299, -0.14713,  0.615,
-		0.587, -0.28886, -0.51499,
-		0.114,  0.436,   -0.10001), rgb);
-}
-
-float3 yuv_to_rgb(float3 yuv) {
-	return mul(float3x3(
-		1.0,      1.0,     1.0,
-		0.0,     -0.39465, 2.03211,
-		1.13983, -0.58060, 0.0), yuv);
-}
-
 bool test_reprojected_normal(float3 n1, float3 n2) {
-	return dot(n1, n2) > 0.95;
+	return dot(n1, n2) > 0.99619469809; // 5 degrees
 }
 
 bool test_inside_screen(int2 p, int2 res) {

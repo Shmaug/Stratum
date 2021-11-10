@@ -22,7 +22,12 @@ uint32_t spirv_type_size(const nlohmann::json& j, const string& tname) {
 		{ "vec4",   sizeof(float)*4 },
 		{ "dvec2",  sizeof(double)*2 },
 		{ "dvec3",  sizeof(double)*3 },
-		{ "dvec4",  sizeof(double)*4 }
+		{ "dvec4",  sizeof(double)*4 },
+		{ "mat2",  sizeof(float)*2*2 },
+		{ "mat3",  sizeof(float)*3*3 },
+		{ "mat3x4",  sizeof(float)*3*4 },
+		{ "mat4x3",  sizeof(float)*4*3 },
+		{ "mat4",  sizeof(float)*4*4 },
 	};
 	if (auto it = gSpirvTypeSizeMap.find(tname); it != gSpirvTypeSizeMap.end())
 		return (uint32_t)it->second;
@@ -52,11 +57,9 @@ auto spirv_array_size(const nlohmann::json& j, const nlohmann::json& v) {
 	}
 	return dst;
 }
-pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(const string& name) {
+pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(string name) {
 	static const unordered_map<string, VertexArrayObject::AttributeType> gAttributeTypeMap {
-		{ "vertex", VertexArrayObject::AttributeType::ePosition },
 		{ "position", VertexArrayObject::AttributeType::ePosition },
-		{ "pos", VertexArrayObject::AttributeType::ePosition },
 		{ "normal", VertexArrayObject::AttributeType::eNormal },
 		{ "tangent", VertexArrayObject::AttributeType::eTangent },
 		{ "binormal", VertexArrayObject::AttributeType::eBinormal },
@@ -65,17 +68,18 @@ pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(const string& na
 		{ "weights", VertexArrayObject::AttributeType::eBlendWeight },
 		{ "blendweight", VertexArrayObject::AttributeType::eBlendWeight },
 		{ "color", VertexArrayObject::AttributeType::eColor },
+		{ "sv_target", VertexArrayObject::AttributeType::eColor },
 		{ "pointsize", VertexArrayObject::AttributeType::ePointSize },
 		{ "texcoord", VertexArrayObject::AttributeType::eTexcoord },
-		{ "uv", VertexArrayObject::AttributeType::eTexcoord }
 	};
+	for (char& c : name) c = tolower(c);
 	for (const auto& [id,attribType] : gAttributeTypeMap)
 		if (size_t pos = name.find(id); pos != string::npos)
 			if (pos+id.size() < name.length() && isdigit(name[pos+id.size()]))
-				return make_pair(attribType,  stoi(id.substr(pos+id.size())));
+				return make_pair(attribType,  stoi(name.substr(pos+id.size())));
 			else
 				return make_pair(attribType,  0u);
-	return make_pair(VertexArrayObject::AttributeType::eTexcoord, 0u);
+	throw invalid_argument("Failed to parse attribute type");
 }
 
 ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
@@ -166,22 +170,12 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 		dst.mLocation = v["location"];
 		dst.mFormat = gSpirvTypeMap.at(v["type"]);
 		tie(dst.mAttributeType,dst.mTypeIndex) = attribute_type(v["name"]);
-		// ensure unique type/typeindex
-		for (const auto&[n,i] : mStageInputs)
-			if (n != v["name"])
-				while (i.mAttributeType == dst.mAttributeType && i.mTypeIndex == dst.mTypeIndex)
-					dst.mTypeIndex++;
 	}
 	for (const auto& v : j["outputs"]) {
 		auto& dst = mStageOutputs[v["name"]];
 		dst.mLocation = v["location"];
 		dst.mFormat = gSpirvTypeMap.at(v["type"]);
 		tie(dst.mAttributeType,dst.mTypeIndex) = attribute_type(v["name"]);
-		// ensure unique type/typeindex
-		for (const auto&[n,i] : mStageInputs)
-			if (n != v["name"])
-				while (i.mAttributeType == dst.mAttributeType && i.mTypeIndex == dst.mTypeIndex)
-					dst.mTypeIndex++;
 	}
 
 	for (const auto& v : j["subpass_inputs"])

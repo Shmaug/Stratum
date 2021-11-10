@@ -26,7 +26,9 @@ void main(uint3 index : SV_DispatchThreadID) {
 	gColor.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
 
-	float4 radiance = gModulateAlbedo ? gColor[index.xy] * gAlbedo[index.xy] : gColor[index.xy];
+	float4 radiance = gColor[index.xy];
+	if (gModulateAlbedo) radiance.rgb *= gAlbedo[index.xy].rgb;
+	
 	if (gACES) radiance.rgb = ACES_fitted(radiance.rgb);
 
 	switch (gDebugMode) {

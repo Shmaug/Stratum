@@ -108,21 +108,27 @@ void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const uno
 		// find DescriptorSets matching current layout
 		const shared_ptr<DescriptorSetLayout>& layout = pipeline.descriptor_set_layouts()[i];
 		auto[first, last] = mDescriptorSets.equal_range(layout.get());
-		for (auto[layout, descriptorSet] : ranges::subrange(first, last)) {
+		for (auto[l, descriptorSet] : ranges::subrange(first, last)) {
 			// find outdated/nonexistant descriptors
 			bool found = true;
 			for (const auto& [id, descriptors] : mDescriptors) {
-				for (const auto&[arrayIndex, descriptor] : descriptors)
-					if (const Descriptor* d = descriptorSet->find(bindings.at(id)->mBinding, arrayIndex);
-							d && *d == descriptor)
-						continue;
-					else if (!descriptorSet->in_use()) {
-						// write the descriptor if possible
-						descriptorSet->insert_or_assign(bindings.at(id)->mBinding, arrayIndex, descriptor);
-					} else {
+				for (const auto&[arrayIndex, descriptor] : descriptors) {
+					auto binding_it = bindings.find(id);
+					if (binding_it == bindings.end()) {
 						found = false;
 						break;
 					}
+					const Descriptor* d = descriptorSet->find(binding_it->second->mBinding, arrayIndex);
+					if (!d || *d != descriptor) {
+						if (descriptorSet->in_use()) {
+							found = false;
+							break;
+						} else {
+							// update the descriptor
+							descriptorSet->insert_or_assign(binding_it->second->mBinding, arrayIndex, descriptor);
+						}
+					}
+				}
 				if (!found) break;
 			}
 			if (found) {
@@ -133,6 +139,7 @@ void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const uno
 		// create new DescriptorSet if necessary
 		if (!descriptorSets[i]) {
 			descriptorSets[i] = make_shared<DescriptorSet>(layout, mName+"/DescriptorSet"+to_string(i));
+			//mDescriptorSets.emplace(layout.get(), descriptorSets[i]);
 			for (auto& [id, descriptors] : mDescriptors)
 				if (auto it = bindings.find(id); it != bindings.end())
 					for (const auto&[arrayIndex, descriptor] : descriptors)
@@ -176,9 +183,10 @@ shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline() {
 	}
 	
 	auto pipeline = find_pipeline(key);
-	if (pipeline) return static_pointer_cast<ComputePipeline>(pipeline);
-	pipeline = make_shared<ComputePipeline>(mName, shader, mImmutableSamplers);
-	add_pipeline(key, pipeline);
+	if (!pipeline) {
+		pipeline = make_shared<ComputePipeline>(mName, shader, mImmutableSamplers);
+		add_pipeline(key, pipeline);
+	}
 	return static_pointer_cast<ComputePipeline>(pipeline);
 }
 
@@ -198,7 +206,9 @@ shared_ptr<GraphicsPipeline> GraphicsPipelineState::get_pipeline(const RenderPas
 	}
 
 	auto pipeline = find_pipeline(key);
-	if (!pipeline) pipeline = make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, vertexDescription, shaders, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
-	add_pipeline(key, pipeline);
+	if (!pipeline) {
+		pipeline = make_shared<GraphicsPipeline>(mName, renderPass, subpassIndex, vertexDescription, shaders, mImmutableSamplers, mRasterState, mSampleShading, mDepthStencilState, mBlendStates);
+		add_pipeline(key, pipeline);
+	}
 	return static_pointer_cast<GraphicsPipeline>(pipeline);
 }

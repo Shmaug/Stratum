@@ -25,7 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#pragma compile glslc -fshader-stage=comp -fentry-point=main
+#pragma compile dxc -spirv -T cs_6_7 -E main
 
 #include "svgf_shared.hlsli"
 
@@ -51,12 +51,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::binding(15)]] Texture2D<float4> gPrevNormal;
 [[vk::binding(16)]] Texture2D<float2> gDiff;
 
-[[vk::push_constant]] cbuffer {
+[[vk::push_constant]] const struct {
 	float gAntilagScale;
 	float gTemporalAlpha;
-};
+} gPushConstants;
 
-[[numthreads(8,8,1)]]
+[numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	uint2 resolution;
   gVisibility.GetDimensions(resolution.x, resolution.y);
@@ -73,7 +73,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	float3 normal_curr = gNormal[ipos].rgb;
 	float l = luminance(color_curr);
 	float2 moments_curr = float2(l, l*l);
-	uint mesh_id_curr = gVisibility[ipos].x;
+	uint4 vis_curr = gVisibility[ipos];
 
 	float4 color_prev   = 0;
 	float2 moments_prev = 0;
@@ -81,7 +81,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	float histlen       = 0;
   float antilag_alpha = 0;
 
-	if (mesh_id_curr != -1) {
+	if (vis_curr.x != -1) {
 		// bilinear interpolation, check each tap individually, renormalize afterwards
 		for (int yy = 0; yy <= 1; yy++) {
 			for (int xx = 0; xx <= 1; xx++) {
@@ -89,17 +89,17 @@ void main(uint3 index : SV_DispatchThreadId) {
 				if (!test_inside_screen(ipos_prev, resolution)) continue;
 				if (!test_reprojected_depth(z_curr.z, gPrevZ[ipos_prev].x, z_curr.y)) continue;
 				if (!test_reprojected_normal(normal_curr, gPrevNormal[ipos_prev].xyz)) continue;
-				uint v = gPrevVisibility[ipos_prev].x;
-				if (v == -1 || gInstanceIndexMap[v] != mesh_id_curr) continue;
+				uint4 vis = gPrevVisibility[ipos_prev];
+				if (vis.x == -1 || gInstanceIndexMap[vis.x] != vis_curr.x) continue;
 
 				float4 c = gPrevColor[ipos_prev];
 				if (any(isnan(c))) continue;
 
-				float w = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
-				color_prev   += c * w;
-				moments_prev += gPrevMoments[ipos_prev] * w;
-				histlen      += gHistoryLength[ipos_prev] * w;
-				sum_w        += w;
+				float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
+				color_prev   += c * wc;
+				moments_prev += gPrevMoments[ipos_prev] * wc;
+				histlen      += gHistoryLength[ipos_prev] * wc;
+				sum_w        += wc;
 			}
 		}
 		if (gAntilag) {
@@ -115,7 +115,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
 					}
 			}
-			antilag_alpha = saturate(antilag_alpha*gAntilagScale);
+			antilag_alpha = saturate(antilag_alpha*gPushConstants.gAntilagScale);
 			if (isnan(antilag_alpha) || isinf(antilag_alpha)) antilag_alpha = 1;
 			gAntilagAlpha[index.xy] = antilag_alpha;
 		}
@@ -126,7 +126,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		moments_prev *= invSum;
 		histlen      *= invSum;
 
-    float alpha_color   = max(gTemporalAlpha, 1 / (histlen + 1));
+    float alpha_color   = max(gPushConstants.gTemporalAlpha, 1 / (histlen + 1));
     float alpha_moments = max(0.6, 1 / (histlen + 1));
 		alpha_color   = lerp(alpha_color,   1, antilag_alpha);
 		alpha_moments = lerp(alpha_moments, 1, antilag_alpha);

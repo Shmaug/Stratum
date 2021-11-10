@@ -25,23 +25,23 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#pragma compile glslc -fshader-stage=comp -fentry-point=main
+#pragma compile dxc -spirv -T cs_6_7 -E main
 
 #include "svgf_shared.hlsli"
 
-[[vk::constant_id(0)]] const uint gFilterKernelType = 1;
+[[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
 
 [[vk::binding(0)]] RWTexture2D<float2> gOutput1;
 [[vk::binding(1)]] RWTexture2D<float4> gOutput2;
 [[vk::binding(2)]] Texture2D<float2> gInput1;
-[[vk::binding(2)]] Texture2D<float4> gInput2;
+[[vk::binding(3)]] Texture2D<float4> gInput2;
 
-[[vk::push_constant]] cbuffer {
+[[vk::push_constant]] const struct {
 	int gIteration;
 	uint gStepSize;
-};
+} gPushConstants;
 
-const float gaussian_kernel[3][3] = {
+static const float gaussian_kernel[3][3] = {
 	{ 1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0 },
 	{ 1.0 / 8.0,  1.0 / 4.0, 1.0 / 8.0  },
 	{ 1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0 }
@@ -52,7 +52,7 @@ float compute_sigma_luminance(float center, int2 ipos) {
 	for (int yy = -1; yy <= 1; yy++)
 		for (int xx = -1; xx <= 1; xx++)
 			if (xx != 0 || yy != 0)
-				sum += gInput2[int3(ipos + int2(xx, yy), 0)].g * gaussian_kernel[xx + 1][yy + 1];
+				sum += gInput2[ipos + int2(xx, yy)].g * gaussian_kernel[xx + 1][yy + 1];
 	return sqrt(max(sum, 0));
 }
 
@@ -73,13 +73,13 @@ class TapData {
 		int2 p = ipos + offset; 
 		if (any(p < 0) || any(p >= resolution)) return;
 		
-		float2 color1_p = gInput1[int3(p,0)]; 
-		float4 color2_p = gInput2[int3(p,0)]; 
+		float2 color1_p = gInput1[p]; 
+		float4 color2_p = gInput2[p]; 
 		float z_p       = color2_p.b;
 		float l_p       = color2_p.r;
 
 		float w_l = abs(l_p - l_center) / (sigma_l + 1e-10); 
-		float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gStepSize * gGradientDownsample) + 1e-2); 
+		float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gPushConstants.gStepSize * gGradientDownsample) + 1e-2); 
 		float w = exp(-w_l * w_l - w_z) * kernel_weight;
 
 		if (isinf(w) || isnan(w)) w = 0;
@@ -100,7 +100,7 @@ void subsampled(inout TapData t) {
 	| | |x| | |
 	*/
 
-	if((gIteration & 1) == 0) {
+	if((gPushConstants.gIteration & 1) == 0) {
 		/*
 		| | | | | |
 		| |x| |x| |
@@ -108,8 +108,8 @@ void subsampled(inout TapData t) {
 		| |x| |x| |
 		| | | | | |
 		*/
-		t.tap(int2(-2,  0) * gStepSize, 1.0);
-		t.tap(int2( 2,  0) * gStepSize, 1.0);
+		t.tap(int2(-2,  0) * gPushConstants.gStepSize, 1.0);
+		t.tap(int2( 2,  0) * gPushConstants.gStepSize, 1.0);
 	} else {
 		/*
 		| | |x| | |
@@ -118,15 +118,15 @@ void subsampled(inout TapData t) {
 		| |x| |x| |
 		| | |x| | |
 		*/
-		t.tap(int2( 0, -2) * gStepSize, 1.0);
-		t.tap(int2( 0,  2) * gStepSize, 1.0);
+		t.tap(int2( 0, -2) * gPushConstants.gStepSize, 1.0);
+		t.tap(int2( 0,  2) * gPushConstants.gStepSize, 1.0);
 	}
 
-	t.tap(int2(-1,  1) * gStepSize, 1.0);
-	t.tap(int2( 1,  1) * gStepSize, 1.0);
+	t.tap(int2(-1,  1) * gPushConstants.gStepSize, 1.0);
+	t.tap(int2( 1,  1) * gPushConstants.gStepSize, 1.0);
 
-	t.tap(int2(-1, -1) * gStepSize, 1.0);
-	t.tap(int2( 1, -1) * gStepSize, 1.0);
+	t.tap(int2(-1, -1) * gPushConstants.gStepSize, 1.0);
+	t.tap(int2( 1, -1) * gPushConstants.gStepSize, 1.0);
 }
 
 void box3(inout TapData t) {
@@ -134,7 +134,7 @@ void box3(inout TapData t) {
 	for(int yy = -r; yy <= r; yy++)
 		for(int xx = -r; xx <= r; xx++)
 			if(xx != 0 || yy != 0)
-				t.tap(int2(xx, yy) * gStepSize, 1.0);
+				t.tap(int2(xx, yy) * gPushConstants.gStepSize, 1.0);
 }
 
 void box5(inout TapData t) {
@@ -142,44 +142,44 @@ void box5(inout TapData t) {
 	for(int yy = -r; yy <= r; yy++)
 		for(int xx = -r; xx <= r; xx++)
 			if(xx != 0 || yy != 0)
-				t.tap(int2(xx, yy) * gStepSize, 1.0);
+				t.tap(int2(xx, yy) * gPushConstants.gStepSize, 1.0);
 }
 
 void atrous(inout TapData t) {
 	const float kernel[3] = { 1.0, 2.0 / 3.0, 1.0 / 6.0 };
 
-	t.tap(int2( 1,  0) * gStepSize, 2.0 / 3.0);
-	t.tap(int2( 0,  1) * gStepSize, 2.0 / 3.0);
-	t.tap(int2(-1,  0) * gStepSize, 2.0 / 3.0);
-	t.tap(int2( 0, -1) * gStepSize, 2.0 / 3.0);
+	t.tap(int2( 1,  0) * gPushConstants.gStepSize, 2.0 / 3.0);
+	t.tap(int2( 0,  1) * gPushConstants.gStepSize, 2.0 / 3.0);
+	t.tap(int2(-1,  0) * gPushConstants.gStepSize, 2.0 / 3.0);
+	t.tap(int2( 0, -1) * gPushConstants.gStepSize, 2.0 / 3.0);
 
-	t.tap(int2( 2,  0) * gStepSize, 1.0 / 6.0);
-	t.tap(int2( 0,  2) * gStepSize, 1.0 / 6.0);
-	t.tap(int2(-2,  0) * gStepSize, 1.0 / 6.0);
-	t.tap(int2( 0, -2) * gStepSize, 1.0 / 6.0);
+	t.tap(int2( 2,  0) * gPushConstants.gStepSize, 1.0 / 6.0);
+	t.tap(int2( 0,  2) * gPushConstants.gStepSize, 1.0 / 6.0);
+	t.tap(int2(-2,  0) * gPushConstants.gStepSize, 1.0 / 6.0);
+	t.tap(int2( 0, -2) * gPushConstants.gStepSize, 1.0 / 6.0);
 
-	t.tap(int2( 1,  1) * gStepSize, 4.0 / 9.0);
-	t.tap(int2(-1,  1) * gStepSize, 4.0 / 9.0);
-	t.tap(int2(-1, -1) * gStepSize, 4.0 / 9.0);
-	t.tap(int2( 1, -1) * gStepSize, 4.0 / 9.0);
+	t.tap(int2( 1,  1) * gPushConstants.gStepSize, 4.0 / 9.0);
+	t.tap(int2(-1,  1) * gPushConstants.gStepSize, 4.0 / 9.0);
+	t.tap(int2(-1, -1) * gPushConstants.gStepSize, 4.0 / 9.0);
+	t.tap(int2( 1, -1) * gPushConstants.gStepSize, 4.0 / 9.0);
 
-	t.tap(int2( 1,  2) * gStepSize, 1.0 / 9.0);
-	t.tap(int2(-1,  2) * gStepSize, 1.0 / 9.0);
-	t.tap(int2(-1, -2) * gStepSize, 1.0 / 9.0);
-	t.tap(int2( 1, -2) * gStepSize, 1.0 / 9.0);
+	t.tap(int2( 1,  2) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2(-1,  2) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2(-1, -2) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2( 1, -2) * gPushConstants.gStepSize, 1.0 / 9.0);
 
-	t.tap(int2( 2,  1) * gStepSize, 1.0 / 9.0);
-	t.tap(int2(-2,  1) * gStepSize, 1.0 / 9.0);
-	t.tap(int2(-2, -1) * gStepSize, 1.0 / 9.0);
-	t.tap(int2( 2, -1) * gStepSize, 1.0 / 9.0);
+	t.tap(int2( 2,  1) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2(-2,  1) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2(-2, -1) * gPushConstants.gStepSize, 1.0 / 9.0);
+	t.tap(int2( 2, -1) * gPushConstants.gStepSize, 1.0 / 9.0);
 
-	t.tap(int2( 2,  2) * gStepSize, 1.0 / 36.0);
-	t.tap(int2(-2,  2) * gStepSize, 1.0 / 36.0);
-	t.tap(int2(-2, -2) * gStepSize, 1.0 / 36.0);
-	t.tap(int2( 2, -2) * gStepSize, 1.0 / 36.0);
+	t.tap(int2( 2,  2) * gPushConstants.gStepSize, 1.0 / 36.0);
+	t.tap(int2(-2,  2) * gPushConstants.gStepSize, 1.0 / 36.0);
+	t.tap(int2(-2, -2) * gPushConstants.gStepSize, 1.0 / 36.0);
+	t.tap(int2( 2, -2) * gPushConstants.gStepSize, 1.0 / 36.0);
 }
 
-[[numthreads(8,8,1)]]
+[numthreads(8,8,1)]
 void main(int2 index : SV_DispatchThreadId) {
 	TapData t;
 	gOutput1.GetDimensions(t.resolution.x, t.resolution.y);
@@ -205,12 +205,12 @@ void main(int2 index : SV_DispatchThreadId) {
 		else if (gFilterKernelType == 3)
 			subsampled(t);
 		else if (gFilterKernelType == 4) {
-			if (gStepSize == 1)
+			if (gPushConstants.gStepSize == 1)
 				box3(t);
 			else
 				subsampled(t);
 		} else if (gFilterKernelType == 5) {
-			if (gStepSize == 1)
+			if (gPushConstants.gStepSize == 1)
 				box5(t);
 			else
 				subsampled(t);

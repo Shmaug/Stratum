@@ -1,9 +1,9 @@
-#pragma compile glslc -fshader-stage=vert -fentry-point=vs
-#pragma compile glslc -fshader-stage=frag -fentry-point=fs
+#pragma compile dxc -spirv -T vs_6_7 -E vs
+#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -T ps_6_7 -E fs
 
 #include "scene.hlsli"
 
-[[vk::constant_id(0)]] const uint gImageCount = 16;
+#define gImageCount 1024
 [[vk::constant_id(1)]] const float gAlphaClip = -1; // set below 0 to disable
 
 [[vk::binding(0)]] StructuredBuffer<TransformData> gTransforms;
@@ -12,15 +12,19 @@
 [[vk::binding(3)]] Texture2DArray<float> gShadowMaps;
 [[vk::binding(4)]] SamplerState gSampler;
 [[vk::binding(5)]] SamplerComparisonState gShadowSampler;
-[[vk::binding(6)]] Texture2D<float4> gImages[gImageCount];
-
-[[vk::push_constant]] cbuffer {
+[[vk::binding(6)]] cbuffer gCameraData {
 	TransformData gWorldToCamera;
+	TransformData gCameraToWorld;
 	ProjectionData gProjection;
+};
+[[vk::binding(7)]] Texture2D<float4> gImages[gImageCount];
+
+
+[[vk::push_constant]] const struct {
 	uint gLightCount;
 	uint gMaterialIndex;
 	uint gEnvironmentMap;
-};
+} gPushConstants;
 
 struct v2f {
 	float4 position : SV_Position;
@@ -39,9 +43,9 @@ v2f vs(
 	v2f o;
 	o.posCamera.xyz = transform_point(gWorldToCamera, transform_point(gTransforms[instanceId], vertex));
 	o.position      = project_point(gProjection, o.posCamera.xyz);
-	quatf q = qmul(gWorldToCamera.mRotation, gTransforms[instanceId].mRotation);
-	o.normal.xyz    = rotate_vector(q, normal);
-	o.tangent.xyz   = rotate_vector(q, tangent);
+	TransformData q = tmul(gWorldToCamera, gTransforms[instanceId]);
+	o.normal.xyz    = transform_vector(q, normal);
+	o.tangent.xyz   = transform_vector(q, tangent.xyz);
 	float3 bitangent = cross(o.tangent.xyz, o.normal.xyz);
 	o.normal.w = bitangent.x;
 	o.tangent.w = bitangent.y;
@@ -99,11 +103,16 @@ float4 light_attenuation(LightData light, TransformData lightToCamera, float3 po
 	float atten = 0;
 	float zdir = sign(light.mShadowProjection.mNear);
 	if (light.mType == LIGHT_TYPE_DISTANT) {
-		dir = rotate_vector(lightToCamera.mRotation, float3(0,0,-zdir));
+		dir = normalize(transform_vector(lightToCamera, float3(0,0,-zdir)));
 		atten = 1;
 	} else {
 		float inv_len2 = 1/dot(posLight,posLight);
-		dir = normalize(lightToCamera.mTranslation - posCamera);
+		#ifdef TRANSFORM_UNIFORM_SCALING
+		float3 lightPosCamera = lightToCamera.mTranslation;
+		#else
+		float3 lightPosCamera = float3(lightToCamera.m[0][3], lightToCamera.m[1][3], lightToCamera.m[2][3]);
+		#endif
+		dir = normalize(lightPosCamera - posCamera);
 		atten = inv_len2;
 		if (light.mType & LIGHT_TYPE_SPOT) {
 			PackedLightData p;
@@ -115,9 +124,10 @@ float4 light_attenuation(LightData light, TransformData lightToCamera, float3 po
 }
 
 float sample_shadow(LightData light, float3 posLight) {
-	float3 shadowCoord = hnormalized(project_point(light.mShadowProjection, posLight));
+	float4 shadowCoord = project_point(light.mShadowProjection, posLight);
+	shadowCoord.xyz /= shadowCoord.w;
 	shadowCoord.y = -shadowCoord.y;
-	float3 ac = abs(shadowCoord);
+	float3 ac = abs(shadowCoord.xyz);
 	if (any(ac.xy < 0) || any(ac.xy > 1)) return 1;
 	PackedLightData p;
 	p.v = light.mPackedData;
@@ -125,15 +135,15 @@ float sample_shadow(LightData light, float3 posLight) {
 	if (shadowIndex == -1) return 1;
 	if (light.mType == LIGHT_TYPE_POINT) {
 		float m = max3(ac);
-		if (m == ac.x) shadowIndex += (ac.x < 0) ? 1 : 0;
-		if (m == ac.y) shadowIndex += (ac.y < 0) ? 3 : 2;
-		if (m == ac.z) shadowIndex += (ac.z < 0) ? 5 : 4;
+		if (m == ac.x) shadowIndex += (shadowCoord.x < 0) ? 1 : 0;
+		if (m == ac.y) shadowIndex += (shadowCoord.y < 0) ? 3 : 2;
+		if (m == ac.z) shadowIndex += (shadowCoord.z < 0) ? 5 : 4;
 	}
 	return gShadowMaps.SampleCmp(gShadowSampler, float3(saturate(shadowCoord.xy*.5 + .5), shadowIndex), shadowCoord.z + p.shadow_bias());
 }
 
 float4 fs(v2f i) : SV_Target0 {
-	MaterialData material = gMaterials[gMaterialIndex];
+	MaterialData material = gMaterials[gPushConstants.gMaterialIndex];
 	ImageIndices inds;
 	inds.v = material.mImageIndices;
 	float4 baseColor = float4(material.mAlbedo, 1 - material.mTransmission);
@@ -166,11 +176,10 @@ float4 fs(v2f i) : SV_Target0 {
 	float3 view = normalize(-i.posCamera.xyz);
 
 	float3 eval = bsdf.emission;
-	for (uint l = 0; l < gLightCount; l++) {
+	for (uint l = 0; l < gPushConstants.gLightCount; l++) {
 		LightData light = gLights[l];
-		TransformData lightToCamera = tmul(gWorldToCamera, light.mLightToWorld);
-		float3 posLight = transform_point(inverse(lightToCamera), i.posCamera);
-		float4 Li = light_attenuation(light, lightToCamera, i.posCamera.xyz, posLight);
+		float3 posLight = transform_point(tmul(light.mWorldToLight, gCameraToWorld), i.posCamera.xyz);
+		float4 Li = light_attenuation(light, tmul(gWorldToCamera, light.mLightToWorld), i.posCamera.xyz, posLight);
 		if (Li.w > 0) {
 			Li.w *= sample_shadow(light, posLight);
 			eval += gLights[l].mEmission * Li.w * bsdf.shade_point(Li.xyz, view, normal);

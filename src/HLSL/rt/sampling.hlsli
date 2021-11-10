@@ -107,29 +107,23 @@ float SmithG_GGX_aniso(float NDotV, float VDotX, float VDotY, float ax, float ay
     return 1 / (NDotV + sqrt(a * a + b * b + c * c));
 }
 
-float3 CosineSampleHemisphere(float r1, float r2) 
-{
-    float3 dir;
-    float r = sqrt(r1);
+float3 CosineSampleHemisphere(float r1, float r2) {
     float phi = (2*M_PI) * r2;
-    dir.x = r * cos(phi);
-    dir.y = r * sin(phi);
-    dir.z = sqrt(max(0, 1 - dir.x * dir.x - dir.y * dir.y));
-
+    float3 dir;
+    dir.xy = sqrt(r1) * float2(cos(phi), sin(phi));
+    dir.z = sqrt(max(0, 1 - dot(dir.xy, dir.xy)));
     return dir;
 }
 
 float3 UniformSampleHemisphere(float r1, float r2) {
-    float r = sqrt(max(0, 1 - r1 * r1));
     float phi = (2*M_PI) * r2;
-    return float3(r * float2(cos(phi), sin(phi)), r1);
+    return float3(sqrt(max(0, 1 - r1*r1)) * float2(cos(phi), sin(phi)), r1);
 }
 
 float3 UniformSampleSphere(float r1, float r2) {
-    float z = 1 - 2.0 * r1;
-    float r = sqrt(max(0, 1 - z * z));
     float phi = (2*M_PI) * r2;
-    return float3(r * float2(cos(phi), sin(phi)), z);
+    float z = 1 - 2*r1;
+    return float3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
 }
 
 float2 ConcentricSampleDisk(float r1, float r2) {
@@ -149,10 +143,4 @@ float2 ConcentricSampleDisk(float r1, float r2) {
 float powerHeuristic(float a, float b) {
     float t = a * a;
     return t / (b * b + t);
-}
-
-void Onb(float3 N, inout float3 T, inout float3 B) {
-    float3 UpVector = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
-    T = normalize(cross(UpVector, N));
-    B = cross(N, T);
 }

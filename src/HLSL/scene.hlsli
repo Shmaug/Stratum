@@ -3,10 +3,26 @@
 
 #include "transform.hlsli"
 
-#define LIGHT_TYPE_DISTANT   0
-#define LIGHT_TYPE_POINT     1
-#define LIGHT_TYPE_SPOT      2
-#define LIGHT_TYPE_EMISSIVE_MATERIAL  3
+#define LIGHT_TYPE_DISTANT 	0
+#define LIGHT_TYPE_POINT   	1
+#define LIGHT_TYPE_SPOT    	2
+#define LIGHT_TYPE_MESH			3
+
+inline float3 unpack_normal(uint n) {
+	float2 xy;
+	uint2 xyi = uint2(n & 0x7FFF, (n >> 16) & 0x7FFF);
+#ifdef __cplusplus
+	xy = xyi.cast<float>() / (float)0x7FFF;
+#else
+	xy = (xyi / (float)0x7FFF);
+#endif
+	return float3(xy[0], xy[1], sqrt(1 - dot(xy,xy))*((n>>31) ? -1 : 1));
+}
+inline uint pack_normal(float3 n) {
+	uint p = (((uint)(n[0]*.5+.5)*0x7FFFF)&0x7FFFF) | (((uint)(n[1]*.5+.5)*0x7FFFF) << 16);
+	if (n[2] < 0) p |= 0x80000000;
+	return p;
+}
 
 class PackedLightData {
 #ifdef __cplusplus
@@ -39,6 +55,7 @@ public:
 
 struct LightData {
 	TransformData mLightToWorld;
+	TransformData mWorldToLight;
 	float3 mEmission;
 	uint mType;
 	ProjectionData mShadowProjection;
@@ -51,23 +68,23 @@ public:
 #endif
 	uint4 v;
 
-	inline uint albedo() { return (v[0] >> 0 ) & 0xFF; }
-	inline void albedo(uint i) { v[0] |= (i&0xFF) << 0 ; }
-	inline uint normal() { return (v[0] >> 8 ) & 0xFF; }
-	inline void normal(uint i) { v[0] |= (i&0xFF) << 8 ; }
-	inline uint emission() { return (v[0] >> 16) & 0xFF; }
-	inline void emission(uint i) { v[0] |= (i&0xFF) << 16; }
-	inline uint metallic() { return (v[0] >> 24) & 0xFF; }
-	inline void metallic(uint i) { v[0] |= (i&0xFF) << 24; }
-	inline uint roughness() { return (v[1] >> 0 ) & 0xFF; }
-	inline void roughness(uint i) { v[1] |= (i&0xFF) << 0 ; }
-	inline uint occlusion() { return (v[1] >> 16) & 0xFF; }
-	inline void occlusion(uint i) { v[1] |= (i&0xFF) << 16; }
-	inline uint metallic_channel() 	{ return v[0] >> 30; }
-	inline void metallic_channel(uint i) { v[0] |= i << 30; }
-	inline uint roughness_channel() { return v[1] >> 30; }
+	inline uint albedo()       		{ return (v[0] >> 0 ) & 0xFFF; }
+	inline void albedo(uint i) 		{ v[0] |= (i&0xFFF) << 0 ; }
+	inline uint normal()       		{ return (v[0] >> 16) & 0xFFF; }
+	inline void normal(uint i) 		{ v[0] |= (i&0xFFF) << 16 ; }
+	inline uint emission()       	{ return (v[1] >> 0 ) & 0xFFF; }
+	inline void emission(uint i) 	{ v[1] |= (i&0xFFF) << 0; }
+	inline uint metallic()       	{ return (v[1] >> 16) & 0xFFF; }
+	inline void metallic(uint i) 	{ v[1] |= (i&0xFFF) << 16; }
+	inline uint roughness()       { return (v[2] >> 0 ) & 0xFFF; }
+	inline void roughness(uint i) { v[2] |= (i&0xFFF) << 0 ; }
+	inline uint occlusion()       { return (v[2] >> 16) & 0xFFF; }
+	inline void occlusion(uint i) { v[2] |= (i&0xFFF) << 16; }
+	inline uint metallic_channel() 	      { return v[0] >> 30; }
+	inline void metallic_channel(uint i)  { v[0] |= i << 30; }
+	inline uint roughness_channel()       { return v[1] >> 30; }
 	inline void roughness_channel(uint i) { v[1] |= i << 30; }
-	inline uint occlusion_channel() { return v[2] >> 30; }
+	inline uint occlusion_channel()       { return v[2] >> 30; }
 	inline void occlusion_channel(uint i) { v[2] |= i << 30; }
 };
 struct MaterialData {
@@ -82,6 +99,14 @@ struct MaterialData {
 	float mTransmission;
 	float pad;
 	uint4 mImageIndices;
+};
+
+struct VertexData {
+	float3 mPosition;
+	float mU;
+	float3 mNormal;
+	float mV;
+	float4 mTangent;
 };
 
 #endif

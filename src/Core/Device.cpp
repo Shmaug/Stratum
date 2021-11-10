@@ -101,15 +101,15 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	if (cacheInfo.pInitialData) delete reinterpret_cast<const byte*>(cacheInfo.pInitialData);
 	
 	vector<vk::DescriptorPoolSize> poolSizes {
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(1024u, mLimits.maxDescriptorSetSamplers)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(1024u, mLimits.maxDescriptorSetSampledImages)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eInputAttachment, 				min(1024u, mLimits.maxDescriptorSetInputAttachments)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					min(1024u, mLimits.maxDescriptorSetSampledImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 					min(1024u, mLimits.maxDescriptorSetStorageImages)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					min(1024u, mLimits.maxDescriptorSetUniformBuffers)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eUniformBufferDynamic, 	min(1024u, mLimits.maxDescriptorSetUniformBuffersDynamic)),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(1024u, mLimits.maxDescriptorSetStorageBuffers)),
-    vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	min(1024u, mLimits.maxDescriptorSetStorageBuffersDynamic))
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(16384u, mLimits.maxDescriptorSetSamplers)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(16384u, mLimits.maxDescriptorSetSampledImages)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eInputAttachment, 				min(16384u, mLimits.maxDescriptorSetInputAttachments)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eSampledImage, 					min(16384u, mLimits.maxDescriptorSetSampledImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 					min(16384u, mLimits.maxDescriptorSetStorageImages)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, 					min(16384u, mLimits.maxDescriptorSetUniformBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eUniformBufferDynamic, 	min(16384u, mLimits.maxDescriptorSetUniformBuffersDynamic)),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 					min(16384u, mLimits.maxDescriptorSetStorageBuffers)),
+    vk::DescriptorPoolSize(vk::DescriptorType::eStorageBufferDynamic, 	min(16384u, mLimits.maxDescriptorSetStorageBuffersDynamic))
 	};
 	{
 		auto descriptorPool = mDescriptorPool.lock();
@@ -190,11 +190,13 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 
 	shared_ptr<CommandBuffer> commandBuffer;
 	if (level == vk::CommandBufferLevel::ePrimary) {
-		auto ret = ranges::remove_if(commandBuffers, &CommandBuffer::clear_if_done);
-		if (!ret.empty()) {
-				auto u = ranges::find(ret, 1, &shared_ptr<CommandBuffer>::use_count);
-				if (u != ret.end()) commandBuffer = *u;
-				commandBuffers.erase(ret.begin(), ret.end());
+		for (auto it = commandBuffers.begin(); it != commandBuffers.end();) {
+			if ((*it)->clear_if_done() && it->use_count() == 1) {
+				commandBuffer = *it;
+				commandBuffers.erase(it);
+				break;
+			} else
+				it++;
 		}
 	}
 	if (commandBuffer) {

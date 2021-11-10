@@ -11,6 +11,8 @@
 // The code in this file was originally written by Stephen Hill (@self_shadow), who deserves all
 // credit for coming up with this fit and implementing it. Buy him a beer next time you see him. :)
 
+#include "math.hlsli"
+
 float3 ACES_fitted(float3 color) {
   static const float3x3 ACES_in = {
     { 0.59719, 0.35458, 0.04823 },

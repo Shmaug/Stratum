@@ -89,10 +89,11 @@ inline void inspector_gui_fn(Instance* instance) {
   VmaStats stats;
   vmaCalculateStats(instance->device().allocator(), &stats);
   auto used = format_bytes(stats.total.usedBytes);
-  auto unused = format_bytes(stats.total.usedBytes);
+  auto unused = format_bytes(stats.total.unusedBytes);
   ImGui::LabelText("Used memory", "%zu %s", used.first, used.second);
   ImGui::LabelText("Unused memory", "%zu %s", unused.first, unused.second);
   ImGui::LabelText("Device allocations", "%u", stats.total.blockCount);
+  ImGui::LabelText("Descriptor Sets", "%u", instance->device().descriptor_set_count());
 
   ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
   ImGui::LabelText("Window format", to_string(instance->window().surface_format().format).c_str());
@@ -121,6 +122,10 @@ inline void inspector_gui_fn(DynamicRenderPass* rp) {
   }
 }
 inline void inspector_gui_fn(GraphicsPipelineState* pipeline) {
+  ImGui::Text("%llu pipelines", pipeline->pipelines().size());
+  ImGui::Text("%llu descriptor sets", pipeline->descriptor_sets().size());
+}
+inline void inspector_gui_fn(ComputePipelineState* pipeline) {
   ImGui::Text("%llu pipelines", pipeline->pipelines().size());
   ImGui::Text("%llu descriptor sets", pipeline->descriptor_sets().size());
 }
@@ -199,11 +204,11 @@ Gui::Gui(Node& node) : mNode(node) {
       vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
 	
 	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst + 16);
+	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eLast - 16);
 	mRenderPass->OnDraw.listen(mNode, bind_front(&Gui::draw, this));
 	
 	// draw after app's render_pass
 	app->main_pass()->mPass.PostProcess.listen(mNode, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
-		make_geometry(commandBuffer);
 		mRenderNode->render(commandBuffer, { { "colorBuffer", { framebuffer->at("colorBuffer"), {} } } } );
 	}, EventPriority::eLast - 16);
 	
@@ -211,6 +216,7 @@ Gui::Gui(Node& node) : mNode(node) {
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
 	register_inspector_gui_fn<ShaderDatabase>(&inspector_gui_fn);
 	register_inspector_gui_fn<DynamicRenderPass>(&inspector_gui_fn);
+	register_inspector_gui_fn<ComputePipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<Application>(&inspector_gui_fn);
 	register_inspector_gui_fn<Mesh>(&inspector_gui_fn);
@@ -244,7 +250,7 @@ Gui::Gui(Node& node) : mNode(node) {
         if (ImGui::Button(name.c_str()))
           switch (type) {
             case AssetType::eScene:
-              load_gltf(app->node(), commandBuffer, filepath);
+              load_gltf(app->node().make_child(name), commandBuffer, filepath);
               break;
             case AssetType::eEnvironmentMap: {
               auto[pixels,extent] = Image::load(commandBuffer.mDevice, filepath);
@@ -297,7 +303,7 @@ Gui::Gui(Node& node) : mNode(node) {
       if (selected) {
         ImGui::Text(selected->name().c_str());
 				if (ImGui::Button("Delete Node")) {
-					if (ImGui::IsKeyPressed(KeyCode::eKeyShift))
+					if (app->window().input_state().pressed(KeyCode::eKeyShift))
 						mNode.node_graph().erase_recurse(*selected);
 					else
 						mNode.node_graph().erase(*selected);
@@ -441,16 +447,26 @@ void Gui::draw(CommandBuffer& commandBuffer) {
 
 	float2 scale = float2::Map(&mDrawData->DisplaySize.x);
 	float2 offset = float2::Map(&mDrawData->DisplayPos.x);
+	
+	#pragma pack(push)
+	#pragma pack(1)
+	struct CameraData {
+		TransformData gWorldToCamera;
+		TransformData gCameraToWorld;
+		ProjectionData gProjection;
+	};
+	#pragma pack(pop)
+	Buffer::View<CameraData> cameraData = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	cameraData[0].gWorldToCamera = cameraData[0].gCameraToWorld = make_transform(float3(0,0,1), make_quatf(0,0,0,1), float3::Ones());
+	cameraData[0].gProjection = make_orthographic(scale, -1 - offset.array()*2/scale.array(), 0, 1);
 
-	mPipeline->push_constant<TransformData>("gWorldToCamera") = TransformData(float3(0,0,1), 1, make_quatf(0,0,0,1));
-	mPipeline->push_constant<ProjectionData>("gProjection") = make_orthographic(scale, -float2::Ones() - offset*2/scale, 0, 1);
+	mPipeline->descriptor("gCameraData") = commandBuffer.hold_resource(cameraData);
 	mPipeline->push_constant<float4>("gImageST") = float4(1,1,0,0);
 	mPipeline->push_constant<float4>("gColor") = float4::Ones();
-
+	
 	commandBuffer.bind_pipeline(mPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), mMesh.vertex_layout(*mPipeline->stage(vk::ShaderStageFlagBits::eVertex))));
 	mPipeline->bind_descriptor_sets(commandBuffer);
 	mPipeline->push_constants(commandBuffer);
-	
 	mMesh.bind(commandBuffer);
 
 	commandBuffer->setViewport(0, vk::Viewport(mDrawData->DisplayPos.x, mDrawData->DisplayPos.y, mDrawData->DisplaySize.x, mDrawData->DisplaySize.y, 0, 1));

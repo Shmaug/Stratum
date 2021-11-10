@@ -32,6 +32,16 @@ public:
 
 	STRATUM_API void reset(const string& name = "Command Buffer");
 
+	inline bool clear_if_done() {
+		if (mState == CommandBufferState::eInFlight)
+			if (mCompletionFence->status() == vk::Result::eSuccess) {
+				mState = CommandBufferState::eDone;
+				clear();
+				return true;
+			}
+		return mState == CommandBufferState::eDone;
+	}
+
 	// Add a resource to the device's resource pool after this commandbuffer finishes executing
 	template<derived_from<DeviceResource> T>
 	inline T& hold_resource(const shared_ptr<T>& r) {
@@ -254,15 +264,6 @@ private:
 	enum class CommandBufferState { eRecording, eInFlight, eDone };
 	
 	STRATUM_API void clear();
-	inline bool clear_if_done() {
-		if (mState == CommandBufferState::eInFlight)
-			if (mCompletionFence->status() == vk::Result::eSuccess) {
-				mState = CommandBufferState::eDone;
-				clear();
-				return true;
-			}
-		return mState == CommandBufferState::eDone;
-	}
 	
 	vk::CommandBuffer mCommandBuffer;
 
@@ -282,6 +283,14 @@ private:
 	Buffer::StrideView mBoundIndexBuffer;
 	vector<shared_ptr<DescriptorSet>> mBoundDescriptorSets;
 };
+
+inline bool DeviceResource::in_use() {
+	while (!mTracking.empty()) {
+		if (!(*mTracking.begin())->clear_if_done())
+			return true;
+	}
+	return !mTracking.empty();
+}
 
 class ProfilerRegion {
 private:

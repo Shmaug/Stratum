@@ -19,7 +19,7 @@ public:
 	inline DeviceResource(Device& device, const string& name) : mDevice(device), mName(name) {}
 	inline virtual ~DeviceResource() {}
 	inline const string& name() const { return mName; }
-	inline bool in_use() const { return !mTracking.empty(); }
+	bool in_use(); // defined in CommandBuffer.hpp
 };
 
 class Device {
@@ -86,6 +86,7 @@ public:
 	inline const vk::PhysicalDeviceLimits& limits() const { return mLimits; }
 	inline vk::PipelineCache pipeline_cache() const { return mPipelineCache; }
 	inline VmaAllocator allocator() const { return mAllocator; }
+	inline uint32_t descriptor_set_count() const { return mDescriptorSetCount; }
 
 	inline const vk::PhysicalDeviceFeatures& features() const  { return mFeatures; }
 	inline const vk::PhysicalDeviceDescriptorIndexingFeatures& descriptor_indexing_features() const  { return mDescriptorIndexingFeatures; }
@@ -141,6 +142,7 @@ private:
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
 	locked_object<vk::DescriptorPool> mDescriptorPool;
+	uint32_t mDescriptorSetCount = 0;
 };
 
 }

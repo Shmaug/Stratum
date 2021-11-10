@@ -36,8 +36,16 @@ https://github.com/knightcrawler25/GLSL-PathTracer/blob/master/src/shaders/commo
 */
 
 #include "sampling.hlsli"
+#include "ray_differential.hlsli"
 
-struct DisneyMaterial {
+#define MIN_ROUGHNESS 1e-4
+
+#define BSDF_FLAG_DIFFUSE 1
+#define BSDF_FLAG_SPECULAR_GGX 2
+#define BSDF_FLAG_SPECULAR_DELTA 4
+#define BSDF_FLAG_TRANSMISSION 8
+
+class DisneyBSDF {
     float3 albedo;
     float specular;
     float metallic;
@@ -50,265 +58,256 @@ struct DisneyMaterial {
     float clearcoatGloss;
     float specTrans;
     float eta;
-};
 
-#define MIN_ROUGHNESS 1e-5
+    inline float3 EvalDielectricReflection(float3 V, float3 N, float3 L, float3 H, out float pdf) {
+        pdf = 0;
+        if (dot(N, L) <= 0) return 0;
 
-float3 EvalDielectricReflection(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
-    pdf = 0;
-    if (dot(N, L) <= 0) return 0;
-
-    float F = DielectricFresnel(dot(V, H), mat.eta);
-    
-    if (mat.roughness < MIN_ROUGHNESS) {
-        pdf = 1;
-        return mat.albedo * F/dot(V,H);
-    }
-
-    float D = GTR2(dot(N, H), mat.roughness);
-    float G = SmithG_GGX(abs(dot(N, L)), mat.roughness) * SmithG_GGX(abs(dot(N, V)), mat.roughness);
-
-    pdf = D * dot(N, H) * F / (4 * abs(dot(V, H)));
-    return mat.albedo * F * D * G;
-}
-
-float3 EvalDielectricRefraction(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
-    pdf = 0;
-    if (dot(N, L) >= 0) return 0;
-
-    float F = DielectricFresnel(abs(dot(V, H)), mat.eta);
-
-    if (mat.roughness < MIN_ROUGHNESS) {
-        pdf = 1;
-        return mat.albedo * F/dot(V,H);
-    }
-
-    float D = GTR2(dot(N, H), mat.roughness);
-    float G = SmithG_GGX(abs(dot(N, L)), mat.roughness) * SmithG_GGX(abs(dot(N, V)), mat.roughness);
-
-    float denomSqrt = dot(L, H) + dot(V, H) * mat.eta;
-    pdf = D * dot(N, H) * (1.0 - F) * abs(dot(L, H)) / (denomSqrt * denomSqrt);
-    return mat.albedo * (1.0 - F) * D * G * abs(dot(V, H)) * abs(dot(L, H)) * 4.0 * mat.eta * mat.eta / (denomSqrt * denomSqrt);
-}
-
-float3 EvalSpecular(DisneyMaterial mat, float3 Cspec0, float3 V, float3 N, float3 L, float3 H, out float pdf) {
-    pdf = 0;
-    if (dot(N, L) <= 0) return 0;
-
-    float FH = SchlickFresnel(dot(L, H));
-    float3 F = lerp(Cspec0, 1, FH);
-
-    if (mat.roughness < MIN_ROUGHNESS) {
-        pdf = 1;
-        return mat.albedo * F/dot(V,H);
-    }
-
-    float D = GTR2(dot(N, H), mat.roughness);
-    pdf = D * dot(N, H) / (4 * dot(V, H));
-
-    float G = SmithG_GGX(abs(dot(N, L)), mat.roughness) * SmithG_GGX(abs(dot(N, V)), mat.roughness);
-    return F * D * G;
-}
-
-float3 EvalClearcoat(DisneyMaterial mat, float3 V, float3 N, float3 L, float3 H, out float pdf) {
-    pdf = 0.0;
-    if (dot(N, L) <= 0.0)
-        return 0;
-
-    float D = GTR1(dot(N, H), lerp(0.1, 0.001, mat.clearcoatGloss));
-    pdf = D * dot(N, H) / (4.0 * dot(V, H));
-
-    float FH = SchlickFresnel(dot(L, H));
-    float F = lerp(0.04, 1.0, FH);
-    float G = SmithG_GGX(dot(N, L), 0.25) * SmithG_GGX(dot(N, V), 0.25);
-    return 0.25 * mat.clearcoat * F * D * G;
-}
-
-float3 EvalDiffuse(DisneyMaterial mat, float3 Csheen, float3 V, float3 N, float3 L, float3 H, out float pdf) {
-    pdf = 0.0;
-    if (dot(N, L) <= 0.0)
-        return 0;
-
-    pdf = dot(N, L) * (1.0 / M_PI);
-
-    // Diffuse
-    float FL = SchlickFresnel(dot(N, L));
-    float FV = SchlickFresnel(dot(N, V));
-    float FH = SchlickFresnel(dot(L, H));
-    float Fd90 = 0.5 + 2.0 * dot(L, H) * dot(L, H) * mat.roughness;
-    float Fd = lerp(1.0, Fd90, FL) * lerp(1.0, Fd90, FV);
-
-    // Fake Subsurface TODO: Replace with volumetric scattering
-    float Fss90 = dot(L, H) * dot(L, H) * mat.roughness;
-    float Fss = lerp(1.0, Fss90, FL) * lerp(1.0, Fss90, FV);
-    float ss = 1.25 * (Fss * (1.0 / (dot(N, L) + dot(N, V)) - 0.5) + 0.5);
-
-    float3 Fsheen = FH * mat.sheen * Csheen;
-    return ((1 / M_PI) * lerp(Fd, ss, mat.subsurface) * mat.albedo + Fsheen) * (1.0 - mat.metallic);
-}
-
-#define BSDF_FLAG_DIFFUSE 1
-#define BSDF_FLAG_SPECULAR_GGX 2
-#define BSDF_FLAG_SPECULAR_DELTA 4
-#define BSDF_FLAG_TRANSMISSION 8
-
-float3 DisneySample(inout uint4 rng, DisneyMaterial mat, float3 V, float3 N, float3 T, out float3 L, out float pdf, out uint flag) {
-    pdf = 0;
-    flag = 0;
-    float3 f = 0;
-
-    float r1 = next_rng_sample(rng);
-    float r2 = next_rng_sample(rng);
-    float r3 = next_rng_sample(rng);
-    float r4 = next_rng_sample(rng);
-    float r5 = next_rng_sample(rng);
-    float r6 = next_rng_sample(rng);
-    float r7 = next_rng_sample(rng);
-    
-    float3 B = normalize(cross(T,N));
-
-    float diffuseRatio = 1 - mat.metallic;
-    float transWeight = diffuseRatio * mat.specTrans;
-
-    float3 Cdlin = mat.albedo;
-    float Cdlum = 0.3 * Cdlin.x + 0.6 * Cdlin.y + 0.1 * Cdlin.z; // luminance approx.
-
-    float3 Ctint = Cdlum > 0 ? Cdlin / Cdlum : 1; // normalize lum. to isolate hue+sat
-    float3 Cspec0 = lerp(mat.specular * 0.08 * lerp(1, Ctint, mat.specularTint), Cdlin, mat.metallic);
-    float3 Csheen = lerp(1, Ctint, mat.sheenTint);
-
-    if (r3 < transWeight) {
-        float3 H;
-        if (mat.roughness < MIN_ROUGHNESS) {
-            H = N;
-            flag |= BSDF_FLAG_SPECULAR_DELTA;
-        } else {
-            H = ImportanceSampleGTR2(mat.roughness, r1, r2);
-            H = normalize(T * H.x + B * H.y + N * H.z);
-            flag |= BSDF_FLAG_SPECULAR_GGX;
-        }
-        if (dot(V, H) < 0) H = -H;
-
-        float3 R = normalize(reflect(-V, H));
-        float F = DielectricFresnel(abs(dot(R, H)), mat.eta);
-
-        // Reflection/Total internal reflection
-        if (r4 < F) {
-            L = R;
-            f = EvalDielectricReflection(mat, V, N, L, H, pdf);
-        } else { // Transmission
-            L = normalize(refract(-V, H, mat.eta));
-            f = EvalDielectricRefraction(mat, V, N, L, H, pdf);
-            flag |= BSDF_FLAG_TRANSMISSION;
-        }
-
-        f *= transWeight;
-        pdf *= transWeight;
-    } else {
-        if (r4 < diffuseRatio) { 
-            L = CosineSampleHemisphere(r1, r2);
-            L = normalize(T * L.x + B * L.y + N * L.z);
-            float3 H = normalize(L + V);
-
-            f = EvalDiffuse(mat, Csheen, V, N, L, H, pdf);
-            pdf *= diffuseRatio;
-            flag |= BSDF_FLAG_DIFFUSE;
-        } else { // Specular
+        float F = DielectricFresnel(dot(V, H), eta);
         
-            float primarySpecRatio = 1.0 / (1.0 + mat.clearcoat);
-            
-            // Sample primary specular lobe
-            if (r5 < primarySpecRatio) {
-                float3 H;
-                if (mat.roughness < MIN_ROUGHNESS) {
-                    H = N;
-                    flag |= BSDF_FLAG_SPECULAR_DELTA;
-                } else {
-                    // TODO: Implement http://jcgt.org/published/0007/04/01/
-                    H = ImportanceSampleGTR2(mat.roughness, r1, r2);
-                    H = normalize(T * H.x + B * H.y + N * H.z);
-                    flag |= BSDF_FLAG_SPECULAR_GGX;
-                }
-                if (dot(V, H) < 0) H = -H;
-
-                L = normalize(reflect(-V, H));
-                f = EvalSpecular(mat, Cspec0, V, N, L, H, pdf);
-                pdf *= primarySpecRatio * (1 - diffuseRatio);
-            } else {
-				// Sample clearcoat lobe
-                float3 H = ImportanceSampleGTR1(lerp(0.1, 0.001, mat.clearcoatGloss), r1, r2);
-                H = normalize(T * H.x + B * H.y + N * H.z);
-                if (dot(V, H) < 0) H = -H;
-            
-                L = normalize(reflect(-V, H));
-                f = EvalClearcoat(mat, V, N, L, H, pdf);
-                pdf *= (1 - primarySpecRatio) * (1 - diffuseRatio);
-                flag |= BSDF_FLAG_SPECULAR_GGX;
-            }
+        if (roughness < MIN_ROUGHNESS) {
+            pdf = 1;
+            return albedo * F/dot(V,H);
         }
 
-        f *= (1 - transWeight);
-        pdf *= (1 - transWeight);
-    }
-    return f;
-}
+        float D = GTR2(dot(N, H), roughness);
+        float G = SmithG_GGX(abs(dot(N, L)), roughness) * SmithG_GGX(abs(dot(N, V)), roughness);
 
-float3 DisneyEval(DisneyMaterial mat, float3 V, float3 N, float3 L, out float pdf) {
-    float3 H;
-    bool refl = dot(N, L) > 0.0;
-
-    if (refl)
-      H = normalize(L + V);
-    else
-      H = normalize(L + V * mat.eta);
-
-    if (dot(V, H) < 0.0)
-      H = -H;
-
-    float diffuseRatio = 1 - mat.metallic;
-    float primarySpecRatio = 1 / (1 + mat.clearcoat);
-    float transWeight = diffuseRatio * mat.specTrans;
-
-    if (mat.roughness < MIN_ROUGHNESS){
-        transWeight = 0;
-        primarySpecRatio = 0;
+        pdf = D * dot(N, H) * F / (4 * abs(dot(V, H)));
+        return albedo * F * D * G;
     }
 
-    float3 brdf = 0;
-    float3 bsdf = 0;
-    float brdfPdf = 0;
-    float bsdfPdf = 0;
+    inline float3 EvalDielectricRefraction(float3 V, float3 N, float3 L, float3 H, out float pdf) {
+        pdf = 0;
+        if (dot(N, L) >= 0) return 0;
 
-    if (transWeight > 0) {
-        // Reflection
-        bsdf = refl ? EvalDielectricReflection(mat, V, N, L, H, bsdfPdf) : EvalDielectricRefraction(mat, V, N, L, H, bsdfPdf);
+        float F = DielectricFresnel(abs(dot(V, H)), eta);
+
+        if (roughness < MIN_ROUGHNESS) {
+            pdf = 1;
+            return albedo * F/dot(V,H);
+        }
+
+        float D = GTR2(dot(N, H), roughness);
+        float G = SmithG_GGX(abs(dot(N, L)), roughness) * SmithG_GGX(abs(dot(N, V)), roughness);
+
+        float denomSqrt = dot(L, H) + dot(V, H) * eta;
+        pdf = D * dot(N, H) * (1.0 - F) * abs(dot(L, H)) / (denomSqrt * denomSqrt);
+        return albedo * (1.0 - F) * D * G * abs(dot(V, H)) * abs(dot(L, H)) * 4.0 * eta * eta / (denomSqrt * denomSqrt);
     }
 
-    if (transWeight < 1) {
-        float3 Cdlin = mat.albedo;
+    inline float3 EvalSpecular(float3 Cspec0, float3 V, float3 N, float3 L, float3 H, out float pdf) {
+        pdf = 0;
+        if (dot(N, L) <= 0) return 0;
+
+        float FH = SchlickFresnel(dot(L, H));
+        float3 F = lerp(Cspec0, 1, FH);
+
+        if (roughness < MIN_ROUGHNESS) {
+            pdf = 1;
+            return albedo * F/dot(V,H);
+        }
+
+        float D = GTR2(dot(N, H), roughness);
+        pdf = D * dot(N, H) / (4 * dot(V, H));
+
+        float G = SmithG_GGX(abs(dot(N, L)), roughness) * SmithG_GGX(abs(dot(N, V)), roughness);
+        return F * D * G;
+    }
+
+    inline float3 EvalClearcoat(float3 V, float3 N, float3 L, float3 H, out float pdf) {
+        pdf = 0.0;
+        if (dot(N, L) <= 0.0)
+            return 0;
+
+        float D = GTR1(dot(N, H), lerp(0.1, 0.001, clearcoatGloss));
+        pdf = D * dot(N, H) / (4.0 * dot(V, H));
+
+        float FH = SchlickFresnel(dot(L, H));
+        float F = lerp(0.04, 1.0, FH);
+        float G = SmithG_GGX(dot(N, L), 0.25) * SmithG_GGX(dot(N, V), 0.25);
+        return 0.25 * clearcoat * F * D * G;
+    }
+
+    inline float3 EvalDiffuse(float3 Csheen, float3 V, float3 N, float3 L, float3 H, out float pdf) {
+        pdf = 0.0;
+        if (dot(N, L) <= 0.0)
+            return 0;
+
+        pdf = dot(N, L) * (1.0 / M_PI);
+
+        // Diffuse
+        float FL = SchlickFresnel(dot(N, L));
+        float FV = SchlickFresnel(dot(N, V));
+        float FH = SchlickFresnel(dot(L, H));
+        float Fd90 = 0.5 + 2.0 * dot(L, H) * dot(L, H) * roughness;
+        float Fd = lerp(1.0, Fd90, FL) * lerp(1.0, Fd90, FV);
+
+        // Fake Subsurface TODO: Replace with volumetric scattering
+        float Fss90 = dot(L, H) * dot(L, H) * roughness;
+        float Fss = lerp(1.0, Fss90, FL) * lerp(1.0, Fss90, FV);
+        float ss = 1.25 * (Fss * (1.0 / (dot(N, L) + dot(N, V)) - 0.5) + 0.5);
+
+        float3 Fsheen = FH * sheen * Csheen;
+        return ((1 / M_PI) * lerp(Fd, ss, subsurface) * albedo + Fsheen) * (1.0 - metallic);
+    }
+
+    inline bool is_delta() { return roughness <= MIN_ROUGHNESS && (metallic == 1 || (metallic == 0 && specTrans == 1)); }
+
+    inline float3 Sample(inout uint4 rng, float3 V, float3 N, float4 T, out float3 L, out float pdf, out uint flag, out float3 H) {
+        pdf = 0;
+        flag = 0;
+        float3 f = 0;
+
+        float3 B = normalize(cross(T.xyz,N)*T.w);
+
+        float diffuseRatio = 1 - metallic;
+        float transWeight = diffuseRatio * specTrans;
+
+        float3 Cdlin = albedo;
         float Cdlum = 0.3 * Cdlin.x + 0.6 * Cdlin.y + 0.1 * Cdlin.z; // luminance approx.
 
         float3 Ctint = Cdlum > 0 ? Cdlin / Cdlum : 1; // normalize lum. to isolate hue+sat
-        float3 Cspec0 = lerp(mat.specular * 0.08 * lerp(1, Ctint, mat.specularTint), Cdlin, mat.metallic);
-        float3 Csheen = lerp(1, Ctint, mat.sheenTint);
+        float3 Cspec0 = lerp(specular * 0.08 * lerp(1, Ctint, specularTint), Cdlin, metallic);
+        float3 Csheen = lerp(1, Ctint, sheenTint);
 
-        float m_pdf = 0;
+        float r1 = next_rng_sample(rng);
+        float r2 = next_rng_sample(rng);
+        float r3 = next_rng_sample(rng);
+        float r4 = next_rng_sample(rng);
         
-        // Diffuse
-        brdf += EvalDiffuse(mat, Csheen, V, N, L, H, m_pdf);
-        brdfPdf += m_pdf * diffuseRatio;
+        if (r3 < transWeight) {
+            if (roughness < MIN_ROUGHNESS) {
+                H = N;
+                flag |= BSDF_FLAG_SPECULAR_DELTA;
+            } else {
+                H = ImportanceSampleGTR2(roughness, r1, r2);
+                H = normalize(T.xyz*H.x + B*H.y + N*H.z);
+                flag |= BSDF_FLAG_SPECULAR_GGX;
+            }
+            if (dot(V, H) < 0) H = -H;
 
-        // Specular
-        if (mat.roughness >= MIN_ROUGHNESS) {
-            brdf += EvalSpecular(mat, Cspec0, V, N, L, H, m_pdf);
-            brdfPdf += m_pdf * primarySpecRatio * (1 - diffuseRatio);
+            float3 R = normalize(reflect(-V, H));
+            float F = DielectricFresnel(abs(dot(R, H)), eta);
+
+            // Reflection/Total internal reflection
+            if (r4 < F) {
+                L = R;
+                f = EvalDielectricReflection(V, N, L, H, pdf);
+            } else { // Transmission
+                L = normalize(refract(-V, H, eta));
+                f = EvalDielectricRefraction(V, N, L, H, pdf);
+                flag |= BSDF_FLAG_TRANSMISSION;
+            }
+
+            f *= transWeight;
+            pdf *= transWeight;
+        } else {
+            if (r4 < diffuseRatio) { 
+                L = CosineSampleHemisphere(r1, r2);
+                L = normalize(T.xyz*L.x + B*L.y + N*L.z);
+                H = normalize(L + V);
+
+                f = EvalDiffuse(Csheen, V, N, L, H, pdf);
+                pdf *= diffuseRatio;
+                flag |= BSDF_FLAG_DIFFUSE;
+            } else { // Specular
+                float r5 = next_rng_sample(rng);
+
+                float primarySpecRatio = 1.0 / (1.0 + clearcoat);
+                
+                // Sample primary specular lobe
+                if (r5 < primarySpecRatio) {
+                    if (roughness < MIN_ROUGHNESS) {
+                        H = N;
+                        flag |= BSDF_FLAG_SPECULAR_DELTA;
+                    } else {
+                        // TODO: Implement http://jcgt.org/published/0007/04/01/
+                        H = ImportanceSampleGTR2(roughness, r1, r2);
+                        H = normalize(T.xyz*H.x + B*H.y + N*H.z);
+                        flag |= BSDF_FLAG_SPECULAR_GGX;
+                    }
+                    if (dot(V, H) < 0) H = -H;
+
+                    L = normalize(reflect(-V, H));
+                    f = EvalSpecular(Cspec0, V, N, L, H, pdf);
+                    pdf *= primarySpecRatio * (1 - diffuseRatio);
+                } else {
+                    // Sample clearcoat lobe
+                    H = ImportanceSampleGTR1(lerp(0.1, 0.001, clearcoatGloss), r1, r2);
+                    H = normalize(T.xyz*H.x + B*H.y + N*H.z);
+                    if (dot(V, H) < 0) H = -H;
+                
+                    L = normalize(reflect(-V, H));
+                    f = EvalClearcoat(V, N, L, H, pdf);
+                    pdf *= (1 - primarySpecRatio) * (1 - diffuseRatio);
+                    flag |= BSDF_FLAG_SPECULAR_GGX;
+                }
+            }
+
+            f *= (1 - transWeight);
+            pdf *= (1 - transWeight);
         }
-
-        // Clearcoat
-        brdf += EvalClearcoat(mat, V, N, L, H, m_pdf);
-        brdfPdf += m_pdf * (1 - primarySpecRatio) * (1 - diffuseRatio);  
+        return f;
     }
 
-    pdf = lerp(brdfPdf, bsdfPdf, transWeight);
-    return lerp(brdf, bsdf, transWeight);
-}
+    inline float3 Evaluate(float3 V, float3 N, float3 L, out float pdf) {
+        float3 H;
+        bool refl = dot(N, L) > 0;
+
+        if (refl)
+        H = normalize(L + V);
+        else
+        H = normalize(L + V * eta);
+
+        if (dot(V, H) < 0)
+        H = -H;
+
+        float diffuseRatio = 1 - metallic;
+        float primarySpecRatio = 1 / (1 + clearcoat);
+        float transWeight = diffuseRatio * specTrans;
+
+        if (roughness < MIN_ROUGHNESS){
+            transWeight = 0;
+            primarySpecRatio = 0;
+        }
+
+        float3 brdf = 0;
+        float3 bsdf = 0;
+        float brdfPdf = 0;
+        float bsdfPdf = 0;
+
+        if (transWeight > 0) {
+            // Reflection
+            bsdf = refl ? EvalDielectricReflection(V, N, L, H, bsdfPdf) : EvalDielectricRefraction(V, N, L, H, bsdfPdf);
+        }
+
+        if (transWeight < 1) {
+            float3 Cdlin = albedo;
+            float Cdlum = 0.3 * Cdlin.x + 0.6 * Cdlin.y + 0.1 * Cdlin.z; // luminance approx.
+
+            float3 Ctint = Cdlum > 0 ? Cdlin / Cdlum : 1; // normalize lum. to isolate hue+sat
+            float3 Cspec0 = lerp(specular * 0.08 * lerp(1, Ctint, specularTint), Cdlin, metallic);
+            float3 Csheen = lerp(1, Ctint, sheenTint);
+
+            float m_pdf = 0;
+            
+            // Diffuse
+            brdf += EvalDiffuse(Csheen, V, N, L, H, m_pdf);
+            brdfPdf += m_pdf * diffuseRatio;
+
+            // Specular
+            if (roughness >= MIN_ROUGHNESS) {
+                brdf += EvalSpecular(Cspec0, V, N, L, H, m_pdf);
+                brdfPdf += m_pdf * primarySpecRatio * (1 - diffuseRatio);
+            }
+
+            // Clearcoat
+            brdf += EvalClearcoat(V, N, L, H, m_pdf);
+            brdfPdf += m_pdf * (1 - primarySpecRatio) * (1 - diffuseRatio);  
+        }
+
+        pdf = lerp(brdfPdf, bsdfPdf, transWeight);
+        return lerp(brdf, bsdf, transWeight);
+    }
+};

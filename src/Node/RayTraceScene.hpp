@@ -42,17 +42,13 @@ public:
 private:
 	struct MeshAS {
 		shared_ptr<AccelerationStructure> mAccelerationStructure;
-		uint32_t mVertexCount;
-		VertexArrayObject::Attribute mPositions;
-		VertexArrayObject::Attribute mNormals;
-		VertexArrayObject::Attribute mTangents;
-		VertexArrayObject::Attribute mTexcoords;
 		Buffer::StrideView mIndices;
 	};
 
 	Node& mNode;
 	shared_ptr<AccelerationStructure> mTopLevel;
 	shared_ptr<AccelerationStructure> mUnitCubeAS;
+	unordered_map<Mesh*, Buffer::View<hlsl::VertexData>> mMeshVertices;
 	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 
@@ -90,16 +86,23 @@ private:
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
 		Image::View mAccumLength;
+		
+		Buffer::View<hlsl::InstanceData> mInstances;
+		Buffer::View<hlsl::MaterialData> mMaterials;
+		Buffer::View<hlsl::VertexData> mVertices;
+		Buffer::View<byte> mIndices;
 	};
 
 	unique_ptr<FrameData> mCurFrame, mPrevFrame;
 
+	Image::View mColorHistory, mColorHistoryUnfiltered;
+	Image::View mLightSamples;
 	Image::View mPrevUV;
-	Image::View mAntilagAlpha;
 	Image::View mGradientPositions;
+	Image::View mAntilagAlpha;
+	Image::View mTemporalReservoir, mSpatialReservoir;
 	Image::View mPing, mPong;
 	array<Image::View, 2> mDiffPing, mDiffPong;
-	Image::View mColorHistory, mColorHistoryUnfiltered;
 };
 
 }

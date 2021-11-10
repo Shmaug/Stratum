@@ -25,7 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#pragma compile glslc -fshader-stage=comp -fentry-point=main
+#pragma compile dxc -spirv -T cs_6_7 -E main
 
 #include "svgf_shared.hlsli"
 
@@ -39,7 +39,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::binding(5)]] Texture2D<float2> gZ;
 [[vk::binding(6)]] Texture2D<uint4> gVisibility;
 
-[[numthreads(8,8,1)]]
+[numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	uint2 resolution;
 	gOutput.GetDimensions(resolution.x, resolution.y);

@@ -99,6 +99,7 @@ public:
 		allocInfo.pSetLayouts = &**mLayout;
 		mDescriptorSet = mDevice->allocateDescriptorSets(allocInfo)[0];
 		mDevice.set_debug_name(mDescriptorSet, name);
+		mDevice.mDescriptorSetCount++;
 	}
 	inline DescriptorSet(shared_ptr<const DescriptorSetLayout> layout, const string& name, const unordered_map<uint32_t, Descriptor>& bindings) : DescriptorSet(layout, name) {
 		for (const auto&[binding, d] : bindings)
@@ -115,6 +116,7 @@ public:
 		auto descriptorPool = mDevice.mDescriptorPool.lock();
 		mLayout.reset();
 		mDevice->freeDescriptorSets(*descriptorPool, { mDescriptorSet });
+		mDevice.mDescriptorSetCount--;
 	}
 
 	inline operator const vk::DescriptorSet*() const { return &mDescriptorSet; }

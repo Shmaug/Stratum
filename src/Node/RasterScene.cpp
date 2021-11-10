@@ -4,6 +4,15 @@
 using namespace stm;
 using namespace stm::hlsl;
 
+#pragma pack(push)
+#pragma pack(1)
+struct CameraData {
+	TransformData gWorldToCamera;
+	TransformData gCameraToWorld;
+	ProjectionData gProjection;
+};
+#pragma pack(pop)
+
 /*
 inline void axis_arrows(DynamicGeometry& g, const TransformData& transform) {
 	static const array<DynamicGeometry::vertex_t, 6> axisVertices {
@@ -66,8 +75,7 @@ void RasterScene::create_pipelines() {
 	mBackgroundPipeline->depth_stencil().depthWriteEnable = false;
 	mBackgroundPipeline->raster_state().cullMode = vk::CullModeFlagBits::eNone;
 	mBackgroundPipeline->set_immutable_sampler("gSampler", sampler);
-	mBackgroundPipeline->specialization_constant("gImageCount") = 1;
-	mBackgroundPipeline->descriptor("gImages") = image_descriptor(Image::View(), vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+	mBackgroundPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 }
 
 void RasterScene::update(CommandBuffer& commandBuffer) {
@@ -80,7 +88,7 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 		return (it == images.end()) ? images.emplace(image, (uint32_t)images.size()).first->second : it->second;
 	};
 	unordered_map<MaterialInfo*, uint32_t> materialMap;
-	unordered_map<size_t, vector<vector<DrawCall>>> drawCalls;
+	unordered_map<MaterialInfo*, unordered_map<size_t, vector<DrawCall>>> drawCalls;
 
 	buffer_vector<LightData,16> lights(commandBuffer.mDevice, 0, vk::BufferUsageFlagBits::eStorageBuffer);
 	buffer_vector<MaterialData,16> materials(commandBuffer.mDevice, 0, vk::BufferUsageFlagBits::eStorageBuffer);
@@ -104,15 +112,16 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 			}
 		}
 		light->mLightToWorld = node_to_world(light.node());
+		light->mWorldToLight = inverse(light->mLightToWorld);
 		lights.emplace_back(*light);
 	});
 	mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
-		vector<vector<DrawCall>>& calls = drawCalls[prim->mMesh ? hash<VertexLayoutDescription>()(prim->mMesh->vertex_layout(*mGeometryPipeline->stage(vk::ShaderStageFlagBits::eVertex))) : 0];
+		vector<DrawCall>& calls = drawCalls[prim->mMaterial.get()][prim->mMesh ? hash<VertexLayoutDescription>()(prim->mMesh->vertex_layout(*mGeometryPipeline->stage(vk::ShaderStageFlagBits::eVertex))) : 0];
 
 		auto materialMap_it = materialMap.find(prim->mMaterial.get());
 		if (materialMap_it == materialMap.end()) {
 			materialMap_it = materialMap.emplace(prim->mMaterial.get(), (uint32_t)materials.size()).first;
-			calls.emplace_back();
+			MaterialData& m = materials.emplace_back();
 			ImageIndices inds { uint4::Zero() };
 			inds.albedo(find_image_index(prim->mMaterial->mAlbedoImage));
 			inds.normal(find_image_index(prim->mMaterial->mNormalImage));
@@ -123,7 +132,6 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 			inds.metallic_channel(prim->mMaterial->mMetallicImageComponent);
 			inds.roughness_channel(prim->mMaterial->mRoughnessImageComponent);
 			inds.occlusion_channel(prim->mMaterial->mOcclusionImageComponent);
-			MaterialData& m = materials.emplace_back();
 			m.mAlbedo = prim->mMaterial->mAlbedo;
 			m.mImageIndices = inds.v;
 			m.mEmission = prim->mMaterial->mEmission;
@@ -135,7 +143,8 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 			m.mNormalScale = prim->mMaterial->mNormalScale;
 			m.mOcclusionScale = prim->mMaterial->mOcclusionScale;
 		}
-		DrawCall& drawCall = calls[materialMap_it->second].emplace_back();
+		
+		DrawCall& drawCall = calls.emplace_back();
 		drawCall.mMesh = prim->mMesh.get();
 		drawCall.mMaterialIndex = materialMap_it->second;
 		drawCall.mFirstIndex = prim->mFirstIndex;
@@ -147,9 +156,11 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	});
 	
 	auto envMap = mNode.find_in_descendants<EnvironmentMap>();
-	if (envMap) {		
-		mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") = find_image_index(envMap->mImage);
-		mBackgroundPipeline->descriptor("gImages") = image_descriptor(envMap->mImage, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+	if (envMap) {
+		uint32_t idx = find_image_index(envMap->mImage);
+		mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") = idx;
+		mBackgroundPipeline->push_constant<uint32_t>("gImageIndex") = idx;
+		mBackgroundPipeline->descriptor("gImages", idx) = image_descriptor(envMap->mImage, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mBackgroundPipeline->push_constant<float>("gEnvironmentGamma") = envMap->mGamma;
 		mBackgroundPipeline->transition_images(commandBuffer);
 	} else {
@@ -159,8 +170,6 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 
 	for (const auto&[image, index] : images)
 		mGeometryPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	if (mGeometryPipeline->specialization_constant("gImageCount") < images.size())
-		mGeometryPipeline->specialization_constant("gImageCount") = (uint32_t)images.size();
 		
 	if (!transforms.empty()) {
 		mGeometryPipeline->descriptor("gMaterials") = materials.buffer_view();
@@ -174,8 +183,8 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 		mGeometryPipeline->descriptor("gLights") = lights.buffer_view();
 	
 	mDrawCalls.clear();
-	for (const auto&[meshHash, materialCalls] : drawCalls)
-		for (const vector<DrawCall>& calls : materialCalls) {
+	for (const auto&[m, materialCalls] : drawCalls)
+		for (const auto& [meshHash, calls] : materialCalls) {
 			size_t sz = mDrawCalls.size();
 			mDrawCalls.resize(sz + calls.size());
 			memcpy(mDrawCalls.data() + sz, calls.data(), calls.size()*sizeof(DrawCall));
@@ -196,23 +205,31 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	}
 
 	if (!lights.empty()) {
+		Buffer::View<CameraData> cameraDatas = make_shared<Buffer>(commandBuffer.mDevice, "gCameraDatas", lights.size()*6*sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		uint32_t cameraIndex = 0;
+		mGeometryPipeline->descriptor("gCameraData") = cameraDatas;
 		shadowMap.image()->transition_barrier(commandBuffer, vk::ImageLayout::eDepthStencilAttachmentOptimal);
 		for (const LightData& light : lights) {
 			PackedLightData p { light.mPackedData };
 			if (p.shadow_index() != -1) {
-				mGeometryPipeline->push_constant<ProjectionData>("gProjection") = light.mShadowProjection;	
 				if (light.mType == LIGHT_TYPE_POINT) {
 					for (uint32_t i = 0; i < 6; i++) {
-						TransformData t = light.mLightToWorld;
+						TransformData t = light.mWorldToLight;
 						float3 axis = float3::Zero();
 						axis[i/2] = i%2==1 ? -1 : 1;
-						t.mRotation = qmul(t.mRotation, angle_axis(numbers::pi_v<float>/2, axis));
-						mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(t);
+						t = tmul(t, make_transform(float3::Zero(), angle_axis(numbers::pi_v<float>/2, axis), float3::Ones()));
+						cameraDatas[cameraIndex].gCameraToWorld = inverse(t);
+						cameraDatas[cameraIndex].gWorldToCamera = t;
+						cameraDatas[cameraIndex].gProjection = light.mShadowProjection;
 						mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index()+i, 1), vk::ClearValue({0.f, 0}) } } });
+						cameraIndex++;
 					}
 				} else {
-					mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = inverse(light.mLightToWorld);
+					cameraDatas[cameraIndex].gCameraToWorld = inverse(light.mWorldToLight);
+					cameraDatas[cameraIndex].gWorldToCamera = light.mWorldToLight;
+					cameraDatas[cameraIndex].gProjection = light.mShadowProjection;
 					mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index(), 1), vk::ClearValue({0.f, 0}) } } });
+					cameraIndex++;
 				}
 			}
 		}
@@ -229,12 +246,12 @@ void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>
 	commandBuffer->setScissor(0, vk::Rect2D({}, framebuffer->extent()));
 	
 	if (camera) {
-		auto worldToCamera = inverse(node_to_world(camera.node()));
-		auto projection = camera->projection((float)framebuffer->extent().height/(float)framebuffer->extent().width);
-		mGeometryPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
-		mGeometryPipeline->push_constant<ProjectionData>("gProjection") = projection;
-		mBackgroundPipeline->push_constant<TransformData>("gWorldToCamera") = worldToCamera;
-		mBackgroundPipeline->push_constant<ProjectionData>("gProjection") = projection;
+		Buffer::View<CameraData> cameraData = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		cameraData.data()->gCameraToWorld = node_to_world(camera.node());
+		cameraData.data()->gWorldToCamera = inverse(cameraData.data()->gCameraToWorld);
+		cameraData.data()->gProjection = camera->projection((float)framebuffer->extent().height/(float)framebuffer->extent().width);
+		mGeometryPipeline->descriptor("gCameraData") = cameraData;
+		mBackgroundPipeline->descriptor("gCameraData") = cameraData;
 	}
 
 	const Mesh* lastMesh = nullptr;
@@ -256,13 +273,13 @@ void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>
 			lastMesh = drawCall.mMesh;
 		}
 		if (drawCall.mMaterialIndex != lastMaterial) {
-			commandBuffer.push_constant("gMaterialIndex", drawCall.mMaterialIndex);
+			if (doShading) commandBuffer.push_constant("gMaterialIndex", drawCall.mMaterialIndex);
 			lastMaterial = drawCall.mMaterialIndex;
 		}
 		commandBuffer->drawIndexed(drawCall.mIndexCount, drawCall.mInstanceCount, drawCall.mFirstIndex, 0, drawCall.mFirstInstance);
 	}
 
-	if (doShading && get<Image::View>(mBackgroundPipeline->descriptor("gImages"))) {
+	if (doShading && mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") != -1) {
 		commandBuffer.bind_pipeline(mBackgroundPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), VertexLayoutDescription(vk::PrimitiveTopology::eTriangleList)));
 		mBackgroundPipeline->bind_descriptor_sets(commandBuffer);
 		mBackgroundPipeline->push_constants(commandBuffer);

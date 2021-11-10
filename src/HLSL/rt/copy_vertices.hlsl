@@ -10,7 +10,6 @@
 
 [[vk::push_constant]] const struct {
 	uint gCount;
-	uint gDstOffset;
 	uint gPositionStride;
 	uint gNormalStride;
 	uint gTangentStride;
@@ -22,8 +21,10 @@ void copy(uint3 index : SV_DispatchThreadId) {
 	if (index.x >= gPushConstants.gCount) return;
 	VertexData v;
 	float2 uv = asfloat(gTexcoords.Load2(index.x*gPushConstants.gTexcoordStride));
-	v.mPositionU = float4(asfloat(gPositions.Load3(index.x*gPushConstants.gPositionStride)), uv.x);
-	v.mNormalV   = float4(asfloat(gNormals.Load3(index.x*gPushConstants.gNormalStride)), uv.y);
-	v.mTangent   = asfloat(gTangents.Load4(index.x*gPushConstants.gTangentStride));
-	gVertices[gPushConstants.gDstOffset + index.x] = v;
+	v.mPosition = asfloat(gPositions.Load3(index.x*gPushConstants.gPositionStride));
+	v.mU = uv.x;
+	v.mNormal = asfloat(gNormals.Load3(index.x*gPushConstants.gNormalStride));
+	v.mV = uv.y;
+	v.mTangent = asfloat(gTangents.Load4(index.x*gPushConstants.gTangentStride));
+	gVertices[index.x] = v;
 }

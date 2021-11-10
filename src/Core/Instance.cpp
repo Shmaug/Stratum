@@ -225,6 +225,8 @@ Instance::Instance(int argc, char** argv) {
 	
 	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, layers, mWindow->back_buffer_count());
 	mWindow->create_swapchain(*mDevice);
+
+	cout << mWindow->back_buffer_count() << " in-flight frames" << endl;
 }
 Instance::~Instance() {
 	mWindow.reset();

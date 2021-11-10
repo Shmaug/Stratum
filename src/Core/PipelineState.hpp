@@ -112,7 +112,7 @@ protected:
 	inline shared_ptr<Pipeline> find_pipeline(size_t key) const {
 		auto it = mPipelines.find(key);
 		if (it == mPipelines.end())
-			return {};
+			return nullptr;
 		else
 			return it->second;
 	}

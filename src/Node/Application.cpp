@@ -10,18 +10,17 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
   mWindowRenderNode = mNode.make_child(node.name() + " DynamicRenderPass").make_component<DynamicRenderPass>();
   mMainPass = mWindowRenderNode->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mWindowRenderNode, "mainPass"));
 
-  vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
   mMainPass->emplace_attachment("colorBuffer", AttachmentType::eColor, blend_mode_state(), vk::AttachmentDescription({},
-    mWindow.surface_format().format, sampleCount,
-    vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eDontCare, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+    mWindow.surface_format().format, vk::SampleCountFlagBits::e1,
+    vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
     vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal));
   mMainPass->emplace_attachment("depthBuffer", AttachmentType::eDepthStencil, blend_mode_state(), vk::AttachmentDescription({},
-    vk::Format::eD32Sfloat, sampleCount,
+    vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
     vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eDontCare, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
     vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal) );
     
 	mMainCamera = mNode.make_child("Default Camera").make_component<Camera>(Camera::ProjectionMode::ePerspective, -1/1024.f, -numeric_limits<float>::infinity(), radians(70.f));
-	mMainCamera.node().make_component<TransformData>(float3::Ones(), 1.f, make_quatf(0,0,0,1));
+	mMainCamera.node().make_component<TransformData>(make_transform(float3(0,1,0), make_quatf(0,0,0,1), float3::Ones()));
 	
   OnUpdate.listen(mNode, [&](CommandBuffer& commandBuffer, float deltaTime) {
 		if (mMainCamera) {
@@ -35,9 +34,13 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
 					static float2 euler = float2::Zero();
 					euler.y() += input.cursor_delta().x()*fwd * gMouseSensitivity;
 					euler.x() = clamp(euler.x() + input.cursor_delta().y() * gMouseSensitivity, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
-					quatf rx = angle_axis(euler.x(), float3(fwd,0,0));
-					quatf ry = angle_axis(euler.y(), float3(0,1,0));
-					cameraTransform->mRotation = qmul(ry, rx);
+					quatf r = angle_axis(euler.x(), float3(fwd,0,0));
+					r = qmul(angle_axis(euler.y(), float3(0,1,0)), r);
+          #ifdef TRANSFORM_UNIFORM_SCALING
+          cameraTransform->mRotation = r;
+          #else
+          cameraTransform->m.topLeftCorner(3,3) = Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
+          #endif
 				}
 			}
 			if (!ImGui::GetIO().WantCaptureKeyboard) {
@@ -46,7 +49,11 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
 				if (input.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
 				if (input.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
 				if (input.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
-				cameraTransform->mTranslation += rotate_vector(cameraTransform->mRotation, mv*deltaTime);
+				if (input.pressed(KeyCode::eKeySpace)) mv += float3(0,1,0);
+				if (input.pressed(KeyCode::eKeyControl)) mv += float3(0,-1,0);
+				if (input.pressed(KeyCode::eKeyShift)) mv *= 3;
+				if (input.pressed(KeyCode::eKeyAlt)) mv /= 2;
+				*cameraTransform = tmul(*cameraTransform, make_transform(mv*deltaTime, make_quatf(0,0,0,1), float3::Ones()));
 			}
 		}
   });

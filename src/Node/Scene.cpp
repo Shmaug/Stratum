@@ -17,10 +17,10 @@ static hlsl::float3 gAnimateRotate = float3::Zero();
 static hlsl::TransformData* gAnimatedTransform = nullptr;
 STRATUM_API void animate(CommandBuffer& commandBuffer, float deltaTime) {
 	if (gAnimatedTransform) {
-		gAnimatedTransform->mTranslation += rotate_vector(gAnimatedTransform->mRotation, gAnimateTranslate);
+		*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(gAnimateTranslate, make_quatf(0,0,0,1), float3::Ones()));
 		float r = length(gAnimateRotate);
 		if (r > 0)
-			gAnimatedTransform->mRotation = normalize(qmul(gAnimatedTransform->mRotation, angle_axis(r, gAnimateRotate/r)));
+			*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(float3::Zero(), angle_axis(r, gAnimateRotate/r), float3::Ones()));
 	}
 }
 
@@ -36,10 +36,16 @@ inline void inspector_gui_fn(Camera* cam) {
     ImGui::DragFloat("Vertical FoV", &cam->mVerticalFoV, .01f, 0.00390625, numbers::pi_v<float>);
 }
 inline void inspector_gui_fn(TransformData* t) {
+	#ifdef TRANSFORM_UNIFORM_SCALING
   ImGui::DragFloat3("Translation", t->mTranslation.data(), .1f);
   ImGui::DragFloat("Scale", &t->mScale, .05f);
   if (ImGui::DragFloat4("Rotation (XYZW)", t->mRotation.xyz.data(), .1f, -1, 1))
     t->mRotation = normalize(t->mRotation);
+	#else
+	float3 translate = t->m.topRightCorner(3,1);
+  if (ImGui::DragFloat3("Translation", translate.data(), .1f))
+		t->m.topRightCorner(3,1) = translate;
+	#endif
 	
 	if (gAnimatedTransform == t) {
 			if (ImGui::Button("Stop Animating")) gAnimatedTransform = nullptr;
@@ -152,7 +158,7 @@ inline void inspector_gui_fn(MaterialInfo* material) {
 }
 
 TransformData node_to_world(const Node& node) {
-	TransformData transform(float3(0,0,0), 1.f, make_quatf(0,0,0,1));
+	TransformData transform = make_transform(float3::Zero(), make_quatf(0,0,0,1), float3::Ones());
 	const Node* p = &node;
 	while (p != nullptr) {
 		auto c = p->find<TransformData>();
@@ -222,8 +228,16 @@ void EnvironmentMap::build_distributions(const span<float4>& img, const vk::Exte
 void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("pbrRenderer::load_gltf", commandBuffer);
 	
+	//component_ptr<ImageDatabase> imageDatabase;
+	//auto dbs = root.node_graph().find_components<ImageDatabase>();
+	//if (dbs.empty())
+	//	imageDatabase = root.node_graph().find_components<Application>().front().node().make_child("Image Database").make_component<ImageDatabase>();
+	//else 
+	//	imageDatabase = dbs.front();
+
 	static bool registered = false;
 	if (!registered) {
+
 		registered = true;
 
 		component_ptr<Gui> gui = root.node_graph().find_components<Gui>().front();
@@ -267,8 +281,8 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		return dst.buffer();
 	});
 	ranges::transform(model.images, images.begin(), [&](const tinygltf::Image& image) {
-		Buffer::View<byte> pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-		memcpy(pixels.data(), image.image.data(), pixels.size_bytes());
+		Buffer::View<unsigned char> pixels = make_shared<Buffer>(device, image.name+"/Staging", image.image.size(), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+		ranges::uninitialized_copy(image.image, pixels);
 		
 		static const unordered_map<int, std::array<vk::Format,4>> formatMap {
 			{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, 	{ vk::Format::eR8Unorm, vk::Format::eR8G8Unorm, vk::Format::eR8G8B8Unorm, vk::Format::eR8G8B8A8Unorm } },
@@ -289,34 +303,20 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		img->generate_mip_maps(commandBuffer);
 		return img;
 	});
+	Node& materialsNode = root.make_child("materials");
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
-		auto m = root.make_child(material.name).make_component<MaterialInfo>();
+		auto m = materialsNode.make_child(material.name).make_component<MaterialInfo>();
 		m->mEmission = Array3d::Map(material.emissiveFactor.data()).cast<float>();
 		m->mAlbedo = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
 		m->mMetallic = (float)material.pbrMetallicRoughness.metallicFactor;
 		m->mRoughness = (float)material.pbrMetallicRoughness.roughnessFactor;
 		m->mNormalScale = (float)material.normalTexture.scale;
 		m->mOcclusionScale = (float)material.occlusionTexture.strength;
-		if (material.pbrMetallicRoughness.baseColorTexture.index != -1)
-			m->mAlbedoImage = images[material.pbrMetallicRoughness.baseColorTexture.index];
-		else
-			m->mAlbedoImage = {};
-		if (material.normalTexture.index != -1)
-			m->mNormalImage = images[material.normalTexture.index];
-		else
-			m->mNormalImage = {};
-		if (material.emissiveTexture.index != -1)
-			m->mEmissionImage = images[material.emissiveTexture.index];
-		else
-			m->mEmissionImage = {};
-		if (material.pbrMetallicRoughness.metallicRoughnessTexture.index != -1)
-			m->mMetallicImage = m->mRoughnessImage = images[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
-		else
-			m->mMetallicImage = m->mRoughnessImage = {};
-		if (material.occlusionTexture.index != -1)
-			m->mOcclusionImage = images[material.occlusionTexture.index];
-		else
-			m->mOcclusionImage = {};
+		if (material.pbrMetallicRoughness.baseColorTexture.index != -1) m->mAlbedoImage = images[model.textures[material.pbrMetallicRoughness.baseColorTexture.index].source];
+		if (material.normalTexture.index != -1) m->mNormalImage = images[model.textures[material.normalTexture.index].source];
+		if (material.emissiveTexture.index != -1) m->mEmissionImage = images[model.textures[material.emissiveTexture.index].source];
+		if (material.pbrMetallicRoughness.metallicRoughnessTexture.index != -1) m->mMetallicImage = m->mRoughnessImage = images[model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index].source];
+		if (material.occlusionTexture.index != -1) m->mOcclusionImage = images[model.textures[material.occlusionTexture.index].source];
 		m->mMetallicImageComponent = 0;
 		m->mRoughnessImageComponent = 1;
 		m->mOcclusionImageComponent = 0;
@@ -338,13 +338,15 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 
 		return m;
 	});
+	Node& meshesNode = root.make_child("meshes");
 	for (uint32_t i = 0; i < model.meshes.size(); i++) {
 		meshes[i].resize(model.meshes[i].primitives.size());
 		for (uint32_t j = 0; j < model.meshes[i].primitives.size(); j++) {
 			const tinygltf::Primitive& prim = model.meshes[i].primitives[j];
 			const auto& indicesAccessor = model.accessors[prim.indices];
 			const auto& indexBufferView = model.bufferViews[indicesAccessor.bufferView];
-			Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType), indexBufferView.byteOffset, indexBufferView.byteLength);
+			size_t stride = tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType);
+			Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], stride, indexBufferView.byteOffset, indexBufferView.byteLength);
 
 			shared_ptr<VertexArrayObject> vertexData = make_shared<VertexArrayObject>();
 			
@@ -475,7 +477,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				(*vertexData)[VertexArrayObject::AttributeType::eTangent].emplace_back(VertexArrayObject::AttributeDescription(sizeof(float4), vk::Format::eR32G32B32A32Sfloat, 0, vk::VertexInputRate::eVertex), tangents);
 			}
 
-			meshes[i][j] = root.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
+			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
 		}
 	}
 
@@ -486,11 +488,16 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		nodes[n] = &dst;
 		
 		if (!node.translation.empty() || !node.rotation.empty() || !node.scale.empty()) {
-			auto transform = dst.make_component<TransformData>(float3::Zero(), 1.f, make_quatf(0,0,0,1));
-			if (!node.translation.empty()) transform->mTranslation = Array3d::Map(node.translation.data()).cast<float>();
-			if (!node.rotation.empty()) 	 transform->mRotation = make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]);
-			if (!node.scale.empty()) 			 transform->mScale = (float)Vector3d::Map(node.scale.data()).norm();
-		}
+			float3 translate;
+			float3 scale;
+			if (node.translation.empty()) translate = float3::Zero();
+			else translate = Array3d::Map(node.translation.data()).cast<float>();
+			if (node.scale.empty()) scale = float3::Ones();
+			else scale = Array3d::Map(node.scale.data()).cast<float>();
+			quatf rotate = node.rotation.empty() ? make_quatf(0,0,0,1) : normalize(make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]));
+			dst.make_component<TransformData>(make_transform(translate, rotate, scale));
+		} else if (!node.matrix.empty())
+			dst.make_component<TransformData>(from_float3x4(Array<double,4,4>::Map(node.matrix.data()).topLeftCorner(3,4).cast<float>()));
 
 		if (node.mesh < model.meshes.size())
 			for (uint32_t i = 0; i < model.meshes[node.mesh].primitives.size(); i++) {

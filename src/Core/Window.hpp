@@ -313,10 +313,10 @@ public:
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
 
 	inline Array2f clip_to_window(const Array2f& clip) const {
-		return (clip.array()*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
+		return (clip*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
 	}
 	inline Array2f window_to_clip(const Array2f& screen) const {
-		Array2f r = screen.array()/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - Array2f::Ones();
+		Array2f r = screen/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - 1;
 		r.y() = -r.y();
 		return r;
 	}
