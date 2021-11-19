@@ -30,8 +30,9 @@ struct v2f {
 	float4 position : SV_Position;
 	float4 normal : NORMAL;
 	float4 tangent : TANGENT;
-	float4 posCamera : TEXCOORD0; // vertex position in camera space
-	float2 texcoord : TEXCOORD1;
+	float4 posCamera : TEXCOORD1; // vertex position in camera space
+	float3 posWorld : TEXCOORD2; // vertex position in world space
+	float2 texcoord : TEXCOORD0;
 };
 
 v2f vs(
@@ -41,9 +42,10 @@ v2f vs(
 	float2 texcoord : TEXCOORD,
 	uint instanceId : SV_InstanceID) {
 	v2f o;
-	o.posCamera.xyz = transform_point(gWorldToCamera, transform_point(gTransforms[instanceId], vertex));
-	o.position      = project_point(gProjection, o.posCamera.xyz);
 	TransformData q = tmul(gWorldToCamera, gTransforms[instanceId]);
+	o.posWorld      = transform_point(gTransforms[instanceId], vertex);
+	o.posCamera.xyz = transform_point(q, vertex);
+	o.position      = project_point(gProjection, o.posCamera.xyz);
 	o.normal.xyz    = transform_vector(q, normal);
 	o.tangent.xyz   = transform_vector(q, tangent.xyz);
 	float3 bitangent = cross(o.tangent.xyz, o.normal.xyz);
@@ -189,6 +191,9 @@ float4 fs(v2f i) : SV_Target0 {
 	float occlusion = 1;
 	ti = inds.occlusion();
 	if (ti < gImageCount) occlusion = lerp(1, gImages[ti].Sample(gSampler, i.texcoord)[inds.occlusion_channel()].r, material.mOcclusionScale);
+
+	if (gPushConstants.gLightCount < 1000)
+		eval = viridis_quintic(saturate(max(length(ddx(i.posWorld)), length(ddy(i.posWorld)))*100));
 	
 	return float4(eval, baseColor.a);
 }

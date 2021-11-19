@@ -86,10 +86,10 @@ void main(uint3 index : SV_DispatchThreadId) {
 	int2 idx_curr = int2(uv * resolution);
 	if (!test_inside_screen(idx_curr, resolution)) return;
 
-	float3 z_curr = gZ[idx_curr].xyz;
+	float4 z_curr = gZ[idx_curr];
 	float3 n_curr = gNormal[idx_curr].xyz;
-	if (z_curr.y == M_PI && !test_reprojected_depth(z_curr.z, gPrevZ[idx_prev].x, z_curr.y)) return;
-	if (z_curr.y == M_PI && !test_reprojected_normal(n_curr, gPrevNormal[idx_prev].xyz)) return;
+	if (!test_reprojected_depth(z_curr.z, gPrevZ[idx_prev].x, length(z_curr.xz))) return;
+	if (!test_reprojected_normal(n_curr, gPrevNormal[idx_prev].xyz)) return;
 
 	uint2 tile_pos_curr = idx_curr / gGradientDownsample;
 	uint gradient_idx_curr = get_gradient_idx_from_tile_pos(idx_curr % gGradientDownsample);
@@ -103,5 +103,6 @@ void main(uint3 index : SV_DispatchThreadId) {
 		gVisibility[idx_curr] = vis;
 		gRNGSeed[idx_curr] = gPrevRNGSeed[idx_prev];
 		gPrevUV[idx_curr] = (idx_prev + 0.5) / float2(resolution);
+		//gZ[idx_curr] = ;
 	}
 }

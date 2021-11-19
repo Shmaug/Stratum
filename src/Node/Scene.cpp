@@ -43,8 +43,19 @@ inline void inspector_gui_fn(TransformData* t) {
     t->mRotation = normalize(t->mRotation);
 	#else
 	float3 translate = t->m.topRightCorner(3,1);
-  if (ImGui::DragFloat3("Translation", translate.data(), .1f))
-		t->m.topRightCorner(3,1) = translate;
+  if (ImGui::DragFloat3("Translation", translate.data(), .1f)) t->m.topRightCorner(3,1) = translate;
+
+	float3 scale;
+	scale.x() = t->m.block(0, 0, 3, 1).matrix().norm();
+	scale.y() = t->m.block(0, 1, 3, 1).matrix().norm();
+	scale.z() = t->m.block(0, 2, 3, 1).matrix().norm();
+	Matrix3f r = t->m.topLeftCorner(3,3).matrix() * DiagonalMatrix<float,3,3>(1/scale.x(), 1/scale.y(), 1/scale.z());
+	Quaternionf rotation(r);
+	bool v = ImGui::DragFloat3("Rotation (XYZ)", rotation.vec().data(), .1f);
+	v |= ImGui::DragFloat("Rotation (W)", &rotation.w(), .1f);
+	v |= ImGui::DragFloat3("Scale", scale.data(), .1f);
+	if (v) t->m.topLeftCorner(3,3) = rotation.normalized().matrix() * DiagonalMatrix<float,3,3>(scale.x(), scale.y(), scale.z());
+	
 	#endif
 	
 	if (gAnimatedTransform == t) {
@@ -96,11 +107,9 @@ inline void inspector_gui_fn(LightData* light) {
 inline void inspector_gui_fn(EnvironmentMap* environment) {
 	uint32_t w = ImGui::GetWindowSize().x;
 	if (environment->mImage) {
-		ImGui::Text("Base Color");
-		if (environment->mImage) {
-			ImGui::Text("Environment Map");
-			ImGui::Image(&environment->mImage, ImVec2(w,w*(float)environment->mImage.extent().height/(float)environment->mImage.extent().width));
-		}
+		ImGui::Image(&environment->mImage, ImVec2(w,w*(float)environment->mImage.extent().height/(float)environment->mImage.extent().width));
+  	ImGui::DragFloat("Exposure", &environment->mExposure, .01f);
+  	ImGui::DragFloat("Gamma", &environment->mGamma, .01f);
 		if (environment->mConditionalDistribution) {
 			ImGui::Text("Conditional Distribution");
 			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,16));
@@ -110,7 +119,6 @@ inline void inspector_gui_fn(EnvironmentMap* environment) {
 			ImGui::Image(&environment->mConditionalDistribution, ImVec2(w,w));
 		}
 	}
-  ImGui::DragFloat("Gamma", &environment->mGamma, .01f);
 }
 inline void inspector_gui_fn(MaterialInfo* material) {
   ImGui::ColorEdit3("Albedo", material->mAlbedo.data());
@@ -335,6 +343,8 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			const auto& c = it->second.Get("attenuationColor");
 			m->mAbsorption = (-Array3d(c.Get(0).Get<double>(), c.Get(1).Get<double>(), c.Get(2).Get<double>()) / it->second.Get("attenuationDistance").Get<double>()).cast<float>();
 		}
+
+		m->mAlphaCutoff =  material.alphaMode == "MASK" ? material.alphaCutoff : 0;
 
 		return m;
 	});

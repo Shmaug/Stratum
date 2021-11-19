@@ -39,6 +39,7 @@ struct EnvironmentMap {
 	Image::View mImage;
 	Image::View mMarginalDistribution;
 	Image::View mConditionalDistribution;
+	float mExposure;
 	float mGamma;
 
 	STRATUM_API static void build_distributions(const span<hlsl::float4>& img, const vk::Extent2D& extent, span<hlsl::float2> marginalDistData/*height,1*/, span<hlsl::float2> conditionalDistData /*width,height*/);
@@ -63,6 +64,7 @@ struct MaterialInfo {
 	uint32_t mMetallicImageComponent;
 	uint32_t mRoughnessImageComponent;
 	uint32_t mOcclusionImageComponent;
+	float mAlphaCutoff;
 };
 
 struct MeshPrimitive {

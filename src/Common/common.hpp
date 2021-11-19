@@ -75,6 +75,7 @@ template<typename T,int M, int N> inline MatrixType<T,M,N> max(const MatrixType<
 template<typename T,int M, int N> inline MatrixType<T,M,N> min(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.min(b); }
 template<typename T,int M, int N> inline MatrixType<T,M,N> abs(const MatrixType<T,M,N>& a) { return a.abs(); }
 
+template<floating_point T> inline T saturate(const T& a) { return min(max(a, 0), 1); }
 template<typename T,int M, int N> inline MatrixType<T,M,N> saturate(const MatrixType<T,M,N>& a) { return a.max(Array<T,M,N>::Zero()).min(Array<T,M,N>::Ones()); }
 
 template<typename T, int M, int N> inline T dot(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }

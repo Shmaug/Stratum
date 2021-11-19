@@ -117,6 +117,16 @@ inline float3 rgb_to_hsv(float3 rgb) {
 	return float3(hcv[0], hcv[1] / (hcv[2] + 1e-6f), hcv[2]);
 }
 
+inline float3 viridis_quintic(float x) {
+	// from https://www.shadertoy.com/view/XtGGzG
+	float4 x1 = float4(1, x, x*x, x*x*x); // 1 x x2 x3
+	float2 x2 = float2(x1[1], x1[2]) * x1[3]; // x4 x5
+	return float3(
+		dot(x1, float4( 0.280268003, -0.143510503,   2.225793877, -14.815088879)) + dot(x2, float2( 25.212752309, -11.772589584)),
+		dot(x1, float4(-0.002117546,  1.617109353,  -1.909305070,   2.701152864)) + dot(x2, float2(-1.685288385 ,   0.178738871)),
+		dot(x1, float4( 0.300805501,  2.614650302, -12.019139090,  28.933559110)) + dot(x2, float2(-33.491294770,  13.762053843)));
+}
+
 inline float2 cartesian_to_spherical_uv(float3 xyz) {
 	return float2(atan2(xyz[2], xyz[0])*M_1_PI*.5 + .5, acos(xyz[1])*M_1_PI);
 }

@@ -64,10 +64,11 @@ private:
 	component_ptr<ComputePipelineState> mCreateGradientSamplesPipeline;
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 
-	bool mDenoise = false;
 	bool mRandomPerFrame = true;
-	uint32_t mNumIterations = 5;
-	uint32_t mDiffAtrousIterations = 5;
+	bool mReprojection = true;
+	bool mForwardProjection = true;
+	uint32_t mDiffAtrousIterations = 0;
+	uint32_t mNumIterations = 0;
 	uint32_t mHistoryTap = 0;
 
 	struct FrameData {
@@ -77,6 +78,8 @@ private:
 		Image::View mVisibility;
 		
 		Image::View mRNGSeed;
+		Image::View mReservoirs;
+		Image::View mReservoirRNG;
 		
 		Image::View mRadiance;
 		Image::View mAlbedo;
@@ -86,7 +89,14 @@ private:
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
 		Image::View mAccumLength;
-		
+			
+		Image::View mPrevUV;
+		Image::View mGradientPositions;
+		Image::View mAntilagAlpha;
+		Image::View mTemporalReservoir, mSpatialReservoir;
+		Image::View mPing, mPong;
+		array<Image::View, 2> mDiffPing, mDiffPong;
+
 		Buffer::View<hlsl::InstanceData> mInstances;
 		Buffer::View<hlsl::MaterialData> mMaterials;
 		Buffer::View<hlsl::VertexData> mVertices;
@@ -94,15 +104,7 @@ private:
 	};
 
 	unique_ptr<FrameData> mCurFrame, mPrevFrame;
-
-	Image::View mColorHistory, mColorHistoryUnfiltered;
-	Image::View mLightSamples;
-	Image::View mPrevUV;
-	Image::View mGradientPositions;
-	Image::View mAntilagAlpha;
-	Image::View mTemporalReservoir, mSpatialReservoir;
-	Image::View mPing, mPong;
-	array<Image::View, 2> mDiffPing, mDiffPong;
+	Image::View mColorHistory;
 };
 
 }

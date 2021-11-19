@@ -34,7 +34,7 @@ float luminance(in float3 color) {
 }
 
 bool test_reprojected_normal(float3 n1, float3 n2) {
-	return dot(n1, n2) > 0.99619469809; // 5 degrees
+	return dot(n1, n2) > 0.99619469809; // cos(5 degrees)
 }
 
 bool test_inside_screen(int2 p, int2 res) {
@@ -42,7 +42,7 @@ bool test_inside_screen(int2 p, int2 res) {
 }
 
 bool test_reprojected_depth(float z1, float z2, float dz) {
-	return abs(z1 - z2) < 2.0 * (dz + 1e-3);
+	return abs(z1 - z2) < 2*(dz + 1e-3);
 }
 
 #define TILE_OFFSET_SHIFT 3u

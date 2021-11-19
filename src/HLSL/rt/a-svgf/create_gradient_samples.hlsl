@@ -43,8 +43,6 @@ void main(uint3 index : SV_DispatchThreadId) {
 	gRadiance.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution/gGradientDownsample)) return;
 
-	float2 o1 = 0;
-
 	uint2 gradPos = index.xy;
 	uint u = gGradientPositions[gradPos];
 	uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
@@ -54,9 +52,10 @@ void main(uint3 index : SV_DispatchThreadId) {
 		uint idx_prev = (u >> (2u * TILE_OFFSET_SHIFT)) & ((1u << (31u - 2u * TILE_OFFSET_SHIFT)) - 1u);
 		uint2 ipos_prev = uint2(idx_prev % resolution.x, idx_prev / resolution.x);
 		float l_prev = luminance(gPrevRadiance[ipos_prev].rgb);
-		//if (isinf(l_prev) || isnan(l_prev)) l_prev = 0;
-		o1 = float2(max(l_curr, l_prev), l_curr - l_prev);
-	}
+		if (isinf(l_prev) || isnan(l_prev)) l_prev = 0;
+		gOutput1[index.xy] = float2(max(l_curr, l_prev), l_curr - l_prev);
+	} else
+		gOutput1[index.xy] = 0;
 
 	float2 moments = float2(l_curr, l_curr*l_curr);
 	float sum_w = 1;
@@ -73,8 +72,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 				sum_w++;
 			}
 		}
-	moments /= sum_w;
+	moments /= float2(sum_w, sum_w*sum_w);
 
-	gOutput1[index.xy] = o1;
-	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), gZ[ipos].xy);
+	float4 z_curr = gZ[ipos].x;
+	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), z_curr.x, length(z_curr.zw));
 }

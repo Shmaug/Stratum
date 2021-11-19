@@ -47,19 +47,9 @@ static const float gaussian_kernel[3][3] = {
 	{ 1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0 }
 };
 
-float compute_sigma_luminance(float center, int2 ipos) {
-	float sum = center * gaussian_kernel[0][0];
-	for (int yy = -1; yy <= 1; yy++)
-		for (int xx = -1; xx <= 1; xx++)
-			if (xx != 0 || yy != 0)
-				sum += gInput2[ipos + int2(xx, yy)].g * gaussian_kernel[xx + 1][yy + 1];
-	return sqrt(max(sum, 0));
-}
 
 class TapData {
 	int2 ipos;
-	float2 color_center1;
-	float4 color_center2;
 	float2 z_center;
 	float l_center;
 	float sigma_l;
@@ -68,6 +58,19 @@ class TapData {
 	float sum_variance;
 	float sum_weight;
 	uint2 resolution;
+
+	void compute_sigma_luminance() {
+		const float kernel[2][2] = {
+				{ 1.0 / 4.0, 1.0 / 8.0  },
+				{ 1.0 / 8.0, 1.0 / 16.0 }
+		};
+		const int r = 1;
+		float sum = 0;
+		for (int yy = -r; yy <= r; yy++)
+			for (int xx = -r; xx <= r; xx++)
+				sum += gInput2[ipos + int2(xx, yy)].g * kernel[abs(xx)][abs(yy)];
+		sigma_l = sqrt(max(sum, 0));
+	}
 
 	void tap(int2 offset, float kernel_weight) {
 		int2 p = ipos + offset; 
@@ -78,11 +81,10 @@ class TapData {
 		float z_p       = color2_p.b;
 		float l_p       = color2_p.r;
 
-		float w_l = abs(l_p - l_center) / (sigma_l + 1e-10); 
+		float w_l = abs(l_p - l_center) / (sigma_l + 1e-2); 
 		float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gPushConstants.gStepSize * gGradientDownsample) + 1e-2); 
 		float w = exp(-w_l * w_l - w_z) * kernel_weight;
-
-		if (isinf(w) || isnan(w)) w = 0;
+		if (isinf(w) || isnan(w) || w == 0) return;
 
 		sum_color     += color1_p * w; 
 		sum_luminance += l_p * w;
@@ -185,15 +187,15 @@ void main(int2 index : SV_DispatchThreadId) {
 	gOutput1.GetDimensions(t.resolution.x, t.resolution.y);
 	if (any(index.xy >= t.resolution)) return;
 	t.ipos = index.xy;
-	t.color_center1 = gInput1[index];
-	t.color_center2 = gInput2[index];
-	t.z_center      = t.color_center2.ba;
-	t.l_center      = t.color_center2.r;
-	t.sigma_l       = 3*compute_sigma_luminance(t.color_center2.g, t.ipos);
-	t.sum_color     = t.color_center1;
-	t.sum_luminance = t.color_center2.r;
-	t.sum_variance  = t.color_center2.g;
+	t.compute_sigma_luminance();
+	float2 color_center1 = gInput1[t.ipos];
+	float4 color_center2 = gInput2[t.ipos];
+	t.sum_color     = color_center1;
+	t.sum_luminance = color_center2.r;
+	t.sum_variance  = color_center2.g;
 	t.sum_weight    = 1;
+	t.l_center      = color_center2.r;
+	t.z_center      = color_center2.ba;
 	
 	if (!isinf(t.z_center.x)) { // only filter foreground pixels
 		if (gFilterKernelType == 0)
@@ -222,6 +224,6 @@ void main(int2 index : SV_DispatchThreadId) {
 	t.sum_luminance *= invSum;
 	t.sum_variance  *= invSum*invSum;
 
-	gOutput1[index] = t.sum_color;
-	gOutput2[index] = float4(t.sum_luminance, t.sum_variance, t.z_center);
+	gOutput1[t.ipos] = t.sum_color;
+	gOutput2[t.ipos] = float4(t.sum_luminance, t.sum_variance, t.z_center);
 }

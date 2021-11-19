@@ -42,37 +42,35 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	uint gStepSize;
 } gPushConstants;
 
-static const float gaussian_kernel[3][3] = {
-	{ 1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0 },
-	{ 1.0 / 8.0,  1.0 / 4.0, 1.0 / 8.0  },
-	{ 1.0 / 16.0, 1.0 / 8.0, 1.0 / 16.0 }
-};
-
-float compute_sigma_luminance(float center, int2 index) {
-	const int r = 1;
-	float sum = center * gaussian_kernel[0][0];
-	for (int yy = -r; yy <= r; yy++)
-		for (int xx = -r; xx <= r; xx++)
-			if (xx != 0 || yy != 0) {
-				float v = gInput[index + int2(xx, yy)].a;
-				float w = gaussian_kernel[xx + 1][yy + 1];
-				sum += v * w;
-			}
-	return sqrt(max(sum, 0.0));
-}
-
 class TapData {
 	int2 index;
 	uint2 resolution;
-	float4 center_color;
 	float3 center_normal;
-	float2 z_center;
+	float4 z_center;
 	float l_center;
 	float sigma_l;
 
-	float3 sum_color;
-	float sum_variance;
+	float4 sum_color;
 	float sum_weight;
+
+	void compute_sigma_luminance() {
+		const float kernel[2][2] = {
+				{ 1.0 / 4.0, 1.0 / 8.0  },
+				{ 1.0 / 8.0, 1.0 / 16.0 }
+		};
+		const int r = 1;
+		float sum = 0;
+		for (int yy = -r; yy <= r; yy++)
+			for (int xx = -r; xx <= r; xx++) {
+				float4 color = gInput[index + int2(xx, yy)];
+				if (xx == 0 && yy == 0) {
+					sum_color = color;
+					sum_weight = 1;
+				}
+				sum += color.a * kernel[abs(xx)][abs(yy)];
+			}
+		sigma_l = sqrt(max(sum, 0));
+	}
 
 	void tap(int2 offset, float kernel_weight) {
 		int2 p = index + offset;
@@ -83,15 +81,14 @@ class TapData {
 		float z_p       = gZ[p].x;
 		float l_p       = luminance(color_p.rgb);
 
-		float w_l = abs(l_p - l_center) / (sigma_l + 1e-10); 
-		float w_z = 3.0 * abs(z_p - z_center.x) / (z_center.y * length(float2(offset) * gPushConstants.gStepSize) + 1e-2);
-		float w_n = pow(max(0, dot(normal_p, center_normal)), 128.0); 
+		float w_l = abs(l_p - l_center) / (sigma_l + 1e-2); 
+		float w_z = 3 * abs(z_p - z_center.x) / (length(z_center.zw * offset * gPushConstants.gStepSize) + 1e-2);
+		float w_n = pow(max(0, dot(normal_p, center_normal)), 256); 
 
-		float w = exp(-w_l * w_l - w_z) * kernel_weight * w_n;
-		if (isinf(w) || isnan(w)) w = 0;
+		float w = exp(-(w_l*w_l + w_z)) * kernel_weight * w_n;
+		if (isinf(w) || isnan(w) || w == 0) return;
 
-		sum_color    += color_p.rgb * w; 
-		sum_variance += w * w * color_p.a; 
+		sum_color    += color_p * float4(w.xxx, w*w); 
 		sum_weight   += w; 
 	}
 };
@@ -191,14 +188,10 @@ void main(uint3 index : SV_DispatchThreadId) {
 	gOutput.GetDimensions(t.resolution.x, t.resolution.y);
 	if (any(index.xy >= t.resolution)) return;
 	t.index = index.xy;
-	t.center_color = gInput[index.xy];
-	t.center_normal = gNormal[index.xy].xyz;
-	t.z_center = gZ[index.xy].xy;
-	t.l_center = luminance(t.center_color.rgb);
-	t.sigma_l  = compute_sigma_luminance(t.center_color.a, t.index) * 3.0;
-	t.sum_color    = t.center_color.rgb;
-	t.sum_variance = t.center_color.a;
-	t.sum_weight   = 1.0;
+	t.compute_sigma_luminance();
+	t.center_normal = gNormal[t.index].xyz;
+	t.l_center = luminance(t.sum_color.rgb);
+	t.z_center = gZ[t.index];
 
 	if (!isinf(t.z_center.x)) { // only filter foreground pixels
 		if (gFilterKernelType == 0)
@@ -222,8 +215,5 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 	}
 
-	t.sum_color    /= t.sum_weight;
-	t.sum_variance /= t.sum_weight * t.sum_weight;
-
-	gOutput[index.xy] = float4(t.sum_color, t.sum_variance);
+	gOutput[t.index] = t.sum_color/float4(t.sum_weight.xxx, t.sum_weight*t.sum_weight);
 }

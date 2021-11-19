@@ -36,7 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::binding(2)]] Texture2D<float2> gMoments;
 [[vk::binding(3)]] Texture2D<float> gHistoryLength;
 [[vk::binding(4)]] Texture2D<float4> gNormal;
-[[vk::binding(5)]] Texture2D<float2> gZ;
+[[vk::binding(5)]] Texture2D<float4> gZ;
 [[vk::binding(6)]] Texture2D<uint4> gVisibility;
 
 [numthreads(8,8,1)]
@@ -46,51 +46,47 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (any(index.xy >= resolution)) return;
 
 	float4 c = gInput[index.xy];
-	float2 z_center = gZ[index.xy];
-	if (isinf(z_center.x)) {
-		gOutput[index.xy] = float4(c.rgb, 0);
+	float2 m = gMoments[index.xy];
+
+	float4 z_center = gZ[index.xy];
+	float histlen = gHistoryLength[index.xy].r;
+	if (isinf(z_center.x) || histlen >= gHistoryLengthThreshold) {
+		gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
 		return;
 	}
 
-	float2 m = gMoments[index.xy].rg;
-	float histlen = gHistoryLength[index.xy].r;
-	if (histlen < gHistoryLengthThreshold) {
-		{
-			float l = luminance(c.rgb);
-			m += float2(l, l*l);
+	float sum_w = 1;
+
+	float3 n_center = gNormal[index.xy].xyz;
+	uint mesh_id_center = gVisibility[index.xy].x;
+
+	int r = histlen > 1 ? 2 : 3;
+	for (int yy = -r; yy <= r; yy++)
+		for (int xx = -r; xx <= r; xx++) {
+			if (xx == 0 && yy == 0) continue;
+
+			int2 p = int2(index.xy) + int2(xx, yy);
+			if (any(p < 0) || any(index.xy >= resolution)) continue;
+			if (mesh_id_center != gVisibility[p].x) continue;
+
+			float z_p = gZ[p].x;
+			float3 n_p = gNormal[p].xyz;
+
+			float w_z = abs(z_p - z_center.x) / (length(z_center.zw * float2(xx, yy)) + 1e-2);
+			float w_n = pow(saturate(dot(n_p, n_center)), 256); 
+			float w = exp(-w_z) * w_n;
+
+			if (isnan(w) || isinf(w)) continue;
+
+			float4 c_p = gInput[p];
+			float l_p = luminance(c_p.rgb);
+			sum_w += w;
+			m += gMoments[p] * w;
+			c.rgb += c_p.rgb * w;
 		}
 
-		float3 n_center = gNormal[index.xy].xyz;
-		uint mesh_id_center = gVisibility[index.xy].x;
-
-		float sum_w = 1;
-		int r = histlen > 1 ? 2 : 3;
-		for (int yy = -r; yy <= r; yy++)
-			for (int xx = -r; xx <= r; xx++) {
-				if (xx == 0 && yy == 0) continue;
-				int2 p = int2(index.xy) + int2(xx, yy);
-				if (any(p < 0) || any(index.xy >= resolution)) continue;
-				if (mesh_id_center != gVisibility[p].x) continue;
-
-				float z_p = gZ[p].x;
-				float3 n_p = gNormal[p].xyz;
-
-				float w_z = abs(z_p - z_center.x) / (z_center.y * length(float2(xx, yy)) + 1e-2);
-				float w_n = pow(saturate(dot(n_p, n_center)), 128.0); 
-				float w = exp(-w_z) * w_n;
-
-				if (isnan(w) || isinf(w)) continue;
-
-				float l = luminance(c.rgb);
-				sum_w += w;
-				m += float2(l, l*l) * w;
-				c.rgb += gInput[p].rgb * w;
-			}
-
-		m /= sum_w;
-		c.rgb /= sum_w;
-		
-		gOutput[index.xy] = float4(c.rgb, (1 + 3*(1 - histlen / gHistoryLengthThreshold)) * max(0, m.y - m.x*m.x));
-	} else 
-		gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
+	m /= sum_w;
+	c.rgb /= sum_w;
+	
+	gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gHistoryLengthThreshold)));
 }

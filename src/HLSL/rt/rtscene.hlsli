@@ -3,6 +3,7 @@
 
 #define SAMPLE_FLAG_BG_IS 1
 #define SAMPLE_FLAG_LIGHT_IS 2
+#define SAMPLE_FLAG_RR 4
 #define SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET 24
 
 #define PROCEDURAL_PRIMITIVE_TYPE_LIGHT 1
@@ -23,7 +24,6 @@ struct SurfaceSample {
 	float3 Ng;
 	float area;
 	bool front_face;
-	differential3 dN;
 	differential2 dUV;
 };
 
@@ -77,46 +77,48 @@ SurfaceSample surface_attributes(InstanceData instance, StructuredBuffer<VertexD
 
 	float3 v1v0 = v1.mPosition - v0.mPosition;
 	float3 v2v0 = v2.mPosition - v0.mPosition;
+	float3 dPdu = transform_vector(instance.mTransform, -v2v0);
+	float3 dPdv = transform_vector(instance.mTransform, v1.mPosition - v2.mPosition);
 
 	sfc.v.mPosition = transform_point(instance.mTransform, v0.mPosition + v1v0*bary.x + v2v0*bary.y);
 	sfc.v.mNormal   = normalize(transform_vector(instance.mTransform, v0.mNormal + (v1.mNormal - v0.mNormal)*bary.x + (v2.mNormal - v0.mNormal)*bary.y));
-	sfc.v.mTangent  = v0.mTangent  + (v1.mTangent - v0.mTangent)*bary.x + (v2.mTangent - v0.mTangent)*bary.y;
-	sfc.v.mTangent.xyz = normalize(transform_vector(instance.mTransform, sfc.v.mTangent.xyz));
+	sfc.v.mTangent  = v0.mTangent + (v1.mTangent - v0.mTangent)*bary.x + (v2.mTangent - v0.mTangent)*bary.y;
 	sfc.v.mU = v0.mU + (v1.mU - v0.mU)*bary.x + (v2.mU - v0.mU)*bary.y;
 	sfc.v.mV = v0.mV + (v1.mV - v0.mV)*bary.x + (v2.mV - v0.mV)*bary.y;
-	sfc.Ng = transform_vector(instance.mTransform, cross(v1v0, v2v0));
+	sfc.Ng = cross(dPdu, dPdv);
 	if (all(sfc.v.mTangent.xyz == 0)) {
 		float3 B;
 		Onb(sfc.Ng, sfc.v.mTangent.xyz, B);
 		sfc.v.mTangent.w = 1;
-	}
+	} else
+		sfc.v.mTangent.xyz = normalize(transform_vector(instance.mTransform, sfc.v.mTangent.xyz));
 	sfc.area = length(sfc.Ng);
 	sfc.Ng /= sfc.area;
 	sfc.area /= 2;
 	
+	float3 D = sfc.v.mPosition - P;
+	float t = length(D);
+	D /= t;
+
+	if (dot(D, sfc.Ng) > 0) {
+		sfc.v.mNormal = -sfc.v.mNormal;
+		sfc.v.mTangent.w = -sfc.v.mTangent.w;
+		sfc.Ng = -sfc.Ng;
+		sfc.front_face = false;
+	} else
+		sfc.front_face = true;
+	
 	// transfer ray differential
-	dP = transfer(sfc.v.mPosition - P, sfc.Ng, P, dP, dD);
+	dP = transfer(sfc.Ng, P, D, t, dP, dD);
 
-	float4 L0 = float4(cross(sfc.Ng, transform_vector(instance.mTransform, v2.mPosition - v1.mPosition)), 0);
-	float4 L1 = float4(cross(sfc.Ng, transform_vector(instance.mTransform, v2v0)), 0);
-	float4 L2 = float4(cross(sfc.Ng, transform_vector(instance.mTransform, v1v0)), 0);
-	L0.w = -dot(L0.xyz, v1.mPosition);
-	L1.w = -dot(L1.xyz, v0.mPosition);
-	L2.w = -dot(L2.xyz, v0.mPosition);
-	L0 /= dot(L0, float4(v0.mPosition,1));
-	L1 /= dot(L1, float4(v1.mPosition,1));
-	L2 /= dot(L2, float4(v2.mPosition,1));
+	differential du, dv;
+	differential_dudv(dPdu, dPdv, dP, sfc.Ng, du, dv);
+	
+	sfc.dUV.dx = float2(du.dx*v0.mU + dv.dx*v1.mU - (du.dx + dv.dx)*v2.mU,
+											du.dx*v0.mV + dv.dx*v1.mV - (du.dx + dv.dx)*v2.mV);
+	sfc.dUV.dy = float2(du.dy*v0.mU + dv.dy*v1.mU - (du.dy + dv.dy)*v2.mU,
+											du.dy*v0.mV + dv.dy*v1.mV - (du.dy + dv.dy)*v2.mV);
 
-	float3 dPLx = float3(dot(L0.xyz, dP.dx), dot(L1.xyz, dP.dx), dot(L2.xyz, dP.dx));
-	float3 dPLy = float3(dot(L0.xyz, dP.dy), dot(L1.xyz, dP.dy), dot(L2.xyz, dP.dy));
-
-	sfc.dN.dx = dPLx[0]*v0.mNormal + dPLx[1]*v1.mNormal + dPLx[2]*v2.mNormal;
-	sfc.dN.dy = dPLy[0]*v0.mNormal + dPLy[1]*v1.mNormal + dPLy[2]*v2.mNormal;
-	sfc.dN.dx -= dot(sfc.v.mNormal, sfc.dN.dx)*sfc.v.mNormal;
-	sfc.dN.dy -= dot(sfc.v.mNormal, sfc.dN.dy)*sfc.v.mNormal;
-
-	sfc.dUV.dx = dPLx[0]*float2(v0.mU, v0.mV) + dPLx[1]*float2(v1.mU, v1.mV) + dPLx[2]*float2(v2.mU, v2.mV);
-	sfc.dUV.dy = dPLy[0]*float2(v0.mU, v0.mV) + dPLy[1]*float2(v1.mU, v1.mV) + dPLy[2]*float2(v2.mU, v2.mV);
 	return sfc;
 }
 

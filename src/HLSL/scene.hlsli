@@ -97,7 +97,7 @@ struct MaterialData {
 	float mOcclusionScale; // lerp(color, color * <sampled occlusion image value>, <occlusion strength>)
 	float mIndexOfRefraction;
 	float mTransmission;
-	float pad;
+	float mAlphaCutoff;
 	uint4 mImageIndices;
 };
 

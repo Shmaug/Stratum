@@ -6,7 +6,7 @@
 #define gImageCount 1024
 
 [[vk::constant_id(0)]] const uint gMaxBounces = 3;
-[[vk::constant_id(1)]] const uint gSamplingFlags = 3;
+[[vk::constant_id(1)]] const uint gSamplingFlags = 0xF;
 [[vk::constant_id(2)]] const uint gEnvironmentMap = -1;
 [[vk::constant_id(3)]] const bool gDemodulateAlbedo = false;
 
@@ -17,14 +17,16 @@
 [[vk::binding(4)]] StructuredBuffer<MaterialData> gMaterials;
 [[vk::binding(5)]] StructuredBuffer<LightData> gLights;
 
-[[vk::binding(6)]] RWTexture2D<uint4> gVisibility;
+[[vk::binding(6)]] RWTexture2D<uint4> gRNGSeed;
+[[vk::binding(7)]] RWTexture2D<uint4> gVisibility;
+[[vk::binding(8)]] RWTexture2D<float4> gNormal;
+[[vk::binding(9)]] RWTexture2D<float4> gZ;
+[[vk::binding(10)]] RWTexture2D<float2> gPrevUV;
+[[vk::binding(11)]] RWTexture2D<float2> gReservoirs;
+[[vk::binding(12)]] RWTexture2D<float4> gReservoirRNG;
 
-[[vk::binding(7)]] RWTexture2D<float4> gRadiance;
-[[vk::binding(8)]] RWTexture2D<float4> gAlbedo;
-[[vk::binding(9)]] RWTexture2D<float4> gNormal;
-[[vk::binding(10)]] RWTexture2D<float4> gZ;
-[[vk::binding(11)]] RWTexture2D<uint4> gRNGSeed;
-[[vk::binding(12)]] RWTexture2D<float2> gPrevUV;
+[[vk::binding(13)]] RWTexture2D<float4> gRadiance;
+[[vk::binding(14)]] RWTexture2D<float4> gAlbedo;
 
 [[vk::binding(17)]] SamplerState gSampler;
 [[vk::binding(18)]] Texture2D<float2> gEnvironmentConditionalDistribution;
@@ -42,8 +44,8 @@ cbuffer gCameraData {
 [[vk::push_constant]] const struct {
 	uint gLightCount;
 	uint gRandomSeed;
-	float gExposure;
-	float gGamma;
+	float gEnvironmentMapGamma;
+	float gEnvironmentMapExposure;
 } gPushConstants;
 
 float next_rng_sample(inout uint4 v) {
@@ -79,23 +81,20 @@ struct LightSample {
 	float pdf;
 	float3 omega_in;
 	float dist;
-	float pdf_geom;
 	bool punctual;
 };
-struct ReservoirSample {
-	uint4 rng;
-	uint4 vis;
-};
 class Reservoir {
-	ReservoirSample z;
+	uint4 z_rng;
+	uint4 z_vis;
 	float w_sum;
 	uint M;
 
-	inline bool update(float r1, ReservoirSample s, float w) {
+	inline bool update(float r1, uint4 s_rng, uint4 s_vis, float w) {
 		w_sum += w;
 		M++;
 		if (r1 < w/w_sum) {
-			z = s;
+			z_rng = s_rng;
+			z_vis = s_vis;
 			return true;
 		}
 		return false;
@@ -103,10 +102,8 @@ class Reservoir {
 };
 
 float4 sample_image(Texture2D<float4> img, SurfaceSample sfc) {
-	uint level, w, h, levelCount;
-	img.GetDimensions(level, w, h, levelCount);
-	float lod = log2(max(length(sfc.dUV.dx)*w, length(sfc.dUV.dy)*h));
-	return img.SampleLevel(gSampler, float2(sfc.v.mU, sfc.v.mV), lod);
+	//return img.SampleLevel(gSampler, float2(sfc.v.mU, sfc.v.mV), 0);
+	return img.SampleGrad(gSampler, float2(sfc.v.mU, sfc.v.mV), sfc.dUV.dx, sfc.dUV.dy);
 }
 MaterialData sample_image_attributes(InstanceData instance, inout SurfaceSample sfc) {
 	MaterialData md = gMaterials[instance.mMaterialIndex];
@@ -128,7 +125,7 @@ MaterialData sample_image_attributes(InstanceData instance, inout SurfaceSample 
 	if (i < gImageCount) {
 		float3 bump = sample_image(gImages[NonUniformResourceIndex(i)], sfc).xyz*2 - 1;
 		bump.xy *= md.mNormalScale;
-		sfc.v.mNormal = normalize(bump.x*sfc.v.mTangent.xyz + bump.y*cross(sfc.v.mTangent.xyz, sfc.v.mNormal)*sfc.v.mTangent.w + bump.z*sfc.v.mNormal);
+		sfc.v.mNormal = normalize(bump.x*sfc.v.mTangent.xyz + bump.y*cross(sfc.v.mTangent.xyz, sfc.v.mNormal)*sfc.v.mTangent.w + sfc.v.mNormal);
 	}
 	// ortho-normalize
 	sfc.v.mTangent.xyz = normalize(sfc.v.mTangent.xyz - sfc.v.mNormal * dot(sfc.v.mNormal, sfc.v.mTangent.xyz));
@@ -153,7 +150,7 @@ LightSample sample_environment(inout uint4 rng) {
 	uv.x = gEnvironmentConditionalDistribution.SampleLevel(gSampler, float2(next_rng_sample(rng), uv.y), 0).x;
 
 	LightSample ls;
-	ls.radiance = gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb;
+	ls.radiance = pow(gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb, 1/gPushConstants.gEnvironmentMapGamma)*gPushConstants.gEnvironmentMapExposure;
 	ls.pdf = gEnvironmentConditionalDistribution.SampleLevel(gSampler, uv, 0).y * gEnvironmentMarginalDistribution.SampleLevel(gSampler, float2(uv.y, 0), 0).y;
 
 	float phi = uv.x * 2*M_PI;
@@ -165,7 +162,7 @@ LightSample sample_environment(inout uint4 rng) {
 	ls.punctual = false;
 	return ls;
 }
-LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differential3 dP, differential3 dD) {
+LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differential3 dP, differential3 dD, inout float pdf_pick) {
 	LightData light = gLights[lightIndex];
 	PackedLightData p;
 	p.v = light.mPackedData;
@@ -175,10 +172,10 @@ LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differentia
 	
 	switch (light.mType) {
 		case LIGHT_TYPE_DISTANT: {
-			ls.omega_in = -transform_vector(light.mLightToWorld, float3(0,0,sign(light.mShadowProjection.mNear)));
+			ls.punctual = true;
+			ls.omega_in = transform_vector(light.mLightToWorld, float3(0,0,sign(light.mShadowProjection.mNear)));
 			ls.pdf = 1;
 			ls.dist = 1.#INF;
-			ls.punctual = true;
 			if (p.radius() > 0) {
 				float3 T, B;
 				Onb(ls.omega_in, T, B);
@@ -215,10 +212,11 @@ LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differentia
 			break;
 		}
 
-		case LIGHT_TYPE_MESH: {				
-			float2 bary = float2(next_rng_sample(rng), next_rng_sample(rng));
-			if (dot(bary,1) >= 1) bary = 1 - bary;
+		case LIGHT_TYPE_MESH: {
+			ls.punctual = false;
 			uint primIndex = min(next_rng_sample(rng)*p.prim_count(), p.prim_count() - 1);
+			float2 bary = float2(next_rng_sample(rng), next_rng_sample(rng));
+			if (dot(bary,1) > 1) bary = 1 - bary;
 			InstanceData linstance = gInstances[p.instance_index()];
 			SurfaceSample lsfc = surface_attributes(linstance, gVertices, gIndices, primIndex, bary, P, dP, dD);
 			MaterialData lmaterial = gMaterials[linstance.mMaterialIndex];
@@ -227,23 +225,59 @@ LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differentia
 			uint ei = inds.emission();
 			if (ei < gImageCount) ls.radiance *= sample_image(gImages[NonUniformResourceIndex(ei)], lsfc).rgb;
 			
-			float3 light_pos = lsfc.v.mPosition;
-			float3 omega_in = light_pos - P;
-			float distSq = dot(omega_in, omega_in);
-			omega_in /= sqrt(distSq);
-			float lnv = dot(omega_in, -lsfc.v.mNormal);
+			ls.omega_in = lsfc.v.mPosition - P;
+			float distSq = dot(ls.omega_in, ls.omega_in);
+			ls.dist = sqrt(distSq);
+			ls.omega_in /= ls.dist;
+			float lnv = dot(lsfc.v.mNormal, -ls.omega_in);
 			if (lnv > 0 && lsfc.area > 0) {
-				ls.pdf = distSq / (lnv*lsfc.area) / (float)p.prim_count();
+				ls.pdf = distSq / (lnv*lsfc.area);
+				pdf_pick /= (float)p.prim_count();
 			} else
 				ls.pdf = 0;
-			ls.punctual = false;
 			break;
 		}
 	}
 
 	return ls;
 }
+LightSample get_light_sample(inout uint4 rng, float3 P, differential3 dP, differential3 dD, out float pdf_pick) {
+	bool sample_bg = (gSamplingFlags & SAMPLE_FLAG_BG_IS) && gEnvironmentMap < gImageCount;
+	bool sample_lights = (gSamplingFlags & SAMPLE_FLAG_LIGHT_IS) && gPushConstants.gLightCount > 0;
 
+	pdf_pick = 1;
+	if (sample_bg && sample_lights) {
+		sample_bg = next_rng_sample(rng) < 0.5;
+		sample_lights = !sample_bg;
+		pdf_pick /= 2;
+	}
+
+	LightSample ls;
+	if (sample_bg)
+		ls = sample_environment(rng);
+	else if (sample_lights) {
+		uint lightIndex = min(uint(next_rng_sample(rng) * gPushConstants.gLightCount), gPushConstants.gLightCount-1);
+		pdf_pick /= (float)gPushConstants.gLightCount;
+		ls = sample_light(lightIndex, rng, P, dP, dD, pdf_pick);
+	}
+	return ls;
+}
+
+RayDesc create_ray(float2 uv) {
+	float3 screenPos = float3(2*uv - 1, 1);
+	screenPos.y = -screenPos.y;
+
+	RayDesc ray;
+	ray.Direction = normalize(transform_vector(gCameraToWorld, float3(back_project(gProjection, screenPos).xy, sign(gProjection.mNear))));
+	#ifdef TRANSFORM_UNIFORM_SCALING
+	ray.Origin = gCameraToWorld.mTranslation;
+	#else
+	ray.Origin = float3(gCameraToWorld.m[0][3], gCameraToWorld.m[1][3], gCameraToWorld.m[2][3]);
+	#endif
+	ray.TMin = gProjection.mNear;
+	ray.TMax = 1.#INF;
+	return ray;
+}
 float3 ray_offset(float3 P, float3 Ng) {
   const float epsilon_f = 1e-5f;
   /* ideally this should match epsilon_f, but instancing and motion blur
@@ -288,7 +322,8 @@ float3 ray_offset(float3 P, float3 Ng) {
 
 }
 
-bool do_ray_query(inout RayQuery<RAY_FLAG_NONE> rayQuery, differential3 dP, differential3 dD) {
+#define ray_query_t RayQuery<RAY_FLAG_FORCE_OPAQUE>
+bool do_ray_query(inout ray_query_t rayQuery, differential3 dP, differential3 dD) {
 	while (rayQuery.Proceed()) {
 		switch (rayQuery.CandidateType()) {
 			case CANDIDATE_PROCEDURAL_PRIMITIVE: {
@@ -302,94 +337,20 @@ bool do_ray_query(inout RayQuery<RAY_FLAG_NONE> rayQuery, differential3 dP, diff
 			}
 			case CANDIDATE_NON_OPAQUE_TRIANGLE: {
 				InstanceData instance = gInstances[rayQuery.CandidateInstanceIndex()];
-				SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, rayQuery.CandidatePrimitiveIndex(), rayQuery.CandidateTriangleBarycentrics(), rayQuery.WorldRayOrigin(), dP, dD);
-				MaterialData material = sample_image_attributes(instance, sfc);
-				if (material.mTransmission > 0)
-					rayQuery.CommitNonOpaqueTriangleHit();
+				MaterialData md = gMaterials[instance.mMaterialIndex];
+				ImageIndices inds;
+				inds.v = md.mImageIndices;
+				uint i = inds.albedo();
+				if (i < gImageCount) {
+					SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, rayQuery.CandidateInstanceIndex(), rayQuery.CandidateTriangleBarycentrics(), rayQuery.WorldRayOrigin(), dP, dD);
+					if (gImages[NonUniformResourceIndex(i)].SampleLevel(gSampler, float2(sfc.v.mU, sfc.v.mV), 0).a >= md.mAlphaCutoff)
+						rayQuery.CommitNonOpaqueTriangleHit();
+				}
 				break;
 			}
 		}
 	}
 	return rayQuery.CommittedStatus() != COMMITTED_NOTHING;
-}
-
-LightSample get_light_sample(inout uint4 rng, float3 P, differential3 dP, differential3 dD) {
-	bool sample_bg = (gSamplingFlags & SAMPLE_FLAG_BG_IS) && gEnvironmentMap < gImageCount;
-	bool sample_lights = gSamplingFlags & SAMPLE_FLAG_LIGHT_IS;
-
-	float pdf = 1;
-	if (sample_bg && sample_lights) {
-		sample_bg = next_rng_sample(rng) < 0.5;
-		sample_lights = !sample_bg;
-		pdf = 0.5;
-	}
-
-	LightSample ls;
-	if (sample_bg)
-		ls = sample_environment(rng);
-	else if (sample_lights) {
-		uint lightIndex = min(uint(next_rng_sample(rng) * gPushConstants.gLightCount), gPushConstants.gLightCount-1);
-		pdf /= gPushConstants.gLightCount;
-		ls = sample_light(lightIndex, rng, P, dP, dD);
-	}
-
-	ls.radiance /= pdf;
-	return ls;
-}
-float3 sample_radiance(inout RayQuery<RAY_FLAG_NONE> rayQuery, inout uint4 rng, uint4 vis, float3 omega_out, SurfaceSample sfc, DisneyBSDF bsdf, differential3 dP, differential3 dD) {
-	LightSample ls;
-	const uint reservoirSamples = gSamplingFlags >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET;
-	if (reservoirSamples > 0) {
-		Reservoir r;
-		r.w_sum = 0;
-		r.M = 0;
-		for (uint i = 0; i < min(gPushConstants.gLightCount, reservoirSamples); i++) {
-			ReservoirSample rs;
-			rs.vis = vis;
-			rs.rng = rng;
-			LightSample ls_i = get_light_sample(rng, sfc.v.mPosition, dP, dD);
-			float pdf_bsdf;
-			ls_i.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls_i.omega_in, pdf_bsdf) * abs(dot(ls_i.omega_in, sfc.v.mNormal)) / ls_i.pdf;
-			float w_i = luminance(ls_i.radiance);
-			if (r.update(next_rng_sample(rng), rs, w_i))
-				ls = ls_i;
-		}
-		ls.radiance *= r.w_sum / luminance(ls.radiance) / r.M;
-	} else {
-		ls = get_light_sample(rng, sfc.v.mPosition, dP, dD);
-		float pdf_bsdf;
-		ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / ls.pdf;
-		if (!ls.punctual)
-			ls.radiance *= powerHeuristic(ls.pdf, pdf_bsdf);
-	}
-
-	if (all(ls.radiance <= 0)) return 0;
-	
-	RayDesc shadowRay;
-	shadowRay.Origin = ray_offset(sfc.v.mPosition, sfc.Ng*sign(dot(sfc.Ng, ls.omega_in)));
-	shadowRay.Direction = ls.omega_in;
-	shadowRay.TMin = 0;
-	shadowRay.TMax = ls.dist - 1e-4;
-	rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
-	if (do_ray_query(rayQuery, dP, dD)) return 0;
-	
-	return ls.radiance;
-}
-
-RayDesc create_ray(float2 uv) {
-	float3 screenPos = float3(2*uv - 1, 1);
-	screenPos.y = -screenPos.y;
-
-	RayDesc ray;
-	ray.Direction = normalize(transform_vector(gCameraToWorld, float3(back_project(gProjection, screenPos).xy, sign(gProjection.mNear))));
-	#ifdef TRANSFORM_UNIFORM_SCALING
-	ray.Origin = gCameraToWorld.mTranslation;
-	#else
-	ray.Origin = float3(gCameraToWorld.m[0][3], gCameraToWorld.m[1][3], gCameraToWorld.m[2][3]);
-	#endif
-	ray.TMin = gProjection.mNear;
-	ray.TMax = 1.#INF;
-	return ray;
 }
 
 [numthreads(8,8,1)]
@@ -407,18 +368,22 @@ void primary(uint3 index : SV_DispatchThreadID) {
 	dD.dx = create_ray(uv + float2(1/(float)resolution.x, 0)).Direction - ray.Direction;
 	dD.dy = create_ray(uv + float2(0, 1/(float)resolution.y)).Direction - ray.Direction;
 
+	uint4 rng = uint4(index.xy, gPushConstants.gRandomSeed, index.x + index.y);
+	gRNGSeed[index.xy] = rng;
+
 	uint instanceIndex = -1;
 	uint primitiveIndex = 0;
 	float2 bary = 0;
 	float3 normal = 0;
-	float3 z = float3(1.#INF, 0, 0);
+	float4 z = float4(1.#INF, 0, 0, 0);
 	float2 prevUV = uv;
-	RayQuery<RAY_FLAG_NONE> rayQuery;
+	ray_query_t rayQuery;
 	rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, ray);
 	if (do_ray_query(rayQuery, dP, dD)) {
 		instanceIndex = rayQuery.CommittedInstanceID();
  		InstanceData instance = gInstances[instanceIndex];
 		float3 pos = 0;
+		z.x = rayQuery.CommittedRayT();
 		if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
 			// light
 			primitiveIndex = -1;
@@ -429,30 +394,37 @@ void primary(uint3 index : SV_DispatchThreadID) {
 			primitiveIndex = rayQuery.CommittedPrimitiveIndex();
 			bary = rayQuery.CommittedTriangleBarycentrics();
 			SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, primitiveIndex, bary, ray.Origin, dP, dD);
-			MaterialData material = sample_image_attributes(instance, sfc);
-			bool front_face = true;
-			if (dot(ray.Direction, sfc.Ng) > 0) {
-				sfc.v.mNormal = -sfc.v.mNormal;
-				sfc.Ng = -sfc.Ng;
-				front_face = false;
-			}
+			
+			//MaterialData md = gMaterials[instance.mMaterialIndex];
+			//ImageIndices inds;
+			//inds.v = md.mImageIndices;
+			//uint i = inds.albedo();
+			//i = inds.normal();
+			//if (i < gImageCount) {
+			//	float3 bump = sample_image(gImages[NonUniformResourceIndex(i)], sfc).xyz*2 - 1;
+			//	bump.xy *= md.mNormalScale;
+			//	sfc.v.mNormal = normalize(bump.x*sfc.v.mTangent.xyz + bump.y*cross(sfc.v.mTangent.xyz, sfc.v.mNormal)*sfc.v.mTangent.w + sfc.v.mNormal);
+			//}
+
 			pos = sfc.v.mPosition;
 			normal = sfc.v.mNormal;
+			z.z = transform_vector(gWorldToCamera, dP.dx).z;
+			z.w = transform_vector(gWorldToCamera, dP.dy).z;
+			//z.zw = 1/abs(normalize(transform_vector(gWorldToCamera, sfc.v.mNormal)).z);
 		}
 
 		float3 prevCamPos = transform_point(tmul(gWorldToPrevCamera, instance.mMotionTransform), pos);
-		normal = normalize(transform_vector(gWorldToCamera, normal));
-		z = float3(rayQuery.CommittedRayT(), 1/abs(normal.z), length(prevCamPos));
+		z.y = length(prevCamPos);
 		
 		float4 prevScreenPos = project_point(gPrevProjection, prevCamPos);
 		prevScreenPos.y = -prevScreenPos.y;
 		prevUV = (prevScreenPos.xy / prevScreenPos.w)*.5 + .5;
-	} else 
+	} else
 		bary = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, acos(clamp(ray.Direction.y, -1, 1)) / M_PI);
 
 	gVisibility[index.xy] = uint4(instanceIndex, primitiveIndex, asuint(bary));
-	gNormal[index.xy] = float4(normal, 1);
-	gZ[index.xy] = float4(z,0);
+	gNormal[index.xy] = float4(normal,1);
+	gZ[index.xy] = z;
 	gPrevUV[index.xy] = prevUV;
 }
 
@@ -469,117 +441,136 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 	float3 reflDir = 0;
 	if (vis.x == -1) {
 		if (gEnvironmentMap < gImageCount)
-			radiance = gImages[gEnvironmentMap].SampleLevel(gSampler, asfloat(vis.zw), 0).rgb;
+			radiance = pow(gImages[gEnvironmentMap].SampleLevel(gSampler, asfloat(vis.zw), 0).rgb, 1/gPushConstants.gEnvironmentMapGamma)*gPushConstants.gEnvironmentMapExposure;
+	} else if (vis.y == -1) {
+		radiance = gLights[gInstances[vis.x].mIndexStride>>8].mEmission;
 	} else {
 		uint4 rng = gRNGSeed[index.xy];
-		if (all(rng == 0)) {
-			rng = uint4(index.xy, gPushConstants.gRandomSeed, index.x + index.y);
-			gRNGSeed[index.xy] = rng;
-		}
 		
 		float3 throughput = 1;
 		float pdf_bsdf = 1;
 		float3 absorption = 0;
 		float hit_t = 0;
 		const bool sample_bg = (gSamplingFlags & SAMPLE_FLAG_BG_IS) && gEnvironmentMap < gImageCount;
-		const bool sample_lights = gSamplingFlags & SAMPLE_FLAG_LIGHT_IS;
+		const bool sample_lights = (gSamplingFlags & SAMPLE_FLAG_LIGHT_IS) && gPushConstants.gLightCount > 0;
 		const uint reservoirSamples = gSamplingFlags >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET;
 
-		RayQuery<RAY_FLAG_NONE> rayQuery;
+		ray_query_t rayQuery;
 		
-		float2 uv = (index.xy + 0.5)/float2(resolution);
-		RayDesc ray = create_ray(uv);
+		RayDesc ray = create_ray((index.xy + 0.5)/float2(resolution));
 		differential3 dP;
 		dP.dx = 0;
 		dP.dy = 0;
 		differential3 dD;
-		dD.dx = create_ray(uv + float2(1/(float)resolution.x, 0)).Direction - ray.Direction;
-		dD.dy = create_ray(uv + float2(0, 1/(float)resolution.y)).Direction - ray.Direction;
+		dD.dx = create_ray((index.xy + 0.5 + uint2(1,0))/float2(resolution)).Direction - ray.Direction;
+		dD.dy = create_ray((index.xy + 0.5 + uint2(0,1))/float2(resolution)).Direction - ray.Direction;
 		for (uint bounce_index = 0; bounce_index < gMaxBounces; bounce_index++) {
 			InstanceData instance = gInstances[vis.x];
-
-			if (vis.y == -1) { // light primitive
-				LightData light = gLights[instance.mIndexStride>>8];
-				if (sample_lights && bounce_index > 0) {
-					if (reservoirSamples == 0 || bounce_index >= 2) {
-						// apply mis weight
-						PackedLightData p;
-						p.v = light.mPackedData;
-						float pdf_light = hit_t*hit_t / (2*M_PI*p.radius()*p.radius()) / (float)gPushConstants.gLightCount;
-						if (sample_bg) pdf_light /= 2;
-						throughput *= powerHeuristic(pdf_bsdf, pdf_light);
-					} else {
-
-					}
-				}
-				radiance += throughput * light.mEmission;
-				break;
-			}
-
 			SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, vis.y, asfloat(vis.zw), ray.Origin, dP, dD);
-
 			MaterialData material = sample_image_attributes(instance, sfc);
-			bool front_face = true;
-			if (dot(ray.Direction, sfc.Ng) > 0) {
-				sfc.v.mNormal = -sfc.v.mNormal;
-				sfc.v.mTangent.w = -sfc.v.mTangent.w;
-				sfc.Ng = -sfc.Ng;
-				front_face = false;
-			}
 
 			if (bounce_index == 0) {
 				ray.Direction = sfc.v.mPosition - ray.Origin;
 				hit_t = length(ray.Direction);
 				ray.Direction /= hit_t;
 				albedo = material.mAlbedo;
-				if (!front_face) absorption = material.mAbsorption;
 			}
 			
 			throughput *= exp(-absorption * hit_t);
 			
-			if (any(material.mEmission > 0) && front_face) {
+			if (any(material.mEmission > 0) && sfc.front_face) {
 				LightData light = gLights[instance.mIndexStride>>8];
 				PackedLightData p;
 				p.v = light.mPackedData;
 				if (sample_lights && bounce_index > 0) {
 					// apply mis weight
-					float pdf_light = hit_t*hit_t / (dot(-ray.Direction, sfc.v.mNormal) * sfc.area) / p.prim_count() / (float)gPushConstants.gLightCount;
-					if (sample_bg) pdf_light /= 2;
-					radiance += throughput * material.mEmission * powerHeuristic(pdf_bsdf, pdf_light);
+					radiance += throughput * material.mEmission * powerHeuristic(pdf_bsdf, hit_t*hit_t / (dot(-ray.Direction, sfc.v.mNormal) * sfc.area) / (float)p.prim_count() / (float)gPushConstants.gLightCount);
 				} else
 					radiance += throughput * material.mEmission;
 			}
-			
-			if (gSamplingFlags == 0) {
-				radiance = sfc.v.mNormal*.5+.5;
-				break;
-			}
+
+			if (all(material.mAlbedo <= 0)) break;
 
 			DisneyBSDF bsdf = to_disney_bsdf(material);
-			if (!front_face) bsdf.eta = 1/bsdf.eta;
+			if (!sfc.front_face) bsdf.eta = 1/bsdf.eta;
+			float3 omega_out = -ray.Direction;
 			
-			if (!bsdf.is_delta() && (sample_bg || sample_lights))
-				radiance += throughput * sample_radiance(rayQuery, rng, vis, -ray.Direction, sfc, bsdf, dP, dD);
+			// sample a light
+			if (!bsdf.is_delta() && (sample_bg || sample_lights)) {
+				LightSample ls;
+				float pdf_pick;
+				if (reservoirSamples > 0 && bounce_index == 0) {
+					Reservoir r;
+					r.w_sum = 0;
+					r.M = 0;
+					//float2 res = gReservoirs[index.xy];
+					//r.w_sum = res.x;
+					//r.M = asuint(res.y);
+					for (uint i = 0; i < reservoirSamples; i++) {
+						uint4 rng_i = rng;
 
-			float3 H;
+						float pdf_pick_i;
+						LightSample ls_i = get_light_sample(rng, sfc.v.mPosition, dP, dD, pdf_pick_i);
+						if (ls_i.pdf <= 0) continue;
+
+						float pdf_bsdf_i;
+						ls_i.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls_i.omega_in, pdf_bsdf_i) * abs(dot(ls_i.omega_in, sfc.v.mNormal)) / ls_i.pdf;
+						if (r.update(next_rng_sample(rng), vis, rng_i, luminance(ls_i.radiance))) {
+							ls = ls_i;
+							pdf_pick = pdf_pick_i;
+							pdf_bsdf = pdf_bsdf_i;
+						}
+					}
+					ls.radiance *= r.w_sum / luminance(ls.radiance) / r.M;
+				} else {
+					ls = get_light_sample(rng, sfc.v.mPosition, dP, dD, pdf_pick);
+					ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / ls.pdf;
+					if (!ls.punctual && bounce_index < gMaxBounces-1)
+						ls.radiance *= powerHeuristic(ls.pdf, pdf_bsdf);
+				}
+				ls.radiance /= pdf_pick;
+
+				if (pdf_bsdf > 0 && ls.pdf > 0) {
+					RayDesc shadowRay;
+					shadowRay.Origin = ray_offset(sfc.v.mPosition, sfc.Ng*sign(dot(sfc.Ng, ls.omega_in)));
+					shadowRay.Direction = ls.omega_in;
+					shadowRay.TMin = 0;
+					shadowRay.TMax = ls.dist - 1e-4;
+					rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
+					if (!do_ray_query(rayQuery, dP, dD))
+						radiance += throughput * ls.radiance;
+				}
+			}
+
+			// sample the bsdf
+			float3 H, omega_in;
 			uint flag;
-			float3 f = bsdf.Sample(rng, -ray.Direction, sfc.v.mNormal, sfc.v.mTangent, ray.Direction, pdf_bsdf, flag, H);
+			float3 f = bsdf.Sample(rng, omega_out, sfc.v.mNormal, sfc.v.mTangent, omega_in, pdf_bsdf, flag, H);
 			if (pdf_bsdf == 0) break;
-			
-			// setup next bounce
 
-			throughput *= f * abs(dot(sfc.v.mNormal, ray.Direction)) / pdf_bsdf;
+			throughput *= f * abs(dot(sfc.v.mNormal, omega_in)) / pdf_bsdf;
+			
 			if (all(throughput < 1e-6)) break;
 
-			bool refracted = sign(dot(ray.Direction, H)) < 0;
-			absorption = refracted ? material.mAbsorption : 0;
+			if (gSamplingFlags & SAMPLE_FLAG_RR) {
+				float l = luminance(throughput);
+				if (next_rng_sample(rng) > l)
+					break;
+				throughput /= l;
+			}
 
-			if (refracted)
-				dD = refract(ray.Direction, dD, H, sfc.dN, bsdf.eta);
-			else
-				dD = reflect(ray.Direction, dD, H, sfc.dN);
-			
-			ray.Origin = ray_offset(sfc.v.mPosition, refracted ? -sfc.Ng : sfc.Ng);
+			if (sign(dot(omega_in, H)) < 0) {
+				absorption = material.mAbsorption;
+				ray.Origin = ray_offset(sfc.v.mPosition, -sfc.Ng);
+				dD.dx = refract(dD.dx, H, bsdf.eta);
+				dD.dy = refract(dD.dy, H, bsdf.eta);
+			} else {
+				absorption = 0;
+				ray.Origin = ray_offset(sfc.v.mPosition, sfc.Ng);
+				dD.dx = reflect(dD.dx, H);
+				dD.dy = reflect(dD.dy, H);
+			}
+			ray.Direction = omega_in;
 			ray.TMin = 0;
 			ray.TMax = 1.#INF;
 			rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, ray);
@@ -587,38 +578,42 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 				if (gEnvironmentMap < gImageCount) {
 					float theta = acos(clamp(ray.Direction.y, -1, 1));
 					float2 uv = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, theta / M_PI);
-					float3 bg = gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb;
+					float3 bg = pow(gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb, 1/gPushConstants.gEnvironmentMapGamma)*gPushConstants.gEnvironmentMapExposure;
 					if (sample_bg) {
-						if (reservoirSamples == 0 || bounce_index >= 2) {
-							// apply mis weight
-							float pdf_bg = environment_pdf(ray.Direction, uv);
-							if (sample_lights) pdf_bg /= 2;
-							throughput *= powerHeuristic(pdf_bsdf, pdf_bg);
-						} else {
-
-						}
+						// apply mis weight
+						bg *= powerHeuristic(pdf_bsdf, environment_pdf(ray.Direction, uv));
 					}
 					radiance += throughput * bg;
 				}
 				break;
 			}
-			vis.x = rayQuery.CommittedInstanceIndex();
-			if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT)
-				vis.y = -1; // light
-			else {
-				vis.y = rayQuery.CommittedPrimitiveIndex();
-				vis.zw = asuint(rayQuery.CommittedTriangleBarycentrics());
-			}
+
 			hit_t = rayQuery.CommittedRayT();
+			
+			if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
+				LightData light = gLights[gInstances[rayQuery.CommittedInstanceIndex()].mIndexStride>>8];
+				if (sample_lights) {
+					// apply mis weight
+					PackedLightData p;
+					p.v = light.mPackedData;
+					throughput *= powerHeuristic(pdf_bsdf, hit_t*hit_t / (2*M_PI*p.radius()*p.radius()) / (float)gPushConstants.gLightCount);
+				}
+				radiance += throughput * light.mEmission;
+				break;
+			}
+
+			vis.x = rayQuery.CommittedInstanceIndex();
+			vis.y = rayQuery.CommittedPrimitiveIndex();
+			vis.zw = asuint(rayQuery.CommittedTriangleBarycentrics());
 		}
 	}
 
 	if (gDemodulateAlbedo) {
-		if (albedo.x > 0) radiance.x /= albedo.x;
-		if (albedo.y > 0) radiance.y /= albedo.y;
-		if (albedo.z > 0) radiance.z /= albedo.z;
+		if (albedo.r > 0) radiance.r /= albedo.r;
+		if (albedo.g > 0) radiance.g /= albedo.g;
+		if (albedo.b > 0) radiance.b /= albedo.b;
 	}
 
-	gRadiance[index.xy] = float4(radiance, 1);
+	gRadiance[index.xy] = float4(radiance, 0);
 	gAlbedo[index.xy] = float4(albedo, 1);
 }
