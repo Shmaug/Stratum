@@ -43,6 +43,10 @@ RWTexture2D<float4> gZ;
 Texture2D<float4> gPrevZ;
 RWTexture2D<uint4> gRNGSeed;
 Texture2D<uint4> gPrevRNGSeed;
+Texture2D<uint4> gPrevReservoirRNG;
+RWTexture2D<uint4> gReservoirRNG;
+Texture2D<float4> gPrevReservoirs;
+RWTexture2D<float4> gReservoirs;
 RWTexture2D<float2> gPrevUV;
 RWTexture2D<uint> gGradientSamples;
 
@@ -102,7 +106,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (res == 0) {
 		gVisibility[idx_curr] = vis;
 		gRNGSeed[idx_curr] = gPrevRNGSeed[idx_prev];
+		gReservoirs[idx_curr] = gPrevReservoirs[idx_prev];
+		gReservoirRNG[idx_curr] = gPrevReservoirRNG[idx_prev];
 		gPrevUV[idx_curr] = (idx_prev + 0.5) / float2(resolution);
-		//gZ[idx_curr] = ;
 	}
 }

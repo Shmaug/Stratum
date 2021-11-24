@@ -1,9 +1,11 @@
 #include "../scene.hlsli"
 #include "ray_differential.hlsli"
 
-#define SAMPLE_FLAG_BG_IS 1
-#define SAMPLE_FLAG_LIGHT_IS 2
-#define SAMPLE_FLAG_RR 4
+#define SAMPLE_FLAG_BSDF_IS (1 << 0)
+#define SAMPLE_FLAG_BG_IS (1 << 1)
+#define SAMPLE_FLAG_LIGHT_IS (1 << 2)
+#define SAMPLE_FLAG_RR (1 << 3)
+#define SAMPLE_FLAG_RESERVOIR_REUSE (1 << 4)
 #define SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET 24
 
 #define PROCEDURAL_PRIMITIVE_TYPE_LIGHT 1
