@@ -53,8 +53,8 @@ private:
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
-	component_ptr<ComputePipelineState> mVisibilityPipeline;
-	component_ptr<ComputePipelineState> mLightingPipeline;
+	component_ptr<ComputePipelineState> mTracePrimaryRaysPipeline;
+	component_ptr<ComputePipelineState> mTraceIndirectRaysPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 
 	component_ptr<ComputePipelineState> mGradientForwardProjectPipeline;

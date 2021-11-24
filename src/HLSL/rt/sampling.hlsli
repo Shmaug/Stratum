@@ -126,13 +126,6 @@ float3 UniformSampleSphere(float r1, float r2) {
     return float3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
 }
 
-float3 UniformSampleCone(float r1, float r2, float cosThetaMax) {
-    float cosTheta = (1. - r1) + r1 * cosThetaMax;
-    float sinTheta = sqrt(1. - cosTheta * cosTheta);
-    float phi = r2 * 2 * M_PI;
-    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
-}
-
 float2 ConcentricSampleDisk(float r1, float r2) {
     float2 s = 2*float2(r1,r2) - 1;
     if (all(s == 0)) return 0;
@@ -147,8 +140,7 @@ float2 ConcentricSampleDisk(float r1, float r2) {
     return r * float2(cos(theta), sin(theta));
 }
 
-float misHeuristic(float a, float b) {
-    // power heuristic
+float powerHeuristic(float a, float b) {
     float t = a * a;
     return t / (b * b + t);
 }
