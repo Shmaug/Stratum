@@ -194,11 +194,10 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 		mNode.for_each_descendant<LightData>([&](const component_ptr<LightData>& light) {
 			light->mLightToWorld = node_to_world(light.node());
 			light->mWorldToLight = inverse(light->mLightToWorld);
-			float area = 1;
 			PackedLightData p { light->mPackedData };
 			if ((light->mType == LIGHT_TYPE_POINT || light->mType == LIGHT_TYPE_SPOT) && p.radius() > 0) {
 				p.instance_index((uint32_t)instanceDatas.size());
-				area = 4*M_PI*p.radius()*p.radius();
+				light->mPackedData = p.v;
 				
 				TransformData prevTransform;
 				if (auto it = mTransformHistory.find(light.get()); it != mTransformHistory.end()) {
@@ -209,13 +208,12 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 					
 				vk::AccelerationStructureInstanceKHR& instance = instances.emplace_back();
 				Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(tmul(light->mLightToWorld, make_transform(float3::Zero(), make_quatf(0,0,0,1), float3::Constant(p.radius()))));
-				instance.instanceCustomIndex = (uint32_t)instances.size();
+				instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
 				instance.mask = 0x2;
 				instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**mUnitCubeAS);
 
 				transformHistory.emplace(light.get(), make_pair(light->mLightToWorld, (uint32_t)instanceDatas.size()));
 				instanceDatas.emplace_back(light->mLightToWorld, tmul(prevTransform, light->mWorldToLight), -1, -1, -1, (uint32_t)lights.size() << 8);
-				light->mPackedData = p.v;
 			}
 			lights.emplace_back(*light);
 		});

@@ -29,7 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
-[[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
+[[vk::constant_id(0)]] const uint gFilterKernelType = 0u;
 
 [[vk::binding(0)]] RWTexture2D<float2> gOutput1;
 [[vk::binding(1)]] RWTexture2D<float4> gOutput2;

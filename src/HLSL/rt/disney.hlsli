@@ -267,11 +267,6 @@ class DisneyBSDF {
         float primarySpecRatio = 1 / (1 + clearcoat);
         float transWeight = diffuseRatio * specTrans;
 
-        if (roughness < MIN_ROUGHNESS){
-            transWeight = 0;
-            primarySpecRatio = 0;
-        }
-
         float3 brdf = 0;
         float3 bsdf = 0;
         float brdfPdf = 0;

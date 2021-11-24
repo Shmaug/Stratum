@@ -162,7 +162,9 @@ LightSample sample_environment(inout uint4 rng) {
 	ls.punctual = false;
 	return ls;
 }
-LightSample sample_light(uint lightIndex, inout uint4 rng, float3 P, differential3 dP, differential3 dD, inout float pdf_pick) {
+LightSample sample_light(inout uint4 rng, float3 P, differential3 dP, differential3 dD, inout float pdf_pick) {
+	uint lightIndex = min(uint(next_rng_sample(rng) * gPushConstants.gLightCount), gPushConstants.gLightCount-1);
+	pdf_pick /= (float)gPushConstants.gLightCount;
 	LightData light = gLights[lightIndex];
 	PackedLightData p;
 	p.v = light.mPackedData;
@@ -255,11 +257,8 @@ LightSample get_light_sample(inout uint4 rng, float3 P, differential3 dP, differ
 	LightSample ls;
 	if (sample_bg)
 		ls = sample_environment(rng);
-	else if (sample_lights) {
-		uint lightIndex = min(uint(next_rng_sample(rng) * gPushConstants.gLightCount), gPushConstants.gLightCount-1);
-		pdf_pick /= (float)gPushConstants.gLightCount;
-		ls = sample_light(lightIndex, rng, P, dP, dD, pdf_pick);
-	}
+	else if (sample_lights)
+		ls = sample_light(rng, P, dP, dD, pdf_pick);
 	return ls;
 }
 
@@ -387,9 +386,7 @@ void primary(uint3 index : SV_DispatchThreadID) {
 		if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
 			// light
 			primitiveIndex = -1;
-			bary = 0;
 			pos = ray.Origin + ray.Direction*rayQuery.CommittedRayT();
-			normal = 0;
 		} else {
 			primitiveIndex = rayQuery.CommittedPrimitiveIndex();
 			bary = rayQuery.CommittedTriangleBarycentrics();
@@ -474,31 +471,30 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 				hit_t = length(ray.Direction);
 				ray.Direction /= hit_t;
 				albedo = material.mAlbedo;
+				
+				if (any(material.mEmission > 0) && sfc.front_face) {
+					LightData light = gLights[instance.mIndexStride>>8];
+					PackedLightData p;
+					p.v = light.mPackedData;
+					radiance += throughput * material.mEmission;
+				}
 			}
 			
 			throughput *= exp(-absorption * hit_t);
 			
-			if (any(material.mEmission > 0) && sfc.front_face) {
-				LightData light = gLights[instance.mIndexStride>>8];
-				PackedLightData p;
-				p.v = light.mPackedData;
-				if (sample_lights && bounce_index > 0) {
-					// apply mis weight
-					radiance += throughput * material.mEmission * powerHeuristic(pdf_bsdf, hit_t*hit_t / (dot(-ray.Direction, sfc.v.mNormal) * sfc.area) / (float)p.prim_count() / (float)gPushConstants.gLightCount);
-				} else
-					radiance += throughput * material.mEmission;
-			}
-
 			if (all(material.mAlbedo <= 0)) break;
 
 			DisneyBSDF bsdf = to_disney_bsdf(material);
 			if (!sfc.front_face) bsdf.eta = 1/bsdf.eta;
 			float3 omega_out = -ray.Direction;
+
+			bool apply_mis_weight = false;
 			
 			// sample a light
 			if (!bsdf.is_delta() && (sample_bg || sample_lights)) {
 				LightSample ls;
 				float pdf_pick;
+				float p_hat;
 				if (reservoirSamples > 0 && bounce_index == 0) {
 					Reservoir r;
 					r.w_sum = 0;
@@ -515,20 +511,24 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 
 						float pdf_bsdf_i;
 						ls_i.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls_i.omega_in, pdf_bsdf_i) * abs(dot(ls_i.omega_in, sfc.v.mNormal)) / ls_i.pdf;
-						if (r.update(next_rng_sample(rng), vis, rng_i, luminance(ls_i.radiance))) {
+						float p_hat_i = luminance(ls_i.radiance);
+						if (r.update(next_rng_sample(rng), vis, rng_i, p_hat_i	/ pdf_pick_i)) {
 							ls = ls_i;
+							p_hat = p_hat_i;
 							pdf_pick = pdf_pick_i;
 							pdf_bsdf = pdf_bsdf_i;
 						}
 					}
-					ls.radiance *= r.w_sum / luminance(ls.radiance) / r.M;
+					ls.radiance *= r.w_sum / p_hat / r.M;
+					apply_mis_weight = true;
+					
 				} else {
 					ls = get_light_sample(rng, sfc.v.mPosition, dP, dD, pdf_pick);
-					ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / ls.pdf;
+					ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / (ls.pdf*pdf_pick);
 					if (!ls.punctual && bounce_index < gMaxBounces-1)
-						ls.radiance *= powerHeuristic(ls.pdf, pdf_bsdf);
+						ls.radiance *= powerHeuristic(ls.pdf*pdf_pick, pdf_bsdf);
+					apply_mis_weight = true;
 				}
-				ls.radiance /= pdf_pick;
 
 				if (pdf_bsdf > 0 && ls.pdf > 0) {
 					RayDesc shadowRay;
@@ -552,13 +552,6 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 			
 			if (all(throughput < 1e-6)) break;
 
-			if (gSamplingFlags & SAMPLE_FLAG_RR) {
-				float l = luminance(throughput);
-				if (next_rng_sample(rng) > l)
-					break;
-				throughput /= l;
-			}
-
 			if (sign(dot(omega_in, H)) < 0) {
 				absorption = material.mAbsorption;
 				ray.Origin = ray_offset(sfc.v.mPosition, -sfc.Ng);
@@ -579,9 +572,10 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 					float theta = acos(clamp(ray.Direction.y, -1, 1));
 					float2 uv = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, theta / M_PI);
 					float3 bg = pow(gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb, 1/gPushConstants.gEnvironmentMapGamma)*gPushConstants.gEnvironmentMapExposure;
-					if (sample_bg) {
-						// apply mis weight
-						bg *= powerHeuristic(pdf_bsdf, environment_pdf(ray.Direction, uv));
+					if (sample_bg && apply_mis_weight) {
+						float pdf_light = environment_pdf(ray.Direction, uv);
+						if (sample_lights) pdf_light *= 0.5;
+						bg *= powerHeuristic(pdf_bsdf, pdf_light);
 					}
 					radiance += throughput * bg;
 				}
@@ -592,14 +586,35 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 			
 			if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
 				LightData light = gLights[gInstances[rayQuery.CommittedInstanceIndex()].mIndexStride>>8];
-				if (sample_lights) {
-					// apply mis weight
+				if (sample_lights && apply_mis_weight) {
 					PackedLightData p;
 					p.v = light.mPackedData;
-					throughput *= powerHeuristic(pdf_bsdf, hit_t*hit_t / (2*M_PI*p.radius()*p.radius()) / (float)gPushConstants.gLightCount);
+					float pdf_light = hit_t*hit_t / (2*M_PI*p.radius()*p.radius());
+					pdf_light *= 1 / (float)gPushConstants.gLightCount;
+					if (sample_bg) pdf_light *= 0.5;
+					throughput *= powerHeuristic(pdf_bsdf, sample_bg);
 				}
 				radiance += throughput * light.mEmission;
 				break;
+			}
+			if (any(material.mEmission > 0) && sfc.front_face) {
+				LightData light = gLights[instance.mIndexStride>>8];
+				PackedLightData p;
+				p.v = light.mPackedData;
+				if (sample_lights && apply_mis_weight) {
+					float pdf_light = hit_t*hit_t / (dot(-ray.Direction, sfc.v.mNormal) * sfc.area);
+					pdf_light *= (1 / (float)p.prim_count()) * (1 / (float)gPushConstants.gLightCount);
+					if (sample_bg) pdf_light *= 0.5;
+					radiance += throughput * material.mEmission * powerHeuristic(pdf_bsdf, pdf_light);
+				} else
+					radiance += throughput * material.mEmission;
+			}
+
+			if (gSamplingFlags & SAMPLE_FLAG_RR) {
+				float l = luminance(throughput);
+				if (next_rng_sample(rng) > l)
+					break;
+				throughput /= l;
 			}
 
 			vis.x = rayQuery.CommittedInstanceIndex();
