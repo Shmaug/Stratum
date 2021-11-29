@@ -42,7 +42,7 @@ bool test_inside_screen(int2 p, int2 res) {
 }
 
 bool test_reprojected_depth(float z1, float z2, float dz) {
-	return abs(z1 - z2) < 2*(dz + 1e-3);
+	return abs(z1 - z2) < 2*length(dz + 1e-2);
 }
 
 #define TILE_OFFSET_SHIFT 3u

@@ -43,6 +43,10 @@ RWTexture2D<float4> gZ;
 Texture2D<float4> gPrevZ;
 RWTexture2D<uint4> gRNGSeed;
 Texture2D<uint4> gPrevRNGSeed;
+RWTexture2D<uint4> gReservoirRNG;
+Texture2D<uint4> gPrevReservoirRNG;
+RWTexture2D<float4> gReservoirs;
+Texture2D<float4> gPrevReservoirs;
 RWTexture2D<float2> gPrevUV;
 RWTexture2D<uint> gGradientSamples;
 
@@ -58,7 +62,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint2 resolution;
 	gVisibility.GetDimensions(resolution.x, resolution.y);
 
-	uint2 idx_prev = index.xy*gGradientDownsample;
+	int2 idx_prev = index.xy*gGradientDownsample;
 	{
 		uint2 arg = uint2(index.x + index.y*resolution.x, gPushConstants.gFrameNumber);
 		uint sum = 0;
@@ -88,7 +92,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 	float4 z_curr = gZ[idx_curr];
 	float3 n_curr = gNormal[idx_curr].xyz;
-	if (!test_reprojected_depth(z_curr.z, gPrevZ[idx_prev].x, length(z_curr.xz))) return;
+	if (!test_reprojected_depth(z_curr.y, gPrevZ[idx_prev].x, length(z_curr.zw))) return;
 	if (!test_reprojected_normal(n_curr, gPrevNormal[idx_prev].xyz)) return;
 
 	uint2 tile_pos_curr = idx_curr / gGradientDownsample;
@@ -102,7 +106,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (res == 0) {
 		gVisibility[idx_curr] = vis;
 		gRNGSeed[idx_curr] = gPrevRNGSeed[idx_prev];
+		gReservoirs[idx_curr] = gPrevReservoirs[idx_prev];
+		gReservoirRNG[idx_curr] = gPrevReservoirRNG[idx_prev];
 		gPrevUV[idx_curr] = (idx_prev + 0.5) / float2(resolution);
-		//gZ[idx_curr] = ;
 	}
 }

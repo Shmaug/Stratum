@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "svgf_shared.hlsli"
 
 [[vk::constant_id(0)]] const bool gAntilag = false;
-[[vk::constant_id(1)]] const int gGradientFilterRadius = 2;
+[[vk::constant_id(1)]] const int gGradientFilterRadius = 0;
 
 [[vk::binding(0)]] RWTexture2D<float4> gAccumColor;
 [[vk::binding(1)]] RWTexture2D<float2> gAccumMoments;
@@ -87,7 +87,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 			for (int xx = 0; xx <= 1; xx++) {
 				int2 ipos_prev = p + int2(xx, yy);
 				if (!test_inside_screen(ipos_prev, resolution)) continue;
-				if (!test_reprojected_depth(z_curr.z, gPrevZ[ipos_prev].x, length(z_curr.yz))) continue;
+				if (!test_reprojected_depth(z_curr.y, gPrevZ[ipos_prev].x, length(z_curr.zw))) continue;
 				if (!test_reprojected_normal(normal_curr, gPrevNormal[ipos_prev].xyz)) continue;
 				uint4 vis_prev = gPrevVisibility[ipos_prev];
 				if (vis_prev.x == -1 || gInstanceIndexMap[vis_prev.x] != vis_curr.x) continue;
@@ -110,7 +110,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)
 					for (int xx = -gGradientFilterRadius; xx <= gGradientFilterRadius; xx++) {
 						int2 p = int2(ipos/gGradientDownsample) + int2(xx, yy);
-						if (any(p < 0) || any(p >= resolution/gGradientDownsample)) continue;
+						if (!test_inside_screen(p, resolution/gGradientDownsample)) continue;
 						float2 v = gDiff[p];
 						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
 					}

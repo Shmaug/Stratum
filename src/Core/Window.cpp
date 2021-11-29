@@ -107,9 +107,9 @@ Image::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
 
 	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
-	if (result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eSuboptimalKHR) {
+	if (result.result == vk::Result::eNotReady || result.result == vk::Result::eSuboptimalKHR || result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eErrorSurfaceLostKHR) {
 		destroy_swapchain();
-		return Image::View(); // swapchain failed to create (happens when window is minimized, etc)
+		return Image::View();
 	}
 	mBackBufferIndex = result.value;
 	return back_buffer();

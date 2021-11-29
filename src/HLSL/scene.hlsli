@@ -49,8 +49,10 @@ public:
 	// mesh light data
 	inline uint instance_index() { return asuint(v[1]); }
 	inline void instance_index(uint i) { v[1] = asfloat(i); }
-	inline uint prim_count() { return asuint(v[2]); }
-	inline void prim_count(uint i) { v[2] = asfloat(i); }
+	inline uint prim_index() { return asuint(v[2]); }
+	inline void prim_index(uint i) { v[2] = asfloat(i); }
+	inline uint prim_count() { return asuint(v[3]); }
+	inline void prim_count(uint i) { v[3] = asfloat(i); }
 };
 
 struct LightData {

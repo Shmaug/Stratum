@@ -6,7 +6,7 @@
 #include "a-svgf/svgf_shared.hlsli"
 #include "../math.hlsli"
 
-[[vk::constant_id(0)]] const bool gModulateAlbedo = false;
+[[vk::constant_id(0)]] const bool gModulateAlbedo = true;
 [[vk::constant_id(1)]] const uint gDebugMode = 0;
 [[vk::constant_id(2)]] const int gGradientFilterRadius = 2;
 
