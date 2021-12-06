@@ -72,9 +72,15 @@ void RayTraceScene::create_pipelines() {
 	mTracePrimaryRaysPipeline = n.make_child("pathtrace_primary").make_component<ComputePipelineState>("pathtrace_primary", shaders.at("pathtrace_primary"));
 	mTracePrimaryRaysPipeline->set_immutable_sampler("gSampler", samplerRepeat);
 	mTracePrimaryRaysPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+	
 	mTraceIndirectRaysPipeline = n.make_child("pathtrace_indirect").make_component<ComputePipelineState>("pathtrace_indirect", shaders.at("pathtrace_indirect"));
 	mTraceIndirectRaysPipeline->set_immutable_sampler("gSampler", samplerRepeat);
 	mTraceIndirectRaysPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+
+	mSpatialReusePipeline = n.make_child("pathtrace_spatial_reuse").make_component<ComputePipelineState>("pathtrace_spatial_reuse", shaders.at("pathtrace_spatial_reuse"));
+	mSpatialReusePipeline->set_immutable_sampler("gSampler", samplerRepeat);
+	mSpatialReusePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+
 	mTonemapPipeline = n.make_child("tonemap").make_component<ComputePipelineState>("tonemap", shaders.at("tonemap"));
 	mTonemapPipeline->push_constant<float>("gExposure") = 1.f;
 	mTonemapPipeline->push_constant<float>("gGamma") = 2.2f;
@@ -99,20 +105,33 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::CheckboxFlags("Importance Sample Background", &mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_BG_IS);
 		ImGui::CheckboxFlags("Importance Sample Lights", &mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_LIGHT_IS);
 		if (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") & (SAMPLE_FLAG_BG_IS|SAMPLE_FLAG_LIGHT_IS)) {
-			uint32_t rs = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET)&0xFF;
-			uint32_t pmax = 0xFF;
-			if (ImGui::DragScalar("Reservoir Samples", ImGuiDataType_U32, &rs, 0, 0, &pmax)) {
+			uint32_t reservoirSamples = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET)&0xFF;
+			uint32_t spatialSamples = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") >> SAMPLE_FLAG_RESERVOIR_SPATIAL_SAMPLES_OFFSET)&0xFF;
+
+			ImGui::PushItemWidth(40);
+			if (ImGui::InputScalar("Reservoir Samples", ImGuiDataType_U32, &reservoirSamples)) {
 				uint32_t mask = ~(0xFF << SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET);
-				mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags")&mask) | ((rs&0xFF)<<SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET);
+				mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags")&mask) | ((reservoirSamples&0xFF)<<SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET);
 			}
-			if (rs > 0) {
-				uint32_t rsh = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") >> SAMPLE_FLAG_RESERVOIR_HISTORY_SAMPLES_OFFSET)&0xFF;
-				if (ImGui::DragScalar("Reservoir History Samples", ImGuiDataType_U32, &rsh, 0, 0, &pmax)) {
-					uint32_t mask = ~(0xFF << SAMPLE_FLAG_RESERVOIR_HISTORY_SAMPLES_OFFSET);
-					mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags")&mask) | ((rsh&0xFF)<<SAMPLE_FLAG_RESERVOIR_HISTORY_SAMPLES_OFFSET);
+			ImGui::PopItemWidth();
+			if (reservoirSamples > 0) {
+				ImGui::CheckboxFlags("Temporal Reservoir Re-Use", &mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_RESERVOIR_TEMPORAL_REUSE);
+
+				ImGui::PushItemWidth(40);
+				if (ImGui::InputScalar("Spatial Reservoir Samples", ImGuiDataType_U32, &spatialSamples)) {
+					uint32_t mask = ~(0xFF << SAMPLE_FLAG_RESERVOIR_SPATIAL_SAMPLES_OFFSET);
+					mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags") = (mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags")&mask) | ((spatialSamples&0xFF)<<SAMPLE_FLAG_RESERVOIR_SPATIAL_SAMPLES_OFFSET);
 				}
-			}
-		}
+				if (spatialSamples > 0) {
+					ImGui::InputScalar("Spatial Re-use Iterations", ImGuiDataType_U32, &mSpatialReservoirIterations);
+					mSpatialReservoirIterations = max(1u, mSpatialReservoirIterations);
+				}
+				ImGui::PopItemWidth();
+			} else
+				mSpatialReservoirIterations = 0;
+				
+		} else
+			mSpatialReservoirIterations = 0;
 	}
 	if (ImGui::CollapsingHeader("Denoising")) {
 		ImGui::Checkbox("Forward projection", &mForwardProjection);
@@ -135,8 +154,8 @@ void RayTraceScene::on_inspector_gui() {
 		}
 		
 		ImGui::PushItemWidth(40);
-		ImGui::InputScalar("Filter Iterations", ImGuiDataType_U32, &mNumIterations);
-		if (mNumIterations > 0) {
+		ImGui::InputScalar("Filter Iterations", ImGuiDataType_U32, &mAtrousIterations);
+		if (mAtrousIterations > 0) {
 			ImGui::InputScalar("Filter Type", ImGuiDataType_U32, &mAtrousPipeline->specialization_constant("gFilterKernelType"));
 			ImGui::InputScalar("History Tap Iteration", ImGuiDataType_U32, &mHistoryTap);
 		}
@@ -241,11 +260,18 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 			mTraceIndirectRaysPipeline->descriptor("gEnvironmentConditionalDistribution") = image_descriptor(blank, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 			mTraceIndirectRaysPipeline->descriptor("gEnvironmentMarginalDistribution") = image_descriptor(blank, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		}
+
 		mTracePrimaryRaysPipeline->specialization_constant("gEnvironmentMap") = mTraceIndirectRaysPipeline->specialization_constant("gEnvironmentMap");
 		mTracePrimaryRaysPipeline->push_constant<float>("gEnvironmentMapGamma") = mTraceIndirectRaysPipeline->push_constant<float>("gEnvironmentMapGamma");
 		mTracePrimaryRaysPipeline->push_constant<float>("gEnvironmentMapExposure") = mTraceIndirectRaysPipeline->push_constant<float>("gEnvironmentMapExposure");
 		mTracePrimaryRaysPipeline->descriptor("gEnvironmentConditionalDistribution") = mTraceIndirectRaysPipeline->descriptor("gEnvironmentConditionalDistribution");
 		mTracePrimaryRaysPipeline->descriptor("gEnvironmentMarginalDistribution") = mTraceIndirectRaysPipeline->descriptor("gEnvironmentMarginalDistribution");
+		
+		mSpatialReusePipeline->specialization_constant("gEnvironmentMap") = mTraceIndirectRaysPipeline->specialization_constant("gEnvironmentMap");
+		mSpatialReusePipeline->push_constant<float>("gEnvironmentMapGamma") = mTraceIndirectRaysPipeline->push_constant<float>("gEnvironmentMapGamma");
+		mSpatialReusePipeline->push_constant<float>("gEnvironmentMapExposure") = mTraceIndirectRaysPipeline->push_constant<float>("gEnvironmentMapExposure");
+		mSpatialReusePipeline->descriptor("gEnvironmentConditionalDistribution") = mTraceIndirectRaysPipeline->descriptor("gEnvironmentConditionalDistribution");
+		mSpatialReusePipeline->descriptor("gEnvironmentMarginalDistribution") = mTraceIndirectRaysPipeline->descriptor("gEnvironmentMarginalDistribution");
 	}
 
 	{ // instances
@@ -432,25 +458,34 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 	mTracePrimaryRaysPipeline->descriptor("gLights") = lights.buffer_view();
 	mTracePrimaryRaysPipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lights.size();
 
+	mTraceIndirectRaysPipeline->descriptor("gScene") = mTracePrimaryRaysPipeline->descriptor("gScene");
+	mTraceIndirectRaysPipeline->descriptor("gInstances") = mTracePrimaryRaysPipeline->descriptor("gInstances");
+	mTraceIndirectRaysPipeline->descriptor("gMaterials") = mTracePrimaryRaysPipeline->descriptor("gMaterials");
+	mTraceIndirectRaysPipeline->descriptor("gVertices") = mTracePrimaryRaysPipeline->descriptor("gVertices");
+	mTraceIndirectRaysPipeline->descriptor("gIndices") = mTracePrimaryRaysPipeline->descriptor("gIndices");
+	mTraceIndirectRaysPipeline->descriptor("gLights") = mTracePrimaryRaysPipeline->descriptor("gLights");
+	mTraceIndirectRaysPipeline->push_constant<uint32_t>("gLightCount") = mTracePrimaryRaysPipeline->push_constant<uint32_t>("gLightCount");
+
+	mSpatialReusePipeline->descriptor("gScene") = mTracePrimaryRaysPipeline->descriptor("gScene");
+	mSpatialReusePipeline->descriptor("gInstances") = mTracePrimaryRaysPipeline->descriptor("gInstances");
+	mSpatialReusePipeline->descriptor("gMaterials") = mTracePrimaryRaysPipeline->descriptor("gMaterials");
+	mSpatialReusePipeline->descriptor("gVertices") = mTracePrimaryRaysPipeline->descriptor("gVertices");
+	mSpatialReusePipeline->descriptor("gIndices") = mTracePrimaryRaysPipeline->descriptor("gIndices");
+	mSpatialReusePipeline->descriptor("gLights") = mTracePrimaryRaysPipeline->descriptor("gLights");
+	mSpatialReusePipeline->push_constant<uint32_t>("gLightCount") = mTracePrimaryRaysPipeline->push_constant<uint32_t>("gLightCount");
+
+	for (const auto&[image, index] : images) {
+		mTraceIndirectRaysPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+		mTracePrimaryRaysPipeline->descriptor("gImages", index) = mTraceIndirectRaysPipeline->descriptor("gImages", index);
+		mSpatialReusePipeline->descriptor("gImages", index) = mTraceIndirectRaysPipeline->descriptor("gImages", index);
+	}
+
 	mGradientForwardProjectPipeline->descriptor("gInstances") = mCurFrame->mInstances;
 	mGradientForwardProjectPipeline->descriptor("gInstanceIndexMap") = instanceIndexMap;
 	mGradientForwardProjectPipeline->descriptor("gVertices") = mCurFrame->mVertices;
 	mGradientForwardProjectPipeline->descriptor("gIndices") = mCurFrame->mIndices;
 	
 	mTemporalAccumulationPipeline->descriptor("gInstanceIndexMap") = instanceIndexMap;
-	
-	mTraceIndirectRaysPipeline->descriptor("gScene") = **mTopLevel;
-	mTraceIndirectRaysPipeline->descriptor("gInstances") = mCurFrame->mInstances;
-	mTraceIndirectRaysPipeline->descriptor("gMaterials") = mCurFrame->mMaterials;
-	mTraceIndirectRaysPipeline->descriptor("gVertices") = mCurFrame->mVertices;
-	mTraceIndirectRaysPipeline->descriptor("gIndices") = mCurFrame->mIndices;
-	mTraceIndirectRaysPipeline->descriptor("gLights") = lights.buffer_view();
-	mTraceIndirectRaysPipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lights.size();
-
-	for (const auto&[image, index] : images) {
-		mTraceIndirectRaysPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mTracePrimaryRaysPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	}
 }
 
 void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer) {
@@ -465,9 +500,9 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		mCurFrame->mReservoirs = make_shared<Image>(commandBuffer.mDevice, "gReservoirs", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		mCurFrame->mReservoirRNG = make_shared<Image>(commandBuffer.mDevice, "gReservoirRNG", colorBuffer.extent(), vk::Format::eR32G32B32A32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 
-		mCurFrame->mRadiance = make_shared<Image>(commandBuffer.mDevice, "gRadiance" , colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc);
+		mCurFrame->mRadiance = make_shared<Image>(commandBuffer.mDevice, "gRadiance", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc);
 		mCurFrame->mAlbedo   = make_shared<Image>(commandBuffer.mDevice, "gAlbedo"  , colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
-		mCurFrame->mNormal   = make_shared<Image>(commandBuffer.mDevice, "gNormal", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
+		mCurFrame->mNormal   = make_shared<Image>(commandBuffer.mDevice, "gNormal"  , colorBuffer.extent(), vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		mCurFrame->mZ        = make_shared<Image>(commandBuffer.mDevice, "gZ"       , colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		
 		mCurFrame->mAccumColor   = make_shared<Image>(commandBuffer.mDevice, "gAccumColor", colorBuffer.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc);
@@ -530,12 +565,32 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		mTracePrimaryRaysPipeline->descriptor("gPrevUV") = image_descriptor(mCurFrame->mPrevUV, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTracePrimaryRaysPipeline->descriptor("gReservoirs")   = image_descriptor(mCurFrame->mReservoirs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTracePrimaryRaysPipeline->descriptor("gReservoirRNG") = image_descriptor(mCurFrame->mReservoirRNG, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		if (mRandomPerFrame) mTracePrimaryRaysPipeline->push_constant<uint32_t>("gRandomSeed") = (uint32_t)commandBuffer.mDevice.mInstance.window().present_count();
+		if (mRandomPerFrame) mTracePrimaryRaysPipeline->push_constant<uint32_t>("gRandomSeed") = rand();
 		mTracePrimaryRaysPipeline->specialization_constant("gSamplingFlags") = mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags");
 		commandBuffer.bind_pipeline(mTracePrimaryRaysPipeline->get_pipeline());
 		mTracePrimaryRaysPipeline->bind_descriptor_sets(commandBuffer);
 		mTracePrimaryRaysPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(mCurFrame->mVisibility.extent());
+	}
+
+	// Spatial resrevoir re-use
+	if (mSpatialReservoirIterations > 0) {
+		ProfilerRegion ps("Spatial reservoir re-use", commandBuffer);
+		mSpatialReusePipeline->descriptor("gCameraData") = cameraData;
+		mSpatialReusePipeline->descriptor("gVisibility") = image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mSpatialReusePipeline->descriptor("gNormal") = image_descriptor(mCurFrame->mNormal, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mSpatialReusePipeline->descriptor("gZ") = image_descriptor(mCurFrame->mZ, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mSpatialReusePipeline->descriptor("gReservoirs")   = image_descriptor(mCurFrame->mReservoirs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mSpatialReusePipeline->descriptor("gReservoirRNG") = image_descriptor(mCurFrame->mReservoirRNG, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mSpatialReusePipeline->specialization_constant("gSamplingFlags") = mTraceIndirectRaysPipeline->specialization_constant("gSamplingFlags");
+		commandBuffer.bind_pipeline(mSpatialReusePipeline->get_pipeline());
+		mSpatialReusePipeline->bind_descriptor_sets(commandBuffer);
+		for (uint32_t i = 0; i < mSpatialReservoirIterations; i++) {
+			if (mRandomPerFrame) mSpatialReusePipeline->push_constant<uint32_t>("gRandomSeed") = rand();
+			mSpatialReusePipeline->push_constants(commandBuffer);
+			mSpatialReusePipeline->transition_images(commandBuffer);
+			commandBuffer.dispatch_over(mCurFrame->mVisibility.extent());
+		}
 	}
 
 	commandBuffer.clear_color_image(mCurFrame->mGradientPositions, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
@@ -568,11 +623,11 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 	
 	{ // Indirect/shading rays
 		ProfilerRegion ps("Indirect rays", commandBuffer);
-		mTraceIndirectRaysPipeline->descriptor("gCameraData") = cameraData;
-		mTraceIndirectRaysPipeline->descriptor("gVisibility") = image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
-		mTraceIndirectRaysPipeline->descriptor("gRNGSeed")    = image_descriptor(mCurFrame->mRNGSeed, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
-		mTraceIndirectRaysPipeline->descriptor("gRadiance")   = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mTraceIndirectRaysPipeline->descriptor("gAlbedo")     = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mTraceIndirectRaysPipeline->descriptor("gCameraData") 	= cameraData;
+		mTraceIndirectRaysPipeline->descriptor("gVisibility") 	= image_descriptor(mCurFrame->mVisibility, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mTraceIndirectRaysPipeline->descriptor("gRNGSeed")    	= image_descriptor(mCurFrame->mRNGSeed, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mTraceIndirectRaysPipeline->descriptor("gRadiance")   	= image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mTraceIndirectRaysPipeline->descriptor("gAlbedo")     	= image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceIndirectRaysPipeline->descriptor("gReservoirs")   = image_descriptor(mCurFrame->mReservoirs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 		mTraceIndirectRaysPipeline->descriptor("gReservoirRNG") = image_descriptor(mCurFrame->mReservoirRNG, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 		commandBuffer.bind_pipeline(mTraceIndirectRaysPipeline->get_pipeline());
@@ -664,14 +719,14 @@ void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camer
 		}
 
 		// atrous
-		if (mHistoryTap >= mNumIterations)
+		if (mHistoryTap >= mAtrousIterations)
 			commandBuffer.copy_image(mCurFrame->mPing, mColorHistory);
-		if (mNumIterations > 0) {
+		if (mAtrousIterations > 0) {
 			ProfilerRegion ps("Filter image", commandBuffer);
 			mAtrousPipeline->descriptor("gNormal") = image_descriptor(mCurFrame->mNormal, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 			mAtrousPipeline->descriptor("gZ") = image_descriptor(mCurFrame->mZ, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 			commandBuffer.bind_pipeline(mAtrousPipeline->get_pipeline());
-			for (uint32_t i = 0; i < mNumIterations; i++) {
+			for (uint32_t i = 0; i < mAtrousIterations; i++) {
 				mAtrousPipeline->descriptor("gOutput") = image_descriptor(mCurFrame->mPong, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 				mAtrousPipeline->descriptor("gInput") = image_descriptor(mCurFrame->mPing, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 				mAtrousPipeline->push_constant<uint32_t>("gIteration") = i;

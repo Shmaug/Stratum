@@ -111,7 +111,7 @@ void Image::transition_barrier(CommandBuffer& commandBuffer, vk::PipelineStageFl
 		for (uint32_t layer = subresourceRange.baseArrayLayer; layer < subresourceRange.baseArrayLayer+subresourceRange.layerCount; layer++) {
 			for (uint32_t level = subresourceRange.baseMipLevel; level < subresourceRange.baseMipLevel+subresourceRange.levelCount; level++) {
 				auto& state = tracked_state((vk::ImageAspectFlags)aspect, layer, level);
-				if (get<vk::ImageLayout>(state) != newLayout || get<vk::AccessFlags>(state) != accessFlags || (accessFlags & vk::AccessFlagBits::eShaderWrite)) {
+				if (get<vk::ImageLayout>(state) != newLayout || get<vk::AccessFlags>(state) != accessFlags || (get<vk::AccessFlags>(state) & vk::AccessFlagBits::eShaderWrite) || (accessFlags & vk::AccessFlagBits::eShaderWrite)) {
 					vk::ImageMemoryBarrier b;
 					b.image = mImage;
 					b.newLayout = newLayout;

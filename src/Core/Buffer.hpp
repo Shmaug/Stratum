@@ -215,14 +215,10 @@ public:
 	inline void reserve(size_type newcap) {
 		if ((!mBuffer && newcap > 0) || newcap*sizeof(T) > mBuffer->size()) {
 			vk::MemoryRequirements requirements;
-			if (mBuffer) {
-				requirements = mBuffer->memory()->requirements();
-				requirements.size = max(newcap*sizeof(T), mBuffer->size() + mBuffer->size()/2);
-			} else {
-				vk::Buffer tmp = mDevice->createBuffer(vk::BufferCreateInfo({}, newcap*sizeof(T), mBufferUsage, mSharingMode));
-				requirements = mDevice->getBufferMemoryRequirements(tmp);
-				mDevice->destroyBuffer(tmp);
-			}
+			vk::Buffer tmp = mDevice->createBuffer(vk::BufferCreateInfo({}, newcap*sizeof(T), mBufferUsage, mSharingMode));
+			requirements = mDevice->getBufferMemoryRequirements(tmp);
+			mDevice->destroyBuffer(tmp);
+
 			if constexpr (_Alignment > 0)
 				requirements.alignment = align_up(requirements.alignment, _Alignment);
 			auto b = make_shared<Buffer>(make_shared<Device::MemoryAllocation>(mDevice, requirements, mMemoryUsage), "buffer_vector<"+string(typeid(T).name())+">", mBufferUsage, mSharingMode);

@@ -51,12 +51,17 @@ private:
 	unordered_map<Mesh*, Buffer::View<hlsl::VertexData>> mMeshVertices;
 	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
-
+	
+	
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
+	
 	component_ptr<ComputePipelineState> mTracePrimaryRaysPipeline;
 	component_ptr<ComputePipelineState> mTraceIndirectRaysPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
-
+	
+	component_ptr<ComputePipelineState> mSpatialReusePipeline;
+	
+	// A-SVGF pipelines
 	component_ptr<ComputePipelineState> mGradientForwardProjectPipeline;
 	component_ptr<ComputePipelineState> mTemporalAccumulationPipeline;
 	component_ptr<ComputePipelineState> mEstimateVariancePipeline;
@@ -68,7 +73,8 @@ private:
 	bool mReprojection = true;
 	bool mForwardProjection = true;
 	uint32_t mDiffAtrousIterations = 0;
-	uint32_t mNumIterations = 0;
+	uint32_t mAtrousIterations = 0;
+	uint32_t mSpatialReservoirIterations = 0;
 	uint32_t mHistoryTap = 0;
 
 	struct FrameData {

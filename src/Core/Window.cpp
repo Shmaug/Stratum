@@ -106,12 +106,12 @@ Image::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
 
-	auto result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {});
-	if (result.result == vk::Result::eNotReady || result.result == vk::Result::eSuboptimalKHR || result.result == vk::Result::eErrorOutOfDateKHR || result.result == vk::Result::eErrorSurfaceLostKHR) {
+	vk::Result result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {}, &mBackBufferIndex);
+	if (result == vk::Result::eNotReady || result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
 		destroy_swapchain();
 		return Image::View();
-	}
-	mBackBufferIndex = result.value;
+	} else if (result != vk::Result::eSuccess)
+		throw runtime_error("Failed to acquire next image");
 	return back_buffer();
 }
 void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores) {

@@ -38,7 +38,7 @@ https://github.com/knightcrawler25/GLSL-PathTracer/blob/master/src/shaders/commo
 #include "sampling.hlsli"
 #include "ray_differential.hlsli"
 
-#define MIN_ROUGHNESS 1e-4
+#define MIN_ROUGHNESS 1e-2
 
 #define BSDF_FLAG_DIFFUSE 1
 #define BSDF_FLAG_SPECULAR_GGX 2
@@ -85,7 +85,7 @@ class DisneyBSDF {
 
         if (roughness < MIN_ROUGHNESS) {
             pdf = 1;
-            return albedo * F/dot(V,H);
+            return albedo * (1.0 - F)/dot(V,H);
         }
 
         float D = GTR2(dot(N, H), roughness);
@@ -152,7 +152,7 @@ class DisneyBSDF {
         return ((1 / M_PI) * lerp(Fd, ss, subsurface) * albedo + Fsheen) * (1.0 - metallic);
     }
 
-    inline bool is_delta() { return roughness <= MIN_ROUGHNESS && (metallic == 1 || (metallic == 0 && specTrans == 1)); }
+    inline bool is_delta() { return roughness < MIN_ROUGHNESS && (metallic == 1 || (metallic == 0 && specTrans == 1)); }
 
     inline float3 Sample(inout uint4 rng, float3 V, float3 N, float4 T, out float3 L, out float pdf, out uint flag, out float3 H) {
         pdf = 0;
@@ -161,7 +161,7 @@ class DisneyBSDF {
 
         float3 B = normalize(cross(T.xyz,N)*T.w);
 
-        float diffuseRatio = 1 - metallic;
+        float diffuseRatio = 0.5 * (1 - metallic);
         float transWeight = diffuseRatio * specTrans;
 
         float3 Cdlin = albedo;
@@ -263,7 +263,7 @@ class DisneyBSDF {
         if (dot(V, H) < 0)
         H = -H;
 
-        float diffuseRatio = 1 - metallic;
+        float diffuseRatio = 0.5 * (1 - metallic);
         float primarySpecRatio = 1 / (1 + clearcoat);
         float transWeight = diffuseRatio * specTrans;
 
@@ -292,10 +292,8 @@ class DisneyBSDF {
             brdfPdf += m_pdf * diffuseRatio;
 
             // Specular
-            if (roughness >= MIN_ROUGHNESS) {
-                brdf += EvalSpecular(Cspec0, V, N, L, H, m_pdf);
-                brdfPdf += m_pdf * primarySpecRatio * (1 - diffuseRatio);
-            }
+            brdf += EvalSpecular(Cspec0, V, N, L, H, m_pdf);
+            brdfPdf += m_pdf * primarySpecRatio * (1 - diffuseRatio);
 
             // Clearcoat
             brdf += EvalClearcoat(V, N, L, H, m_pdf);

@@ -1,5 +1,6 @@
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E primary
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E indirect
+#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E spatial_reuse
 
 #include "rtscene.hlsli"
 
@@ -159,7 +160,7 @@ inline DisneyBSDF to_disney_bsdf(MaterialData material) {
 	bsdf.albedo = material.mAlbedo;
 	bsdf.specular = 0.5;
 	bsdf.metallic = material.mMetallic;
-	bsdf.roughness = material.mRoughness*material.mRoughness;
+	bsdf.roughness = material.mRoughness;
 	bsdf.subsurface = 0;
 	bsdf.specularTint = 0;
 	bsdf.sheen = 0;
@@ -344,45 +345,50 @@ LightSample get_light_sample(inout uint4 rng, float3 P, differential3 dP, differ
 
 class Reservoir {
 	uint4 y;
+	float p_hat_y;
 	float w_sum;
 	uint M;
 	float W;
-	float p_hat_y;
 
 	inline void store(uint2 index) {
 		gReservoirRNG[index] = y;
 		gReservoirs[index] = float4(w_sum, asfloat(M), W, p_hat_y);
 	}
-	inline void load(uint2 index) {
+	inline LightSample load(uint2 index, DisneyBSDF bsdf, float3 omega_out, float3 P, float3 N, differential3 dP, differential3 dD, out float pdf_bsdf, out float pdf_pick) {
 		y = gReservoirRNG[index];
 		float4 v = gReservoirs[index];
 		w_sum = v.x;
 		M = asuint(v.y);
 		W = v.z;
-		p_hat_y = v.w;
-	}
-	inline void load_prev(int2 index, int2 resolution, DisneyBSDF bsdf, float3 omega_out, float3 pos, float3 normal, float4 z, differential3 dP, differential3 dD) {
-		if (!test_inside_screen(index, resolution) || !test_reprojected_depth(z.y, gPrevZ[index].x, length(z.zw)) || !test_reprojected_normal(normal, gPrevNormal[index].xyz)) {
-			w_sum = 0;
-			M = 0;
-			W = 0;
-		} else {
-			y = gPrevReservoirRNG[index];
-			float4 v = gPrevReservoirs[index];
-			w_sum = v.x;
-			M = asuint(v.y);
-			W = v.z;
-			p_hat_y = v.w;
-			if (W > 0) {
-				float pdf_pick;
-				uint4 tmp_rng = y;
-				LightSample ls = get_light_sample(tmp_rng, pos, dP, dD, pdf_pick);
-				if (ls.pdf > 0) {
-					float pdf_bsdf;
-					p_hat_y = luminance(ls.radiance * bsdf.Evaluate(omega_out, normal, ls.omega_in, pdf_bsdf)) * abs(dot(ls.omega_in, normal)) / ls.pdf;
-				}
-			}
+
+		LightSample ls;
+		ls.pdf = 0;
+		p_hat_y = 0;
+		if (w_sum > 0) {
+			uint4 tmp_rng = y;
+			ls = get_light_sample(tmp_rng, P, dP, dD, pdf_pick);
+			if (ls.pdf > 0)
+				p_hat_y = luminance(ls.radiance * bsdf.Evaluate(omega_out, N, ls.omega_in, pdf_bsdf)) * abs(dot(ls.omega_in, N)) / ls.pdf;
 		}
+		return ls;
+	}
+	inline LightSample load_prev(int2 index, DisneyBSDF bsdf, float3 omega_out, float3 P, float3 N, differential3 dP, differential3 dD, out float pdf_bsdf, out float pdf_pick) {
+		y = gPrevReservoirRNG[index];
+		float4 v = gPrevReservoirs[index];
+		w_sum = v.x;
+		M = asuint(v.y);
+		W = v.z;
+
+		LightSample ls;
+		ls.pdf = 0;
+		p_hat_y = 0;
+		if (w_sum > 0) {
+			uint4 tmp_rng = y;
+			ls = get_light_sample(tmp_rng, P, dP, dD, pdf_pick);
+			if (ls.pdf > 0)
+				p_hat_y = luminance(ls.radiance * bsdf.Evaluate(omega_out, N, ls.omega_in, pdf_bsdf)) * abs(dot(ls.omega_in, N)) / ls.pdf;
+		}
+		return ls;
 	}
 
 	inline bool update(float r1, uint4 x, float w) {
@@ -395,29 +401,92 @@ class Reservoir {
 		return false;
 	}
 
-	inline LightSample ris(inout uint4 rng, DisneyBSDF bsdf, float3 pos, float3 N, float3 omega_out, differential3 dP, differential3 dD) {
+	inline LightSample ris(inout uint4 rng, DisneyBSDF bsdf, float3 omega_out, float3 P, float3 N, differential3 dP, differential3 dD) {
 		const uint reservoirSamples = gSamplingFlags >> SAMPLE_FLAG_RESERVOIR_SAMPLES_OFFSET;
 		LightSample ls;
-		float p_hat;
 		for (uint i = 0; i < reservoirSamples; i++) {
 			uint4 rng_i = rng;
 
 			float pdf_pick_i;
-			LightSample ls_i = get_light_sample(rng, pos, dP, dD, pdf_pick_i);
+			LightSample ls_i = get_light_sample(rng, P, dP, dD, pdf_pick_i);
 			if (ls_i.pdf <= 0) continue;
 
 			float pdf_bsdf_i;
 			float p_hat_i = luminance(ls_i.radiance * bsdf.Evaluate(omega_out, N, ls_i.omega_in, pdf_bsdf_i)) * abs(dot(ls_i.omega_in, N)) / ls_i.pdf;
 			if (update(next_rng_sample(rng), rng_i, p_hat_i / pdf_pick_i)) {
 				ls = ls_i;
-				p_hat = p_hat_i;
+				p_hat_y = p_hat_i;
 			}
 		}
-		if (p_hat > 0)
-			W = w_sum / p_hat / M;
+		if (p_hat_y > 0)
+			W = w_sum / p_hat_y / M;
 		else
 			W = 0;
 		return ls;
+	}
+		
+	inline void temporal_reuse(inout LightSample ls, inout uint4 rng, uint2 index, DisneyBSDF bsdf, float3 omega_out, float3 P, float3 N, differential3 dP, differential3 dD) {
+		uint max_M = 20*M;
+		uint M_sum = M;
+
+		w_sum = p_hat_y*W*M;
+		M = 1;
+
+		float pdf_pick, pdf_bsdf;
+		Reservoir q;
+		LightSample ls_prev = q.load_prev(index, bsdf, omega_out, P, N, dP, dD, pdf_bsdf, pdf_pick);
+		if (q.M > 0) {
+			q.M = min(q.M, max_M);
+			if (update(next_rng_sample(rng), q.y, q.p_hat_y*q.W*q.M)) {
+				ls = ls_prev;
+				p_hat_y = q.p_hat_y;
+			}
+			if (q.p_hat_y > 0)
+				M_sum += q.M;
+		}
+
+		M = M_sum;
+		W = w_sum / p_hat_y / M;
+	}
+	inline void spatial_reuse(inout LightSample ls, uint2 index, uint2 resolution, DisneyBSDF bsdf, float3 omega_out, float3 P, float3 N, differential3 dP, differential3 dD, out float pdf_bsdf, out float pdf_pick) {
+		const uint max_m = M*20;
+		uint M_sum = M;
+		uint Z = p_hat_y > 0 ? M : 0;
+
+		w_sum = p_hat_y*W*M;
+		M = 1;
+
+		uint4 rng = uint4(index, gPushConstants.gRandomSeed, index.x + index.y);
+		const float4 z = gZ[index.xy];
+		const float3 n = gNormal[index.xy].xyz;
+
+		const uint reservoirSpatialSamples = (gSamplingFlags >> SAMPLE_FLAG_RESERVOIR_SPATIAL_SAMPLES_OFFSET) & 0xFF;
+		for (uint i = 0; i < reservoirSpatialSamples; i++) {
+			int2 o = 30*(2*float2(next_rng_sample(rng), next_rng_sample(rng))-1);
+			if (all(o == 0)) continue;
+			int2 p = index.xy + o;
+			if (!test_inside_screen(p, resolution)) continue;
+			if (!test_reprojected_depth(gZ[p].x, z.x, length(o*z.zw))) continue;
+			if (!test_reprojected_normal(n, gNormal[p].xyz)) continue;
+
+			float pdf_pick_i, pdf_bsdf_i;
+			Reservoir q;
+			LightSample ls_i = q.load(p, bsdf, omega_out, P, N, dP, dD, pdf_bsdf_i, pdf_pick_i);
+			q.M = min(q.M, max_m);
+
+			if (update(next_rng_sample(rng), q.y, q.p_hat_y*q.W*q.M)) {
+				ls = ls_i;
+				pdf_bsdf = pdf_bsdf_i;
+				pdf_pick = pdf_pick_i;
+				p_hat_y = q.p_hat_y;
+			}
+			M_sum += q.M;
+			if (q.p_hat_y > 0)
+				Z += q.M;
+		}
+
+		M = M_sum;
+		W = w_sum / p_hat_y / Z;
 	}
 };
 
@@ -427,7 +496,7 @@ void primary(uint3 index : SV_DispatchThreadID) {
 	gVisibility.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
 
-	float2 uv = (index.xy + 0.5)/float2(resolution);
+	const float2 uv = (index.xy + 0.5)/float2(resolution);
 	RayDesc ray = create_ray(uv);
 	differential3 dP;
 	dP.dx = 0;
@@ -437,7 +506,6 @@ void primary(uint3 index : SV_DispatchThreadID) {
 	dD.dy = create_ray(uv + float2(0, 1/(float)resolution.y)).Direction - ray.Direction;
 
 	uint4 rng = uint4(index.xy, gPushConstants.gRandomSeed, index.x + index.y);
-	gRNGSeed[index.xy] = rng;
 
 	uint instanceIndex = -1;
 	uint primitiveIndex = 0;
@@ -456,7 +524,7 @@ void primary(uint3 index : SV_DispatchThreadID) {
 			// light
 			primitiveIndex = -1;
 			
-			float3 prevCamPos = transform_point(tmul(gWorldToPrevCamera, instance.mMotionTransform), ray.Origin + ray.Direction*rayQuery.CommittedRayT());
+			const float3 prevCamPos = transform_point(tmul(gWorldToPrevCamera, instance.mMotionTransform), ray.Origin + ray.Direction*rayQuery.CommittedRayT());
 			z.y = length(prevCamPos);
 			float4 prevScreenPos = project_point(gPrevProjection, prevCamPos);
 			prevScreenPos.y = -prevScreenPos.y;
@@ -466,7 +534,7 @@ void primary(uint3 index : SV_DispatchThreadID) {
 			bary = rayQuery.CommittedTriangleBarycentrics();
 			SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, primitiveIndex, bary, ray.Origin, dP, dD);
 			
-			float3 prevCamPos = transform_point(tmul(gWorldToPrevCamera, instance.mMotionTransform), sfc.v.mPosition);
+			const float3 prevCamPos = transform_point(tmul(gWorldToPrevCamera, instance.mMotionTransform), sfc.v.mPosition);
 			z.y = length(prevCamPos);
 			float4 prevScreenPos = project_point(gPrevProjection, prevCamPos);
 			prevScreenPos.y = -prevScreenPos.y;
@@ -475,7 +543,6 @@ void primary(uint3 index : SV_DispatchThreadID) {
 			normal = sfc.v.mNormal;
 			z.z = transform_vector(gWorldToCamera, dP.dx).z;
 			z.w = transform_vector(gWorldToCamera, dP.dy).z;
-			//z.zw = 1/abs(normalize(transform_vector(gWorldToCamera, sfc.v.mNormal)).z);
 
 			const bool sample_bg = (gSamplingFlags & SAMPLE_FLAG_BG_IS) && gEnvironmentMap < gImageCount;
 			const bool sample_lights = (gSamplingFlags & SAMPLE_FLAG_LIGHT_IS) && gPushConstants.gLightCount > 0;
@@ -484,55 +551,89 @@ void primary(uint3 index : SV_DispatchThreadID) {
 				MaterialData material = sample_image_attributes(instance, sfc);
 				DisneyBSDF bsdf = to_disney_bsdf(material);
 				if (!sfc.front_face) bsdf.eta = 1/bsdf.eta;
+
 				Reservoir r;
 				r.w_sum = 0;
 				r.M = 0;
-				LightSample ls = r.ris(rng, bsdf, sfc.v.mPosition, sfc.v.mNormal, -ray.Direction, dP, dD);
-				RayDesc shadowRay;
-				shadowRay.Origin = ray_offset(sfc.v.mPosition, sfc.Ng*sign(dot(sfc.Ng, ls.omega_in)));
-				shadowRay.Direction = ls.omega_in;
-				shadowRay.TMin = 0;
-				shadowRay.TMax = ls.dist * 0.999;
-				rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
-				if (do_ray_query(rayQuery, dP, dD))
-					r.W = 0;
-				
-				const uint reservoirHistorySamples = (gSamplingFlags >> SAMPLE_FLAG_RESERVOIR_HISTORY_SAMPLES_OFFSET) & 0xFF;
-				if (gPushConstants.gHistoryValid && reservoirHistorySamples > 0) {
-					Reservoir s;
-					s.y = r.y;
-					s.p_hat_y = r.p_hat_y;
-					s.w_sum = r.p_hat_y*r.W*r.M;
-					uint M = r.M;
-					
-					int2 prev_idx = prevUV*resolution;
-					for (uint i = 0; i < reservoirHistorySamples; i++) {
-						int xx = min(floor(next_rng_sample(rng)*3),2) - 1;
-						int yy = min(floor(next_rng_sample(rng)*3),2) - 1;
-						Reservoir q;
-						q.load_prev(prev_idx + int2(xx,yy), resolution, bsdf, -ray.Direction, sfc.v.mPosition, normal, z, dP, dD);
-						if (q.W > 100) {
-							if (s.update(next_rng_sample(rng), q.y, q.p_hat_y*q.W*q.M)) s.p_hat_y = q.p_hat_y;
-							M += q.M;
-						}
+				if (!bsdf.is_delta()) {
+					// RIS
+					LightSample ls = r.ris(rng, bsdf, -ray.Direction, sfc.v.mPosition, sfc.v.mNormal, dP, dD);
+
+					// temporal re-use
+					if ((gSamplingFlags & SAMPLE_FLAG_RESERVOIR_TEMPORAL_REUSE) && gPushConstants.gHistoryValid) {
+						const int2 idx_prev = gPrevUV[index.xy]*resolution + float2(next_rng_sample(rng), next_rng_sample(rng)) - 0.5;
+						if (test_inside_screen(idx_prev, resolution))
+							if (test_reprojected_normal(normal, gPrevNormal[idx_prev].xyz))
+								if (test_reprojected_depth(z.y, gPrevZ[idx_prev].x, length(z.zw)))
+									r.temporal_reuse(ls, rng, idx_prev, bsdf, -ray.Direction, sfc.v.mPosition, sfc.v.mNormal, dP, dD);
 					}
-					
-					s.M = M;
-					if (s.p_hat_y > 0)
-						s.W = s.w_sum / s.p_hat_y / s.M;
-					else
-						s.W = 0;
-					s.store(index.xy);
-				} else
-					r.store(index.xy);
+
+					if (r.W > 0 && ls.pdf > 0) {
+						RayDesc shadowRay;
+						shadowRay.Origin = ray_offset(sfc.v.mPosition, sfc.Ng*sign(dot(sfc.Ng, ls.omega_in)));
+						shadowRay.Direction = ls.omega_in;
+						shadowRay.TMin = 0;
+						shadowRay.TMax = ls.dist * 0.999;
+						rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
+						if (do_ray_query(rayQuery, dP, dD))
+							r.W = 0;
+					}
+				}
+				r.store(index.xy);
 			}
 		}
 	}
 
+	gRNGSeed[index.xy] = rng;
 	gVisibility[index.xy] = uint4(instanceIndex, primitiveIndex, asuint(bary));
 	gNormal[index.xy] = float4(normal,1);
 	gZ[index.xy] = z;
 	gPrevUV[index.xy] = prevUV;
+}
+
+[numthreads(8,8,1)]
+void spatial_reuse(uint3 index : SV_DispatchThreadId) {
+	uint2 resolution;
+	gVisibility.GetDimensions(resolution.x, resolution.y);
+	if (any(index.xy >= resolution)) return;
+	const uint4 vis = gVisibility[index.xy];
+
+	if (vis.x == -1 || vis.y == -1) return;
+	
+	const float2 uv = (index.xy + 0.5)/float2(resolution);
+	RayDesc ray = create_ray(uv);
+	differential3 dP;
+	dP.dx = 0;
+	dP.dy = 0;
+	differential3 dD;
+	dD.dx = create_ray(uv + float2(1/(float)resolution.x, 0)).Direction - ray.Direction;
+	dD.dy = create_ray(uv + float2(0, 1/(float)resolution.y)).Direction - ray.Direction;
+	
+	InstanceData instance = gInstances[vis.x];
+	SurfaceSample sfc = surface_attributes(instance, gVertices, gIndices, vis.y, asfloat(vis.zw), ray.Origin, dP, dD);
+	MaterialData material = sample_image_attributes(instance, sfc);
+	DisneyBSDF bsdf = to_disney_bsdf(material);
+	if (!sfc.front_face) bsdf.eta = 1/bsdf.eta;
+
+	const float3 omega_out = -ray.Direction;
+
+	Reservoir r;
+	float pdf_bsdf, pdf_pick;
+	LightSample ls = r.load(index.xy, bsdf, omega_out, sfc.v.mPosition, sfc.v.mNormal, dP, dD, pdf_bsdf, pdf_pick);
+
+	r.spatial_reuse(ls, index.xy, resolution, bsdf, omega_out, sfc.v.mPosition, sfc.v.mNormal, dP, dD, pdf_bsdf, pdf_pick);
+
+	ray_query_t rayQuery;
+	if (ls.pdf > 0 && pdf_bsdf > 0) {
+		RayDesc shadowRay;
+		shadowRay.Origin = ray_offset(sfc.v.mPosition, sfc.Ng*sign(dot(sfc.Ng, ls.omega_in)));
+		shadowRay.Direction = ls.omega_in;
+		shadowRay.TMin = 0;
+		shadowRay.TMax = ls.dist * 0.999;
+		rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, shadowRay);
+		if (!do_ray_query(rayQuery, dP, dD))
+			r.store(index.xy);
+	}
 }
 
 [numthreads(8,8,1)]
@@ -541,7 +642,7 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 	gRadiance.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
 
-	uint4 vis = gVisibility[index.xy];
+	const uint4 vis = gVisibility[index.xy];
 	
 	float3 radiance = 0;
 	float3 albedo = 1;
@@ -594,24 +695,22 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 
 			DisneyBSDF bsdf = to_disney_bsdf(material);
 			if (!sfc.front_face) bsdf.eta = 1/bsdf.eta;
-			float3 omega_out = -ray.Direction;
+			const float3 omega_out = -ray.Direction;
 
 			bool apply_mis_weight = false;
 			
-			// sample a light
+			// sample direct light
 			if (!bsdf.is_delta() && (sample_bg || sample_lights)) {
+				apply_mis_weight = true;
 				LightSample ls;
 				float pdf_pick;
 				if (reservoirSamples > 0 && bounce_index == 0) {
 					Reservoir r;
-					r.load(index.xy);
-					if (r.W > 0) {
-						ls = get_light_sample(r.y, sfc.v.mPosition, dP, dD, pdf_pick);
-						if (ls.pdf > 0) {
-							ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / ls.pdf;
-							if (!ls.punctual) ls.radiance *= powerHeuristic(ls.pdf*pdf_pick, pdf_bsdf);
-							radiance += throughput * r.W * ls.radiance;
-						}
+					ls = r.load(index.xy, bsdf, omega_out, sfc.v.mPosition, sfc.v.mNormal, dP, dD, pdf_bsdf, pdf_pick);
+					if (r.W > 0 && ls.pdf > 0 && pdf_bsdf > 0) {
+						ls.radiance *= bsdf.Evaluate(omega_out, sfc.v.mNormal, ls.omega_in, pdf_bsdf) * abs(dot(ls.omega_in, sfc.v.mNormal)) / ls.pdf;
+						if (!ls.punctual) ls.radiance *= powerHeuristic(ls.pdf*pdf_pick, pdf_bsdf);
+						radiance += throughput * r.W * ls.radiance;
 					}
 				} else {
 					ls = get_light_sample(rng, sfc.v.mPosition, dP, dD, pdf_pick);
@@ -629,13 +728,12 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 							radiance += throughput * ls.radiance;
 					}
 				}
-				apply_mis_weight = true;
 			}
 
 			// sample the bsdf
 			float3 H, omega_in;
 			uint flag;
-			float3 f = bsdf.Sample(rng, omega_out, sfc.v.mNormal, sfc.v.mTangent, omega_in, pdf_bsdf, flag, H);
+			const float3 f = bsdf.Sample(rng, omega_out, sfc.v.mNormal, sfc.v.mTangent, omega_in, pdf_bsdf, flag, H);
 			if (pdf_bsdf <= 0 || isnan(pdf_bsdf)) break;
 
 			throughput *= f * abs(dot(sfc.v.mNormal, omega_in)) / pdf_bsdf;
@@ -659,8 +757,8 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 			rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, ray);
 			if (!do_ray_query(rayQuery, dP, dD)) {
 				if (gEnvironmentMap < gImageCount) {
-					float theta = acos(clamp(ray.Direction.y, -1, 1));
-					float2 uv = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, theta / M_PI);
+					const float theta = acos(clamp(ray.Direction.y, -1, 1));
+					const float2 uv = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, theta / M_PI);
 					float3 bg = pow(gImages[gEnvironmentMap].SampleLevel(gSampler, uv, 0).rgb, 1/gPushConstants.gEnvironmentMapGamma)*gPushConstants.gEnvironmentMapExposure;
 					if (sample_bg && apply_mis_weight) {
 						float pdf_light = environment_pdf(ray.Direction, uv);
@@ -684,8 +782,8 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 
 				float w = 1;
 				if (sample_lights && apply_mis_weight) {
-					float sinThetaMax2 = p.radius()*p.radius() / (hit_t*hit_t);
-					float cosThetaMax = sqrt(max(0., 1 - sinThetaMax2));
+					const float sinThetaMax2 = p.radius()*p.radius() / (hit_t*hit_t);
+					const float cosThetaMax = sqrt(max(0., 1 - sinThetaMax2));
 					float pdf_light = 1 / (2*M_PI * (1 - cosThetaMax));
 					pdf_light *= 1 / (float)gPushConstants.gLightCount;
 					if (sample_bg) pdf_light *= 0.5;
@@ -705,7 +803,7 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 
 				float w = 1;
 				if (sample_lights && apply_mis_weight) {
-					float lnv = dot(-ray.Direction, sfc.v.mNormal);
+					const float lnv = dot(-ray.Direction, sfc.v.mNormal);
 					float pdf_light = hit_t*hit_t / (lnv * sfc.area);
 					pdf_light *= (1 / (float)p.prim_count()) * (1 / (float)gPushConstants.gLightCount);
 					if (sample_bg) pdf_light *= 0.5;
@@ -715,7 +813,7 @@ void indirect(uint3 index : SV_DispatchThreadID) {
 			}
 
 			if (gSamplingFlags & SAMPLE_FLAG_RR) {
-				float l = luminance(throughput);
+				const float l = luminance(throughput);
 				if (next_rng_sample(rng) > l)
 					break;
 				throughput /= l;

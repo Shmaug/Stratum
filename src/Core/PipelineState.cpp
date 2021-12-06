@@ -139,7 +139,7 @@ void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const uno
 		// create new DescriptorSet if necessary
 		if (!descriptorSets[i]) {
 			descriptorSets[i] = make_shared<DescriptorSet>(layout, mName+"/DescriptorSet"+to_string(i));
-			//mDescriptorSets.emplace(layout.get(), descriptorSets[i]);
+			mDescriptorSets.emplace(layout.get(), descriptorSets[i]);
 			for (auto& [id, descriptors] : mDescriptors)
 				if (auto it = bindings.find(id); it != bindings.end())
 					for (const auto&[arrayIndex, descriptor] : descriptors)
