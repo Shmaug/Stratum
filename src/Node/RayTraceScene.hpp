@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/PipelineState.hpp>
+
 #include "Scene.hpp"
 
 namespace stm {
@@ -49,7 +51,7 @@ private:
 	shared_ptr<AccelerationStructure> mTopLevel;
 	shared_ptr<AccelerationStructure> mUnitCubeAS;
 	unordered_map<Mesh*, Buffer::View<hlsl::VertexData>> mMeshVertices;
-	unordered_map<size_t/* hash_args(Mesh*, firstIndex, indexCount) */, MeshAS> mMeshAccelerationStructures;
+	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 	
 	

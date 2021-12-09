@@ -1,7 +1,8 @@
 #pragma once
 
-#include "NodeGraph.hpp"
 #include <Core/CommandBuffer.hpp>
+
+#include "NodeGraph.hpp"
 
 namespace stm {
 

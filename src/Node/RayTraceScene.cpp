@@ -67,7 +67,7 @@ void RayTraceScene::create_pipelines() {
 	
 	const ShaderDatabase& shaders = *mNode.node_graph().find_components<ShaderDatabase>().front();
 	
-	mCopyVerticesPipeline = n.make_child("copy_vertices_copy").make_component<ComputePipelineState>("copy_vertices_copy", shaders.at("copy_vertices_copy"));
+	mCopyVerticesPipeline = n.make_child("copy_vertices").make_component<ComputePipelineState>("copy_vertices", shaders.at("copy_vertices"));
 	
 	mTracePrimaryRaysPipeline = n.make_child("pathtrace_primary").make_component<ComputePipelineState>("pathtrace_primary", shaders.at("pathtrace_primary"));
 	mTracePrimaryRaysPipeline->set_immutable_sampler("gSampler", samplerRepeat);
@@ -280,8 +280,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 			if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
 
 			// build BLAS
-			size_t key = hash_args(prim->mMesh.get(), prim->mFirstIndex, prim->mIndexCount);
-			auto it = mMeshAccelerationStructures.find(key);
+			auto it = mMeshAccelerationStructures.find(prim->mMesh.get());
 			if (it == mMeshAccelerationStructures.end()) {
 				const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
 				
@@ -294,11 +293,11 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 				triangles.vertexStride = vertexPosDesc.mStride;
 				triangles.maxVertex = (uint32_t)(positions.size_bytes()/vertexPosDesc.mStride);
 				triangles.indexType = prim->mMesh->index_type();
-				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address() + prim->mFirstIndex*prim->mMesh->indices().stride();
+				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address();
 				vk::GeometryFlagBitsKHR flag = {};
 				if (prim->mMaterial->mAlphaCutoff == 0) flag = vk::GeometryFlagBitsKHR::eOpaque;
 				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, flag);
-				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mIndexCount/3);
+				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mMesh->indices().size()/(prim->mMesh->indices().stride()*3));
 				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name()+"/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
 				blasBarriers.emplace_back(
 					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
@@ -312,32 +311,28 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 					
 					// copy vertex data
 					auto positions = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
-					auto normals = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
-					auto tangents = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTangent)[0];
-					auto texcoords = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eTexcoord)[0];
+					auto normals   = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
+					auto texcoords = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTexcoord);
+					auto tangents  = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTangent);
 					
 					commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
 					mCopyVerticesPipeline->descriptor("gVertices") = vertices;
 					mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(positions.second, positions.first.mOffset);
 					mCopyVerticesPipeline->descriptor("gNormals")   = Buffer::View(normals.second, normals.first.mOffset);
-					mCopyVerticesPipeline->descriptor("gTangents")  = Buffer::View(tangents.second, tangents.first.mOffset);
-					mCopyVerticesPipeline->descriptor("gTexcoords") = Buffer::View(texcoords.second, texcoords.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gTangents")  = tangents ? Buffer::View(tangents->second, tangents->first.mOffset) : positions.second;
+					mCopyVerticesPipeline->descriptor("gTexcoords") = texcoords ? Buffer::View(texcoords->second, texcoords->first.mOffset) : positions.second;
 					mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = vertices.size();
 					mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = positions.first.mStride;
 					mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = normals.first.mStride;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents.first.mStride;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents ? tangents->first.mStride : 0;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords ? texcoords->first.mStride : 0;
 					mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);
 					mCopyVerticesPipeline->push_constants(commandBuffer);
 					commandBuffer.dispatch_over(triangles.maxVertex);
 					commandBuffer.barrier(vertices, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
 				}
 
-				it = mMeshAccelerationStructures.emplace(key, MeshAS { as, Buffer::StrideView(
-						prim->mMesh->indices().buffer(),
-						prim->mMesh->indices().stride(),
-						prim->mMesh->indices().offset() + prim->mFirstIndex*prim->mMesh->indices().stride(),
-						prim->mIndexCount*prim->mMesh->indices().stride()) }).first;
+				it = mMeshAccelerationStructures.emplace(prim->mMesh.get(), MeshAS { as, prim->mMesh->indices() }).first;
 			}
 			
 			// append unique materials to materials list
@@ -383,7 +378,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 				light.mLightToWorld = transform;
 				light.mType = LIGHT_TYPE_MESH;
 				light.mEmission = prim->mMaterial->mEmission;
-				for (uint32_t i = 0; i < prim->mIndexCount/3; i++) {
+				for (uint32_t i = 0; i < prim->mMesh->indices().size()/(prim->mMesh->indices().stride()*3); i++) {
 					PackedLightData p { float4::Zero() };
 					p.instance_index((uint32_t)instanceDatas.size());
 					p.prim_index(i);

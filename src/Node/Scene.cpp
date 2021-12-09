@@ -356,7 +356,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			const auto& indicesAccessor = model.accessors[prim.indices];
 			const auto& indexBufferView = model.bufferViews[indicesAccessor.bufferView];
 			size_t stride = tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType);
-			Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], stride, indexBufferView.byteOffset, indexBufferView.byteLength);
+			Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], stride, indexBufferView.byteOffset + indicesAccessor.byteOffset, indicesAccessor.count * stride);
 
 			shared_ptr<VertexArrayObject> vertexData = make_shared<VertexArrayObject>();
 			
@@ -457,34 +457,10 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				auto& attribs = (*vertexData)[attributeType];
 				if (attribs.size() <= typeIndex) attribs.resize(typeIndex+1);
 				const tinygltf::BufferView& bv = model.bufferViews[accessor.bufferView];
+				uint32_t stride = accessor.ByteStride(bv);
 				attribs[typeIndex] = {
-					VertexArrayObject::AttributeDescription(accessor.ByteStride(bv), attributeFormat, (uint32_t)accessor.byteOffset, vk::VertexInputRate::eVertex),
-					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset, bv.byteLength) };
-			}
-
-			if (topology == vk::PrimitiveTopology::eTriangleList && !vertexData->find(VertexArrayObject::AttributeType::eTangent)) {
-				Buffer::View<float4> tangents = make_shared<Buffer>(commandBuffer.mDevice, "tangents", sizeof(float4), bufferUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-				commandBuffer->fillBuffer(**tangents.buffer(), tangents.offset(), tangents.size_bytes(), 0);
-				if (!vertexData->find(VertexArrayObject::AttributeType::eTexcoord)) {
-					(*vertexData)[VertexArrayObject::AttributeType::eTexcoord].emplace_back(VertexArrayObject::AttributeDescription(sizeof(float2), vk::Format::eR32G32Sfloat, 0, vk::VertexInputRate::eVertex), tangents);
-				} else {
-					auto positions = (*vertexData)[VertexArrayObject::AttributeType::ePosition][0].second;
-					auto texcoords = (*vertexData)[VertexArrayObject::AttributeType::eTexcoord][0].second;
-					for (uint32_t i = 0; i < indicesAccessor.count; i++) {
-						uint32_t i0 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*i);
-						uint32_t i1 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*(i+1));
-						uint32_t i2 = *reinterpret_cast<uint32_t*>(indexBuffer.data() + indexBuffer.stride()*(i+2));
-						if (indexBuffer.stride() < sizeof(uint32_t)) {
-							uint32_t mask = (1 << (indexBuffer.stride()*8)) - 1;
-							i0 &= mask;
-							i1 &= mask;
-							i2 &= mask;
-						}
-						
-						
-					}
-				}
-				(*vertexData)[VertexArrayObject::AttributeType::eTangent].emplace_back(VertexArrayObject::AttributeDescription(sizeof(float4), vk::Format::eR32G32B32A32Sfloat, 0, vk::VertexInputRate::eVertex), tangents);
+					VertexArrayObject::AttributeDescription(stride, attributeFormat, 0, vk::VertexInputRate::eVertex),
+					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset + accessor.byteOffset, stride*accessor.count) };
 			}
 
 			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
@@ -513,7 +489,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			for (uint32_t i = 0; i < model.meshes[node.mesh].primitives.size(); i++) {
 				const auto& prim = model.meshes[node.mesh].primitives[i];
 				const auto& indicesAccessor = model.accessors[prim.indices];
-				dst.make_child(model.meshes[node.mesh].name).make_component<MeshPrimitive>(materials[prim.material], meshes[node.mesh][i], (uint32_t)(indicesAccessor.byteOffset/meshes[node.mesh][i]->indices().stride()), indicesAccessor.count);
+				dst.make_child(model.meshes[node.mesh].name).make_component<MeshPrimitive>(materials[prim.material], meshes[node.mesh][i]);
 			}
 		
 		auto light_it = node.extensions.find("KHR_lights_punctual");

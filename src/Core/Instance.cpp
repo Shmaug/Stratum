@@ -46,15 +46,12 @@ LRESULT CALLBACK Instance::window_procedure(HWND hwnd, UINT message, WPARAM wPar
 }
 #endif
 
-Instance::Instance(int argc, char** argv) {
+Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	gInstance = this;
 
 	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(mDynamicLoader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
 	#endif
-
-	mCommandLine.resize(argc);
-	ranges::copy_n(argv, argc, mCommandLine.begin());
 
 	for (const string& arg : mCommandLine) {
 		size_t o = string::npos;

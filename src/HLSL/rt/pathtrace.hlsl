@@ -561,7 +561,7 @@ void primary(uint3 index : SV_DispatchThreadID) {
 
 					// temporal re-use
 					if ((gSamplingFlags & SAMPLE_FLAG_RESERVOIR_TEMPORAL_REUSE) && gPushConstants.gHistoryValid) {
-						const int2 idx_prev = gPrevUV[index.xy]*resolution + float2(next_rng_sample(rng), next_rng_sample(rng)) - 0.5;
+						const int2 idx_prev = gPrevUV[index.xy]*resolution;
 						if (test_inside_screen(idx_prev, resolution))
 							if (test_reprojected_normal(normal, gPrevNormal[idx_prev].xyz))
 								if (test_reprojected_depth(z.y, gPrevZ[idx_prev].x, length(z.zw)))
@@ -582,6 +582,9 @@ void primary(uint3 index : SV_DispatchThreadID) {
 				r.store(index.xy);
 			}
 		}
+	} else {
+		const float theta = acos(clamp(ray.Direction.y, -1, 1));
+		bary = float2(atan2(ray.Direction.z, ray.Direction.x)/M_PI *.5 + .5, theta / M_PI);
 	}
 
 	gRNGSeed[index.xy] = rng;

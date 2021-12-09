@@ -15,24 +15,29 @@ target_include_directories(Stratum PUBLIC
     "$<INSTALL_INTERFACE:include>"
     "$<INSTALL_INTERFACE:include/extern>")
 
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan OpenXR::openxr_loader imgui::imgui)
-if(UNIX)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan imgui::imgui)
+if (UNIX)
     target_link_libraries(Stratum PUBLIC xcb xcb-keysyms)
 endif()
 
 option(STRATUM_ENABLE_DEBUG_LAYERS "Enable debug layers" TRUE)
-if(${STRATUM_ENABLE_DEBUG_LAYERS})
+if (${STRATUM_ENABLE_DEBUG_LAYERS})
     target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_DEBUG_LAYERS)
 endif()
 
-target_compile_definitions(Stratum
-    PRIVATE STRATUM_EXPORTS
-    PUBLIC STRATUM_VERSION_MAJOR=1 STRATUM_VERSION_MINOR=5 _USE_MATH_DEFINES IMGUI_DEFINE_MATH_OPERATORS)
+target_compile_definitions(Stratum PRIVATE STRATUM_EXPORTS)
+target_compile_definitions(Stratum PUBLIC STRATUM_VERSION_MAJOR=1 STRATUM_VERSION_MINOR=5 _USE_MATH_DEFINES IMGUI_DEFINE_MATH_OPERATORS)
 if (UNIX)
-    target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_XCB_KHR XR_USE_GRAPHICS_API_VULKAN)
+    target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_XCB_KHR)
 elseif(WIN32)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_compile_options(Stratum PUBLIC /bigobj)
+endif()
+
+if (OpenXR_FOUND)
+    target_link_libraries(Stratum PUBLIC OpenXR::openxr_loader)
+    target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_OPENXR XR_USE_GRAPHICS_API_VULKAN)
+    message(STATUS "OpenXR enabled")
 endif()
 
 # Shaders

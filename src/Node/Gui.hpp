@@ -1,10 +1,121 @@
 #pragma once
-#include <Core/PipelineState.hpp>
-#include "DynamicRenderPass.hpp"
 
 #include <imgui.h>
 
+#include <Core/PipelineState.hpp>
+
+#include "NodeGraph.hpp"
+#include "DynamicRenderPass.hpp"
+
 namespace stm {
+
+inline void imgui_vk_scalar(const char* label, vk::Format format, void* data) {
+	switch (format) {
+		case vk::Format::eR8Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U8, data, 1);
+			break;
+		case vk::Format::eR8G8Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U8, data, 2);
+			break;
+		case vk::Format::eR8G8B8Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U8, data, 3);
+			break;
+		case vk::Format::eR8G8B8A8Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U8, data, 4);
+			break;
+
+		case vk::Format::eR8Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S8, data, 1);
+			break;
+		case vk::Format::eR8G8Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S8, data, 2);
+			break;
+		case vk::Format::eR8G8B8Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S8, data, 3);
+			break;
+		case vk::Format::eR8G8B8A8Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S8, data, 4);
+			break;
+			
+		case vk::Format::eR16Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U16, data, 1);
+			break;
+		case vk::Format::eR16G16Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U16, data, 2);
+			break;
+		case vk::Format::eR16G16B16Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U16, data, 3);
+			break;
+		case vk::Format::eR16G16B16A16Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U16, data, 4);
+			break;
+
+		case vk::Format::eR16Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S16, data, 1);
+			break;
+		case vk::Format::eR16G16Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S16, data, 2);
+			break;
+		case vk::Format::eR16G16B16Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S16, data, 3);
+			break;
+		case vk::Format::eR16G16B16A16Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S16, data, 4);
+			break;
+
+		case vk::Format::eR32Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U32, data, 1);
+			break;
+		case vk::Format::eR32G32Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U32, data, 2);
+			break;
+		case vk::Format::eR32G32B32Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U32, data, 3);
+			break;
+		case vk::Format::eR32G32B32A32Uint:
+			ImGui::InputScalarN(label, ImGuiDataType_U32, data, 4);
+			break;
+
+		case vk::Format::eR32Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S32, data, 1);
+			break;
+		case vk::Format::eR32G32Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S32, data, 2);
+			break;
+		case vk::Format::eR32G32B32Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S32, data, 3);
+			break;
+		case vk::Format::eR32G32B32A32Sint:
+			ImGui::InputScalarN(label, ImGuiDataType_S32, data, 4);
+			break;
+			
+		case vk::Format::eR32Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 1);
+			break;
+		case vk::Format::eR32G32Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 2);
+			break;
+		case vk::Format::eR32G32B32Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 3);
+			break;
+		case vk::Format::eR32G32B32A32Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 4);
+			break;
+			
+		case vk::Format::eR64Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Double, data, 1);
+			break;
+		case vk::Format::eR64G64Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Double, data, 2);
+			break;
+		case vk::Format::eR64G64B64Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Double, data, 3);
+			break;
+		case vk::Format::eR64G64B64A64Sfloat:
+			ImGui::InputScalarN(label, ImGuiDataType_Double, data, 4);
+			break;
+	}
+}
 
 class Gui {
 public:	

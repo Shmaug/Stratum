@@ -132,7 +132,7 @@ inline void inspector_gui_fn(ComputePipelineState* pipeline) {
 inline void inspector_gui_fn(Mesh* mesh) {
 	ImGui::LabelText("Topology", to_string(mesh->topology()).c_str());
 	ImGui::LabelText("Index Type", to_string(mesh->index_type()).c_str());
-	if (mesh->vertices())
+  if (mesh->vertices()) {
 		for (const auto&[type,verts] : *mesh->vertices())
 			for (uint32_t i = 0; i < verts.size(); i++)
 				if (verts[i].second && ImGui::CollapsingHeader((to_string(type) + "_" + to_string(i)).c_str())) {
@@ -141,6 +141,7 @@ inline void inspector_gui_fn(Mesh* mesh) {
 					ImGui::LabelText("Offset", to_string(verts[i].first.mOffset).c_str());
 					ImGui::LabelText("Input Rate", to_string(verts[i].first.mInputRate).c_str());
 				}
+  }
 }
 
 inline void node_graph_gui_fn(Node& n, Node*& selected) {

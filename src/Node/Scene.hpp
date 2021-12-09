@@ -1,7 +1,8 @@
 #pragma once
 
-#include "DynamicRenderPass.hpp"
-#include <Core/PipelineState.hpp>
+#include <Core/CommandBuffer.hpp>
+
+#include "NodeGraph.hpp"
 
 namespace stm {
 
@@ -26,7 +27,6 @@ struct Camera {
 		float mVerticalFoV;
 		float mOrthographicHeight;
 	};
-	float mStereoSeparation = 0; // set to 0 to disable stereo
 
 	inline hlsl::ProjectionData projection(float aspect) const {
 		return (mProjectionMode == ProjectionMode::eOrthographic) ?
@@ -70,8 +70,6 @@ struct MaterialInfo {
 struct MeshPrimitive {
 	component_ptr<MaterialInfo> mMaterial;
 	component_ptr<Mesh> mMesh;
-	uint32_t mFirstIndex;
-	uint32_t mIndexCount;
 };
 
 STRATUM_API hlsl::TransformData node_to_world(const Node& node);

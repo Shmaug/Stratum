@@ -6,8 +6,8 @@ project(Stratum)
 
 find_package(Vulkan REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(OpenXR REQUIRED CONFIG)
 find_package(imgui  REQUIRED CONFIG)
+find_package(OpenXR CONFIG)
 
 file(DOWNLOAD https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp                       ${CMAKE_CURRENT_LIST_DIR}/src/extern/json.hpp)
 file(DOWNLOAD https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/master/include/vk_mem_alloc.h ${CMAKE_CURRENT_LIST_DIR}/src/extern/vk_mem_alloc.h)

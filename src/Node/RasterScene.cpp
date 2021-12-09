@@ -147,8 +147,6 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 		DrawCall& drawCall = calls.emplace_back();
 		drawCall.mMesh = prim->mMesh.get();
 		drawCall.mMaterialIndex = materialMap_it->second;
-		drawCall.mFirstIndex = prim->mFirstIndex;
-		drawCall.mIndexCount = prim->mIndexCount;
 		drawCall.mFirstInstance = (uint32_t)transforms.size();
 		drawCall.mInstanceCount = 1;
 		
@@ -159,14 +157,13 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	if (envMap) {
 		uint32_t idx = find_image_index(envMap->mImage);
 		mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") = idx;
+		mGeometryPipeline->descriptor("gImages", idx) = image_descriptor(envMap->mImage, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mBackgroundPipeline->push_constant<uint32_t>("gImageIndex") = idx;
 		mBackgroundPipeline->descriptor("gImages", idx) = image_descriptor(envMap->mImage, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mBackgroundPipeline->push_constant<float>("gEnvironmentGamma") = envMap->mGamma;
 		mBackgroundPipeline->transition_images(commandBuffer);
-	} else {
-		mBackgroundPipeline->descriptor("gImages") = {};
+	} else
 		mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") = -1;
-	}
 
 	for (const auto&[image, index] : images)
 		mGeometryPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -276,7 +273,7 @@ void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>
 			if (doShading) commandBuffer.push_constant("gMaterialIndex", drawCall.mMaterialIndex);
 			lastMaterial = drawCall.mMaterialIndex;
 		}
-		commandBuffer->drawIndexed(drawCall.mIndexCount, drawCall.mInstanceCount, drawCall.mFirstIndex, 0, drawCall.mFirstInstance);
+		commandBuffer->drawIndexed(drawCall.mMesh->indices().size_bytes()/drawCall.mMesh->indices().stride(), drawCall.mInstanceCount, 0, 0, drawCall.mFirstInstance);
 	}
 
 	if (doShading && mGeometryPipeline->push_constant<uint32_t>("gEnvironmentMap") != -1) {

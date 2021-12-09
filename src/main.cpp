@@ -3,6 +3,10 @@
 #include "Node/RasterScene.hpp"
 #include "Node/RayTraceScene.hpp"
 
+#ifdef STRATUM_ENABLE_OPENXR
+#include "Node/XRScene.hpp"
+#endif
+
 using namespace stm;
 using namespace stm::hlsl;
 
@@ -24,7 +28,25 @@ inline void load_plugins(const string& plugin_info, Node& dst) {
 }
 
 int main(int argc, char** argv) {
-  auto instance = gNodeGraph.emplace("Instance").make_component<Instance>(argc, argv);
+  vector<string> args;
+  for (int i = 0; i < argc; i++)
+    args.emplace_back(argv[i]);
+
+  Node& root = gNodeGraph.emplace("Instance");
+
+#ifdef STRATUM_ENABLE_OPENXR
+  auto xrscene = root.make_component<XRScene>();
+  string instanceExtensions, deviceExtensions;
+  xrscene->get_vulkan_extensions(instanceExtensions, deviceExtensions);
+  
+  string s;
+  istringstream ss(instanceExtensions);
+  while (getline(ss, s, ' ')) args.push_back("--instanceExtension:" + s);
+  ss = istringstream(deviceExtensions);
+  while (getline(ss, s, ' ')) args.push_back("--deviceExtension:" + s);
+#endif
+
+  auto instance = root.make_component<Instance>(args);
   auto app = instance.node().make_child("Application").make_component<Application>(instance->window());
   auto gui = app.node().make_child("ImGui").make_component<Gui>();
 
@@ -40,6 +62,6 @@ int main(int argc, char** argv) {
 
   instance->device().flush();
 
-	gNodeGraph.erase_recurse(instance.node());
+	gNodeGraph.erase_recurse(root);
 	return EXIT_SUCCESS;
 }

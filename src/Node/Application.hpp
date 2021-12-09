@@ -3,7 +3,9 @@
 #include <Common/dynamic_library.hpp>
 #include <Core/Window.hpp>
 
+#include "DynamicRenderPass.hpp"
 #include "Scene.hpp"
+
 int main(int argc, char** argv);
 
 namespace stm {

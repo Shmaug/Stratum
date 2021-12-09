@@ -54,7 +54,7 @@ public:
 		inline const vk::DeviceMemory& operator*() const { return *reinterpret_cast<const vk::DeviceMemory*>(&mInfo.deviceMemory); }
 		inline const vk::DeviceMemory* operator->() const { return reinterpret_cast<const vk::DeviceMemory*>(&mInfo.deviceMemory); }
 		inline operator bool() const { return mAllocation; }
-		inline VmaAllocation allocation() const { return mAllocation; }
+		inline const VmaAllocation& allocation() const { return mAllocation; }
 		inline byte* data() { return reinterpret_cast<byte*>(mInfo.pMappedData); }
 		inline vk::DeviceSize size() const { return mInfo.size; }
 		inline vk::DeviceSize offset() const { return mInfo.offset; }

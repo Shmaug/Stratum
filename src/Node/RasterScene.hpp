@@ -1,6 +1,9 @@
 #pragma once
 
+#include <Core/PipelineState.hpp>
+
 #include "Scene.hpp"
+#include "DynamicRenderPass.hpp"
 
 namespace stm {
 
@@ -19,8 +22,6 @@ private:
 	struct DrawCall {
 		Mesh* mMesh;
 		uint32_t mMaterialIndex;
-		uint32_t mFirstIndex;
-		uint32_t mIndexCount;
 		uint32_t mFirstInstance;
 		uint32_t mInstanceCount;
 	};

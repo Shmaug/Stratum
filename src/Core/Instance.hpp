@@ -25,7 +25,7 @@ class Instance {
 public:
 	static bool sDisableDebugCallback;
 
-	STRATUM_API Instance(int argc, char** argv);
+	STRATUM_API Instance(const vector<string>& args);
 	STRATUM_API ~Instance();
 
 	inline vk::Instance& operator*() { return mInstance; }
