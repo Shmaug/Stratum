@@ -63,6 +63,7 @@ public:
 	};
 
 	struct QueueFamily {
+		Device& mDevice;
 		uint32_t mFamilyIndex = 0;
 		vector<vk::Queue> mQueues;
 		vk::QueueFamilyProperties mProperties;
@@ -98,9 +99,10 @@ public:
 	template<typename T> inline vk::DeviceSize min_uniform_buffer_offset_alignment() {
 		return (sizeof(T) + mLimits.minUniformBufferOffsetAlignment - 1) & ~(mLimits.minUniformBufferOffsetAlignment - 1);
 	}
-
+	
+	inline auto queue_families() { return mQueueFamilies.lock(); }
 	inline QueueFamily* find_queue_family(vk::SurfaceKHR surface) {
-		auto queueFamilies = mQueueFamilies.lock();
+		auto queueFamilies = queue_families();
 		for (auto& [queueFamilyIndex, queueFamily] : *queueFamilies)
 			if (mPhysicalDevice.getSurfaceSupportKHR(queueFamilyIndex, surface))
 				return &queueFamily;

@@ -10,7 +10,7 @@ namespace stm {
 class CommandBuffer : public DeviceResource {
 public:	
 	// assumes a CommandPool has been created for this_thread in queueFamily
-	STRATUM_API CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+	STRATUM_API CommandBuffer(Device::QueueFamily& queueFamily, const string& name, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	STRATUM_API ~CommandBuffer();
 
 	inline vk::CommandBuffer& operator*() { return mCommandBuffer; }
@@ -19,7 +19,7 @@ public:
 	inline const vk::CommandBuffer* operator->() const { return &mCommandBuffer; }
 
 	inline Fence& completion_fence() const { return *mCompletionFence; }
-	inline Device::QueueFamily* queue_family() const { return mQueueFamily; }
+	inline Device::QueueFamily& queue_family() const { return mQueueFamily; }
 	
 	inline const shared_ptr<Framebuffer>& bound_framebuffer() const { return mBoundFramebuffer; }
 	inline uint32_t subpass_index() const { return mSubpassIndex; }
@@ -177,7 +177,7 @@ public:
 	}
 	inline void dispatch_over(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_over(vk::Extent3D(x,y,z)); }
 
-	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxyNoTemporaries<const vk::ClearValue>& clearValues, vk::SubpassContents contents = vk::SubpassContents::eInline);
+	STRATUM_API void begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void next_subpass(vk::SubpassContents contents = vk::SubpassContents::eInline);
 	STRATUM_API void end_render_pass();
 
@@ -267,7 +267,7 @@ private:
 	
 	vk::CommandBuffer mCommandBuffer;
 
-	Device::QueueFamily* mQueueFamily;
+	Device::QueueFamily& mQueueFamily;
 	vk::CommandPool mCommandPool;
 	CommandBufferState mState;
 	

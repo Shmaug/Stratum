@@ -71,14 +71,6 @@ inline void inspector_gui_fn(Application* app) {
 		app->node().for_each_descendant<RasterScene>([](const auto& v) { v->create_pipelines();	});
 		app->node().for_each_descendant<RayTraceScene>([](const auto& v) { v->create_pipelines();	});
 	}
-	
-  if (ImGui::BeginCombo("Main Camera", app->main_camera().node().name().c_str())) {
-    app->node().for_each_descendant<Camera>([&](component_ptr<Camera> c) {
-      if (ImGui::Selectable(c.node().name().c_str(), app->main_camera() == c))
-        app->main_camera(c);
-    });
-    ImGui::EndCombo();
-  }
 }
 inline void inspector_gui_fn(Instance* instance) {
   ImGui::Text("Vulkan %u.%u.%u", 
@@ -98,27 +90,15 @@ inline void inspector_gui_fn(Instance* instance) {
   ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
   ImGui::LabelText("Window format", to_string(instance->window().surface_format().format).c_str());
   ImGui::LabelText("Window color space", to_string(instance->window().surface_format().colorSpace).c_str());
+  ImGui::LabelText("Window present mode", to_string(instance->window().present_mode()).c_str());
+  
+  bool t = instance->window().allow_tearing();
+  if (ImGui::Checkbox("Tearing allowed", &t))
+    instance->window().allow_tearing(t);
 }
 inline void inspector_gui_fn(ShaderDatabase* shader) {
   for (const auto&[name, spv] : *shader) {
     ImGui::LabelText(name.c_str(), "%s | %s", spv->entry_point().c_str(), to_string(spv->stage()).c_str());
-  }
-}
-inline void inspector_gui_fn(DynamicRenderPass* rp) {
-  for (auto& sp : rp->subpasses()) {
-    if (ImGui::BeginListBox(sp->name().c_str())) {
-      for (auto&[attachment, a] : sp->description().attachments()) {
-          ImGui::Text(attachment.c_str());
-          const char* items[] { "Input", "Color", "Resolve", "DepthStencil", "Preserve" };
-          if (ImGui::BeginCombo("Type", items[a.mType])) {
-            for (uint32_t i = 0; i < ranges::size(items); i++)
-              if (ImGui::Selectable(items[i], a.mType==i))
-                a.mType = (AttachmentType)i;
-            ImGui::EndCombo();
-          }
-      }
-      ImGui::EndListBox();
-    }
   }
 }
 inline void inspector_gui_fn(GraphicsPipelineState* pipeline) {
@@ -415,8 +395,10 @@ void Profiler::on_gui() {
 
     float timeAccum = 0; 
     uint32_t frameCount = 0;
-    for (frameCount = 0; frameCount < frameTimings.size(); frameCount++)
+    for (frameCount = 0; frameCount < frameTimings.size(); frameCount++) {
       timeAccum += frameTimings[frameCount];
+      if (timeAccum > 2000.f) break;
+    }
     ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
 
     const float graphScale = 2;
@@ -471,28 +453,12 @@ Gui::Gui(Node& node) : mNode(node) {
 	mMesh[VertexArrayObject::AttributeType::eColor   ][0].first = VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex);
 
 	auto app = mNode.find_in_ancestor<Application>();
-  
-	mRenderNode = mNode.make_child(node.name() + " DynamicRenderPass").make_component<DynamicRenderPass>();
-  mRenderPass = mRenderNode->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mRenderNode, "renderPass"));
-  mRenderPass->emplace_attachment("colorBuffer", AttachmentType::eColor, blend_mode_state(),
-    vk::AttachmentDescription({},
-      app->main_pass()->attachment("colorBuffer").mDescription.format, vk::SampleCountFlagBits::e1,
-      vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-      vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR));
-	
 	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst + 16);
 	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eLast - 16);
-	mRenderPass->OnDraw.listen(mNode, bind_front(&Gui::draw, this));
-	
-	// draw after app's render_pass
-	app->main_pass()->mPass.PostProcess.listen(mNode, [&](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
-		mRenderNode->render(commandBuffer, { { "colorBuffer", { framebuffer->at("colorBuffer"), {} } } } );
-	}, EventPriority::eLast - 16);
 	
 	#pragma region Inspector gui
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
 	register_inspector_gui_fn<ShaderDatabase>(&inspector_gui_fn);
-	register_inspector_gui_fn<DynamicRenderPass>(&inspector_gui_fn);
 	register_inspector_gui_fn<ComputePipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<Application>(&inspector_gui_fn);
@@ -732,10 +698,23 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 		mPipeline->transition_images(commandBuffer);
 	}
 }
-void Gui::draw(CommandBuffer& commandBuffer) {
+void Gui::draw(CommandBuffer& commandBuffer, const Image::View& dst) {
 	if (!mDrawData || mDrawData->CmdListsCount <= 0) return;
 
 	ProfilerRegion ps("Draw Gui", commandBuffer);
+
+	unordered_map<RenderAttachmentId, RenderPass::AttachmentInfo> attachments {
+		{ "colorBuffer", {
+			AttachmentType::eColor, blend_mode_state(), vk::AttachmentDescription{ {},
+				dst.image()->format(), dst.image()->sample_count(),
+				vk::AttachmentLoadOp::eLoad, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal } }
+		}
+	};
+  auto renderPass = make_shared<RenderPass>(dst.image()->mDevice, "Gui RenderPass", attachments);
+  Image::View attachment = dst;
+  auto framebuffer = make_shared<Framebuffer>(*renderPass, "Gui Framebuffer", attachment);
+  commandBuffer.begin_render_pass(renderPass, framebuffer, vk::Rect2D{ {}, framebuffer->extent() }, { {} });
 
 	float2 scale = float2::Map(&mDrawData->DisplaySize.x);
 	float2 offset = float2::Map(&mDrawData->DisplayPos.x);
@@ -780,4 +759,6 @@ void Gui::draw(CommandBuffer& commandBuffer) {
 		voff += cmdList->VtxBuffer.size();
 		ioff += cmdList->IdxBuffer.size();
 	}
+
+  commandBuffer.end_render_pass();
 }

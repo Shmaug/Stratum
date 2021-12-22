@@ -96,12 +96,12 @@ stm::Window::~Window() {
 #endif
 }
 
-Image::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
+bool stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	ProfilerRegion ps("Window::acquire_image", commandBuffer);
 	
-	if (!mSwapchain || mSwapchainImages[0].image()->usage() != mImageUsage) {
+	if (mRecreateSwapchain || !mSwapchain || mSwapchainImages[0].image()->usage() != mImageUsage) {
 		create_swapchain(commandBuffer.mDevice);
-		if (!mSwapchain) return Image::View();
+		if (!mSwapchain) return false;
 	}
 
 	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
@@ -109,10 +109,10 @@ Image::View stm::Window::acquire_image(CommandBuffer& commandBuffer) {
 	vk::Result result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {}, &mBackBufferIndex);
 	if (result == vk::Result::eNotReady || result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
 		destroy_swapchain();
-		return Image::View();
+		return false;
 	} else if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
-	return back_buffer();
+	return true;
 }
 void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores) {
 	ProfilerRegion ps("Window::present");
@@ -200,17 +200,14 @@ void stm::Window::create_swapchain(Device& device) {
 	mPresentQueueFamily = mSwapchainDevice->find_queue_family(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
-	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->physical().getSurfaceCapabilitiesKHR(mSurface);
-	auto formats 							 = mSwapchainDevice->physical().getSurfaceFormatsKHR(mSurface);
-	auto presentModes 				 = mSwapchainDevice->physical().getSurfacePresentModesKHR(mSurface);
-	auto queueFamilyProperties = mSwapchainDevice->physical().getQueueFamilyProperties();
-
 	// get the size of the swapchain
+	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->physical().getSurfaceCapabilitiesKHR(mSurface);
 	mSwapchainExtent = capabilities.currentExtent;
 	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mSwapchainDevice->limits().maxImageDimension2D || mSwapchainExtent.height > mSwapchainDevice->limits().maxImageDimension2D)
 		return; // invalid swapchain size, window invalid
 
 	// select the format of the swapchain
+	auto formats = mSwapchainDevice->physical().getSurfaceFormatsKHR(mSurface);
 	mSurfaceFormat = formats[0];
 	for (const vk::SurfaceFormatKHR& format : formats)
 		if (format.format == vk::Format::eR8G8B8A8Unorm) {
@@ -219,12 +216,13 @@ void stm::Window::create_swapchain(Device& device) {
 		}	else if (format.format == vk::Format::eB8G8R8A8Unorm)
 			mSurfaceFormat = format;
 
+	auto presentModes = mSwapchainDevice->physical().getSurfacePresentModesKHR(mSurface);
 	vector<vk::PresentModeKHR> preferredPresentModes { vk::PresentModeKHR::eMailbox };
-	if (mAllowTearing) preferredPresentModes = { vk::PresentModeKHR::eMailbox, vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eFifoRelaxed };
-	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
+	if (mAllowTearing) preferredPresentModes = { vk::PresentModeKHR::eFifoRelaxed, vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eMailbox };
+	mPresentMode = vk::PresentModeKHR::eFifo;
 	for (auto mode : preferredPresentModes)
 		if (ranges::find(presentModes, mode) != presentModes.end())
-			presentMode = mode;
+			mPresentMode = mode;
 
 	vk::SwapchainCreateInfoKHR createInfo = {};
 	createInfo.surface = mSurface;
@@ -237,7 +235,7 @@ void stm::Window::create_swapchain(Device& device) {
 	createInfo.imageSharingMode = vk::SharingMode::eExclusive;
 	createInfo.preTransform = capabilities.currentTransform;
 	createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
-	createInfo.presentMode = presentMode;
+	createInfo.presentMode = mPresentMode;
 	createInfo.clipped = VK_TRUE;
 	mSwapchain = (*mSwapchainDevice)->createSwapchainKHR(createInfo);
 	mSwapchainDevice->set_debug_name(mSwapchain, "Window/Swapchain");

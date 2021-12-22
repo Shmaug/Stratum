@@ -275,11 +275,12 @@ public:
 	inline vk::SurfaceKHR surface() const { return mSurface; }
 	inline vk::SwapchainKHR swapchain() const { return mSwapchain; }
 	inline vk::SurfaceFormatKHR surface_format() const { return mSurfaceFormat; }
+	inline vk::PresentModeKHR present_mode() const { return mPresentMode; }
 	inline const vk::Extent2D& swapchain_extent() const { return mSwapchainExtent; }
 	inline const shared_ptr<Semaphore>& image_available_semaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
 	
-	inline void allow_tearing(bool v) { mAllowTearing = v; }
+	inline void allow_tearing(bool v) { if (mAllowTearing != v) mRecreateSwapchain = true; mAllowTearing = v; }
 	inline bool allow_tearing() const { return mAllowTearing; }
 
 	STRATUM_API void fullscreen(bool fs);
@@ -289,7 +290,7 @@ public:
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
 	inline const Image::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
 	inline const Image::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
-	inline void back_buffer_usage(vk::ImageUsageFlags usage) { mImageUsage = usage; }
+	inline vk::ImageUsageFlags& back_buffer_usage() { return mImageUsage; }
 	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mImageUsage; }
 
 #ifdef WIN32
@@ -301,7 +302,7 @@ public:
 
 	STRATUM_API void resize(uint32_t w, uint32_t h);
 
-	STRATUM_API Image::View acquire_image(CommandBuffer& commandBuffer);
+	STRATUM_API bool acquire_image(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores = {});
 	// Number of times present has been called
@@ -334,12 +335,14 @@ private:
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
 	vk::ImageUsageFlags mImageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+	vk::PresentModeKHR mPresentMode;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
 	size_t mPresentCount = 0;
 	
 	bool mFullscreen = false;
 	bool mAllowTearing = false;
+	bool mRecreateSwapchain = false;
 	vk::Rect2D mClientRect;
 	string mTitle;
 

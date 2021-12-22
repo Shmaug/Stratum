@@ -14,7 +14,7 @@ private:
 
 public:
 	inline Framebuffer(stm::RenderPass& renderPass, const string& name, const vk::ArrayProxy<Image::View>& attachments)
-		: DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass), mAttachments(attachments.begin(), attachments.end()) {		
+		: DeviceResource(renderPass.mDevice, name), mRenderPass(renderPass), mAttachments(attachments.begin(), attachments.end()) {
 		for (uint32_t i = 0; i < mAttachments.size(); i++)
 			mExtent = vk::Extent2D(max(mExtent.width , mAttachments[i].extent().width), max(mExtent.height, mAttachments[i].extent().height) );
 		vector<vk::ImageView> views(mAttachments.size());

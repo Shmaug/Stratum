@@ -2,10 +2,10 @@
 
 using namespace stm;
 
-CommandBuffer::CommandBuffer(Device& device, const string& name, Device::QueueFamily* queueFamily, vk::CommandBufferLevel level)
-	: DeviceResource(device, name), mQueueFamily(queueFamily) {
-	mCompletionFence = make_unique<Fence>(device, name + "/CompletionFence");
-	mCommandPool = queueFamily->mCommandBuffers.at(this_thread::get_id()).first;
+CommandBuffer::CommandBuffer(Device::QueueFamily& queueFamily, const string& name, vk::CommandBufferLevel level)
+	: DeviceResource(queueFamily.mDevice, name), mQueueFamily(queueFamily) {
+	mCompletionFence = make_unique<Fence>(mDevice, name + "/CompletionFence");
+	mCommandPool = mQueueFamily.mCommandBuffers.at(this_thread::get_id()).first;
 
 	vk::CommandBufferAllocateInfo allocInfo;
 	allocInfo.commandPool = mCommandPool;
@@ -71,7 +71,7 @@ void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<Descrip
 	mCommandBuffer.bindDescriptorSets(mBoundPipeline->bind_point(), mBoundPipeline->layout(), index, **descriptorSet, dynamicOffsets);
 }
 
-void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vk::ArrayProxyNoTemporaries<const vk::ClearValue>& clearValues, vk::SubpassContents contents) {
+void CommandBuffer::begin_render_pass(const shared_ptr<RenderPass>& renderPass, const shared_ptr<Framebuffer>& framebuffer, const vk::Rect2D& renderArea, const vector<vk::ClearValue>& clearValues, vk::SubpassContents contents) {
 	// Transition attachments to the layouts specified by the render pass
 	// Image states are untracked during a renderpass
 	for (uint32_t i = 0; i < framebuffer->size(); i++)

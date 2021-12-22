@@ -1,11 +1,9 @@
 #pragma once
 
-#include <imgui.h>
-
 #include <Core/PipelineState.hpp>
-
 #include "NodeGraph.hpp"
-#include "DynamicRenderPass.hpp"
+
+#include <imgui.h>
 
 namespace stm {
 
@@ -123,7 +121,6 @@ public:
 	STRATUM_API ~Gui();
 
 	inline Node& node() const { return mNode; }
-	inline const auto& render_pass() const { return mRenderPass; }
 	
 	STRATUM_API void create_pipelines();
 
@@ -134,7 +131,7 @@ public:
 
 	STRATUM_API void new_frame(CommandBuffer& commandBuffer, float deltaTime);
 	STRATUM_API void make_geometry(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer);
+	STRATUM_API void draw(CommandBuffer& commandBuffer, const Image::View& dst);
 
 	inline void set_context() const {
 		ImGui::SetCurrentContext(mContext);
@@ -153,8 +150,6 @@ public:
 
 private:
 	Node& mNode;
-	component_ptr<DynamicRenderPass> mRenderNode;
-	shared_ptr<DynamicRenderPass::Subpass> mRenderPass;
 	component_ptr<GraphicsPipelineState> mPipeline;
 	unordered_map<Image::View, uint32_t> mImageMap;
 	Mesh mMesh;

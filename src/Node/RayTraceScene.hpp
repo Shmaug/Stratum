@@ -38,8 +38,7 @@ public:
 	
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer);
-	STRATUM_API void a_svgf(CommandBuffer& commandBuffer, const Image::View& colorBuffer);
+	STRATUM_API void render(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer, const vk::Rect2D& renderRegion = {});
 
 private:
 	struct MeshAS {

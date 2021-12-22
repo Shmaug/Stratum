@@ -46,46 +46,16 @@ enum AttachmentType {
 	ePreserve = 5
 };
 
-struct SubpassDescription {
+class RenderPass : public DeviceResource {
 public:
 	struct AttachmentInfo {
 		AttachmentType mType;
 		vk::PipelineColorBlendAttachmentState mBlendState;
 		vk::AttachmentDescription mDescription;
 	};
+	using SubpassDescription = unordered_map<RenderAttachmentId, AttachmentInfo>;
 
-	inline auto& attachments() { return mAttachmentDescriptions; }
-	inline const auto& attachments() const { return mAttachmentDescriptions; }
-	inline size_t count(const RenderAttachmentId& attachmentId) const { return mAttachmentDescriptions.count(attachmentId); }
-	inline const auto& at(const RenderAttachmentId& attachmentId) const { return mAttachmentDescriptions.at(attachmentId); }
-	inline auto& at(const RenderAttachmentId& attachmentId) { return mAttachmentDescriptions.at(attachmentId); }
-	template<typename... Args> requires(constructible_from<AttachmentInfo, Args...>)
-	inline auto& emplace(const RenderAttachmentId& attachmentId, Args&&... args) { return mAttachmentDescriptions.emplace(attachmentId, AttachmentInfo(forward<Args>(args)...)).first->second; }
-	inline size_t erase(const RenderAttachmentId& attachmentId) { return mAttachmentDescriptions.erase(attachmentId); }
-	
-	inline AttachmentInfo& operator[](const RenderAttachmentId& attachmentId) { return mAttachmentDescriptions[attachmentId]; }
-	inline const AttachmentInfo& operator[](const RenderAttachmentId& attachmentId) const { return at(attachmentId); }
-
-private:
-	unordered_map<RenderAttachmentId, AttachmentInfo> mAttachmentDescriptions;
-};
-
-class RenderPass : public DeviceResource {
-private:
- 	friend class CommandBuffer;
-	friend struct std::hash<stm::RenderPass>;
-
-	vk::RenderPass mRenderPass;
-
-	vector<SubpassDescription> mSubpassDescriptions;
-	vector<pair<vk::AttachmentDescription, RenderAttachmentId>> mAttachmentDescriptions;
-	unordered_map<RenderAttachmentId, uint32_t> mAttachmentMap;
-
-	size_t mHash;
-
-public:
-	template<ranges::view R>
-	inline RenderPass(Device& device, const string& name, R&& subpassDescriptions) : DeviceResource(device, name), mHash(0) {
+	inline RenderPass(Device& device, const string& name, const vk::ArrayProxy<SubpassDescription>& subpassDescriptions) : DeviceResource(device, name), mHash(0) {
 		ranges::copy(subpassDescriptions, back_inserter(mSubpassDescriptions));
 		
 		vector<tuple<
@@ -101,10 +71,10 @@ public:
 		for (uint32_t i = 0; i < mSubpassDescriptions.size(); i++) {
 			auto&[inputAttachments, colorAttachments, resolveAttachments, preserveAttachments, depthAttachment] = subpassData[i];
 
-			mHash = hash_combine(mHash, hash_args(mSubpassDescriptions[i].attachments()));
+			mHash = hash_combine(mHash, hash_args(mSubpassDescriptions[i]));
 
 			bool hasDepth = false;
-			for (const auto& [attachmentName,attachment] : mSubpassDescriptions[i].attachments()) {
+			for (const auto& [attachmentName,attachment] : mSubpassDescriptions[i]) {
 				uint32_t attachmentIndex;
 				const auto& vkdesc = attachment.mDescription;
 				if (auto it = mAttachmentMap.find(attachmentName); it != mAttachmentMap.end()) {
@@ -182,6 +152,18 @@ public:
 	inline const auto& subpasses() const { return mSubpassDescriptions; }
 	inline const auto& attachments() const { return mAttachmentDescriptions; }
 	inline uint32_t attachment_index(const RenderAttachmentId& id) const { return mAttachmentMap.at(id); }
+
+private:
+ 	friend class CommandBuffer;
+	friend struct std::hash<stm::RenderPass>;
+
+	vk::RenderPass mRenderPass;
+
+	vector<SubpassDescription> mSubpassDescriptions;
+	vector<pair<vk::AttachmentDescription, RenderAttachmentId>> mAttachmentDescriptions;
+	unordered_map<RenderAttachmentId, uint32_t> mAttachmentMap;
+
+	size_t mHash;
 };
 
 }

@@ -80,7 +80,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	set_debug_name(mDevice, name);
 	#pragma endregion
 
-	#pragma region Create PipelineCache and DesriptorPool
+	#pragma region Create PipelineCache and DescriptorPool
 	vk::PipelineCacheCreateInfo cacheInfo = {};
 	string tmp;
 	if (!mInstance.find_argument("noPipelineCache")) {
@@ -119,7 +119,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	#pragma endregion
 
 	for (const vk::DeviceQueueCreateInfo& info : queueCreateInfos) {
-		QueueFamily q = {};
+		QueueFamily q = { *this };
 		q.mFamilyIndex = info.queueFamilyIndex;
 		q.mProperties = queueFamilyProperties[info.queueFamilyIndex];
 		q.mSurfaceSupport = mPhysicalDevice.getSurfaceSupportKHR(info.queueFamilyIndex, mInstance.window().surface());
@@ -203,7 +203,7 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 		commandBuffer->reset(name);
 		return commandBuffer;
 	} else
-		return make_shared<CommandBuffer>(*this, name, queueFamily, level);
+		return make_shared<CommandBuffer>(*queueFamily, name, level);
 }
 void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProxy<pair<shared_ptr<Semaphore>, vk::PipelineStageFlags>>& waitSemaphores, const vk::ArrayProxy<shared_ptr<Semaphore>>& signalSemaphores) {
 	ProfilerRegion ps("CommandBuffer::submit");
@@ -220,11 +220,11 @@ void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProx
 	for(const auto& s : signalSemaphores) commandBuffer->hold_resource(s);
 
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily->mQueues[0].submit(vk::SubmitInfo(waits, waitStages, **commandBuffer, signals), **commandBuffer->mCompletionFence);
+	commandBuffer->mQueueFamily.mQueues[0].submit(vk::SubmitInfo(waits, waitStages, **commandBuffer, signals), **commandBuffer->mCompletionFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 	
 	scoped_lock l(mQueueFamilies.m());
-	commandBuffer->mQueueFamily->mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
+	commandBuffer->mQueueFamily.mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
 }
 void Device::flush() {
 	mDevice.waitIdle();

@@ -101,7 +101,7 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
   ProfilerRegion ps("GraphicsPipeline::GraphicsPipeline");
 
   vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
-  for (const auto& desc : renderPass.subpasses()[subpassIndex].attachments() | views::values) {
+  for (const auto& desc : renderPass.subpasses()[subpassIndex] | views::values) {
     if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil)
       sampleCount = desc.mDescription.samples;
     if (blendStates.empty() && desc.mType == AttachmentType::eColor)
@@ -110,7 +110,7 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
   if (!blendStates.empty()) mBlendStates = blendStates;
 
   // attachments
-  for (auto& [id, desc] : renderPass.subpasses()[subpassIndex].attachments())
+  for (auto& [id, desc] : renderPass.subpasses()[subpassIndex])
     if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil) {
       mMultisampleState.rasterizationSamples = desc.mDescription.samples;
       break;

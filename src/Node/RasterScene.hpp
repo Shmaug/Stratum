@@ -1,9 +1,7 @@
 #pragma once
 
 #include <Core/PipelineState.hpp>
-
 #include "Scene.hpp"
-#include "DynamicRenderPass.hpp"
 
 namespace stm {
 
@@ -13,10 +11,9 @@ public:
 	STRATUM_API void create_pipelines();
 
 	inline Node& node() const { return mNode; }
-	inline DynamicRenderPass& shadow_node() const { return *mShadowPass; }
 		
 	STRATUM_API void update(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, bool doShading = true) const;
+	STRATUM_API void render(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const vk::Rect2D& renderArea, bool doShading = true) const;
 
 private:
 	struct DrawCall {
@@ -26,7 +23,7 @@ private:
 		uint32_t mInstanceCount;
 	};
 	Node& mNode;
-	component_ptr<DynamicRenderPass> mShadowPass;
+	shared_ptr<RenderPass> mShadowPass;
 	component_ptr<GraphicsPipelineState> mGeometryPipeline;
 	component_ptr<GraphicsPipelineState> mBackgroundPipeline;
 	vector<DrawCall> mDrawCalls;

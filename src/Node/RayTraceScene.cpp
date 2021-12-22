@@ -41,13 +41,6 @@ AccelerationStructure::~AccelerationStructure() {
 
 RayTraceScene::RayTraceScene(Node& node) : mNode(node), mCurFrame(make_unique<FrameData>()), mPrevFrame(make_unique<FrameData>()) {
 	auto app = mNode.find_in_ancestor<Application>();
-  app->OnUpdate.listen(mNode, bind(&RayTraceScene::update, this, std::placeholders::_1), EventPriority::eLast - 128);
-  app->main_pass()->mPass.PostProcess.listen(mNode, [&,app](CommandBuffer& commandBuffer, const shared_ptr<Framebuffer>& framebuffer) {
-    draw(commandBuffer, app->main_camera(), framebuffer->at("colorBuffer"));
-  }, EventPriority::eFirst + 8);
-	app->back_buffer_usage() |= vk::ImageUsageFlagBits::eStorage;
-	app->depth_buffer_usage() |= vk::ImageUsageFlagBits::eSampled;
-	
 	app.node().find_in_descendants<Gui>()->register_inspector_gui_fn(&inspector_gui_fn);
 
 	create_pipelines();
@@ -483,8 +476,8 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 	mTemporalAccumulationPipeline->descriptor("gInstanceIndexMap") = instanceIndexMap;
 }
 
-void RayTraceScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer) {
-	ProfilerRegion ps("RayTraceScene::draw", commandBuffer);
+void RayTraceScene::render(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer, const vk::Rect2D& renderArea) {
+	ProfilerRegion ps("RayTraceScene::render", commandBuffer);
 
 	vk::Extent3D gradExtent(colorBuffer.extent().width / gGradientDownsample, colorBuffer.extent().height / gGradientDownsample, 1);
 	if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != colorBuffer.extent()) {

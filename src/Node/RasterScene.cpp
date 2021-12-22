@@ -13,40 +13,18 @@ struct CameraData {
 };
 #pragma pack(pop)
 
-/*
-inline void axis_arrows(DynamicGeometry& g, const TransformData& transform) {
-	static const array<DynamicGeometry::vertex_t, 6> axisVertices {
-		DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0xFF,0,0,0xFF), float2(0,0) ),
-		DynamicGeometry::vertex_t( float3(1,0,0), uchar4(0xFF,0,0,0xFF), float2(1,0) ),
-		DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0,0xFF,0,0xFF), float2(0,0) ),
-		DynamicGeometry::vertex_t( float3(0,1,0), uchar4(0,0xFF,0,0xFF), float2(1,0) ),
-		DynamicGeometry::vertex_t( float3(0,0,0), uchar4(0,0,0xFF,0xFF), float2(0,0) ),
-		DynamicGeometry::vertex_t( float3(0,0,1), uchar4(0,0,0xFF,0xFF), float2(1,0) ),
-	};
-	static const array<uint16_t,6> axisIndices { 0,1, 2,3, 4,5 };
-	g.add_instance(axisVertices, axisIndices, vk::PrimitiveTopology::eLineList, transform);
-}
-template<typename T> inline void gizmo_fn(DynamicGeometry&, const component_ptr<T>&) {}
-template<> inline void gizmo_fn(DynamicGeometry& g, const component_ptr<LightData>& light) {
-	axis_arrows(g, light->mLightToWorld);
-}
-template<> inline void gizmo_fn(DynamicGeometry& g, const component_ptr<TransformData>& transform) {
-	axis_arrows(g, node_to_world(transform.node()));
-}
-*/
-
 RasterScene::RasterScene(Node& node) : mNode(node) {
-	mShadowPass = node.make_child("ShadowMap DynamicRenderPass").make_component<DynamicRenderPass>();
-	auto& shadowPass = *mShadowPass->subpasses().emplace_back(make_shared<DynamicRenderPass::Subpass>(*mShadowPass, "shadowPass"));
-	shadowPass.emplace_attachment("gShadowMap", AttachmentType::eDepthStencil, blend_mode_state(), vk::AttachmentDescription({},
-		vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
-		vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-		vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal));
-	shadowPass.OnDraw.listen(mNode, [&](CommandBuffer& commandBuffer) { draw(commandBuffer, nullptr, false); });
+	auto instance = node.find_in_ancestor<Instance>();
 
-	auto app = mNode.find_in_ancestor<Application>();
-  app->OnUpdate.listen(mNode, bind(&RasterScene::update, this, std::placeholders::_1), EventPriority::eLast - 128);
-  app->main_pass()->OnDraw.listen(mNode, [&,app](CommandBuffer& commandBuffer) { draw(commandBuffer, app->main_camera()); });
+	unordered_map<RenderAttachmentId, RenderPass::AttachmentInfo> shadowAttachments {
+		{ "gShadowMap", {
+			AttachmentType::eDepthStencil, blend_mode_state(), vk::AttachmentDescription{ {},
+				vk::Format::eD32Sfloat, vk::SampleCountFlagBits::e1,
+				vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+				vk::ImageLayout::eDepthStencilAttachmentOptimal, vk::ImageLayout::eDepthStencilAttachmentOptimal }
+			} }
+	};
+	mShadowPass = make_shared<RenderPass>(instance->device(), "Shadow Pass", shadowAttachments);
 
 	create_pipelines();
 }
@@ -218,14 +196,26 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 						cameraDatas[cameraIndex].gCameraToWorld = inverse(t);
 						cameraDatas[cameraIndex].gWorldToCamera = t;
 						cameraDatas[cameraIndex].gProjection = light.mShadowProjection;
-						mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index()+i, 1), vk::ClearValue({0.f, 0}) } } });
+						
+						Image::View attachment(shadowMap.image(), 0, 1, p.shadow_index()+i, 1);
+						auto framebuffer = make_shared<Framebuffer>(*mShadowPass, mNode.name()+"/Framebuffer", attachment);
+						commandBuffer.begin_render_pass(mShadowPass, framebuffer, { {}, framebuffer->extent() }, { vk::ClearValue({0.f, 0}) });
+						render(commandBuffer, nullptr,  { {}, framebuffer->extent() }, false);
+						commandBuffer.end_render_pass();
+						
 						cameraIndex++;
 					}
 				} else {
 					cameraDatas[cameraIndex].gCameraToWorld = inverse(light.mWorldToLight);
 					cameraDatas[cameraIndex].gWorldToCamera = light.mWorldToLight;
 					cameraDatas[cameraIndex].gProjection = light.mShadowProjection;
-					mShadowPass->render(commandBuffer, { { "gShadowMap", { Image::View(shadowMap.image(), 0, 1, p.shadow_index(), 1), vk::ClearValue({0.f, 0}) } } });
+
+					Image::View attachment(shadowMap.image(), 0, 1, p.shadow_index(), 1);
+					auto framebuffer = make_shared<Framebuffer>(*mShadowPass, mNode.name()+"/Framebuffer", attachment);
+					commandBuffer.begin_render_pass(mShadowPass, framebuffer, { {}, framebuffer->extent() }, { vk::ClearValue({0.f, 0}) });
+					render(commandBuffer, nullptr,  { {}, framebuffer->extent() }, false);
+					commandBuffer.end_render_pass();
+
 					cameraIndex++;
 				}
 			}
@@ -236,17 +226,17 @@ void RasterScene::update(CommandBuffer& commandBuffer) {
 	mGeometryPipeline->transition_images(commandBuffer);
 }
 
-void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, bool doShading) const {
-	ProfilerRegion ps("RasterScene::draw", commandBuffer);
+void RasterScene::render(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const vk::Rect2D& renderArea, bool doShading) const {
+	ProfilerRegion ps("RasterScene::render", commandBuffer);
 	const auto& framebuffer = commandBuffer.bound_framebuffer();
-	commandBuffer->setViewport(0, vk::Viewport(0, (float)framebuffer->extent().height, (float)framebuffer->extent().width, -(float)framebuffer->extent().height, 0, 1));
-	commandBuffer->setScissor(0, vk::Rect2D({}, framebuffer->extent()));
+	commandBuffer->setViewport(0, vk::Viewport(renderArea.offset.x, renderArea.offset.y + (float)renderArea.extent.height, (float)renderArea.extent.width, -(float)renderArea.extent.height, 0, 1));
+	commandBuffer->setScissor(0, vk::Rect2D({ renderArea.offset.x, renderArea.offset.y }, renderArea.extent));
 	
 	if (camera) {
 		Buffer::View<CameraData> cameraData = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		cameraData.data()->gCameraToWorld = node_to_world(camera.node());
 		cameraData.data()->gWorldToCamera = inverse(cameraData.data()->gCameraToWorld);
-		cameraData.data()->gProjection = camera->projection((float)framebuffer->extent().height/(float)framebuffer->extent().width);
+		cameraData.data()->gProjection = camera->projection((float)renderArea.extent.height/(float)renderArea.extent.width);
 		mGeometryPipeline->descriptor("gCameraData") = cameraData;
 		mBackgroundPipeline->descriptor("gCameraData") = cameraData;
 	}
@@ -257,9 +247,9 @@ void RasterScene::draw(CommandBuffer& commandBuffer, const component_ptr<Camera>
 	for (const DrawCall& drawCall : mDrawCalls) {
 		if (drawCall.mMesh != lastMesh) {
 			auto pipeline = mGeometryPipeline->get_pipeline(
-					commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
-					drawCall.mMesh->vertex_layout(*mGeometryPipeline->stage(vk::ShaderStageFlagBits::eVertex)),
-					doShading ? vk::ShaderStageFlagBits::eAll : vk::ShaderStageFlagBits::eVertex );
+				commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(),
+				drawCall.mMesh->vertex_layout(*mGeometryPipeline->stage(vk::ShaderStageFlagBits::eVertex)),
+				doShading ? vk::ShaderStageFlagBits::eAll : vk::ShaderStageFlagBits::eVertex );
 			if (pipeline.get() != lastPipeline) {
 				commandBuffer.bind_pipeline(pipeline);
 				mGeometryPipeline->bind_descriptor_sets(commandBuffer);
