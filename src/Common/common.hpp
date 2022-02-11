@@ -4,90 +4,12 @@
 
 namespace stm {
 
-
 using namespace std;
 using namespace Eigen;
 namespace fs = std::filesystem;
 
 using fRay = ParametrizedLine<float,3>;
 using dRay = ParametrizedLine<double,3>;
-
-
-namespace hlsl {
-
-using uint = uint32_t;
-
-template<typename T, int M, int N> using MatrixType = Array<T, M, N, ColMajor, M, N>;
-
-using char2    	= MatrixType<int8_t , 2, 1>;
-using char3    	= MatrixType<int8_t , 3, 1>;
-using char4    	= MatrixType<int8_t , 4, 1>;
-using uchar2   	= MatrixType<int8_t , 2, 1>;
-using uchar3   	= MatrixType<int8_t , 3, 1>;
-using uchar4   	= MatrixType<int8_t , 4, 1>;
-using int2    	= MatrixType<int32_t, 2, 1>;
-using int3    	= MatrixType<int32_t, 3, 1>;
-using int4    	= MatrixType<int32_t, 4, 1>;
-using uint2   	= MatrixType<int32_t, 2, 1>;
-using uint3   	= MatrixType<int32_t, 3, 1>;
-using uint4   	= MatrixType<int32_t, 4, 1>;
-using long2    	= MatrixType<int64_t, 2, 1>;
-using long3    	= MatrixType<int64_t, 3, 1>;
-using long4    	= MatrixType<int64_t, 4, 1>;
-using ulong2   	= MatrixType<int64_t, 2, 1>;
-using ulong3   	= MatrixType<int64_t, 3, 1>;
-using ulong4   	= MatrixType<int64_t, 4, 1>;
-using float2  	= MatrixType<float  , 2, 1>;
-using float3  	= MatrixType<float  , 3, 1>;
-using float4  	= MatrixType<float  , 4, 1>;
-using int2x2    = MatrixType<int32_t, 2, 2>;
-using int3x2    = MatrixType<int32_t, 3, 2>;
-using int4x2    = MatrixType<int32_t, 4, 2>;
-using uint2x2   = MatrixType<int32_t, 2, 2>;
-using uint3x2   = MatrixType<int32_t, 3, 2>;
-using uint4x2   = MatrixType<int32_t, 4, 2>;
-using float2x2  = MatrixType<float  , 2, 2>;
-using float3x2  = MatrixType<float  , 3, 2>;
-using float4x2  = MatrixType<float  , 4, 2>;
-using int2x3    = MatrixType<int32_t, 2, 3>;
-using int3x3    = MatrixType<int32_t, 3, 3>;
-using int4x3    = MatrixType<int32_t, 4, 3>;
-using uint2x3   = MatrixType<int32_t, 2, 3>;
-using uint3x3   = MatrixType<int32_t, 3, 3>;
-using uint4x3   = MatrixType<int32_t, 4, 3>;
-using float2x3  = MatrixType<float  , 2, 3>;
-using float3x3  = MatrixType<float  , 3, 3>;
-using float4x3  = MatrixType<float  , 4, 3>;
-using int2x4    = MatrixType<int32_t, 2, 4>;
-using int3x4    = MatrixType<int32_t, 3, 4>;
-using int4x4    = MatrixType<int32_t, 4, 4>;
-using uint2x4   = MatrixType<int32_t, 2, 4>;
-using uint3x4   = MatrixType<int32_t, 3, 4>;
-using uint4x4   = MatrixType<int32_t, 4, 4>;
-using float2x4  = MatrixType<float  , 2, 4>;
-using float3x4  = MatrixType<float  , 3, 4>;
-using float4x4  = MatrixType<float  , 4, 4>;
-
-using std::min;
-using std::max;
-using std::abs;
-template<typename T,int M, int N> inline MatrixType<T,M,N> max(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.max(b); }
-template<typename T,int M, int N> inline MatrixType<T,M,N> min(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.min(b); }
-template<typename T,int M, int N> inline MatrixType<T,M,N> abs(const MatrixType<T,M,N>& a) { return a.abs(); }
-
-template<floating_point T> inline T saturate(const T& a) { return min(max(a, 0), 1); }
-template<typename T,int M, int N> inline MatrixType<T,M,N> saturate(const MatrixType<T,M,N>& a) { return a.max(Array<T,M,N>::Zero()).min(Array<T,M,N>::Ones()); }
-
-template<typename T, int M, int N> inline T dot(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int M, int N> inline T length(const MatrixType<T,M,N>& a) { return a.matrix().norm(); }
-template<typename T, int M, int N> inline MatrixType<T,M,N> normalize(const MatrixType<T,M,N>& a) { return a.matrix().normalized(); }
-template<typename T, int M, int N> inline MatrixType<T,M,M> inverse(const MatrixType<T,M,M>& a) { return a.matrix().inverse(); }
-template<typename T> inline MatrixType<T,3,1> cross(const MatrixType<T,3,1>& a, const MatrixType<T,3,1>& b) { return a.matrix().cross(b.matrix()); }
-
-inline float asfloat(uint32_t v) { return *reinterpret_cast<float*>(&v); }
-inline uint32_t asuint(float v) { return *reinterpret_cast<uint32_t*>(&v); }
-
-}
 
 #pragma region misc concepts
 template<typename T>
@@ -141,7 +63,6 @@ inline T signed_distance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& bo
 	auto n = lerp(box.max(), box.min(), max(normal.sign(), Matrix<T,3>::Zero()));
 	return dilatatedPlane.signedDistance(n);
 }
-
 #pragma endregion
 
 constexpr unsigned long long operator"" _kB(unsigned long long x) { return x*1024; }
@@ -642,6 +563,183 @@ inline auto format_bytes(size_t bytes) {
 		i++;
 	}
 	return make_pair(bytes, units[i]);
+}
+
+template<typename T>
+inline static void store_texel(void* data, const T v, uint32_t c, vk::Format format) {
+	switch (format) {
+		case vk::Format::eR8Sint:
+		case vk::Format::eR8G8Sint:
+		case vk::Format::eR8G8B8Sint:
+		case vk::Format::eR8G8B8A8Sint:
+			reinterpret_cast<int8_t*>(data)[c] = (int8_t)v;
+			break;
+		case vk::Format::eR8Uint:
+		case vk::Format::eR8G8Uint:
+		case vk::Format::eR8G8B8Uint:
+		case vk::Format::eR8G8B8A8Uint:
+			reinterpret_cast<uint8_t*>(data)[c] = (uint8_t)v;
+			break;
+
+		case vk::Format::eR16Sint:
+		case vk::Format::eR16G16Sint:
+		case vk::Format::eR16G16B16Sint:
+		case vk::Format::eR16G16B16A16Sint:
+			reinterpret_cast<int16_t*>(data)[c] = (int16_t)v;
+			break;
+		case vk::Format::eR16Uint:
+		case vk::Format::eR16G16Uint:
+		case vk::Format::eR16G16B16Uint:
+		case vk::Format::eR16G16B16A16Uint:
+			reinterpret_cast<uint16_t*>(data)[c] = (uint16_t)v;
+			break;
+			
+		case vk::Format::eR32Sint:
+		case vk::Format::eR32G32Sint:
+		case vk::Format::eR32G32B32Sint:
+		case vk::Format::eR32G32B32A32Sint:
+			reinterpret_cast<int32_t*>(data)[c] = (int32_t)v;
+			break;
+		case vk::Format::eR32Uint:
+		case vk::Format::eR32G32Uint:
+		case vk::Format::eR32G32B32Uint:
+		case vk::Format::eR32G32B32A32Uint:
+			reinterpret_cast<uint32_t*>(data)[c] = (uint32_t)v;
+			break;
+			
+		case vk::Format::eR64Sint:
+		case vk::Format::eR64G64Sint:
+		case vk::Format::eR64G64B64Sint:
+		case vk::Format::eR64G64B64A64Sint:
+			reinterpret_cast<int64_t*>(data)[c] = (int64_t)v;
+			break;
+		case vk::Format::eR64Uint:
+		case vk::Format::eR64G64Uint:
+		case vk::Format::eR64G64B64Uint:
+		case vk::Format::eR64G64B64A64Uint:
+			reinterpret_cast<uint64_t*>(data)[c] = (uint64_t)v;
+			break;
+
+		case vk::Format::eR8Unorm:
+		case vk::Format::eR8G8Unorm:
+		case vk::Format::eR8G8B8Unorm:
+		case vk::Format::eR8G8B8A8Unorm:
+			reinterpret_cast<uint8_t*>(data)[c] = is_floating_point_v<T> ? (uint8_t)clamp(v*numeric_limits<uint8_t>::max(), 0, numeric_limits<uint8_t>::max()) : (uint8_t)v;
+			break;
+		case vk::Format::eR16Unorm:
+		case vk::Format::eR16G16Unorm:
+		case vk::Format::eR16G16B16Unorm:
+		case vk::Format::eR16G16B16A16Unorm:
+			reinterpret_cast<uint16_t*>(data)[c] = is_floating_point_v<T> ? (uint16_t)clamp(v*numeric_limits<uint16_t>::max(), 0, numeric_limits<uint16_t>::max()) : (uint16_t)v;
+			break;
+			
+		case vk::Format::eR8Snorm:
+		case vk::Format::eR8G8Snorm:
+		case vk::Format::eR8G8B8Snorm:
+		case vk::Format::eR8G8B8A8Snorm:
+			reinterpret_cast<uint8_t*>(data)[c] = is_floating_point_v<T> ? (uint8_t)clamp((v*.5 + .5)*numeric_limits<uint8_t>::max(), 0, numeric_limits<uint8_t>::max()) : (uint8_t)v;
+			break;
+		case vk::Format::eR16Snorm:
+		case vk::Format::eR16G16Snorm:
+		case vk::Format::eR16G16B16Snorm:
+		case vk::Format::eR16G16B16A16Snorm:
+			reinterpret_cast<uint16_t*>(data)[c] = is_floating_point_v<T> ? (uint16_t)clamp((v*.5 + .5)*numeric_limits<uint16_t>::max(), 0, numeric_limits<uint16_t>::max()) : (uint16_t)v;
+			break;
+
+		case vk::Format::eR32Sfloat:
+		case vk::Format::eR32G32Sfloat:
+		case vk::Format::eR32G32B32Sfloat:
+		case vk::Format::eR32G32B32A32Sfloat:
+			reinterpret_cast<float*>(data)[c] = (float)v;
+			break;
+		case vk::Format::eR64Sfloat:
+		case vk::Format::eR64G64Sfloat:
+		case vk::Format::eR64G64B64Sfloat:
+		case vk::Format::eR64G64B64A64Sfloat:
+			reinterpret_cast<double*>(data)[c] = (double)v;
+			break;
+	}
+}
+
+inline static float load_texel(void* data, uint32_t c, vk::Format format) {
+	switch (format) {
+		case vk::Format::eR8Sint:
+		case vk::Format::eR8G8Sint:
+		case vk::Format::eR8G8B8Sint:
+		case vk::Format::eR8G8B8A8Sint:
+			return reinterpret_cast<int8_t*>(data)[c];
+		case vk::Format::eR8Uint:
+		case vk::Format::eR8G8Uint:
+		case vk::Format::eR8G8B8Uint:
+		case vk::Format::eR8G8B8A8Uint:
+			return reinterpret_cast<uint8_t*>(data)[c];
+
+		case vk::Format::eR16Sint:
+		case vk::Format::eR16G16Sint:
+		case vk::Format::eR16G16B16Sint:
+		case vk::Format::eR16G16B16A16Sint:
+			return reinterpret_cast<int16_t*>(data)[c];
+		case vk::Format::eR16Uint:
+		case vk::Format::eR16G16Uint:
+		case vk::Format::eR16G16B16Uint:
+		case vk::Format::eR16G16B16A16Uint:
+			return reinterpret_cast<uint16_t*>(data)[c];
+			
+		case vk::Format::eR32Sint:
+		case vk::Format::eR32G32Sint:
+		case vk::Format::eR32G32B32Sint:
+		case vk::Format::eR32G32B32A32Sint:
+			return reinterpret_cast<int32_t*>(data)[c];
+		case vk::Format::eR32Uint:
+		case vk::Format::eR32G32Uint:
+		case vk::Format::eR32G32B32Uint:
+		case vk::Format::eR32G32B32A32Uint:
+			return reinterpret_cast<uint32_t*>(data)[c];
+			
+		case vk::Format::eR64Sint:
+		case vk::Format::eR64G64Sint:
+		case vk::Format::eR64G64B64Sint:
+		case vk::Format::eR64G64B64A64Sint:
+			return reinterpret_cast<int64_t*>(data)[c];
+		case vk::Format::eR64Uint:
+		case vk::Format::eR64G64Uint:
+		case vk::Format::eR64G64B64Uint:
+		case vk::Format::eR64G64B64A64Uint:
+			return reinterpret_cast<uint64_t*>(data)[c];
+
+		case vk::Format::eR8Unorm:
+		case vk::Format::eR8G8Unorm:
+		case vk::Format::eR8G8B8Unorm:
+		case vk::Format::eR8G8B8A8Unorm:
+			return (float)reinterpret_cast<uint8_t*>(data)[c] / numeric_limits<uint8_t>::max();
+		case vk::Format::eR16Unorm:
+		case vk::Format::eR16G16Unorm:
+		case vk::Format::eR16G16B16Unorm:
+		case vk::Format::eR16G16B16A16Unorm:
+			return (float)reinterpret_cast<uint16_t*>(data)[c] / numeric_limits<uint16_t>::max();
+
+		case vk::Format::eR8Snorm:
+		case vk::Format::eR8G8Snorm:
+		case vk::Format::eR8G8B8Snorm:
+		case vk::Format::eR8G8B8A8Snorm:
+			return (float)reinterpret_cast<uint8_t*>(data)[c] / numeric_limits<uint8_t>::max() * 2 - 1;
+		case vk::Format::eR16Snorm:
+		case vk::Format::eR16G16Snorm:
+		case vk::Format::eR16G16B16Snorm:
+		case vk::Format::eR16G16B16A16Snorm:
+			return (float)reinterpret_cast<uint16_t*>(data)[c] / numeric_limits<uint16_t>::max() * 2 - 1;
+
+		case vk::Format::eR32Sfloat:
+		case vk::Format::eR32G32Sfloat:
+		case vk::Format::eR32G32B32Sfloat:
+		case vk::Format::eR32G32B32A32Sfloat:
+			return reinterpret_cast<float*>(data)[c];
+		case vk::Format::eR64Sfloat:
+		case vk::Format::eR64G64Sfloat:
+		case vk::Format::eR64G64B64Sfloat:
+		case vk::Format::eR64G64B64A64Sfloat:
+			return (float)reinterpret_cast<double*>(data)[c];
+	}
 }
 
 }

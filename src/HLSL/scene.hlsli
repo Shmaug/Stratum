@@ -1,114 +1,195 @@
 #ifndef SCENE_H
 #define SCENE_H
 
+#include "bitfield.hlsli"
 #include "transform.hlsli"
 
-#define LIGHT_TYPE_DISTANT 	0
-#define LIGHT_TYPE_POINT   	1
-#define LIGHT_TYPE_SPOT    	2
-#define LIGHT_TYPE_MESH			3
+#define SAMPLE_FLAG_DEMODULATE_ALBEDO BIT(0)
+#define SAMPLE_FLAG_BG_IS BIT(1)
+#define SAMPLE_FLAG_LIGHT_IS BIT(2)
 
-inline float3 unpack_normal(uint n) {
-	float2 xy;
-	uint2 xyi = uint2(n & 0x7FFF, (n >> 16) & 0x7FFF);
-#ifdef __cplusplus
-	xy = xyi.cast<float>() / (float)0x7FFF;
-#else
-	xy = (xyi / (float)0x7FFF);
-#endif
-	return float3(xy[0], xy[1], sqrt(1 - dot(xy,xy))*((n>>31) ? -1 : 1));
-}
-inline uint pack_normal(float3 n) {
-	uint p = (((uint)(n[0]*.5+.5)*0x7FFFF)&0x7FFFF) | (((uint)(n[1]*.5+.5)*0x7FFFF) << 16);
-	if (n[2] < 0) p |= 0x80000000;
-	return p;
-}
+#define INSTANCE_TYPE_SPHERE 0
+#define INSTANCE_TYPE_TRIANGLES 1
 
-class PackedLightData {
-#ifdef __cplusplus
-public:
-#endif
-	float4 v;
+#define BVH_FLAG_NONE 0
+#define BVH_FLAG_TRIANGLES BIT(0)
+#define BVH_FLAG_SPHERES BIT(1)
+#define BVH_FLAG_EMITTER BIT(2)
 
-	// point/spot/distant light data
-	inline float radius() { return v[0]; }
-	inline void radius(float s) { v[0] = s; }
-	
-	// spot light data
-	inline float cos_inner_angle() { return (asuint(v[1])>>16)/(float)0xFFFF; }
-	inline void cos_inner_angle(float s) { v[1] = asfloat(asuint(v[1]) | ((uint(s*0xFFFF)&0xFFFF)>>16)); }
-	inline float cos_outer_angle() { return (asuint(v[1])&0xFFFF)/(float)0xFFFF; }
-	inline void cos_outer_angle(float s) { v[1] = asfloat(asuint(v[1]) | (uint(s*0xFFFF)&0xFFFF)); }
+struct InstanceData {
+	// instance -> world
+	TransformData transform;
+	// instance -> prev world
+	TransformData prev_transform;
 
-	// shadow map (distant/point/spot light)
-	inline float shadow_bias() { return v[2]; }
-	inline void shadow_bias(float s) { v[2] = s; }
-	inline uint shadow_index() { return asuint(v[3]); }
-	inline void shadow_index(uint i) { v[3] = asfloat(i); }
-
-	// mesh light data
-	inline uint instance_index() { return asuint(v[1]); }
-	inline void instance_index(uint i) { v[1] = asfloat(i); }
-	inline uint prim_index() { return asuint(v[2]); }
-	inline void prim_index(uint i) { v[2] = asfloat(i); }
-	inline uint prim_count() { return asuint(v[3]); }
-	inline void prim_count(uint i) { v[3] = asfloat(i); }
-};
-
-struct LightData {
-	TransformData mLightToWorld;
-	TransformData mWorldToLight;
-	float3 mEmission;
-	uint mType;
-	ProjectionData mShadowProjection;
-	float4 mPackedData;
-};
-
-class ImageIndices {
-#ifdef __cplusplus
-public:
-#endif
 	uint4 v;
 
-	inline uint albedo()       		{ return (v[0] >> 0 ) & 0xFFF; }
-	inline void albedo(uint i) 		{ v[0] |= (i&0xFFF) << 0 ; }
-	inline uint normal()       		{ return (v[0] >> 16) & 0xFFF; }
-	inline void normal(uint i) 		{ v[0] |= (i&0xFFF) << 16 ; }
-	inline uint emission()       	{ return (v[1] >> 0 ) & 0xFFF; }
-	inline void emission(uint i) 	{ v[1] |= (i&0xFFF) << 0; }
-	inline uint metallic()       	{ return (v[1] >> 16) & 0xFFF; }
-	inline void metallic(uint i) 	{ v[1] |= (i&0xFFF) << 16; }
-	inline uint roughness()       { return (v[2] >> 0 ) & 0xFFF; }
-	inline void roughness(uint i) { v[2] |= (i&0xFFF) << 0 ; }
-	inline uint occlusion()       { return (v[2] >> 16) & 0xFFF; }
-	inline void occlusion(uint i) { v[2] |= (i&0xFFF) << 16; }
-	inline uint metallic_channel() 	      { return v[0] >> 30; }
-	inline void metallic_channel(uint i)  { v[0] |= i << 30; }
-	inline uint roughness_channel()       { return v[1] >> 30; }
-	inline void roughness_channel(uint i) { v[1] |= i << 30; }
-	inline uint occlusion_channel()       { return v[2] >> 30; }
-	inline void occlusion_channel(uint i) { v[2] |= i << 30; }
+	inline uint type() CONST_CPP { return BF_GET(v[0], 0, 4); }
+	inline uint material_address() CONST_CPP { return BF_GET(v[0], 4, 28); }
+
+	// sphere
+	inline float radius() CONST_CPP { return asfloat(v[1]); }
+
+	// mesh
+	inline uint prim_count() CONST_CPP { return BF_GET(v[1], 8, 24); }
+	inline uint first_vertex() CONST_CPP { return BF_GET(v[2], 0, 28); }
+	inline uint index_stride() CONST_CPP { return BF_GET(v[2], 28, 4); }
+	inline uint indices_byte_offset() CONST_CPP { return v[3]; }
 };
-struct MaterialData {
-  float3 mAlbedo;
-  float mRoughness;
-  float3 mEmission;
-	float mMetallic;
-	float3 mAbsorption;
-	float mNormalScale; // scaledNormal = normalize((<sampled normal image value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0))
-	float mOcclusionScale; // lerp(color, color * <sampled occlusion image value>, <occlusion strength>)
-	float mIndexOfRefraction;
-	float mTransmission;
-	float mAlphaCutoff;
-	uint4 mImageIndices;
+inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, uint materialAddress, float radius) {
+	InstanceData r;
+	r.transform = objectToWorld;
+	r.prev_transform = tmul(prevObjectToWorld, objectToWorld.inverse());
+	r.v = 0;
+	BF_SET(r.v[0], INSTANCE_TYPE_SPHERE, 0, 4);
+	BF_SET(r.v[0], materialAddress, 4, 28);
+	r.v[1] = asuint(radius);
+	return r;
+}
+inline InstanceData make_instance_triangles(const TransformData objectToWorld, const TransformData prevObjectToWorld, uint materialAddress, uint primCount, uint firstVertex, uint indexByteOffset, uint indexStride) {
+	InstanceData r;
+	r.transform = objectToWorld;
+	r.prev_transform = tmul(prevObjectToWorld, objectToWorld.inverse());
+	r.v = 0;
+	BF_SET(r.v[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
+	BF_SET(r.v[0], materialAddress, 4, 28);
+	BF_SET(r.v[1], primCount, 8, 24);
+	BF_SET(r.v[2], firstVertex, 0, 28);
+	BF_SET(r.v[2], indexStride, 28, 4);
+	r.v[3] = indexByteOffset;
+	return r;
+}
+
+struct PackedVertexData {
+	float3 position;
+	float u;
+	float3 normal;
+	float v;
+	float4 tangent;
 };
 
-struct VertexData {
-	float3 mPosition;
-	float mU;
-	float3 mNormal;
-	float mV;
-	float4 mTangent;
+#ifdef __HLSL_VERSION
+#include "ray_differential.hlsli"
+#endif
+struct ViewData {
+	TransformData camera_to_world;
+	TransformData world_to_camera;
+	ProjectionData projection;
+	uint2 image_min;
+	uint2 image_max;
+#ifdef __HLSL_VERSION
+	inline RayDifferential create_ray(const float2 uv) {
+		float2 clipPos = 2*uv - 1;
+		clipPos.y = -clipPos.y;
+
+		RayDifferential ray;
+		ray.direction = normalize(camera_to_world.transform_vector(projection.back_project(clipPos)));
+		#ifdef TRANSFORM_UNIFORM_SCALING
+		ray.origin = gCameraToWorld.mTranslation;
+		#else
+		ray.origin = float3(camera_to_world.m[0][3], camera_to_world.m[1][3], camera_to_world.m[2][3]);
+		#endif
+		ray.t_max = 1.#INF;
+
+		ray.dP.dx = 0;
+		ray.dP.dy = 0;
+
+		float2 clipPos_dx = 2*(uv + float2(1/(float)(image_max.x - image_min.x), 0)) - 1;
+		float2 clipPos_dy = 2*(uv + float2(0, 1/(float)(image_max.y - image_min.y))) - 1;
+		clipPos_dx.y = -clipPos_dx.y;
+		clipPos_dy.y = -clipPos_dy.y;
+		ray.dD.dx = (min16float3)(normalize(camera_to_world.transform_vector(projection.back_project(clipPos_dx))) - ray.direction);
+		ray.dD.dy = (min16float3)(normalize(camera_to_world.transform_vector(projection.back_project(clipPos_dy))) - ray.direction);
+
+		return ray;
+	}
+#endif
 };
+
+struct ShadingFrame {
+    float3 t, b, n;
+		inline void flip() {
+			t = -t;
+			b = -b;
+			n = -n;
+		}
+    inline float3 to_world(const float3 v_l) { return v_l[0]*t + v_l[1]*b + v_l[2]*n; }
+    inline float3 to_local(const float3 v_w) { return float3(dot(v_w, t), dot(v_w, b), dot(v_w, n)); }
+};
+
+struct PDFMeasure {
+	float pdf;
+	float G;
+	bool is_solid_angle;
+	inline float solid_angle() {return is_solid_angle ? pdf : pdf/G; }
+	inline float area() {return is_solid_angle ? pdf*G : pdf; }
+};
+inline PDFMeasure make_area_pdf(const float pdfA, const float cos_theta, const float dist) {
+	PDFMeasure pdf;
+	pdf.pdf = pdfA;
+	pdf.G = cos_theta / pow2(dist);
+	pdf.is_solid_angle = false;
+	return pdf;
+}
+inline PDFMeasure make_solid_angle_pdf(const float pdfW, const float cos_theta, const float dist) {
+	PDFMeasure pdf;
+	pdf.pdf = pdfW;
+	pdf.G = cos_theta / pow2(dist);
+	pdf.is_solid_angle = true;
+	return pdf;
+}
+
+#ifdef __HLSL_VERSION
+
+inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, const uint viewCount) {
+	for (uint i = 0; i < viewCount; i++)
+		if (all(index >= views[i].image_min) && all(index < views[i].image_max))
+			return i;
+	return -1;
+}
+
+inline float3 ray_offset(const float3 P, const float3 Ng) {
+	// This function should be used to compute a modified ray start position for
+	// rays leaving from a surface. This is from "A Fast and Robust Method for Avoiding
+	// Self-Intersection" see https://research.nvidia.com/publication/2019-03_A-Fast-and
+  const float int_scale = 256.0f;
+  const int3 of_i = int3((int)(int_scale * Ng.x), (int)(int_scale * Ng.y), (int)(int_scale * Ng.z));
+
+  const float3 p_i = float3(asfloat(asint(P.x) + ((P.x < 0) ? -of_i.x : of_i.x)),
+                      		 	asfloat(asint(P.y) + ((P.y < 0) ? -of_i.y : of_i.y)),
+                      		 	asfloat(asint(P.z) + ((P.z < 0) ? -of_i.z : of_i.z)));
+	
+  const float origin = 1 / 32.0;
+  const float float_scale = 1 / 65536.0;
+  return float3(abs(P.x) < origin ? P.x + float_scale * Ng.x : p_i.x,
+                abs(P.y) < origin ? P.y + float_scale * Ng.y : p_i.y,
+                abs(P.z) < origin ? P.z + float_scale * Ng.z : p_i.z);
+}
+
+inline uint3 load_tri(ByteAddressBuffer indices, uint indexByteOffset, uint indexStride, uint primitiveIndex) {
+	const uint offsetBytes = indexByteOffset + primitiveIndex*3*indexStride;
+	uint3 tri;
+	if (indexStride == 2) {
+		// https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingSimpleLighting/Raytracing.hlsl
+		const uint dwordAlignedOffset = offsetBytes & ~3;    
+		const uint2 four16BitIndices = indices.Load2(dwordAlignedOffset);
+		if (dwordAlignedOffset == offsetBytes) {
+				tri.x = four16BitIndices.x & 0xffff;
+				tri.y = (four16BitIndices.x >> 16) & 0xffff;
+				tri.z = four16BitIndices.y & 0xffff;
+		} else {
+				tri.x = (four16BitIndices.x >> 16) & 0xffff;
+				tri.y = four16BitIndices.y & 0xffff;
+				tri.z = (four16BitIndices.y >> 16) & 0xffff;
+		}
+	} else
+		tri = indices.Load3(offsetBytes);
+	return tri;
+}
+inline uint3 load_tri(ByteAddressBuffer indices, const InstanceData instance, uint primitiveIndex) {
+	return instance.first_vertex() + load_tri(indices, instance.indices_byte_offset(), instance.index_stride(), primitiveIndex);
+}
+
+#endif
 
 #endif

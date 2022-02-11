@@ -8,7 +8,7 @@
 
 using namespace stm;
 
-Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers, uint32_t frameInUseCount)
+Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers)
 	: mPhysicalDevice(physicalDevice), mInstance(instance) {
 
 	vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
@@ -17,7 +17,6 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	vector<const char*> deviceExts;
 	for (const string& s : deviceExtensions)
 		deviceExts.emplace_back(s.c_str());
-		
 
 	#pragma region get queue infos
 	vector<vk::QueueFamilyProperties> queueFamilyProperties = mPhysicalDevice.getQueueFamilyProperties();
@@ -134,7 +133,6 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	VmaAllocatorCreateInfo allocatorInfo = {};
 	allocatorInfo.physicalDevice = mPhysicalDevice;
 	allocatorInfo.device = mDevice;
-	allocatorInfo.frameInUseCount = frameInUseCount;
 	allocatorInfo.instance = *mInstance;
 	allocatorInfo.vulkanApiVersion = mInstance.vulkan_version();
 	#if VK_KHR_buffer_device_address

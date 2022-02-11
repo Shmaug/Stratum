@@ -28,6 +28,8 @@ public:
 	STRATUM_API Instance(const vector<string>& args);
 	STRATUM_API ~Instance();
 
+	STRATUM_API void create_device(vk::PhysicalDevice device = {});
+
 	inline vk::Instance& operator*() { return mInstance; }
 	inline vk::Instance* operator->() { return &mInstance; }
 	inline const vk::Instance& operator*() const { return mInstance; }
@@ -62,6 +64,7 @@ public:
 
 private:
 	vk::Instance mInstance;
+	vector<const char*> mValidationLayers;
 	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
 	vk::DynamicLoader mDynamicLoader;
 	#endif

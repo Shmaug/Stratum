@@ -1,18 +1,11 @@
 #include "Gui.hpp"
 #include "Application.hpp"
-#include "RasterScene.hpp"
-#include "RayTraceScene.hpp"
+#include "Scene.hpp"
 
 #include <imgui_internal.h>
 #include <stb_image_write.h>
 
 #include <Core/Window.hpp>
-
-namespace stm {
-namespace hlsl {
-#include <HLSL/transform.hlsli>
-}
-}
 
 using namespace stm;
 using namespace stm::hlsl;
@@ -63,12 +56,13 @@ string GetSystemFontFile(const string &faceName) {
 #endif
 
 #pragma region inspector gui
+#include "RayTraceScene.hpp"
 inline void inspector_gui_fn(Application* app) {
 	if (ImGui::Button("Reload Shaders")) {
-		app->window().mInstance.device().flush();
+	  app->window().mInstance.device()->waitIdle();
+		//app->window().mInstance.device().flush();
 		app->load_shaders();
 		app->node().for_each_descendant<Gui>([](const auto& v) { v->create_pipelines();	});
-		app->node().for_each_descendant<RasterScene>([](const auto& v) { v->create_pipelines();	});
 		app->node().for_each_descendant<RayTraceScene>([](const auto& v) { v->create_pipelines();	});
 	}
 }
@@ -88,13 +82,22 @@ inline void inspector_gui_fn(Instance* instance) {
   ImGui::LabelText("Descriptor Sets", "%u", instance->device().descriptor_set_count());
 
   ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
-  ImGui::LabelText("Window format", to_string(instance->window().surface_format().format).c_str());
-  ImGui::LabelText("Window color space", to_string(instance->window().surface_format().colorSpace).c_str());
-  ImGui::LabelText("Window present mode", to_string(instance->window().present_mode()).c_str());
+  ImGui::LabelText("Render target format", to_string(instance->window().back_buffer().image()->format()).c_str());
+  ImGui::LabelText("Surface format", to_string(instance->window().surface_format().format).c_str());
+  ImGui::LabelText("Surface color space", to_string(instance->window().surface_format().colorSpace).c_str());
   
-  bool t = instance->window().allow_tearing();
-  if (ImGui::Checkbox("Tearing allowed", &t))
-    instance->window().allow_tearing(t);
+  vk::PresentModeKHR m = instance->window().present_mode();
+  if (ImGui::BeginCombo("Window present mode", to_string(m).c_str())) {
+		auto items = instance->device().physical().getSurfacePresentModesKHR(instance->window().surface());
+    for (uint32_t i = 0; i < ranges::size(items); i++)
+      if (ImGui::Selectable(to_string(items[i]).c_str(), m == items[i]))
+        instance->window().preferred_present_mode(items[i]);
+    ImGui::EndCombo();
+	}
+
+	int64_t timeout = instance->window().acquire_image_timeout().count();
+	if (ImGui::InputScalar("Swapchain image timeout (ns)", ImGuiDataType_U64, &timeout))
+		instance->window().acquire_image_timeout(chrono::nanoseconds(timeout));
 }
 inline void inspector_gui_fn(ShaderDatabase* shader) {
   for (const auto&[name, spv] : *shader) {
@@ -420,7 +423,8 @@ Gui::Gui(Node& node) : mNode(node) {
 	mContext = ImGui::CreateContext();
 
 	ImGuiIO& io = ImGui::GetIO();
-	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_HasMouseCursors;
+	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+	io.ConfigFlags |= ImGuiConfigFlags_IsSRGB;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
 	
 	io.KeyMap[ImGuiKey_Tab] = eKeyTab;
@@ -447,14 +451,16 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.KeyMap[ImGuiKey_Z] = eKeyZ;
 
 	mMesh.topology() = vk::PrimitiveTopology::eTriangleList;
-	mMesh.vertices() = make_shared<VertexArrayObject>(VertexArrayObject::AttributeType::ePosition, VertexArrayObject::AttributeType::eTexcoord, VertexArrayObject::AttributeType::eColor);
-	mMesh[VertexArrayObject::AttributeType::ePosition][0].first = VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, pos), vk::VertexInputRate::eVertex);
-	mMesh[VertexArrayObject::AttributeType::eTexcoord][0].first = VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, uv ), vk::VertexInputRate::eVertex);
-	mMesh[VertexArrayObject::AttributeType::eColor   ][0].first = VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex);
+  
+	unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>> attributes;
+	attributes[VertexArrayObject::AttributeType::ePosition].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, pos), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
+	attributes[VertexArrayObject::AttributeType::eTexcoord].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, uv ), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
+	attributes[VertexArrayObject::AttributeType::eColor   ].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
+	mMesh.vertices() = make_shared<VertexArrayObject>(attributes);
 
 	auto app = mNode.find_in_ancestor<Application>();
-	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst + 16);
-	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eLast - 16);
+	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
+	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
 	
 	#pragma region Inspector gui
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
@@ -466,13 +472,16 @@ Gui::Gui(Node& node) : mNode(node) {
 
   enum AssetType {
     eEnvironmentMap,
-    eScene
+    eGLTFScene,
+    eMitsubaScene,
   };
   vector<tuple<fs::path, string, AssetType>> assets;
   for (const string& filepath : app->window().mInstance.find_arguments("assetsFolder"))
     for (const auto& entry : fs::recursive_directory_iterator(filepath)) {
       if (entry.path().extension() == ".gltf")
-        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eScene);
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eGLTFScene);
+      else if (entry.path().extension() == ".xml")
+        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eMitsubaScene);
       else if (entry.path().extension() == ".hdr")
         assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eEnvironmentMap);
     }
@@ -487,62 +496,37 @@ Gui::Gui(Node& node) : mNode(node) {
 		gui->set_context();
 		
 		if (ImGui::Begin("Utilities")) {
-			static int mode = 0;
+			static int tab = 0;
 			static Node* selected = nullptr;
 
     	Profiler::on_gui();
 
-			if (ImGui::Button("Assets")) mode = 0;
+			if (ImGui::Button("Assets")) tab = 0;
 			ImGui::SameLine();
-			if (ImGui::Button("Scene")) mode = 1;
+			if (ImGui::Button("Scene")) tab = 1;
 			ImGui::SameLine();
-			if (ImGui::Button("Inspector")) mode = 2;
+			if (ImGui::Button("Inspector")) tab = 2;
 			
-			switch (mode) {
+			switch (tab) {
 			case 0:
-				for (const auto&[filepath, name, type] : assets)
-					if (ImGui::Button(name.c_str()))
+				for (const auto&[filepath, name, type] : assets) {
+          string n = name;
+          if (ranges::find_if(assets, [&](const auto& t) { return get<0>(t) != filepath && name == get<1>(t); }) != assets.end())
+            n = filepath.parent_path().filename().string() + "/" + n;
+					if (ImGui::Button(n.c_str()))
 						switch (type) {
-							case AssetType::eScene:
+							case AssetType::eGLTFScene:
 								load_gltf(app->node().make_child(name), commandBuffer, filepath);
 								break;
+							case AssetType::eMitsubaScene:
+								load_mitsuba(app->node().make_child(name), commandBuffer, filepath);
+								break;
 							case AssetType::eEnvironmentMap: {
-								auto[pixels,extent] = Image::load(commandBuffer.mDevice, filepath);
-								auto envMap = app->node().find_in_descendants<EnvironmentMap>();
-								if (!envMap) envMap = app->node().make_child("Environment Map").make_component<EnvironmentMap>();
-								envMap->mImage = make_shared<Image>(commandBuffer.mDevice, name, extent, pixels.format(), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled);
-								commandBuffer.copy_buffer_to_image(pixels, envMap->mImage);
-								envMap->mExposure = 1;
-								envMap->mGamma = 1;
-
-								if (pixels.format() == vk::Format::eR32G32B32A32Sfloat) {
-									string marginalPath = filepath.string() + ".marginal";
-									string conditionalPath = filepath.string() + ".conditional";
-									Buffer::View<float2> marginalDistData = make_shared<Buffer>(commandBuffer.mDevice, "marginalDistData", extent.height*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-									Buffer::View<float2> conditionalDistData = make_shared<Buffer>(commandBuffer.mDevice, "conditionalDistData", extent.width*extent.height*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-									if (fs::exists(marginalPath) && fs::exists(conditionalPath)) { 
-										read_file(marginalPath, marginalDistData);
-										read_file(conditionalPath, conditionalDistData);
-									} else {
-										EnvironmentMap::build_distributions(
-											span<float4>(reinterpret_cast<float4*>(pixels.data()), pixels.size()/sizeof(float4)), vk::Extent2D(extent.width, extent.height),
-											span(marginalDistData.data(), marginalDistData.size()),
-											span(conditionalDistData.data(), conditionalDistData.size()));
-										write_file(marginalPath, marginalDistData);
-										write_file(conditionalPath, conditionalDistData);
-									}
-
-									envMap->mMarginalDistribution = Image::View(
-										make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.height,1,1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled), 
-										0, 1, 0, 1, {}, {}, vk::ImageViewType::e2D);
-									envMap->mConditionalDistribution = make_shared<Image>(commandBuffer.mDevice, name, vk::Extent3D(extent.width, extent.height, 1), vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled);
-									commandBuffer.copy_buffer_to_image(marginalDistData, envMap->mMarginalDistribution);
-									commandBuffer.copy_buffer_to_image(conditionalDistData, envMap->mConditionalDistribution);
-								}
+								app->node().make_child(filepath.stem().string()).make_component<Material>(load_environment(commandBuffer, filepath));
 								break;
 							}
 						}
+        }
 				break;
 
 			case 1:
@@ -563,7 +547,7 @@ Gui::Gui(Node& node) : mNode(node) {
 						selected = nullptr;
 					} else {
 						if (!selected->find<hlsl::TransformData>() && ImGui::Button("Add Transform"))
-							selected->make_component<hlsl::TransformData>(make_transform(float3::Zero(), make_quatf(0,0,0,1), float3::Ones()));
+							selected->make_component<hlsl::TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
 						type_index to_erase = typeid(nullptr_t);
 						for (type_index type : selected->components()) {
 							if (ImGui::CollapsingHeader(type.name())) {
@@ -593,9 +577,9 @@ Gui::~Gui() {
 
 void Gui::create_pipelines() {
 	const ShaderDatabase& shader = *mNode.node_graph().find_components<ShaderDatabase>().front();
-	const auto& basic_color_image_fs = shader.at("basic_color_image_fs");
+	const auto& color_image_fs = shader.at("raster_color_image_fs");
 	if (mPipeline) mNode.node_graph().erase(mPipeline.node());
-	mPipeline = mNode.make_child("Pipeline").make_component<GraphicsPipelineState>("Gui", shader.at("basic_color_image_vs"), basic_color_image_fs);
+	mPipeline = mNode.make_child("Pipeline").make_component<GraphicsPipelineState>("Gui", shader.at("raster_color_image_vs"), color_image_fs);
 	mPipeline->raster_state().setFrontFace(vk::FrontFace::eClockwise);
 	mPipeline->depth_stencil().setDepthTestEnable(false);
 	mPipeline->depth_stencil().setDepthWriteEnable(false);
@@ -603,7 +587,7 @@ void Gui::create_pipelines() {
 		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
 		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
 		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA) };
-	mPipeline->set_immutable_sampler("gSampler", make_shared<Sampler>(basic_color_image_fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
+	mPipeline->set_immutable_sampler("gSampler", make_shared<Sampler>(color_image_fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
@@ -637,7 +621,6 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 	io.DisplaySize = ImVec2((float)window.swapchain_extent().width, (float)window.swapchain_extent().height);
 	io.DisplayFramebufferScale = ImVec2(1.f, 1.f);
 	io.DeltaTime = deltaTime;
-	io.ImeWindowHandle = commandBuffer.mDevice.mInstance.window().handle();
 	
 	const MouseKeyboardState& input = window.input_state();
 	io.MousePos = ImVec2(input.cursor_pos().x(), input.cursor_pos().y());
@@ -698,12 +681,12 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 		mPipeline->transition_images(commandBuffer);
 	}
 }
-void Gui::draw(CommandBuffer& commandBuffer, const Image::View& dst) {
-	if (!mDrawData || mDrawData->CmdListsCount <= 0) return;
+void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
+	if (!mDrawData || mDrawData->CmdListsCount <= 0 || mDrawData->DisplaySize.x == 0 || mDrawData->DisplaySize.y == 0) return;
 
 	ProfilerRegion ps("Draw Gui", commandBuffer);
 
-	unordered_map<RenderAttachmentId, RenderPass::AttachmentInfo> attachments {
+	RenderPass::SubpassDescription subpass {
 		{ "colorBuffer", {
 			AttachmentType::eColor, blend_mode_state(), vk::AttachmentDescription{ {},
 				dst.image()->format(), dst.image()->sample_count(),
@@ -711,27 +694,21 @@ void Gui::draw(CommandBuffer& commandBuffer, const Image::View& dst) {
 				vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eColorAttachmentOptimal } }
 		}
 	};
-  auto renderPass = make_shared<RenderPass>(dst.image()->mDevice, "Gui RenderPass", attachments);
-  Image::View attachment = dst;
-  auto framebuffer = make_shared<Framebuffer>(*renderPass, "Gui Framebuffer", attachment);
+  auto renderPass = make_shared<RenderPass>(dst.image()->mDevice, "Gui RenderPass", ranges::single_view { subpass });
+  auto framebuffer = make_shared<Framebuffer>(*renderPass, "Gui Framebuffer", ranges::single_view { dst });
   commandBuffer.begin_render_pass(renderPass, framebuffer, vk::Rect2D{ {}, framebuffer->extent() }, { {} });
 
 	float2 scale = float2::Map(&mDrawData->DisplaySize.x);
 	float2 offset = float2::Map(&mDrawData->DisplayPos.x);
 	
-	#pragma pack(push)
-	#pragma pack(1)
-	struct CameraData {
-		TransformData gWorldToCamera;
-		TransformData gCameraToWorld;
-		ProjectionData gProjection;
-	};
-	#pragma pack(pop)
-	Buffer::View<CameraData> cameraData = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(CameraData), vk::BufferUsageFlagBits::eUniformBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	cameraData[0].gWorldToCamera = cameraData[0].gCameraToWorld = make_transform(float3(0,0,1), make_quatf(0,0,0,1), float3::Ones());
-	cameraData[0].gProjection = make_orthographic(scale, -1 - offset.array()*2/scale.array(), 0, 1);
+	Buffer::View<hlsl::ViewData> views = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(hlsl::ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	views[0].world_to_camera = views[0].camera_to_world = make_transform(float3(0,0,1), quatf_identity(), float3::Ones());
+	views[0].projection = make_orthographic(scale, -1 - offset.array()*2/scale.array(), 0, 1);
+	views[0].image_min = { 0, 0 };
+	views[0].image_max = { framebuffer->extent().width, framebuffer->extent().height };
 
-	mPipeline->descriptor("gCameraData") = commandBuffer.hold_resource(cameraData);
+	mPipeline->descriptor("gViews") = commandBuffer.hold_resource(views);
+	mPipeline->push_constant<uint32_t>("gViewIndex") = 0;
 	mPipeline->push_constant<float4>("gImageST") = float4(1,1,0,0);
 	mPipeline->push_constant<float4>("gColor") = float4::Ones();
 	

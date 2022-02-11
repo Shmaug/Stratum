@@ -75,7 +75,7 @@ public:
 	stm::Instance& mInstance;
 	static const vk::DeviceSize mMinAllocSize = 256_mB;
 
-	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers, uint32_t frameInUseCount);
+	STRATUM_API Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const unordered_set<string>& deviceExtensions, const vector<const char*>& validationLayers);
 	STRATUM_API ~Device();
 
 	inline vk::Device& operator*() { return mDevice; }
@@ -110,13 +110,12 @@ public:
 	}
 
 	template<typename T> requires(convertible_to<decltype(T::objectType), vk::ObjectType>)
-	inline T& set_debug_name(T& object, const string& name) {
+	inline void set_debug_name(const T& object, const string& name) {
 		vk::DebugUtilsObjectNameInfoEXT info = {};
 		info.objectHandle = *reinterpret_cast<const uint64_t*>(&object);
 		info.objectType = T::objectType;
 		info.pObjectName = name.c_str();
 		mDevice.setDebugUtilsObjectNameEXT(info);
-		return object;
 	}
 	
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);

@@ -280,18 +280,19 @@ public:
 	inline const shared_ptr<Semaphore>& image_available_semaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
 	
-	inline void allow_tearing(bool v) { if (mAllowTearing != v) mRecreateSwapchain = true; mAllowTearing = v; }
-	inline bool allow_tearing() const { return mAllowTearing; }
+	inline void acquire_image_timeout(const chrono::nanoseconds& v) { mAcquireImageTimeout = v; }
+	inline const chrono::nanoseconds& acquire_image_timeout() const { return mAcquireImageTimeout; }
+
+	inline void preferred_present_mode(vk::PresentModeKHR v) { if (mPreferredPresentMode != v) mRecreateSwapchain = true; mPreferredPresentMode = v; }
+	inline vk::PresentModeKHR preferred_present_mode() const { return mPreferredPresentMode; }
 
 	STRATUM_API void fullscreen(bool fs);
 	inline bool fullscreen() const { return mFullscreen; }
 
 	inline uint32_t back_buffer_count() const { return (uint32_t)mSwapchainImages.size(); }
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
-	inline const Image::View& back_buffer() const { return mSwapchainImages[back_buffer_index()]; }
-	inline const Image::View& back_buffer(uint32_t i) const { return mSwapchainImages[i]; }
-	inline vk::ImageUsageFlags& back_buffer_usage() { return mImageUsage; }
-	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mImageUsage; }
+	inline const Image::View& back_buffer() const { return mRenderTargets[back_buffer_index()]; }
+	inline const Image::View& back_buffer(uint32_t i) const { return mRenderTargets[i]; }
 
 #ifdef WIN32
 	inline HWND handle() const { return mHwnd; }
@@ -302,14 +303,13 @@ public:
 
 	STRATUM_API void resize(uint32_t w, uint32_t h);
 
-	STRATUM_API bool acquire_image(CommandBuffer& commandBuffer);
+	STRATUM_API bool acquire_image();
+	STRATUM_API void resolve(CommandBuffer& commandBuffer);
 	// Waits on all semaphores in waitSemaphores
 	STRATUM_API void present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores = {});
 	// Number of times present has been called
 	inline size_t present_count() const { return mPresentCount; }
 
-	STRATUM_API void lock_mouse(bool l);
-	inline bool lock_mouse() const { return mLockMouse; }
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
 
@@ -323,32 +323,32 @@ public:
 	}
 
 private:
-	STRATUM_API void create_swapchain(Device& device);
+	STRATUM_API void create_swapchain();
 	STRATUM_API void destroy_swapchain();
 	
 	vk::SurfaceKHR mSurface;
-	Device* mSwapchainDevice = nullptr;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
+	vector<Image::View> mRenderTargets;
 	vector<Image::View> mSwapchainImages;
 	vector<shared_ptr<Semaphore>> mImageAvailableSemaphores;
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
-	vk::ImageUsageFlags mImageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
 	vk::PresentModeKHR mPresentMode;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
 	size_t mPresentCount = 0;
+
+	vk::PresentModeKHR mPreferredPresentMode = vk::PresentModeKHR::eMailbox;
+	chrono::nanoseconds mAcquireImageTimeout = 10s;
 	
 	bool mFullscreen = false;
-	bool mAllowTearing = false;
 	bool mRecreateSwapchain = false;
 	vk::Rect2D mClientRect;
 	string mTitle;
 
 	MouseKeyboardState mInputState;
 	MouseKeyboardState mInputStateLast;
-	bool mLockMouse = false;
 
 	friend class Instance;
 #ifdef WIN32

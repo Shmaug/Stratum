@@ -1,9 +1,10 @@
 #pragma once
 
-#include "Fence.hpp"
-#include "Framebuffer.hpp"
-#include "Pipeline.hpp"
 #include <Common/Profiler.hpp>
+
+#include "Fence.hpp"
+#include "RenderPass.hpp"
+#include "Pipeline.hpp"
 
 namespace stm {
 
@@ -99,6 +100,26 @@ public:
 		return Buffer::View<T>(dst);
 	}
 
+	template<typename T = byte>
+	inline const Image::View& copy_buffer_to_image(const Buffer::View<T>& src, const Image::View& dst) {
+		vector<vk::BufferImageCopy> copies(dst.subresource_range().levelCount);
+		for (uint32_t i = 0; i < dst.subresource_range().levelCount; i++)
+			copies[i] = vk::BufferImageCopy(src.offset(), 0, 0, dst.subresource(i), {}, dst.extent());
+		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
+		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, copies);
+		return dst;
+	}
+
+	template<typename T = byte>
+	inline const Buffer::View<T>& copy_image_to_buffer(const Image::View& src, const Buffer::View<T>& dst) {
+		vector<vk::BufferImageCopy> copies(src.subresource_range().levelCount);
+		for (uint32_t i = 0; i < src.subresource_range().levelCount; i++)
+			copies[i] = vk::BufferImageCopy(dst.offset(), 0, 0, src.subresource(i), {}, src.extent());
+		src.transition_barrier(*this, vk::ImageLayout::eTransferSrcOptimal);
+		mCommandBuffer.copyImageToBuffer(*hold_resource(src.image()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.buffer()), copies);
+		return dst;
+	}
+
 	inline const Image::View& clear_color_image(const Image::View& img, const vk::ClearColorValue& clear) {
 		img.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
 		mCommandBuffer.clearColorImage(*hold_resource(img.image()), vk::ImageLayout::eTransferDstOptimal, clear, img.subresource_range());
@@ -143,16 +164,6 @@ public:
 		for (uint32_t i = 0; i < resolves.size(); i++)
 			resolves[i] = vk::ImageResolve(src.subresource(i), vk::Offset3D{}, src.subresource(i), vk::Offset3D{}, src.extent());
 		mCommandBuffer.resolveImage(*hold_resource(src.image()), vk::ImageLayout::eTransferSrcOptimal, *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, resolves);
-		return dst;
-	}
-
-	template<typename T = byte>
-	inline const Image::View& copy_buffer_to_image(const Buffer::View<T>& src, const Image::View& dst) {
-		vector<vk::BufferImageCopy> copies(dst.subresource_range().levelCount);
-		for (uint32_t i = 0; i < dst.subresource_range().levelCount; i++)
-			copies[i] = vk::BufferImageCopy(src.offset(), 0, 0, dst.subresource(i), {}, dst.extent());
-		dst.transition_barrier(*this, vk::ImageLayout::eTransferDstOptimal);
-		mCommandBuffer.copyBufferToImage(*hold_resource(src.buffer()), *hold_resource(dst.image()), vk::ImageLayout::eTransferDstOptimal, copies);
 		return dst;
 	}
 

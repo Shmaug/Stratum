@@ -131,7 +131,7 @@ public:
 
 	STRATUM_API void new_frame(CommandBuffer& commandBuffer, float deltaTime);
 	STRATUM_API void make_geometry(CommandBuffer& commandBuffer);
-	STRATUM_API void draw(CommandBuffer& commandBuffer, const Image::View& dst);
+	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& dst);
 
 	inline void set_context() const {
 		ImGui::SetCurrentContext(mContext);

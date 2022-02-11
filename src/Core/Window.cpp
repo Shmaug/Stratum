@@ -96,23 +96,34 @@ stm::Window::~Window() {
 #endif
 }
 
-bool stm::Window::acquire_image(CommandBuffer& commandBuffer) {
-	ProfilerRegion ps("Window::acquire_image", commandBuffer);
+bool stm::Window::acquire_image() {
+	ProfilerRegion ps("Window::acquire_image");
 	
-	if (mRecreateSwapchain || !mSwapchain || mSwapchainImages[0].image()->usage() != mImageUsage) {
-		create_swapchain(commandBuffer.mDevice);
+	if (mRecreateSwapchain || !mSwapchain) {
+		create_swapchain();
 		if (!mSwapchain) return false;
 	}
+	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
+		return false; // minimized ?
 
-	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex+1)%mImageAvailableSemaphores.size();
+	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
 
-	vk::Result result = (*mSwapchainDevice)->acquireNextImageKHR(mSwapchain, numeric_limits<uint64_t>::max(), **mImageAvailableSemaphores[mImageAvailableSemaphoreIndex], {}, &mBackBufferIndex);
-	if (result == vk::Result::eNotReady || result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
+	vk::Result result = mInstance.device()->acquireNextImageKHR(mSwapchain, mAcquireImageTimeout.count(), **image_available_semaphore(), {}, &mBackBufferIndex);
+	if (result == vk::Result::eNotReady || result == vk::Result::eTimeout)
+		return false;
+
+	if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
 		destroy_swapchain();
 		return false;
 	} else if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
+
+	//cout << "acquire_image signalling " << image_available_semaphore()->name() << endl;
 	return true;
+}
+void stm::Window::resolve(CommandBuffer& commandBuffer) {
+	commandBuffer.blit_image(back_buffer(), mSwapchainImages[back_buffer_index()]);
+	mSwapchainImages[back_buffer_index()].transition_barrier(commandBuffer, vk::ImageLayout::ePresentSrcKHR);
 }
 void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores) {
 	ProfilerRegion ps("Window::present");
@@ -192,36 +203,32 @@ void stm::Window::fullscreen(bool fs) {
 	#endif
 }
 
-void stm::Window::create_swapchain(Device& device) {
+void stm::Window::create_swapchain() {
 	if (mSwapchain) destroy_swapchain();
-	mSwapchainDevice = &device;
-	mSwapchainDevice->set_debug_name(mSurface, "WindowSurface");
 	
-	mPresentQueueFamily = mSwapchainDevice->find_queue_family(mSurface);
+	mPresentQueueFamily = mInstance.device().find_queue_family(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
 	// get the size of the swapchain
-	vk::SurfaceCapabilitiesKHR capabilities = mSwapchainDevice->physical().getSurfaceCapabilitiesKHR(mSurface);
+	vk::SurfaceCapabilitiesKHR capabilities = mPresentQueueFamily->mDevice.physical().getSurfaceCapabilitiesKHR(mSurface);
 	mSwapchainExtent = capabilities.currentExtent;
-	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mSwapchainDevice->limits().maxImageDimension2D || mSwapchainExtent.height > mSwapchainDevice->limits().maxImageDimension2D)
+	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mPresentQueueFamily->mDevice.limits().maxImageDimension2D || mSwapchainExtent.height > mPresentQueueFamily->mDevice.limits().maxImageDimension2D)
 		return; // invalid swapchain size, window invalid
 
 	// select the format of the swapchain
-	auto formats = mSwapchainDevice->physical().getSurfaceFormatsKHR(mSurface);
-	mSurfaceFormat = formats[0];
-	for (const vk::SurfaceFormatKHR& format : formats)
-		if (format.format == vk::Format::eR8G8B8A8Unorm) {
-			mSurfaceFormat = format;
-			break;
-		}	else if (format.format == vk::Format::eB8G8R8A8Unorm)
-			mSurfaceFormat = format;
+	mSurfaceFormat = vk::Format::eR8G8B8A8Unorm;
+	//auto formats = mPresentQueueFamily->mDevice.physical().getSurfaceFormatsKHR(mSurface);
+	//for (const vk::SurfaceFormatKHR& format : formats)
+	//	if (format.format == vk::Format::eR8G8B8A8Srgb) {
+	//		mSurfaceFormat = format;
+	//		break;
+	//	}	else if (format.format == vk::Format::eB8G8R8A8Srgb)
+	//		mSurfaceFormat = format;
 
-	auto presentModes = mSwapchainDevice->physical().getSurfacePresentModesKHR(mSurface);
-	vector<vk::PresentModeKHR> preferredPresentModes { vk::PresentModeKHR::eMailbox };
-	if (mAllowTearing) preferredPresentModes = { vk::PresentModeKHR::eFifoRelaxed, vk::PresentModeKHR::eImmediate, vk::PresentModeKHR::eMailbox };
-	mPresentMode = vk::PresentModeKHR::eFifo;
-	for (auto mode : preferredPresentModes)
-		if (ranges::find(presentModes, mode) != presentModes.end())
+	auto presentModes = mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface);
+	mPresentMode = vk::PresentModeKHR::eFifo; // required to be supported
+	for (auto mode : presentModes)
+		if (mode == mPreferredPresentMode)
 			mPresentMode = mode;
 
 	vk::SwapchainCreateInfoKHR createInfo = {};
@@ -231,48 +238,44 @@ void stm::Window::create_swapchain(Device& device) {
 	createInfo.imageColorSpace = mSurfaceFormat.colorSpace;
 	createInfo.imageExtent = mSwapchainExtent;
 	createInfo.imageArrayLayers = 1;
-	createInfo.imageUsage = mImageUsage;
+	createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
 	createInfo.imageSharingMode = vk::SharingMode::eExclusive;
 	createInfo.preTransform = capabilities.currentTransform;
 	createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 	createInfo.presentMode = mPresentMode;
-	createInfo.clipped = VK_TRUE;
-	mSwapchain = (*mSwapchainDevice)->createSwapchainKHR(createInfo);
-	mSwapchainDevice->set_debug_name(mSwapchain, "Window/Swapchain");
-	
-	// get the back buffers
-	vector<vk::Image> images = (*mSwapchainDevice)->getSwapchainImagesKHR(mSwapchain);
-	mSwapchainImages.resize(images.size());
+	createInfo.clipped = VK_FALSE;
+	mSwapchain = mPresentQueueFamily->mDevice->createSwapchainKHR(createInfo);
+	mPresentQueueFamily->mDevice.set_debug_name(mSwapchain, "Window/Swapchain");
+		
+	// create per-frame image views and semaphores
+	vector<vk::Image> images = mPresentQueueFamily->mDevice->getSwapchainImagesKHR(mSwapchain);
+	mSwapchainImages.clear();
+	mRenderTargets.clear();
 	mImageAvailableSemaphores.clear();
-	mImageAvailableSemaphores.resize(images.size());
+	mSwapchainImages.reserve(images.size());
+	mRenderTargets.reserve(images.size());
+	mImageAvailableSemaphores.reserve(images.size());
+	for (uint32_t i = 0; i < images.size(); i++) {
+		mPresentQueueFamily->mDevice.set_debug_name(images[i], "swapchain " + to_string(i));
+		mSwapchainImages.emplace_back(
+			make_shared<Image>(images[i], mPresentQueueFamily->mDevice, "swapchain " + to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
+			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
+		mRenderTargets.emplace_back(
+			make_shared<Image>(mPresentQueueFamily->mDevice, "render target " + to_string(i), vk::Extent3D(mSwapchainExtent,1), vk::Format::eR8G8B8A8Unorm, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eColorAttachment|vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled),
+			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
+		mImageAvailableSemaphores.emplace_back(make_shared<Semaphore>(mPresentQueueFamily->mDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i)));
+	}
+
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
-	
-	// create per-frame image views and semaphores
-	for (uint32_t i = 0; i < images.size(); i++) {
-		mSwapchainDevice->set_debug_name(images[i], "swapchain"+to_string(i));
-		mSwapchainImages[i] = Image::View(
-			make_shared<Image>(images[i], *mSwapchainDevice, "swapchain"+to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
-			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
-		mImageAvailableSemaphores[i] = make_shared<Semaphore>(*mSwapchainDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i));
-	}
 }
 void stm::Window::destroy_swapchain() {
-	mSwapchainDevice->flush();
+	mInstance.device().flush();
 	mSwapchainImages.clear();
+	mRenderTargets.clear();
 	mImageAvailableSemaphores.clear();
-	if (mSwapchain) (*mSwapchainDevice)->destroySwapchainKHR(mSwapchain);
+	if (mSwapchain) mInstance.device()->destroySwapchainKHR(mSwapchain);
 	mSwapchain = nullptr;
-}
-
-void stm::Window::lock_mouse(bool l) {
-	#ifdef WIN32
-	if (mLockMouse && !l)
-		ShowCursor(TRUE);
-	else if (!mLockMouse && l)
-		ShowCursor(FALSE);
-	#endif
-	mLockMouse = l;
 }
 
 #ifdef WIN32
@@ -312,11 +315,6 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mInputState.set_button  (KeyCode::eMouse5);
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mInputState.unset_button(KeyCode::eMouse5);
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mInputState.add_scroll_delta((float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA);
-			if (mLockMouse) {
-				RECT rect;
-				GetWindowRect(mHwnd, &rect);
-				SetCursorPos((rect.right + rect.left) / 2, (rect.bottom + rect.top) / 2);
-			}
 		}
 		if (raw.header.dwType == RIM_TYPEKEYBOARD) {
 			USHORT key = raw.data.keyboard.VKey;

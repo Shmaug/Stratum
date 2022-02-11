@@ -7,51 +7,91 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image.h>
+#include <stb_image_write.h>
 
-using namespace stm;
+#define TINYEXR_USE_MINIZ 0
+#include <miniz/miniz.h>
+#define TINYEXR_IMPLEMENTATION
+#include <extern/tiny_exr.h>
 
-Image::PixelData Image::load(Device& device, const fs::path& filename, bool srgb) {
-	int x,y,channels;
-	stbi_info(filename.string().c_str(), &x, &y, &channels);
+namespace stm {
 
-	int desiredChannels = 0;
-	if (channels == 3) desiredChannels = 4;
-
-	byte* pixels = nullptr;
-	vk::Format format = vk::Format::eUndefined;
-	if (stbi_is_hdr(filename.string().c_str())) {
-		pixels = (byte*)stbi_loadf(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		switch(desiredChannels ? desiredChannels : channels) {
-			case 1: format = vk::Format::eR32Sfloat; break;
-			case 2: format = vk::Format::eR32G32Sfloat; break;
-			case 3: format = vk::Format::eR32G32B32Sfloat; break;
-			case 4: format = vk::Format::eR32G32B32A32Sfloat; break;
+ImageData load_image_data(Device& device, const fs::path& filename, bool srgb, int desiredChannels) {
+	if (!fs::exists(filename)) throw invalid_argument("File does not exist: " + filename.string());
+	if (filename.extension() == ".exr") {
+		float* data = nullptr;
+		int width;
+		int height;
+		const char* err = nullptr;
+		int ret = LoadEXR(&data, &width, &height, filename.string().c_str(), &err);
+		if (ret != TINYEXR_SUCCESS) {
+			std::cerr << "OpenEXR error: " << err << std::endl;
+			FreeEXRErrorMessage(err);
+			throw runtime_error(std::string("Failure when loading image: ") + filename.string());
 		}
-	} else if (stbi_is_16_bit(filename.string().c_str())) {
-		pixels = (byte*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		switch(desiredChannels ? desiredChannels : channels) {
-			case 1: format = vk::Format::eR16Unorm; break;
-			case 2: format = vk::Format::eR16G16Unorm; break;
-			case 3: format = vk::Format::eR16G16B16Unorm; break;
-			case 4: format = vk::Format::eR16G16B16A16Unorm; break;
-		}
+		Buffer::View<float> buf = make_shared<Buffer>(device, filename.stem().string(), width*height*sizeof(float)*4, vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		memcpy(buf.data(), data, buf.size_bytes());
+		free(data);
+		return ImageData{Buffer::TexelView(buf, vk::Format::eR32G32B32A32Sfloat), vk::Extent3D(width,height,1)};
 	} else {
-		pixels = (byte*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
-		switch (desiredChannels ? desiredChannels : channels) {
-			case 1: format = vk::Format::eR8Unorm; break;
-			case 2: format = vk::Format::eR8G8Unorm; break;
-			case 3: format = vk::Format::eR8G8B8Unorm; break;
-			case 4: format = vk::Format::eR8G8B8A8Unorm; break;
-		}
-	}
-	if (!pixels) throw invalid_argument("Could not load " + filename.string());
-	cout << "Loaded " << filename << " (" << x << "x" << y << ")" << endl;
-	if (desiredChannels) channels = desiredChannels;
+		int x,y,channels;
+		stbi_info(filename.string().c_str(), &x, &y, &channels);
 
-	Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*texel_size(format), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY));
-	memcpy(buf.data(), pixels, buf.size());
-	stbi_image_free(pixels);
-	return make_pair(Buffer::TexelView(buf, format), vk::Extent3D(x,y,1));
+		if (channels == 3) desiredChannels = 4;
+
+		byte* pixels = nullptr;
+		vk::Format format = vk::Format::eUndefined;
+		if (stbi_is_hdr(filename.string().c_str())) {
+			pixels = (byte*)stbi_loadf(filename.string().c_str(), &x, &y, &channels, desiredChannels);
+			switch(desiredChannels ? desiredChannels : channels) {
+				case 1: format = vk::Format::eR32Sfloat; break;
+				case 2: format = vk::Format::eR32G32Sfloat; break;
+				case 3: format = vk::Format::eR32G32B32Sfloat; break;
+				case 4: format = vk::Format::eR32G32B32A32Sfloat; break;
+			}
+		} else if (stbi_is_16_bit(filename.string().c_str())) {
+			pixels = (byte*)stbi_load_16(filename.string().c_str(), &x, &y, &channels, desiredChannels);
+			switch(desiredChannels ? desiredChannels : channels) {
+				case 1: format = vk::Format::eR16Unorm; break;
+				case 2: format = vk::Format::eR16G16Unorm; break;
+				case 3: format = vk::Format::eR16G16B16Unorm; break;
+				case 4: format = vk::Format::eR16G16B16A16Unorm; break;
+			}
+		} else {
+			pixels = (byte*)stbi_load(filename.string().c_str(), &x, &y, &channels, desiredChannels);
+			switch (desiredChannels ? desiredChannels : channels) {
+				case 1: format = srgb ? vk::Format::eR8Srgb : vk::Format::eR8Unorm; break;
+				case 2: format = srgb ? vk::Format::eR8G8Srgb : vk::Format::eR8G8Unorm; break;
+				case 3: format = srgb ? vk::Format::eR8G8B8Srgb : vk::Format::eR8G8B8Unorm; break;
+				case 4: format = srgb ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm; break;
+			}
+		}
+		if (!pixels) throw invalid_argument("Could not load " + filename.string());
+		cout << "Loaded " << filename << " (" << x << "x" << y << ")" << endl;
+		if (desiredChannels) channels = desiredChannels;
+
+		Buffer::View<byte> buf(make_shared<Buffer>(device, filename.stem().string() + "/Staging", x*y*texel_size(format), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY));
+		memcpy(buf.data(), pixels, buf.size());
+		stbi_image_free(pixels);
+		return ImageData{Buffer::TexelView(buf, format), vk::Extent3D(x,y,1)};
+	}
+}
+
+// If mipLevels = 0, will auto-determine according to extent
+Image::Image(CommandBuffer& commandBuffer, const string& name, const ImageData& pixels, uint32_t mipCount, vk::ImageUsageFlags usage, VmaMemoryUsage memoryUsage, vk::ImageTiling tiling)
+		: DeviceResource(commandBuffer.mDevice, name), mExtent(pixels.extent), mFormat(pixels.pixels.format()), mLayerCount(1), mSampleCount(vk::SampleCountFlagBits::e1), mUsage(vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|usage), 
+		mLevelCount(mipCount?mipCount:max_mips(pixels.extent)), mType(vk::ImageType::e2D), mTiling(tiling) {
+	init_state();
+	create();
+	mMemory = make_shared<Device::MemoryAllocation>(mDevice, mDevice->getImageMemoryRequirements(mImage), memoryUsage);
+	vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
+	
+	transition_barrier(commandBuffer, vk::ImageLayout::eTransferDstOptimal);
+	vk::BufferImageCopy copy(pixels.pixels.offset(), 0, 0, vk::ImageSubresourceLayers{vk::ImageAspectFlagBits::eColor, 0, 0, 1}, {}, extent());
+	commandBuffer->copyBufferToImage(*commandBuffer.hold_resource(pixels.pixels.buffer()), mImage, vk::ImageLayout::eTransferDstOptimal, copy);
+	
+	if (mLevelCount > 1)
+		generate_mip_maps(commandBuffer);
 }
 
 void Image::init_state() {
@@ -185,4 +225,6 @@ Image::View::View(const shared_ptr<Image>& image, const vk::ImageSubresourceRang
 		mView = image->mViews.emplace(key, mImage->mDevice->createImageView(info)).first->second;
 		mImage->mDevice.set_debug_name(mView, mImage->name() + "/View");
 	}
+}
+
 }

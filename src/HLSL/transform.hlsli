@@ -1,7 +1,7 @@
 #ifndef TRANSFORM_H
 #define TRANSFORM_H
 
-#include "math.hlsli"
+#include "quatf.hlsli"
 
 //#define TRANSFORM_UNIFORM_SCALING
 
@@ -13,8 +13,56 @@ struct TransformData {
 #else
  float4x4 m;
 #endif
-};
 
+	inline float3 transform_vector(float3 v) CONST_CPP {
+#ifdef TRANSFORM_UNIFORM_SCALING
+		return rotate_vector(mRotation, v*mScale);
+#else
+#ifdef __cplusplus
+		return m.block<3,3>(0,0).matrix() * v.matrix();
+#else
+		return mul((float3x3)m, v).xyz;
+#endif
+#endif
+	}
+
+	inline float3 transform_point(float3 v) CONST_CPP {
+#ifdef TRANSFORM_UNIFORM_SCALING
+		return mTranslation + transform_vector(v);
+#else
+#ifdef __cplusplus
+		return (m.matrix() * v.matrix().homogeneous()).col(3).head<3>();
+#else
+		return mul(m, float4(v, 1)).xyz;
+#endif
+#endif
+	}
+
+	inline TransformData inverse() CONST_CPP {
+		TransformData r;
+#ifdef TRANSFORM_UNIFORM_SCALING
+		r.mRotation = inverse(mRotation);
+		r.mScale = 1/t.mScale;
+		r.mTranslation = rotate_vector(r.mRotation, -mTranslation * r.mScale);
+#else
+#ifdef __cplusplus
+		r.m = m.matrix().inverse();
+#else
+		float a00 = m[0][0], a01 = m[0][1], a02 = m[0][2];
+		float a10 = m[1][0], a11 = m[1][1], a12 = m[1][2];
+		float a20 = m[2][0], a21 = m[2][1], a22 = m[2][2];
+		float b01 =  a22 * a11 - a12 * a21;
+		float b11 = -a22 * a10 + a12 * a20;
+		float b21 =  a21 * a10 - a11 * a20;
+		float det = 1/(a00 * b01 + a01 * b11 + a02 * b21);
+		r.m[0] = float4(b01*det, (-a22 * a01 + a02 * a21)*det, ( a12 * a01 - a02 * a11)*det, -m[0][3]);
+		r.m[1] = float4(b11*det, ( a22 * a00 - a02 * a20)*det, (-a12 * a00 + a02 * a10)*det, -m[1][3]);
+		r.m[2] = float4(b21*det, (-a21 * a00 + a01 * a20)*det, ( a11 * a00 - a01 * a10)*det, -m[2][3]);
+#endif
+#endif
+		return r;
+	}
+};
 
 inline TransformData make_transform(float3 t, quatf r, float3 s) {
 	TransformData result;
@@ -25,7 +73,7 @@ inline TransformData make_transform(float3 t, quatf r, float3 s) {
 #else
 #ifdef __cplusplus
 	result.m = Affine3f(Translation3f(t)).matrix();
-	result.m.topLeftCorner(3,3) = (Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]) * Scaling(s.matrix())).matrix();
+	result.m.block<3,3>(0,0) = (Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]) * Scaling(s.matrix())).matrix();
 #else
 	// https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToMatrix/index.htm
 	float sqw = r.w*r.w;
@@ -61,52 +109,7 @@ inline TransformData make_transform(float3 t, quatf r, float3 s) {
 #endif
 	return result;
 }
-inline float3 transform_vector(TransformData t, float3 v) {
-#ifdef TRANSFORM_UNIFORM_SCALING
-	return rotate_vector(t.mRotation, v*t.mScale);
-#else
-#ifdef __cplusplus
-	return t.m.topLeftCorner(3,3).matrix() * v.matrix();
-#else
-	return mul((float3x3)t.m, v).xyz;
-#endif
-#endif
-}
-inline float3 transform_point(TransformData t, float3 v) {
-#ifdef TRANSFORM_UNIFORM_SCALING
-	return t.mTranslation + transform_vector(t, v);
-#else
-#ifdef __cplusplus
-	return (t.m.matrix() * v.matrix().homogeneous()).topLeftCorner(3,1);
-#else
-	return mul(t.m, float4(v, 1)).xyz;
-#endif
-#endif
-}
-inline TransformData inverse(TransformData t) {
-	TransformData r;
-#ifdef TRANSFORM_UNIFORM_SCALING
-	r.mRotation = inverse(t.mRotation);
-	r.mScale = 1/t.mScale;
-	r.mTranslation = rotate_vector(r.mRotation, -t.mTranslation * r.mScale);
-#else
-#ifdef __cplusplus
-	r.m = t.m.matrix().inverse();
-#else
-  float a00 = r.m[0][0], a01 = r.m[0][1], a02 = r.m[0][2];
-  float a10 = r.m[1][0], a11 = r.m[1][1], a12 = r.m[1][2];
-  float a20 = r.m[2][0], a21 = r.m[2][1], a22 = r.m[2][2];
-  float b01 =  a22 * a11 - a12 * a21;
-  float b11 = -a22 * a10 + a12 * a20;
-  float b21 =  a21 * a10 - a11 * a20;
-  float det = 1/(a00 * b01 + a01 * b11 + a02 * b21);
-  r.m[0] = float4(b01*det, (-a22 * a01 + a02 * a21)*det, ( a12 * a01 - a02 * a11)*det, -t.m[0][3]);
-	r.m[1] = float4(b11*det, ( a22 * a00 - a02 * a20)*det, (-a12 * a00 + a02 * a10)*det, -t.m[1][3]);
-	r.m[2] = float4(b21*det, (-a21 * a00 + a01 * a20)*det, ( a11 * a00 - a01 * a10)*det, -t.m[2][3]);
-#endif
-#endif
-	return r;
-}
+
 inline TransformData tmul(TransformData lhs, TransformData rhs) {
 	TransformData r;
 #ifdef TRANSFORM_UNIFORM_SCALING
@@ -123,65 +126,10 @@ inline TransformData tmul(TransformData lhs, TransformData rhs) {
 	return r;
 }
 
-
-struct ProjectionData {
-	float2 mScale;
-	float2 Offset;
-	float mNear;
-	float mFar;
-	uint mOrthographic;
-	uint pad;
-};
-
-inline ProjectionData make_orthographic(float2 size, float2 offset, float znear, float zfar) {
-	ProjectionData r;
-	r.mScale = 2/size;
-	r.Offset = offset;
-	r.mNear = znear;
-	r.mFar = -abs(zfar);
-	return r;
-}
-inline ProjectionData make_perspective(float fovy, float aspect /* width/height */, float2 offset, float znear, float zfar) {
-	ProjectionData r;
-	r.mScale[1] = 1/tan(fovy/2);
-	r.mScale[0] = aspect*r.mScale[1];
-	r.Offset = offset;
-	r.mNear = znear;
-	r.mFar = abs(zfar);
-	return r;
-}
-
-// uses reversed z (1 at near plane -> 0 at far plane)
-inline float4 project_point(ProjectionData t, float3 v) {
-	float4 r;
-	r[0] = v[0]*t.mScale[0] + t.Offset[0];
-	r[1] = v[1]*t.mScale[1] + t.Offset[1];
-	if (t.mFar < 0) {
-		// orthographic
-		r[2] = (v[2] - (-t.mFar)*sign(t.mNear))/(t.mNear - t.mFar);
-		r[3] = 1;
-	} else {
-		// perspective, infinite far plane
-		r[2] = abs(t.mNear);
-		r[3] = v[2]*sign(t.mNear);
-	}
-	return r;
-}
-inline float3 back_project(ProjectionData t, float3 v) {
-	float3 r;
-	r[0] = (v[0] - t.Offset[0])/t.mScale[0];
-	r[1] = (v[1] - t.Offset[0])/t.mScale[1];
-	if (t.mOrthographic) {
-		r[2] = t.mFar + r[2]*(t.mNear - t.mFar);
-	} else
-		r[2] = t.mNear/v[2];
-	return r;
-}
-
 inline float3x4 to_float3x4(TransformData t) {
 #ifdef TRANSFORM_UNIFORM_SCALING
 #ifdef __cplusplus
-	return (Eigen::Translation3f(t.mTranslation) * Eigen::Quaternionf(t.mRotation.w, t.mRotation.xyz[0], t.mRotation.xyz[1], t.mRotation.xyz[2]) * Eigen::Scaling(t.mScale)).matrix().array().topLeftCorner(3,4);
+	return (Eigen::Translation3f(t.mTranslation) * Eigen::Quaternionf(t.mRotation.w, t.mRotation.xyz[0], t.mRotation.xyz[1], t.mRotation.xyz[2]) * Eigen::Scaling(t.mScale)).matrix().array().block<3,4>(0,0);
 #else
 	float3x4 m;
 	float3 r0 = rotate_vector(t.mRotation, float3(1,0,0));
@@ -194,19 +142,19 @@ inline float3x4 to_float3x4(TransformData t) {
 #endif
 #else
 #ifdef __cplusplus
-	return t.m.topLeftCorner(3,4);
+	return t.m.block<3,4>(0,0);
 #else
 	return (float3x4)t.m;
 #endif
 #endif
 }
 
-inline TransformData from_float3x4(float3x4 m) {
+inline TransformData from_float3x4(const float3x4 m) {
 	TransformData t;
 #ifdef TRANSFORM_UNIFORM_SCALING
 #ifdef __cplusplus
 	t.mTranslation = m.col(3);
-	Matrix3f m3x3 = m.topLeftCorner(3,3);
+	Matrix3f m3x3 = m.block<3,3>(0,0);
 	t.mScale = pow(m3x3.determinant(), 1.f/3.f);
 	m3x3 /= t.mScale;
 	Quaternionf q(m3x3);
@@ -245,8 +193,8 @@ inline TransformData from_float3x4(float3x4 m) {
 #endif
 #else
 #ifdef __cplusplus
-	t.m.topLeftCorner(3,4) = m;
-	t.m.bottomLeftCorner(1,4) = float4(0,0,0,1);
+	t.m.block<3,4>(0,0) = m;
+	t.m.row(3) = float4(0,0,0,1);
 #else
 	t.m[0] = m[0];
 	t.m[1] = m[1];
@@ -255,6 +203,66 @@ inline TransformData from_float3x4(float3x4 m) {
 #endif
 #endif
 	return t;
+}
+
+struct ProjectionData {
+	float2 mScale;
+	float2 mOffset;
+	float mNear;
+	float mFar;
+	uint mOrthographic;
+	uint pad;
+
+	// uses reversed z (1 at near plane -> 0 at far plane)
+	inline float4 project_point(float3 v) CONST_CPP {
+		float4 r;
+		if (mOrthographic) {
+			// orthographic
+			r[0] = v[0]*mScale[0] + mOffset[0];
+			r[1] = v[1]*mScale[1] + mOffset[1];
+			r[2] = (v[2] - mFar)/(mNear - mFar);
+			r[3] = 1;
+		} else {
+			// perspective, infinite far plane
+			r[0] = v[0]*mScale[0] + v[2]*mOffset[0];
+			r[1] = v[1]*mScale[1] + v[2]*mOffset[1];
+			r[2] = abs(mNear);
+			r[3] = v[2]*sign(mNear);
+		}
+		return r;
+	}
+	inline float3 back_project(float2 v) CONST_CPP {
+		float3 r;
+		if (mOrthographic) {
+			r[0] = (v[0] - mOffset[0])/mScale[0];
+			r[1] = (v[1] - mOffset[1])/mScale[1];
+		} else {
+			r[0] = mNear*(v[0]*sign(mNear) - mOffset[0])/mScale[0];
+			r[1] = mNear*(v[1]*sign(mNear) - mOffset[1])/mScale[1];
+		}
+		r[2] = mNear;
+		return r;
+	}
+};
+
+inline ProjectionData make_orthographic(float2 size, float2 offset, float znear, float zfar) {
+	ProjectionData r;
+	r.mScale = 2/size;
+	r.mOffset = offset;
+	r.mNear = znear;
+	r.mFar = zfar;
+	r.mOrthographic = 1;
+	return r;
+}
+inline ProjectionData make_perspective(float fovy, float aspect, float2 offset, float znear) {
+	ProjectionData r;
+	r.mScale[1] = 1/tan(fovy/2);
+	r.mScale[0] = aspect*r.mScale[1];
+	r.mOffset = offset;
+	r.mNear = znear;
+	r.mFar = 0;
+	r.mOrthographic = 0;
+	return r;
 }
 
 #endif

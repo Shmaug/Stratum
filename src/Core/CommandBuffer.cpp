@@ -25,7 +25,6 @@ CommandBuffer::~CommandBuffer() {
 	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 }
 
-
 void CommandBuffer::begin_label(const string& text, const Array4f& color) {
 	vk::DebugUtilsLabelEXT label = {};
 	memcpy(label.color, &color, sizeof(color));
@@ -58,7 +57,6 @@ void CommandBuffer::reset(const string& name) {
 	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 	mState = CommandBufferState::eRecording;
 }
-
 
 void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
 	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");

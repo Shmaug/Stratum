@@ -116,5 +116,4 @@ inline void binary_write(ostream& lhs, const R& rhs) {
 			binary_write(lhs, v);
 }
 
-
 }

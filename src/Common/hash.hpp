@@ -104,12 +104,6 @@ struct hash<Eigen::Matrix<T,Rows,Cols,Options,MaxRows,MaxCols>> {
   }
 };
 
-template<typename BitType>
-struct hash<vk::Flags<BitType>> {
-	inline size_t operator()(const vk::Flags<BitType>& v) const {
-		return (typename vk::Flags<BitType>::MaskType)v;
-	}
-};
 template<>
 struct hash<vk::SamplerCreateInfo> {
 	inline size_t operator()(const vk::SamplerCreateInfo& v) const {

@@ -1,7 +1,4 @@
 #include "Profiler.hpp"
-#include <Core/Window.hpp>
-
-#include <imgui.h>
 
 using namespace stm;
 

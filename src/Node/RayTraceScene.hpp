@@ -6,12 +6,12 @@
 
 namespace stm {
 
-namespace hlsl {
 #pragma pack(push)
 #pragma pack(1)
-#include <HLSL/rt/rtscene.hlsli>
-#pragma pack(pop)
+namespace hlsl {
+#include <HLSL/visibility_buffer.hlsli>
 }
+#pragma pack(pop)
 
 class AccelerationStructure : public DeviceResource {
 public:
@@ -38,7 +38,7 @@ public:
 	
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer);
-	STRATUM_API void render(CommandBuffer& commandBuffer, const component_ptr<Camera>& camera, const Image::View& colorBuffer, const vk::Rect2D& renderRegion = {});
+	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<hlsl::ViewData>& views);
 
 private:
 	struct MeshAS {
@@ -49,15 +49,15 @@ private:
 	Node& mNode;
 	shared_ptr<AccelerationStructure> mTopLevel;
 	shared_ptr<AccelerationStructure> mUnitCubeAS;
-	unordered_map<Mesh*, Buffer::View<hlsl::VertexData>> mMeshVertices;
+	unordered_map<Mesh*, Buffer::View<hlsl::PackedVertexData>> mMeshVertices;
 	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 	
 	
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	
-	component_ptr<ComputePipelineState> mTracePrimaryRaysPipeline;
-	component_ptr<ComputePipelineState> mTraceIndirectRaysPipeline;
+	component_ptr<ComputePipelineState> mTraceVisibilityPipeline;
+	component_ptr<ComputePipelineState> mTraceIndirectPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 	
 	component_ptr<ComputePipelineState> mSpatialReusePipeline;
@@ -71,47 +71,40 @@ private:
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 
 	bool mRandomPerFrame = true;
-	bool mReprojection = true;
-	bool mForwardProjection = true;
+	bool mReprojection = false;
 	uint32_t mDiffAtrousIterations = 0;
 	uint32_t mAtrousIterations = 0;
 	uint32_t mSpatialReservoirIterations = 0;
 	uint32_t mHistoryTap = 0;
 
 	struct FrameData {
-		hlsl::TransformData mCameraToWorld;
-		hlsl::ProjectionData mProjection;
+		Buffer::View<hlsl::PackedVertexData> mVertices;
+		Buffer::View<byte> mIndices;
+		Buffer::View<byte> mMaterialData;
+		Buffer::View<hlsl::InstanceData> mInstances;
+		Buffer::View<uint32_t> mLightInstances;
+		Buffer::View<float> mDistributionData;
 
-		Image::View mVisibility;
+		Buffer::View<hlsl::ViewData> mViews;
 		
-		Image::View mRNGSeed;
+		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
+		Image::View mRadiance;
+		Image::View mAlbedo;
+
 		Image::View mReservoirs;
 		Image::View mReservoirRNG;
 		
-		Image::View mRadiance;
-		Image::View mAlbedo;
-		Image::View mNormal;
-		Image::View mZ;
-		
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
-		Image::View mAccumLength;
-			
-		Image::View mPrevUV;
+		
 		Image::View mGradientPositions;
-		Image::View mAntilagAlpha;
-		Image::View mTemporalReservoir, mSpatialReservoir;
-		Image::View mPing, mPong;
-		array<Image::View, 2> mDiffPing, mDiffPong;
+		array<Image::View, 2> mTemp;
+		array<array<Image::View, 2>, 2> mDiffTemp;
 
-		Buffer::View<hlsl::InstanceData> mInstances;
-		Buffer::View<hlsl::MaterialData> mMaterials;
-		Buffer::View<hlsl::VertexData> mVertices;
-		Buffer::View<byte> mIndices;
+		uint32_t mFrameId;
 	};
 
 	unique_ptr<FrameData> mCurFrame, mPrevFrame;
-	Image::View mColorHistory;
 };
 
 }

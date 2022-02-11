@@ -57,7 +57,7 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
 
     add_custom_command(OUTPUT "${SPV_PATH}" "${SPV_JSON_PATH}"
       COMMAND ${COMPILE_CMD} ${SRC_PATH} && spirv-cross ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect
-      DEPENDS "${SRC_PATH}" IMPLICIT_DEPENDS c "${SRC_PATH}")
+      DEPENDS "${SRC_PATH}" IMPLICIT_DEPENDS CXX "${SRC_PATH}")
     
     add_custom_target(${DST_NAME} ALL DEPENDS "${SPV_PATH}" "${SPV_JSON_PATH}")    
     

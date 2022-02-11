@@ -3,6 +3,7 @@
 #include "Scene.hpp"
 
 #ifdef STRATUM_ENABLE_OPENXR
+#include <openxr/openxr_platform.h>
 #include <openxr/openxr.hpp>
 
 namespace stm {
@@ -12,7 +13,12 @@ public:
   struct View {
     component_ptr<hlsl::TransformData> mTransform;
     component_ptr<Camera> mCamera;
-    vk::Rect2D mImageRect;
+    inline const Image::View& back_buffer() const { return mSwapchainImages[mImageIndex]; }
+  private:
+    friend class XR;
+    xr::Swapchain mSwapchain;
+    vector<Image::View> mSwapchainImages;
+    uint32_t mImageIndex;
   };
 
   STRATUM_API XR(Node& node);
@@ -22,20 +28,23 @@ public:
   inline const xr::SystemId& system() const { return mSystem; }
   inline const vector<View>& views() const { return mViews; }
   
-	inline Image::View back_buffer() const { return mSwapchainImages[mSwapchainImageIndex]; }
 	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mSwapchainImageUsage; }
 	inline vk::ImageUsageFlags& back_buffer_usage() { return mSwapchainImageUsage; }
 
-  STRATUM_API void get_vulkan_extensions(string& instanceExtensions, string& deviceExtensions);
-  STRATUM_API void create_session(Device::QueueFamily& queueFamily);
-  STRATUM_API void create_swapchain();
+  inline const xr::SessionState& state() const { return mSessionState; }
 
-  STRATUM_API void poll_actions();
-  STRATUM_API void do_frame(CommandBuffer& commandBuffer);
+  STRATUM_API void get_vulkan_extensions(string& instanceExtensions, string& deviceExtensions);
+  STRATUM_API vk::PhysicalDevice get_vulkan_device(Instance& instance);
+  STRATUM_API void create_session(Instance& instance);
+
+  STRATUM_API void poll_events();
+  STRATUM_API void render(CommandBuffer& commandBuffer);
+  STRATUM_API void present();
 
   NodeEvent<CommandBuffer&> OnRender;
 
 private:
+  STRATUM_API void create_views();
   STRATUM_API void destroy();
 
   Node& mNode;
@@ -48,18 +57,21 @@ private:
   xr::Instance mInstance;
   xr::SystemId mSystem;
   xr::Session mSession;
-  xr::Swapchain mSwapchain;
-  vector<shared_ptr<Image>> mSwapchainImages;
-  uint32_t mSwapchainImageIndex;
-  vk::ImageUsageFlags mSwapchainImageUsage;
 
   xr::Space mReferenceSpace;
   xr::ViewConfigurationType mPrimaryViewConfiguration;
+  vk::ImageUsageFlags mSwapchainImageUsage;
   vector<View> mViews;
+  vector<xr::View> mXRViews;
   
+  xr::CompositionLayerProjection mCompositionLayer;
+  xr::FrameState mFrameState;
+  xr::SessionState mSessionState;
+  bool mSessionRunning;
+
   // Spaces for hands, etc
-  std::vector<xr::Space> mActionSpaces;
-  std::vector<xr::Path> mHandPaths;
+  vector<xr::Space> mActionSpaces;
+  vector<xr::Path> mHandPaths;
   xr::ActionSet mActionSet;
   xr::Action mGrabAction;
   xr::Action mPoseAction;

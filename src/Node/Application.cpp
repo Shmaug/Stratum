@@ -1,49 +1,55 @@
 #include "Application.hpp"
+#include "Scene.hpp"
 #include "Gui.hpp"
 
 using namespace stm;
 using namespace stm::hlsl;
 
 Application::Application(Node& node, Window& window) : mNode(node), mWindow(window) {
-  node.make_child("ImGui").make_component<Gui>();
+	auto mainCamera = mNode.make_child("Default Camera").make_component<Camera>( make_perspective(radians(70.f), 1.f, float2::Zero(), -1/1024.f) );
+	mainCamera.node().make_component<TransformData>(make_transform(float3(0,1,0), quatf_identity(), float3::Ones()));
 
-	mMainCamera = mNode.make_child("Default Camera").make_component<Camera>(Camera::ProjectionMode::ePerspective, -1/1024.f, -numeric_limits<float>::infinity(), radians(70.f));
-	mMainCamera.node().make_component<TransformData>(make_transform(float3(0,1,0), make_quatf(0,0,0,1), float3::Ones()));
+  mMainCamera = mainCamera;
 	
   if (!mNode.find_in_ancestor<Instance>()->find_argument("--xr"))
-    OnUpdate.listen(mNode, [&](CommandBuffer& commandBuffer, float deltaTime) {
-      if (mMainCamera) {
-        Window& window = commandBuffer.mDevice.mInstance.window();
-        const MouseKeyboardState& input = window.input_state();
-        auto cameraTransform = mMainCamera.node().find_in_ancestor<TransformData>();
-        float fwd = (mMainCamera->mNear < 0) ? -1 : 1;
-        if (!ImGui::GetIO().WantCaptureMouse) {
-          if (input.pressed(KeyCode::eMouse2)) {
-            static const float gMouseSensitivity = 0.002f;
-            static float2 euler = float2::Zero();
-            euler.y() += input.cursor_delta().x()*fwd * gMouseSensitivity;
-            euler.x() = clamp(euler.x() + input.cursor_delta().y() * gMouseSensitivity, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
-            quatf r = angle_axis(euler.x(), float3(fwd,0,0));
-            r = qmul(angle_axis(euler.y(), float3(0,1,0)), r);
-            #ifdef TRANSFORM_UNIFORM_SCALING
-            cameraTransform->mRotation = r;
-            #else
-            cameraTransform->m.topLeftCorner(3,3) = Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
-            #endif
-          }
+    OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
+      Window& window = commandBuffer.mDevice.mInstance.window();
+      const MouseKeyboardState& input = window.input_state();
+      auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();
+      float fwd = (mainCamera->mProjection.mNear < 0) ? -1 : 1;
+      if (!ImGui::GetIO().WantCaptureMouse) {
+        if (input.pressed(KeyCode::eMouse2)) {
+          static const float gMouseSensitivity = 0.002f;
+          static float2 euler = float2::Zero();
+          euler.y() += input.cursor_delta().x()*fwd * gMouseSensitivity;
+          euler.x() = clamp(euler.x() + input.cursor_delta().y() * gMouseSensitivity, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
+          quatf r = angle_axis(euler.x(), float3(fwd,0,0));
+          r = qmul(angle_axis(euler.y(), float3(0,1,0)), r);
+          #ifdef TRANSFORM_UNIFORM_SCALING
+          cameraTransform->mRotation = r;
+          #else
+          cameraTransform->m.block<3,3>(0,0) = Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
+          #endif
         }
-        if (!ImGui::GetIO().WantCaptureKeyboard) {
-          float3 mv = float3(0,0,0);
-          if (input.pressed(KeyCode::eKeyD)) mv += float3( 1,0,0);
-          if (input.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
-          if (input.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
-          if (input.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
-          if (input.pressed(KeyCode::eKeySpace)) mv += float3(0,1,0);
-          if (input.pressed(KeyCode::eKeyControl)) mv += float3(0,-1,0);
-          if (input.pressed(KeyCode::eKeyShift)) mv *= 3;
-          if (input.pressed(KeyCode::eKeyAlt)) mv /= 2;
-          *cameraTransform = tmul(*cameraTransform, make_transform(mv*deltaTime, make_quatf(0,0,0,1), float3::Ones()));
-        }
+      }
+      if (!ImGui::GetIO().WantCaptureKeyboard) {
+        float3 mv = float3(0,0,0);
+        if (input.pressed(KeyCode::eKeyD)) mv += float3( 1,0,0);
+        if (input.pressed(KeyCode::eKeyA)) mv += float3(-1,0,0);
+        if (input.pressed(KeyCode::eKeyW)) mv += float3(0,0, fwd);
+        if (input.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
+        if (input.pressed(KeyCode::eKeySpace)) mv += float3(0,1,0);
+        if (input.pressed(KeyCode::eKeyControl)) mv += float3(0,-1,0);
+        if (input.pressed(KeyCode::eKeyShift)) mv *= 3;
+        if (input.pressed(KeyCode::eKeyAlt)) mv /= 2;
+        *cameraTransform = tmul(*cameraTransform, make_transform(mv*deltaTime, quatf_identity(), float3::Ones()));
+      }
+      
+      mainCamera->mImageRect = vk::Rect2D { { 0, 0 }, window.swapchain_extent() };
+      const float aspect = window.swapchain_extent().height / (float)window.swapchain_extent().width;
+      if (abs(mainCamera->mProjection.mScale[0] / mainCamera->mProjection.mScale[1] - aspect) > 1e-5) {
+        const float fovy = 2*atan(1/mainCamera->mProjection.mScale[1]);
+        mainCamera->mProjection = make_perspective(fovy, aspect, float2::Zero(), mainCamera->mProjection.mNear);
       }
     });
 
@@ -65,22 +71,18 @@ void Application::load_shaders() {
   #pragma endregion
 }
 
-void Application::loop() {
-  auto gui = mNode.find_in_descendants<Gui>();
-
+void Application::run() {
   size_t frameCount = 0;
   auto t0 = chrono::high_resolution_clock::now();
   while (true) {
     ProfilerRegion ps("Frame " + to_string(frameCount++));
 
-    mWindow.mInstance.poll_events();
-    if (!mWindow.handle())
-      break;
-
     {
       ProfilerRegion ps("Application::PreFrame");
       PreFrame();
     }
+
+    if (!mWindow.handle()) break;
 
     auto t1 = chrono::high_resolution_clock::now();
     float deltaTime = chrono::duration_cast<chrono::duration<float>>(t1 - t0).count();
@@ -93,18 +95,24 @@ void Application::loop() {
       OnUpdate(*commandBuffer, deltaTime);
     }
     
-    if (mWindow.acquire_image(*commandBuffer)) {
-      OnRenderWindow(*commandBuffer);
-      
-      gui->draw(*commandBuffer, mWindow.back_buffer());
-
-      mWindow.back_buffer().transition_barrier(*commandBuffer, vk::ImageLayout::ePresentSrcKHR);
+    if (mWindow.acquire_image()) {
+      {
+        ProfilerRegion ps("Application::OnRenderWindow");
+        OnRenderWindow(*commandBuffer);
+        mWindow.resolve(*commandBuffer);
+      }
 
       auto renderFinishSemaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");
-      pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> waits(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eAllCommands);
-      commandBuffer->mDevice.submit(commandBuffer, waits, renderFinishSemaphore);
+      pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> imageAvailableSemaphore(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
+      commandBuffer->mDevice.submit(commandBuffer, imageAvailableSemaphore, renderFinishSemaphore);
       
       mWindow.present(**renderFinishSemaphore);
+    } else
+      commandBuffer->mDevice.submit(commandBuffer);
+
+    {
+      ProfilerRegion ps("Application::PostFrame");
+      PostFrame();
     }
   }
 }

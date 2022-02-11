@@ -16,6 +16,7 @@ target_include_directories(Stratum PUBLIC
     "$<INSTALL_INTERFACE:include/extern>")
 
 target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan imgui::imgui)
+target_link_libraries(Stratum PRIVATE miniz::miniz pugixml pugixml::shared pugixml::pugixml)
 if (UNIX)
     target_link_libraries(Stratum PUBLIC xcb xcb-keysyms)
 endif()

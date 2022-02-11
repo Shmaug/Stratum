@@ -9,9 +9,11 @@ class NodeGraph;
 template<typename T> class component_ptr;
 
 enum EventPriority : uint32_t {
-	eFirst = 0,
-	eDefault = numeric_limits<uint32_t>::max()/2,
-	eLast = numeric_limits<uint32_t>::max(),
+	eFirst       = 0,
+	eAlmostFirst = 0x3FFFFFFF,
+	eDefault     = 0x7FFFFFFF,
+	eAlmostLast  = 0xBFFFFFFD,
+	eLast        = 0xFFFFFFFF
 };
 
 template<typename... Args>

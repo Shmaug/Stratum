@@ -33,8 +33,6 @@ public:
 	VertexArrayObject(VertexArrayObject&&) = default;
 	VertexArrayObject(const VertexArrayObject&) = default;
 	inline VertexArrayObject(const unordered_map<AttributeType, vector<Attribute>>& attributes) : mAttributes(attributes) {}
-	template<same_as<AttributeType> ... Types>
-	inline VertexArrayObject(Types...types) { ( mAttributes[types].push_back({}), ...); }
 
 	VertexArrayObject& operator=(const VertexArrayObject&) = default;
 	VertexArrayObject& operator=(VertexArrayObject&&) = default;

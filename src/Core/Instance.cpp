@@ -70,34 +70,15 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 		}
 	}
 
-	uint32_t deviceIndex = 0;
-	if (auto index = find_argument("deviceIndex"))
-		deviceIndex = stoi(*index);
-
-	unordered_set<string> validationLayers;
-	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
-	unordered_set<string> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-	
-	for (const auto& layer : find_arguments("validationLayer")) validationLayers.emplace(layer);
-	for (const auto& ext : find_arguments("instanceExtension")) instanceExtensions.emplace(ext);
-	for (const auto& ext : find_arguments("deviceExtension")) deviceExtensions.emplace(ext);
 	bool debugMessenger = find_argument("debugMessenger").has_value();
 	
+	unordered_set<string> validationLayers;
+	for (const auto& layer : find_arguments("validationLayer")) validationLayers.emplace(layer);
 	if (debugMessenger) validationLayers.emplace("VK_LAYER_KHRONOS_validation");
-	if (validationLayers.contains("VK_LAYER_KHRONOS_validation")) {
-		instanceExtensions.emplace(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-		instanceExtensions.emplace(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-		instanceExtensions.emplace(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
-	}
-
-	if (deviceExtensions.contains(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
-		deviceExtensions.emplace(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-		deviceExtensions.emplace(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-		deviceExtensions.emplace(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
-	}
-	if (deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
-		deviceExtensions.emplace(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-
+	
+	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+	for (const auto& ext : find_arguments("instanceExtension")) instanceExtensions.emplace(ext);
+	
 	#ifdef WIN32
 	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
@@ -117,46 +98,36 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 			} else 
 				it++;
 	}
+	for (const string& s : validationLayers) mValidationLayers.push_back(s.c_str());
 
-	vector<const char*> layers;
+	if (validationLayers.contains("VK_LAYER_KHRONOS_validation")) {
+		instanceExtensions.emplace(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+		instanceExtensions.emplace(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		instanceExtensions.emplace(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+	}
+
 	vector<const char*> instanceExts;
-	vector<const char*> deviceExts;
-	for (const string& s : validationLayers) layers.push_back(s.c_str());
 	for (const string& s : instanceExtensions) instanceExts.push_back(s.c_str());
-	for (const string& s : deviceExtensions) deviceExts.push_back(s.c_str());
 
 	vk::ApplicationInfo appInfo = {};
 	appInfo.pApplicationName = "StratumApplication";
-	appInfo.applicationVersion = VK_MAKE_VERSION(0,0,0);
+	appInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 0);
 	appInfo.pEngineName = "Stratum";
-	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR,STRATUM_VERSION_MINOR, 0);
+	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR, STRATUM_VERSION_MINOR, 0);
 	appInfo.apiVersion = mVulkanApiVersion = VK_API_VERSION_1_2;
-	mInstance = vk::createInstance(vk::InstanceCreateInfo({}, &appInfo, layers, instanceExts));
-
+	mInstance = vk::createInstance(vk::InstanceCreateInfo({}, &appInfo, mValidationLayers, instanceExts));
 	
 	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
   VULKAN_HPP_DEFAULT_DISPATCHER.init(mInstance);
 	#endif
 
 	if (debugMessenger) {
-		cout << "Creating debug messenger...";
+		cout << "Creating debug messenger" << endl;
 		mDebugMessenger = mInstance.createDebugUtilsMessengerEXT(vk::DebugUtilsMessengerCreateInfoEXT({},
 			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError, 
 			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
 			DebugCallback));
 	}
-
-	vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
-	if (devices.empty()) throw runtime_error("no vulkan devices found");
-	if (deviceIndex >= devices.size()) {
-		fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to 0\n", deviceIndex);
-		deviceIndex = 0;
-	}
-	vk::PhysicalDevice physicalDevice = devices[deviceIndex];
-	auto deviceProperties = physicalDevice.getProperties();
-
-	cout << "Using physical device " << deviceIndex << ": " << deviceProperties.deviceName << endl;
-	cout << VK_VERSION_MAJOR(deviceProperties.apiVersion) << "." << VK_VERSION_MINOR(deviceProperties.apiVersion) << "." << VK_VERSION_PATCH(deviceProperties.apiVersion) << endl;
 
 	// Create window
 
@@ -219,11 +190,6 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
 	
 	if (find_argument("fullscreen")) mWindow->fullscreen(true);
-	
-	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, layers, mWindow->back_buffer_count());
-	mWindow->create_swapchain(*mDevice);
-
-	cout << mWindow->back_buffer_count() << " in-flight frames" << endl;
 }
 Instance::~Instance() {
 	mWindow.reset();
@@ -240,6 +206,43 @@ Instance::~Instance() {
 	xcb_key_symbols_free(mXCBKeySymbols);
 	xcb_disconnect(mXCBConnection);
 #endif
+}
+
+void Instance::create_device(vk::PhysicalDevice physicalDevice) {
+	if (!physicalDevice) {
+		uint32_t deviceIndex = 0;
+		if (auto index = find_argument("deviceIndex"))
+			deviceIndex = stoi(*index);
+
+		vector<vk::PhysicalDevice> devices = mInstance.enumeratePhysicalDevices();
+		if (devices.empty()) throw runtime_error("no vulkan devices found");
+		if (deviceIndex >= devices.size()) {
+			fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Device index out of bounds: %u. Defaulting to 0\n", deviceIndex);
+			deviceIndex = 0;
+		}
+		physicalDevice = devices[deviceIndex];
+	}
+	auto deviceProperties = physicalDevice.getProperties();
+
+	unordered_set<string> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	for (const auto& ext : find_arguments("deviceExtension")) deviceExtensions.emplace(ext);
+	if (deviceExtensions.contains(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
+		deviceExtensions.emplace(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+		deviceExtensions.emplace(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+		deviceExtensions.emplace(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+	}
+	if (deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
+		deviceExtensions.emplace(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+	vector<const char*> deviceExts;
+	for (const string& s : deviceExtensions) deviceExts.push_back(s.c_str());
+
+	cout << "Using physical device " << deviceProperties.deviceID << ": " << deviceProperties.deviceName << endl;
+	cout << VK_VERSION_MAJOR(deviceProperties.apiVersion) << "." << VK_VERSION_MINOR(deviceProperties.apiVersion) << "." << VK_VERSION_PATCH(deviceProperties.apiVersion) << endl;
+
+	mDevice = make_unique<stm::Device>(*this, physicalDevice, deviceExtensions, mValidationLayers);
+	mWindow->create_swapchain();
+
+	cout << mWindow->back_buffer_count() << " in-flight frames" << endl;
 }
 
 void Instance::poll_events() const {

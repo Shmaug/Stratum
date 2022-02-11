@@ -36,6 +36,12 @@ public:
 	inline const vk::SamplerCreateInfo& create_info() const { return mInfo; }
 };
 
+struct ImageData {
+	Buffer::TexelView pixels;
+	vk::Extent3D extent;
+};
+STRATUM_API ImageData load_image_data(Device& device, const fs::path& filename, bool srgb = true, int desiredChannels = 0);
+
 class Image : public DeviceResource {
 public:
 	static constexpr uint32_t max_mips(const vk::Extent3D& extent) {
@@ -43,9 +49,6 @@ public:
 	}
 
 	class View;
-	using PixelData = pair<Buffer::TexelView, vk::Extent3D>;
-	STRATUM_API static PixelData load(Device& device, const fs::path& filename, bool srgb = true);
-
 	// If mipLevels = 0, will auto-determine according to extent
 	inline Image(shared_ptr<Device::MemoryAllocation> memory, const string& name,
 		const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
@@ -56,6 +59,9 @@ public:
 		create();
 		vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
 	}
+
+	// If mipLevels = 0, will auto-determine according to extent
+	STRATUM_API Image(CommandBuffer& commandBuffer, const string& name, const ImageData& pixels, uint32_t levelCount = 0, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::ImageTiling tiling = vk::ImageTiling::eOptimal);
 
 	// If mipLevels = 0, will auto-determine according to extent
 	inline Image(Device& device, const string& name, const vk::Extent3D& extent, vk::Format format, uint32_t arrayLayers = 1, uint32_t mipLevels = 0, vk::SampleCountFlagBits numSamples = vk::SampleCountFlagBits::e1,
@@ -118,7 +124,7 @@ public:
 	inline void transition_barrier(CommandBuffer& commandBuffer, vk::ImageLayout newLayout, vk::ImageSubresourceRange subresourceRange = {}) {
 		transition_barrier(commandBuffer, guess_stage(newLayout), newLayout, guess_access_flags(newLayout), subresourceRange);
 	}
-
+	
 	class View {
 	private:
 		vk::ImageView mView;
@@ -129,7 +135,7 @@ public:
 	public:
 		View() = default;
 		View(const View&) = default;
-		STRATUM_API View(const shared_ptr<Image>& image, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components, vk::ImageViewType type = (vk::ImageViewType)VK_IMAGE_VIEW_TYPE_MAX_ENUM);
+		STRATUM_API View(const shared_ptr<Image>& image, const vk::ImageSubresourceRange& subresource, const vk::ComponentMapping& components = {}, vk::ImageViewType type = (vk::ImageViewType)VK_IMAGE_VIEW_TYPE_MAX_ENUM);
 		inline View(const shared_ptr<Image>& image, uint32_t baseMip=0, uint32_t mipCount=0, uint32_t baseLayer=0, uint32_t layerCount=0, vk::ImageAspectFlags aspect=(vk::ImageAspectFlags)0, const vk::ComponentMapping& components={}, vk::ImageViewType type = (vk::ImageViewType)VK_IMAGE_VIEW_TYPE_MAX_ENUM)
 			: View(image, vk::ImageSubresourceRange(aspect, baseMip, mipCount, baseLayer, layerCount), components, type) {};
 
@@ -194,13 +200,12 @@ private:
 }
 
 namespace std {
-	
+
 template<>
 struct hash<stm::Image::View> {
 	inline size_t operator()(const stm::Image::View& v) const {
 		return stm::hash_args(v.image().get(), v.subresource_range(), v.components());
 	}
 };
-
 
 }

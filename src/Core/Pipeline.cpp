@@ -2,7 +2,6 @@
 #include "CommandBuffer.hpp"
 
 using namespace stm;
-using namespace stm::hlsl;
 
 Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const ShaderSpecialization>& shaders, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers) : DeviceResource(shaders.begin()->mShader->mDevice, name) {
   ProfilerRegion ps("Pipeline::Pipeline");
