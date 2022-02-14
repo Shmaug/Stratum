@@ -67,7 +67,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (!test_inside_screen(idx_prev, view)) return;
 
  	VisibilityInfo v_prev = load_prev_visibility(idx_prev, gInstanceIndexMap);
-	if (v_prev.instance_index() == -1) return;
+	if (v_prev.instance_index() == INVALID_INSTANCE) return;
 
 	// encode position in previous frame
 	const int2 idx_view_prev = idx_prev - view.image_min;

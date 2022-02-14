@@ -19,8 +19,8 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 	LightSampleRecord ls;
 	if (gSampleBG && (!gSampleLights || rng.next() <= gPushConstants.gEnvironmentSampleProbability)) {
 		// sample environment
-		BF_SET(ls.instance_primitive_index, -1, 0, 16);
-		BF_SET(ls.instance_primitive_index, -1, 16, 16);
+		BF_SET(ls.instance_primitive_index, INVALID_INSTANCE, 0, 16);
+		BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		ls.material_address = gPushConstants.gEnvironmentMaterialAddress;
 		BSDFSampleRecord s = sample_material(gMaterialData, ls.material_address, float3(rng.next(), rng.next(), rng.next()), ray.direction, v);
 		ls.radiance = s.eval.f;
@@ -36,7 +36,7 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 		ls.material_address = instance.material_address();
 		switch (instance.type()) {
 			case INSTANCE_TYPE_SPHERE: {
-				BF_SET(ls.instance_primitive_index, -1, 16, 16);
+				BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 				const float3 center = instance.transform.transform_point(0);
 				float3 to_center = center - v.position;
 				const float dist = length(to_center);
@@ -106,7 +106,7 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 inline PDFMeasure light_sample_pdf(const PathVertex light_vertex, const RayDifferential ray, const float dist) {
 	PDFMeasure pdf;
 
-	if (light_vertex.instance_index() == -1) {
+	if (light_vertex.instance_index() == INVALID_INSTANCE) {
 		if (!gSampleBG) return make_area_pdf(0, 1, 1);
 		return make_solid_angle_pdf(light_vertex.eval_material(ray.direction, ray.direction).pdfW*gPushConstants.gEnvironmentSampleProbability, 1, 1);
 	} else {

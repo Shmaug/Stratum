@@ -13,12 +13,13 @@ struct RoughDielectric : BSDF {
 #ifdef __HLSL_VERSION
 
     inline float eval_pdfW(const float3 dir_in, const float3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-        const bool reflect = dot(vertex.geometry_normal, dir_in) * dot(vertex.geometry_normal, dir_out) > 0;
-
         // Flip the shading frame if it is inconsistent with the geometry normal
         ShadingFrame frame = vertex.shading_frame();
         if (dot(frame.n, dir_in) * dot(vertex.geometry_normal, dir_in) < 0)
             frame.flip();
+            
+        const bool reflect = dot(frame.n, dir_in) * dot(frame.n, dir_out) > 0;
+        
         // If we are going into the surface, then we use normal eta
         // (internal/external), otherwise we use external/internal.
         const float local_eta = dot(vertex.geometry_normal, dir_in) > 0 ? eta : 1 / eta;
@@ -57,12 +58,12 @@ struct RoughDielectric : BSDF {
         }
     }
     inline BSDFEvalRecord eval(const float3 dir_in, const float3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-        const bool reflect = dot(vertex.geometry_normal, dir_in) * dot(vertex.geometry_normal, dir_out) > 0;
-
         // Flip the shading frame if it is inconsistent with the geometry normal
         ShadingFrame frame = vertex.shading_frame();
         if (dot(frame.n, dir_in) * dot(vertex.geometry_normal, dir_in) < 0)
             frame.flip();
+
+        const bool reflect = dot(frame.n, dir_in) * dot(frame.n, dir_out) > 0;
 
         // If we are going into the surface, then we use normal eta
         // (internal/external), otherwise we use external/internal.
@@ -154,11 +155,10 @@ struct RoughDielectric : BSDF {
 
         if (rnd.z <= F) {
             // Reflection
-            const float3 reflected = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
             BSDFSampleRecord r;
-            r.dir_out = reflected;
+            r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
             r.eta = 0;
-            r.eval = eval(dir_in, reflected, vertex, dir);
+            r.eval = eval(dir_in, r.dir_out, vertex, dir);
             return r;
         } else {
             // Refraction
@@ -167,7 +167,7 @@ struct RoughDielectric : BSDF {
             const float h_dot_out_sq = 1 - (1 - h_dot_in * h_dot_in) / (local_eta * local_eta);
             if (h_dot_out_sq <= 0) {
                 // Total internal reflection
-                // This shouldn't floatly happen, as F will be 1 in this case.
+                // This shouldn't really happen, as F will be 1 in this case.
                 BSDFSampleRecord r;
                 r.dir_out = 0;
                 r.eta = 0;
@@ -180,11 +180,10 @@ struct RoughDielectric : BSDF {
                 half_vector = -half_vector;
             
             const float h_dot_out = sqrt(h_dot_out_sq);
-            const float3 refracted = -dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector;
             BSDFSampleRecord r;
-            r.dir_out = refracted;
+            r.dir_out = -dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector;
             r.eta = 0;
-            r.eval = eval(dir_in, refracted, vertex, dir);
+            r.eval = eval(dir_in, r.dir_out, vertex, dir);
             return r;
         }
     }

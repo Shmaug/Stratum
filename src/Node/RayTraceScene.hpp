@@ -53,11 +53,11 @@ private:
 	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 	
-	
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	
 	component_ptr<ComputePipelineState> mTraceVisibilityPipeline;
-	component_ptr<ComputePipelineState> mTraceIndirectPipeline;
+	component_ptr<ComputePipelineState> mTraceBouncePipeline;
+	component_ptr<ComputePipelineState> mDemodulateAlbedoPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 	
 	component_ptr<ComputePipelineState> mSpatialReusePipeline;
@@ -71,11 +71,14 @@ private:
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 
 	bool mRandomPerFrame = true;
-	bool mReprojection = false;
+	bool mReprojection = true;
+	bool mDemodulateAlbedo = true;
 	uint32_t mDiffAtrousIterations = 0;
 	uint32_t mAtrousIterations = 0;
 	uint32_t mSpatialReservoirIterations = 0;
 	uint32_t mHistoryTap = 0;
+	uint32_t mMinDepth = 2;
+	uint32_t mMaxDepth = 5;
 
 	struct FrameData {
 		Buffer::View<hlsl::PackedVertexData> mVertices;
@@ -84,6 +87,7 @@ private:
 		Buffer::View<hlsl::InstanceData> mInstances;
 		Buffer::View<uint32_t> mLightInstances;
 		Buffer::View<float> mDistributionData;
+		Buffer::View<byte> mPathBounceData;
 
 		Buffer::View<hlsl::ViewData> mViews;
 		

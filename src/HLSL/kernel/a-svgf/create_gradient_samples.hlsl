@@ -66,7 +66,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	float2 moments = float2(l_curr, l_curr*l_curr);
 	float sum_w = 1;
 	const VisibilityInfo v = load_visibility(ipos);
-	if (v.instance_index() != -1)
+	if (v.instance_index() != INVALID_INSTANCE)
 		for (int yy = 0; yy < gGradientDownsample; yy++) {
 			for (int xx = 0; xx < gGradientDownsample; xx++) {
 				const int2 p = index.xy*gGradientDownsample + int2(xx, yy);

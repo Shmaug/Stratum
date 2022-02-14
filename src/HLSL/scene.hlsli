@@ -4,7 +4,7 @@
 #include "bitfield.hlsli"
 #include "transform.hlsli"
 
-#define SAMPLE_FLAG_DEMODULATE_ALBEDO BIT(0)
+#define SAMPLE_FLAG_RR BIT(0)
 #define SAMPLE_FLAG_BG_IS BIT(1)
 #define SAMPLE_FLAG_LIGHT_IS BIT(2)
 
@@ -15,6 +15,9 @@
 #define BVH_FLAG_TRIANGLES BIT(0)
 #define BVH_FLAG_SPHERES BIT(1)
 #define BVH_FLAG_EMITTER BIT(2)
+
+#define INVALID_INSTANCE 0xFFFF
+#define INVALID_PRIMITIVE 0xFFFF
 
 struct InstanceData {
 	// instance -> world
@@ -31,9 +34,9 @@ struct InstanceData {
 	inline float radius() CONST_CPP { return asfloat(v[1]); }
 
 	// mesh
-	inline uint prim_count() CONST_CPP { return BF_GET(v[1], 8, 24); }
-	inline uint first_vertex() CONST_CPP { return BF_GET(v[2], 0, 28); }
-	inline uint index_stride() CONST_CPP { return BF_GET(v[2], 28, 4); }
+	inline uint prim_count() CONST_CPP { return BF_GET(v[1], 0, 16); }
+	inline uint index_stride() CONST_CPP { return BF_GET(v[1], 16, 4); }
+	inline uint first_vertex() CONST_CPP { return v[2]; }
 	inline uint indices_byte_offset() CONST_CPP { return v[3]; }
 };
 inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, uint materialAddress, float radius) {
@@ -53,9 +56,9 @@ inline InstanceData make_instance_triangles(const TransformData objectToWorld, c
 	r.v = 0;
 	BF_SET(r.v[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
 	BF_SET(r.v[0], materialAddress, 4, 28);
-	BF_SET(r.v[1], primCount, 8, 24);
-	BF_SET(r.v[2], firstVertex, 0, 28);
-	BF_SET(r.v[2], indexStride, 28, 4);
+	BF_SET(r.v[1], primCount, 0, 16);
+	BF_SET(r.v[1], indexStride, 16, 4);
+	r.v[2] = firstVertex;
 	r.v[3] = indexByteOffset;
 	return r;
 }

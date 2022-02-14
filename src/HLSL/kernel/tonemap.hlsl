@@ -1,3 +1,4 @@
+#pragma compile dxc -spirv -T cs_6_7 -E demodulate_albedo
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
 #include "../tonemap.hlsli"
@@ -45,6 +46,19 @@ Texture2D<uint4> gDebug3;
 [[vk::push_constant]] const struct {
 	float gExposure;
 } gPushConstants;
+
+[numthreads(8,8,1)]
+void demodulate_albedo(uint3 index : SV_DispatchThreadID) {
+	uint2 resolution;
+	gOutput.GetDimensions(resolution.x, resolution.y);
+	if (any(index.xy >= resolution)) return;
+	const float3 albedo = gAlbedo[index.xy].rgb;
+	float4 radiance = gOutput[index.xy];
+	if (albedo.r > 0) radiance.r /= albedo.r;
+	if (albedo.g > 0) radiance.g /= albedo.g;
+	if (albedo.b > 0) radiance.b /= albedo.b;
+	gOutput[index.xy] = radiance;
+}
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadID) {

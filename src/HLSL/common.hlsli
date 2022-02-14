@@ -111,7 +111,7 @@ inline void make_orthonormal(const float3 N, ARG_OUT(float3) T, ARG_OUT(float3) 
 }
 
 inline float stable_atan2(const float y, const float x) {
-	return x == 0.0 ? sign(y)*M_PI/2 : atan2(y, x);
+	return x == 0.0 ? (y == 0 ? 0 : (y < 0 ? -M_PI/2 : M_PI/2)) : atan2(y, x);
 }
 
 inline float2 cartesian_to_spherical_uv(const float3 v) {

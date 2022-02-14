@@ -78,7 +78,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	const VisibilityInfo v = load_visibility(index.xy);
 
 	const float histlen = c.a;
-	if (v.instance_index() == -1 || histlen >= gHistoryLengthThreshold) {
+	if (v.instance_index() == INVALID_INSTANCE || histlen >= gHistoryLengthThreshold) {
 		gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
 		return;
 	}
