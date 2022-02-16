@@ -2,8 +2,9 @@
 #define ROUGHPLASTIC_H
 
 #include "../scene.hlsli"
-
+#ifdef __HLSL_VERSION
 #include "../microfacet.hlsli"
+#endif
 
 struct RoughPlastic : BSDF {
     ImageValue3 diffuse_reflectance;
@@ -38,7 +39,7 @@ struct RoughPlastic : BSDF {
             return 0;
         }
         // Clamp roughness to avoid numerical issues.
-        const float rgh = clamp(roughness.eval(vertex), 0.01, 1);
+        const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
         // We use the reflectance to determine whether to choose specular sampling lobe or diffuse.
         float spec_prob = lS / (lS + lR);
         float diff_prob = 1 - spec_prob;
@@ -84,10 +85,8 @@ struct RoughPlastic : BSDF {
             return r;
         }
 
-        const float3 Kd = diffuse_reflectance.eval(vertex);
-        const float3 Ks = specular_reflectance.eval(vertex);
         // Clamp roughness to avoid numerical issues.
-        const float rgh = clamp(roughness.eval(vertex), 0.025, 1);
+        const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
 
         // If we are going into the surface, then we use normal eta
         // (internal/external), otherwise we use external/internal.
@@ -105,7 +104,10 @@ struct RoughPlastic : BSDF {
         const float D = GTR2(n_dot_h, rgh); // "Generalized Trowbridge Reitz", GTR2 is equivalent to GGX.
         const float G = smith_masking_gtr2(frame.to_local(dir_in), rgh) * smith_masking_gtr2(frame.to_local(dir_out), rgh);
 
-        const float3 spec_contrib = Ks * (G * F_o * D) / (4 * n_dot_in * n_dot_out);
+        const float3 Kd = diffuse_reflectance.eval(vertex);
+        const float3 Ks = specular_reflectance.eval(vertex);
+
+        const float3 spec_contrib = Ks * ((G * F_o * D) / (4 * n_dot_in * n_dot_out));
 
         // Next we account for the diffuse layer.
         // In order to reflect from the diffuse layer,
@@ -114,7 +116,7 @@ struct RoughPlastic : BSDF {
         const float F_i = fresnel_dielectric(dot(half_vector, dir_in), local_eta);
         // Multiplying with Fresnels leads to an overly dark appearance at the 
         // object boundaries. Disney BRDF proposes a fix to this -- we will implement this in problem set 1.
-        const float3 diffuse_contrib = Kd * (1 - F_o) * (1 - F_i) / M_PI;
+        const float3 diffuse_contrib = (Kd * (1 - F_o) * (1 - F_i)) / M_PI;
 
         BSDFEvalRecord r;
         r.pdfW = eval_pdfW(dir_in, dir_out, vertex, dir);
@@ -156,7 +158,7 @@ struct RoughPlastic : BSDF {
             // Convert the incoming direction to local coordinates
             float3 local_dir_in = frame.to_local(dir_in);
             // Clamp roughness to avoid numerical issues.
-            const float rgh = clamp(roughness.eval(vertex), 0.01, 1);
+            const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
             const float alpha = rgh * rgh;
             float3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
             

@@ -79,6 +79,7 @@ private:
 	uint32_t mHistoryTap = 0;
 	uint32_t mMinDepth = 2;
 	uint32_t mMaxDepth = 5;
+	uint32_t mMISDepth = 4;
 
 	struct FrameData {
 		Buffer::View<hlsl::PackedVertexData> mVertices;

@@ -58,6 +58,11 @@ void RayTraceScene::create_pipelines() {
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
 
+	auto samplerClamp = make_shared<Sampler>(instance->device(), "gSampler", vk::SamplerCreateInfo({},
+		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
+		vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge,
+		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
+
 	if (mTraceVisibilityPipeline)
 		mNode.node_graph().erase_recurse(*mTraceVisibilityPipeline.node().parent());
 	Node& n = mNode.make_child("pipelines");
@@ -90,6 +95,7 @@ void RayTraceScene::create_pipelines() {
 	mTemporalAccumulationPipeline = n.make_child("temporal_accumulation").make_component<ComputePipelineState>("temporal_accumulation", shaders.at("temporal_accumulation"));
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 128;
 	mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") = 1.f;
+	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
 	mEstimateVariancePipeline = n.make_child("estimate_variance").make_component<ComputePipelineState>("estimate_variance", shaders.at("estimate_variance"));
 	mAtrousPipeline = n.make_child("atrous").make_component<ComputePipelineState>("atrous", shaders.at("atrous"));
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
@@ -100,6 +106,7 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::PushItemWidth(40);
 		ImGui::InputScalar("Max Depth", ImGuiDataType_U32, &mMaxDepth);
 		ImGui::InputScalar("Min Depth", ImGuiDataType_U32, &mMinDepth);
+		ImGui::InputScalar("MIS Depth", ImGuiDataType_U32, &mMISDepth);
 		ImGui::PopItemWidth();
 		ImGui::Checkbox("Demodulate Albedo", &mDemodulateAlbedo);
 
@@ -376,6 +383,12 @@ void RayTraceScene::update(CommandBuffer& commandBuffer) {
 			instanceDatas.emplace_back(make_instance_triangles(transform, prevTransform, materialMap_it->second, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()));
 			totalVertexCount += mMeshVertices.at(prim->mMesh.get()).size();
 			totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
+
+			//if (auto mask = prim->mMaterial.node().find_in_descendants<Image::View>(); mask && mask.node().name() == "alpha_mask") {
+			//	const uint32_t ind = images.get_index(*mask);
+			//	BF_SET(instanceDatas.back().v[1], ind, 0, 12);
+			//} else
+			//	BF_SET(instanceDatas.back().v[1], ~0u, 0, 12);
 		});
 		mTransformHistory = transformHistory;
 	}
@@ -569,9 +582,11 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			mGradientForwardProjectPipeline->descriptor("gVisibility", i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 			mGradientForwardProjectPipeline->descriptor("gPrevVisibility", i) = image_descriptor(mPrevFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 		}
+		mGradientForwardProjectPipeline->descriptor("gPathStates") = mCurFrame->mPathBounceData;
 		mGradientForwardProjectPipeline->descriptor("gGradientSamples") = image_descriptor(mCurFrame->mGradientPositions, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite|vk::AccessFlagBits::eShaderRead);
 		mGradientForwardProjectPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 		if (mRandomPerFrame) mGradientForwardProjectPipeline->push_constant<uint32_t>("gFrameNumber") = mCurFrame->mFrameId;
+		commandBuffer.barrier(mCurFrame->mPathBounceData, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		commandBuffer.bind_pipeline(mGradientForwardProjectPipeline->get_pipeline());
 		mGradientForwardProjectPipeline->bind_descriptor_sets(commandBuffer);
 		mGradientForwardProjectPipeline->push_constants(commandBuffer);
@@ -592,6 +607,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			commandBuffer.barrier(mCurFrame->mPathBounceData, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			if (i+1 > mMinDepth) flag |= SAMPLE_FLAG_RR;
+			if ((flag & (SAMPLE_FLAG_BG_IS|SAMPLE_FLAG_LIGHT_IS)) && i > mMISDepth) flag &= ~(SAMPLE_FLAG_BG_IS|SAMPLE_FLAG_LIGHT_IS);
 			commandBuffer.push_constant("gSamplingFlags", flag);
 			commandBuffer.dispatch_over(extent);
 		}
@@ -669,10 +685,10 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			commandBuffer.bind_pipeline(mTemporalAccumulationPipeline->get_pipeline());
 			mTemporalAccumulationPipeline->bind_descriptor_sets(commandBuffer);
 			mTemporalAccumulationPipeline->push_constants(commandBuffer);
-			commandBuffer.dispatch_over(extent);
-			
-			tonemap_in = mCurFrame->mAccumColor;
+			commandBuffer.dispatch_over(extent);	
 		}
+
+		tonemap_in = mCurFrame->mAccumColor;
 
 		{ // estimate variance
 			ProfilerRegion ps("Estimate Variance", commandBuffer);
@@ -688,8 +704,6 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			mEstimateVariancePipeline->bind_descriptor_sets(commandBuffer);
 			mEstimateVariancePipeline->push_constants(commandBuffer);
 			commandBuffer.dispatch_over(extent);
-			
-			tonemap_in = mCurFrame->mTemp[0];
 		}
 
 		if (mAtrousIterations > 0) {

@@ -17,12 +17,13 @@ struct LightSampleRecord {
 
 inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const PathVertexGeometry v, const RayDifferential ray) {
 	LightSampleRecord ls;
+	ls.pdf.pdf = 0;
 	if (gSampleBG && (!gSampleLights || rng.next() <= gPushConstants.gEnvironmentSampleProbability)) {
 		// sample environment
 		BF_SET(ls.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 		BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		ls.material_address = gPushConstants.gEnvironmentMaterialAddress;
-		BSDFSampleRecord s = sample_material(gMaterialData, ls.material_address, float3(rng.next(), rng.next(), rng.next()), ray.direction, v);
+		const BSDFSampleRecord s = sample_material(gMaterialData, gPushConstants.gEnvironmentMaterialAddress, float3(rng.next(), rng.next(), rng.next()), -ray.direction, v);
 		ls.radiance = s.eval.f;
 		ls.to_light = s.dir_out;
 		ls.dist = 1.#INF;

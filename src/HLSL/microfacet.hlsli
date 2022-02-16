@@ -1,6 +1,8 @@
 #ifndef MICROFACET_H
 #define MICROFACET_H
 
+static const float gMinRoughness = 1.0 / 64.0;
+
 /// A microfacet model assumes that the surface is composed of infinitely many little mirrors/glasses.
 /// The orientation of the mirrors determines the amount of lights reflected.
 /// The distribution of the orientation is determined empirically.

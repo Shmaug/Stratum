@@ -4,23 +4,23 @@
 #include "common.hlsli"
 
 struct differential {
-  min16float dx;
-  min16float dy;
+  float dx;
+  float dy;
   inline float2 xy() CONST_CPP { return float2(dx, dy); }
 };
 struct differential2 {
-  min16float2 dx;
-  min16float2 dy;
+  float2 dx;
+  float2 dy;
 };
 struct differential3 {
-  min16float3 dx;
-  min16float3 dy;
+  float3 dx;
+  float3 dy;
 };
 
 struct RayDifferential {
   float3 origin;
-  float3 direction;
   float t_min;
+  float3 direction;
   float t_max;
   differential3 dP;
   differential3 dD;

@@ -1,52 +1,7 @@
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E trace_visibility
-#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E trace_direct_light
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -E trace_path_bounce
 
 #include "../scene.hlsli"
-
-struct PathBounceState {
-	uint4 rng;
-	float3 ray_origin;
-	uint packed_ray_direction;
-	uint3 packed_dP;
-	uint instance_primitive_index;
-	uint3 packed_dD;
-	uint pad;
-	float2 bary_or_z;
-	uint2 packed_throughput;
-
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-	inline float3 throughput() { return float3(unpack_f16_2(packed_throughput[0]), f16tof32(packed_throughput[1])); }
-	inline float eta_scale() { return f16tof32(packed_throughput[1]>>16); }
-	inline RayDifferential ray() {
-		RayDifferential r;
-		r.origin    = ray_origin;
-		r.direction = unpack_normal_octahedron(packed_ray_direction);
-		r.t_min = 0;
-		r.t_max = 1.#INF;
-		r.dP.dx = min16float3(unpack_f16_2(packed_dP[0]), f16tof32(packed_dP[2]));
-		r.dP.dy = min16float3(unpack_f16_2(packed_dP[1]), f16tof32(packed_dP[2]>>16));
-		r.dD.dx = min16float3(unpack_f16_2(packed_dD[0]), f16tof32(packed_dD[2]));
-		r.dD.dy = min16float3(unpack_f16_2(packed_dD[1]), f16tof32(packed_dD[2]>>16));
-		return r;
-	}
-};
-inline void store_path_bounce_state(out PathBounceState p, const uint4 rng, const float3 throughput, const float eta_scale, const float2 bary_or_z, const RayDifferential ray, const uint instance_primitive_index) {
-	p.rng = rng;
-	p.packed_throughput[0] = pack_f16_2(throughput.xy);
-	p.packed_throughput[1] = pack_f16_2(float2(throughput.z, eta_scale));
-	p.bary_or_z = bary_or_z;
-	p.instance_primitive_index = instance_primitive_index;
-	p.ray_origin = ray.origin;
-	p.packed_ray_direction = pack_normal_octahedron(ray.direction);
-	p.packed_dP[0] = pack_f16_2(ray.dP.dx.xy);
-	p.packed_dP[1] = pack_f16_2(ray.dP.dy.xy);
-	p.packed_dP[2] = pack_f16_2(float2(ray.dP.dx.z, ray.dP.dy.z));
-	p.packed_dD[0] = pack_f16_2(ray.dD.dx.xy);
-	p.packed_dD[1] = pack_f16_2(ray.dD.dy.xy);
-	p.packed_dD[2] = pack_f16_2(float2(ray.dD.dx.z, ray.dD.dy.z));
-}
 
 [[vk::constant_id(0)]] const uint gViewCount = 1;
 [[vk::constant_id(1)]] uint gSampleCount = 1;
@@ -70,7 +25,6 @@ RWTexture2D<float4> gAlbedo;
 
 StructuredBuffer<float> gDistributions;
 SamplerState gSampler;
-RWStructuredBuffer<PathBounceState> gPathStates;
 Texture2D<float4> gImages[gImageCount];
 
 [[vk::push_constant]] const struct {
@@ -117,11 +71,11 @@ struct rng_t {
 
 struct PathVertexGeometry {
 	float3 position;
-	min16float shape_area;
-  min16float3 geometry_normal;
-  min16float3 shading_normal;
-  min16float4 tangent;
-	min16float2 uv;
+	float shape_area;
+  float3 geometry_normal;
+  float3 shading_normal;
+  float4 tangent;
+	float2 uv;
 	differential3 d_position;
 	differential2 d_uv;
 
@@ -137,14 +91,14 @@ inline PathVertexGeometry make_sphere_geometry(const TransformData transform, co
 	PathVertexGeometry r;
 	const float3 center = transform.transform_point(0);
 	r.position = ray.origin + ray.direction*t;
-	r.geometry_normal = r.shading_normal = (min16float3)normalize(r.position - center);
-	r.tangent = min16float4((min16float3)cross(transform.transform_vector(float3(0, 1, 0)), r.geometry_normal), 1);
-	r.uv = (min16float2)cartesian_to_spherical_uv(r.geometry_normal);
+	r.geometry_normal = r.shading_normal = normalize(r.position - center);
+	r.tangent = float4(cross(transform.transform_vector(float3(0, 1, 0)), r.geometry_normal), 1);
+	r.uv = cartesian_to_spherical_uv(r.geometry_normal);
 	// transfer ray differential
 	r.d_position = transfer_dP(r.geometry_normal, ray.origin, ray.direction, t, ray.dP, ray.dD);
 	r.d_uv.dx = 0;
 	r.d_uv.dy = 0;
-	r.shape_area = (min16float)(4*M_PI*radius*radius);
+	r.shape_area = 4*M_PI*radius*radius;
 	return r;
 }
 inline PathVertexGeometry make_triangle_geometry(const TransformData transform, const RayDifferential ray, const uint3 tri, const float2 bary) {
@@ -157,10 +111,10 @@ inline PathVertexGeometry make_triangle_geometry(const TransformData transform, 
 
 	PathVertexGeometry r;
 	r.position       = v0.position + v1v0*bary.x + v2v0*bary.y;
-	r.shading_normal = (min16float3)(v0.normal + (v1.normal - v0.normal)*bary.x + (v2.normal - v0.normal)*bary.y);
-	r.tangent        = (min16float4)(v0.tangent + (v1.tangent - v0.tangent)*bary.x + (v2.tangent - v0.tangent)*bary.y);
-	r.uv.x = (min16float)(v0.u + (v1.u - v0.u)*bary.x + (v2.u - v0.u)*bary.y);
-	r.uv.y = (min16float)(v0.v + (v1.v - v0.v)*bary.x + (v2.v - v0.v)*bary.y);
+	r.shading_normal = v0.normal + (v1.normal - v0.normal)*bary.x + (v2.normal - v0.normal)*bary.y;
+	r.tangent        = v0.tangent + (v1.tangent - v0.tangent)*bary.x + (v2.tangent - v0.tangent)*bary.y;
+	r.uv.x = v0.u + (v1.u - v0.u)*bary.x + (v2.u - v0.u)*bary.y;
+	r.uv.y = v0.v + (v1.v - v0.v)*bary.x + (v2.v - v0.v)*bary.y;
 
 	r.position = transform.transform_point(r.position);
 
@@ -168,20 +122,20 @@ inline PathVertexGeometry make_triangle_geometry(const TransformData transform, 
 	const float3 dPdv = transform.transform_vector(v1.position - v2.position);
 	const float3 ng = cross(dPdu, dPdv);
 	const float area2 = length(ng);
-	r.geometry_normal = (min16float3)(ng/area2);
-	r.shape_area = (min16float)(area2/2);
+	r.geometry_normal = ng/area2;
+	r.shape_area = area2/2;
 
 	if (all(r.shading_normal.xyz == 0) || any(isnan(r.shading_normal)))
 		r.shading_normal = r.geometry_normal;
 	else
-		r.shading_normal = (min16float3)normalize(transform.transform_vector(r.shading_normal));
+		r.shading_normal = normalize(transform.transform_vector(r.shading_normal));
 	
 	if (r.tangent.w == 0 || all(r.tangent.xyz == 0) || any(isnan(r.tangent))) {
 		float3 B;
 		make_orthonormal(r.shading_normal, r.tangent.xyz, B);
 		r.tangent.w = 1;
 	} else {
-		r.tangent.xyz = (min16float3)transform.transform_vector(r.tangent.xyz);
+		r.tangent.xyz = transform.transform_vector(r.tangent.xyz);
 		r.tangent.xyz = normalize(r.tangent.xyz - dot(r.shading_normal, r.tangent.xyz)*r.shading_normal);
 	}
 
@@ -221,13 +175,13 @@ inline void make_vertex(const uint instance_primitive_index, const float2 bary_o
 	if (r.instance_index() == INVALID_INSTANCE) {
 		r.material_address = gPushConstants.gEnvironmentMaterialAddress;
 		r.g.position = ray.direction;
-		r.g.geometry_normal = r.g.shading_normal = r.g.tangent.xyz = (min16float3)ray.direction;
+		r.g.geometry_normal = r.g.shading_normal = r.g.tangent.xyz = ray.direction;
 		r.g.tangent.w = 1;
 		r.g.d_position.dx = r.g.d_position.dy = 0;
 		r.g.shape_area = 0;
-		r.g.uv      = (min16float2)cartesian_to_spherical_uv(ray.direction);
-		r.g.d_uv.dx = (min16float2)cartesian_to_spherical_uv(ray.direction + ray.dD.dx) - r.g.uv;
-		r.g.d_uv.dy = (min16float2)cartesian_to_spherical_uv(ray.direction + ray.dD.dy) - r.g.uv;
+		r.g.uv      = cartesian_to_spherical_uv(ray.direction);
+		r.g.d_uv.dx = (min16float2)(cartesian_to_spherical_uv(ray.direction + ray.dD.dx) - r.g.uv);
+		r.g.d_uv.dy = (min16float2)(cartesian_to_spherical_uv(ray.direction + ray.dD.dy) - r.g.uv);
 	} else {
 		const InstanceData instance = gInstances[r.instance_index()];
 		r.material_address = instance.material_address();
@@ -285,13 +239,14 @@ inline void intersect(inout ray_query_t rayQuery, const RayDifferential ray, out
 		BF_SET(v.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 		BF_SET(v.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		v.material_address = gPushConstants.gEnvironmentMaterialAddress;
-		v.g.position = v.g.geometry_normal = v.g.shading_normal = v.g.tangent.xyz = (min16float3)ray.direction;
+		v.g.position = ray.direction;
+		v.g.geometry_normal = v.g.shading_normal = v.g.tangent.xyz = ray.direction;
 		v.g.tangent.w = 1;
 		v.g.d_position.dx = v.g.d_position.dy = 0;
 		v.g.shape_area = 0;
-		v.g.uv      = (min16float2)cartesian_to_spherical_uv(ray.direction);
-		v.g.d_uv.dx = (min16float2)cartesian_to_spherical_uv(ray.direction + ray.dD.dx) - v.g.uv;
-		v.g.d_uv.dy = (min16float2)cartesian_to_spherical_uv(ray.direction + ray.dD.dy) - v.g.uv;
+		v.g.uv      = cartesian_to_spherical_uv(ray.direction);
+		v.g.d_uv.dx = (min16float2)(cartesian_to_spherical_uv(ray.direction + ray.dD.dx) - v.g.uv);
+		v.g.d_uv.dy = (min16float2)(cartesian_to_spherical_uv(ray.direction + ray.dD.dy) - v.g.uv);
 	}
 }
 
@@ -396,7 +351,7 @@ inline float3 sample_bsdf(inout PathVertex vertex, inout RayDifferential ray_in,
 
 	// modify eta_scale, trace bsdf ray
 	RayDifferential bsdf_ray;
-	bsdf_ray.origin = ray_offset(vertex.g.position, bsdf_sample.eta == 0 ? vertex.g.geometry_normal : -vertex.g.geometry_normal);
+	bsdf_ray.origin = ray_offset(vertex.g.position, dot(bsdf_sample.dir_out, vertex.g.geometry_normal) < 0 ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
 	bsdf_ray.direction = bsdf_sample.dir_out;
 	bsdf_ray.t_min = 0;
 	bsdf_ray.t_max = 1.#INF;
@@ -406,7 +361,7 @@ inline float3 sample_bsdf(inout PathVertex vertex, inout RayDifferential ray_in,
 		bsdf_ray.dD = reflect(ray_in.dD, H);
 	} else {
 		float3 H = normalize(-ray_in.direction + bsdf_sample.dir_out * bsdf_sample.eta);
-		if (dot(H, ray_in.direction) > 0) H = -H;
+		if (dot(H, ray_in.direction) < 0) H = -H;
 		bsdf_ray.dD = refract(ray_in.dD, H, bsdf_sample.eta);
 		eta_scale /= bsdf_sample.eta*bsdf_sample.eta;
 	}
@@ -424,28 +379,6 @@ inline float3 sample_bsdf(inout PathVertex vertex, inout RayDifferential ray_in,
 }
 
 [numthreads(GROUP_SIZE,GROUP_SIZE,1)]
-void trace_direct_light(uint3 index : SV_DispatchThreadID) {
-	const uint viewIndex = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
-	
-	uint w,h;
-	gRadiance.GetDimensions(w,h);
-	w = index.y*w + index.x;
-	#define state gPathStates[w]
-
-	float3 throughput = state.throughput();
-	if (all(throughput <= 1e-6)) return;
-
-	PathVertex vertex;
-	make_vertex(state.instance_primitive_index, state.bary_or_z, state.ray(), vertex);
-	rng_t rng = { state.rng };
-
-	ray_query_t rayQuery;
-
-	gRadiance[index.xy].rgb += throughput * sample_direct_light(vertex, state.ray(), rayQuery, rng, true);
-}
-
-[numthreads(GROUP_SIZE,GROUP_SIZE,1)]
 void trace_path_bounce(uint3 index : SV_DispatchThreadID) {
 	const uint viewIndex = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
 	if (viewIndex == -1) return;
@@ -458,11 +391,11 @@ void trace_path_bounce(uint3 index : SV_DispatchThreadID) {
 	float3 throughput = state.throughput();
 	if (all(throughput <= 1e-6)) return;
 
-	PathVertex vertex;
-	make_vertex(state.instance_primitive_index, state.bary_or_z, state.ray(), vertex);
 	rng_t rng = { state.rng };
 
 	RayDifferential ray_in = state.ray();
+	PathVertex vertex;
+	make_vertex(state.instance_primitive_index, state.bary_or_z, ray_in, vertex);
 
 	ray_query_t rayQuery;
 

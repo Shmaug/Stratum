@@ -124,11 +124,12 @@ inline void build_distributions(const span<float4>& img, const vk::Extent2D& ext
 	};
 
 	// Construct a 1D distribution for each row
-	vector<thread> threads;
-	const uint32_t block_size = (extent.height + thread::hardware_concurrency() - 1) / thread::hardware_concurrency();
-	for (uint32_t thread_idx = 0; thread_idx < thread::hardware_concurrency(); thread_idx++) {
-		threads.emplace_back([&,thread_idx]{
-			for (int y = thread_idx*block_size; y < min((thread_idx+1)*block_size, extent.height); y++) {
+	//vector<thread> threads;
+	//const uint32_t block_size = (extent.height + thread::hardware_concurrency() - 1) / thread::hardware_concurrency();
+	//for (uint32_t thread_idx = 0; thread_idx < thread::hardware_concurrency(); thread_idx++) {
+	//	threads.emplace_back([&,thread_idx]{
+	//		for (int y = thread_idx*block_size; y < min((thread_idx+1)*block_size, extent.height); y++) {
+			for (int y = 0; y < extent.height; y++) {
 				cdf_rows[y * (extent.width + 1)] = 0;
 				for (int x = 0; x < extent.width; x++) {
 					cdf_rows[y * (extent.width + 1) + (x + 1)] = cdf_rows[y * (extent.width + 1) + x] + f(x,y);
@@ -157,9 +158,9 @@ inline void build_distributions(const span<float4>& img, const vk::Extent2D& ext
 					cdf_rows[y * (extent.width + 1) + extent.width] = 1;
 				}
 			}
-		});
-	}
-	for (thread& t : threads) t.join();
+	//});
+	//}
+	//for (thread& t : threads) t.join();
 
 	// Now construct the marginal CDF for each column.
 	cdf_marginals[0] = 0;

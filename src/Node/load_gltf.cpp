@@ -86,10 +86,31 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			e.emission.image = get_image(material.emissiveTexture.index, true);
 			*m = e;
 		} else {
-			Lambertian l;
-			l.reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
-			l.reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
-			*m = l;
+			if (material.pbrMetallicRoughness.metallicFactor > 0) {
+				RoughPlastic r;
+				r.diffuse_reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+				r.diffuse_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
+				r.specular_reflectance.value = r.diffuse_reflectance.value * material.pbrMetallicRoughness.metallicFactor;
+				r.specular_reflectance.image = r.diffuse_reflectance.image;
+				r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
+				*m = r;
+			} else {
+				if (material.extensions.contains("KHR_materials_transmission")) {			
+					RoughDielectric r;
+					r.specular_reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+					r.specular_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
+					r.specular_transmittance.value = r.specular_reflectance.value * material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble();
+					r.specular_transmittance.image = r.specular_reflectance.image;
+					r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
+					r.eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
+					*m = r;
+				} else {
+					Lambertian l;
+					l.reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+					l.reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
+					*m = l;
+				}
+			}
 		}
 		/*
 		m->mMetallic = (float)material.pbrMetallicRoughness.metallicFactor;
@@ -120,8 +141,9 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			m->mAbsorption = (-Array3d(c.Get(0).Get<double>(), c.Get(1).Get<double>(), c.Get(2).Get<double>()) / it->second.Get("attenuationDistance").Get<double>()).cast<float>();
 		}
 
-		m->mAlphaCutoff =  material.alphaMode == "MASK" ? material.alphaCutoff : 0;
 		*/
+		if (material.alphaMode == "MASK")
+			m.node().make_child("alpha_mask").make_component<Image::View>( get_image(material.pbrMetallicRoughness.baseColorTexture.index, true) );
 		return m;
 	});
 	Node& meshesNode = root.make_child("meshes");

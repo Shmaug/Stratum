@@ -72,7 +72,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 				const int2 p = index.xy*gGradientDownsample + int2(xx, yy);
 				if (all(ipos == p)) continue;
 				if (!test_inside_screen(p, view)) continue;
-				if (v.instance_index() != v.instance_index()) continue;
+				if (v.instance_index() != load_visibility(p).instance_index()) continue;
 				const float l = luminance(gRadiance[p].rgb);
 				if (isinf(l) || isnan(l)) continue;
 				moments += float2(l, l*l);

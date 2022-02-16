@@ -44,6 +44,8 @@ Texture2D<float4> gHistory;
 StructuredBuffer<ViewData> gViews;
 StructuredBuffer<uint> gInstanceIndexMap;
 
+SamplerState gSampler;
+
 #include "../../visibility_buffer.hlsli"
 
 [[vk::push_constant]] const struct {
@@ -104,7 +106,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 			float antilag_alpha = 0;
 
 			if (gGradientFilterRadius == 0) {
-				const float2 v = gDiff[ipos/gGradientDownsample];
+				uint w,h;
+				gSamples.GetDimensions(w,h);
+				const float2 v = gDiff.SampleLevel(gSampler, (ipos + 0.5) / float2(w,h), 0);
 				antilag_alpha = saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0);
 			} else {
 				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)

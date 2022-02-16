@@ -2,7 +2,9 @@
 #define ROUGHDIELECTRIC_H
 
 #include "../scene.hlsli"
+#ifdef __HLSL_VERSION
 #include "../microfacet.hlsli"
+#endif
 
 struct RoughDielectric : BSDF {
     ImageValue3 specular_reflectance;
@@ -18,7 +20,7 @@ struct RoughDielectric : BSDF {
         if (dot(frame.n, dir_in) * dot(vertex.geometry_normal, dir_in) < 0)
             frame.flip();
             
-        const bool reflect = dot(frame.n, dir_in) * dot(frame.n, dir_out) > 0;
+        const bool reflect = dot(vertex.geometry_normal, dir_in) * dot(vertex.geometry_normal, dir_out) > 0;
         
         // If we are going into the surface, then we use normal eta
         // (internal/external), otherwise we use external/internal.
@@ -39,7 +41,7 @@ struct RoughDielectric : BSDF {
         }
 
         // Clamp roughness to avoid numerical issues.
-        const float rgh = clamp(roughness.eval(vertex), 0.01, 1);
+        const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
 
         // We sample the visible normals, also we use F to determine
         // whether to sample reflection or refraction
@@ -53,8 +55,8 @@ struct RoughDielectric : BSDF {
         } else {
             const float h_dot_out = dot(half_vector, dir_out);
             const float sqrt_denom = h_dot_in + local_eta * h_dot_out;
-            const float dh_dout = local_eta * local_eta * h_dot_out / (sqrt_denom * sqrt_denom);
-            return (1 - F) * D * G_in * abs(dh_dout * h_dot_in / dot(frame.n, dir_in));
+            const float dh_dout = (local_eta * local_eta) * h_dot_out / (sqrt_denom * sqrt_denom);
+            return ((1 - F) * D * G_in) * abs(dh_dout * h_dot_in / dot(frame.n, dir_in));
         }
     }
     inline BSDFEvalRecord eval(const float3 dir_in, const float3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
@@ -63,7 +65,7 @@ struct RoughDielectric : BSDF {
         if (dot(frame.n, dir_in) * dot(vertex.geometry_normal, dir_in) < 0)
             frame.flip();
 
-        const bool reflect = dot(frame.n, dir_in) * dot(frame.n, dir_out) > 0;
+        const bool reflect = dot(vertex.geometry_normal, dir_in) * dot(vertex.geometry_normal, dir_out) > 0;
 
         // If we are going into the surface, then we use normal eta
         // (internal/external), otherwise we use external/internal.
@@ -72,7 +74,7 @@ struct RoughDielectric : BSDF {
         const float3 Ks = specular_reflectance.eval(vertex);
         const float3 Kt = specular_transmittance.eval(vertex);
         // Clamp roughness to avoid numerical issues.
-        const float rgh = clamp(roughness.eval(vertex), 0.025, 1);
+        const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
 
         float3 half_vector;
         if (reflect) {
@@ -137,7 +139,7 @@ struct RoughDielectric : BSDF {
             frame.flip();
 
         // Clamp roughness to avoid numerical issues.
-        const float rgh = clamp(roughness.eval(vertex), 0.01, 1);
+        const float rgh = clamp(roughness.eval(vertex), gMinRoughness, 1);
         // Sample a micro normal and transform it to world space -- this is our half-vector.
         const float alpha = rgh * rgh;
         const float3 local_dir_in = frame.to_local(dir_in);
@@ -181,8 +183,8 @@ struct RoughDielectric : BSDF {
             
             const float h_dot_out = sqrt(h_dot_out_sq);
             BSDFSampleRecord r;
-            r.dir_out = -dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector;
-            r.eta = 0;
+            r.dir_out = normalize(-dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector);
+            r.eta = local_eta;
             r.eval = eval(dir_in, r.dir_out, vertex, dir);
             return r;
         }
