@@ -3,20 +3,21 @@
 
 #include "../scene.hlsli"
 
-struct Emissive : BSDF {
+struct Emissive {
     ImageValue3 emission;
     
 #ifdef __HLSL_VERSION
-
-    inline BSDFEvalRecord eval(const float3 dir_in, const float3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-        BSDFEvalRecord r;
+    template<typename Real, bool TransportToLight>
+    inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
+        BSDFEvalRecord<Real> r;
         r.f = 0;
         r.pdfW = 0;
         return r;
     }
 
-    inline BSDFSampleRecord sample(const float3 rnd, const float3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-        BSDFSampleRecord r;
+    template<typename Real, bool TransportToLight>
+    inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
+        BSDFSampleRecord<Real> r;
         r.dir_out = 0,
         r.eta = 0;
         r.eval.f = 0;
@@ -24,8 +25,8 @@ struct Emissive : BSDF {
         return r;
     }
 
-    inline float3 eval_albedo(const PathVertexGeometry vertex) { return 0; }
-    inline float3 eval_emission(const PathVertexGeometry vertex) { return emission.eval(vertex); }
+    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return 0; }
+    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         emission.load(bytes, address);

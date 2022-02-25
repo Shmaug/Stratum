@@ -41,7 +41,6 @@ Texture2D<float4> gAlbedo;
 
 Texture2D<float4> gDebug1;
 Texture2D<float2> gDebug2;
-Texture2D<uint4> gDebug3;
 
 [[vk::push_constant]] const struct {
 	float gExposure;
@@ -73,49 +72,41 @@ void main(uint3 index : SV_DispatchThreadID) {
 		if (albedo.g > 0) radiance.g *= albedo.g;
 		if (albedo.b > 0) radiance.b *= albedo.b;
 	}
-	radiance = radiance*gPushConstants.gExposure;
-
-	switch (gMode) {
-	case TonemapMode::eReinhard:
-		radiance = tonemap_reinhard(radiance);
-		break;
-	case TonemapMode::eUncharted2:
-		radiance = tonemap_uc2(radiance);
-		break;
-	case TonemapMode::eFilmic:
-		radiance = tonemap_filmic(radiance);
-		break;
+	if (gDebugMode == 0) {
 	}
-
-	if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
 	
 	switch (gDebugMode) {
-	case DebugMode::eZ:
-		radiance = viridis_quintic(1 - exp(-0.1*asfloat(f16tof32(gDebug3[index.xy].x))*gPushConstants.gExposure));
-		break;
-	case DebugMode::eDz:
-		radiance = viridis_quintic(saturate(length(unpack_f16_2(gDebug3[index.xy].y)))*gPushConstants.gExposure);
-		break;
-	case DebugMode::eNormals:
-		radiance = unpack_normal_octahedron(gDebug3[index.xy].w)*.5 + .5;
-		break;
-	case DebugMode::eAlbedo:
-		radiance = gAlbedo[index.xy].rgb;
-		break;
-	case DebugMode::ePrevUV:
-		radiance = float3(asfloat(gDebug3[index.xy].zw), 0);
-		break;
-	case DebugMode::eVariance:
-		radiance = viridis_quintic(saturate(gInput[index.xy].a*gPushConstants.gExposure));
-		break;
-	case DebugMode::eAccumLength:
-		radiance = viridis_quintic(saturate(gDebug1[index.xy].a*gPushConstants.gExposure));
-		break;
-	case DebugMode::eAntilag: {
-		const float2 diff1 = gDebug2[index.xy/gGradientDownsample];
-		radiance = viridis_quintic(saturate(diff1.r > 1e-4 ? abs(diff1.g)/diff1.r : 0));
-		break;
-	}
+		default:
+		case DebugMode::eNone:
+			radiance = radiance*gPushConstants.gExposure;
+			switch (gMode) {
+			case TonemapMode::eReinhard:
+				radiance = tonemap_reinhard(radiance);
+				break;
+			case TonemapMode::eUncharted2:
+				radiance = tonemap_uc2(radiance);
+				break;
+			case TonemapMode::eFilmic:
+				radiance = tonemap_filmic(radiance);
+				break;
+			}
+			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
+			break;
+		case DebugMode::eAlbedo:
+			radiance = gAlbedo[index.xy].rgb*gPushConstants.gExposure;
+			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
+			break;
+		case DebugMode::eAccumLength:
+			radiance = viridis_quintic(saturate(gDebug1[index.xy].a*gPushConstants.gExposure));
+			break;
+		case DebugMode::eTemporalGradient:
+			radiance = viridis_quintic(saturate(abs(gDebug2[index.xy/gGradientDownsample].g)*gPushConstants.gExposure));
+			break;
+		case DebugMode::eRelativeTemporalGradient: {
+			const float2 diff1 = gDebug2[index.xy/gGradientDownsample];
+			radiance = viridis_quintic(saturate(diff1.r > 1e-4 ? abs(diff1.g)/diff1.r : 0));
+			break;
+		}
 	}
 
 	gOutput[index.xy] = float4(radiance, 1);

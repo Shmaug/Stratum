@@ -36,6 +36,9 @@ StructuredBuffer<InstanceData> gInstances;
 StructuredBuffer<uint> gInstanceIndexMap;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
+#include "../../reservoir.hlsli"
+RWStructuredBuffer<Reservoir> gReservoirs;
+StructuredBuffer<Reservoir> gPrevReservoirs;
 
 RWTexture2D<uint> gGradientSamples;
 
@@ -76,7 +79,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const InstanceData instance = gInstances[v_prev.instance_index()];
 	float3 pos_obj;
 	if (v_prev.primitive_index() == INVALID_PRIMITIVE) {
-		pos_obj = spherical_uv_to_cartesian(v_prev.bary());
+		pos_obj = spherical_uv_to_cartesian(v_prev.bary())*instance.radius();
 	} else {
 		const uint3 tri = load_tri(gIndices, instance, v_prev.primitive_index());
 		const float3 p0 = gVertices[tri.x].position;
@@ -92,7 +95,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 	const VisibilityInfo v_curr = load_visibility(idx_curr);
 
-	if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), 1, v_prev.dz_dx(), v_prev.dz_dy())) return;
+	if (v_curr.instance_index() != v_prev.instance_index()) return;
+	//if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), gGradientDownsample, v_prev.dz_dxy())) return;
 	if (!test_reprojected_normal(v_curr.normal(), v_prev.normal())) return;
 
 	const uint2 tile_pos_curr = idx_curr / gGradientDownsample;
@@ -101,18 +105,18 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint res;
 	InterlockedCompareExchange(gGradientSamples[tile_pos_curr], 0u, gradient_idx_curr, res);
 	if (res == 0) {
+		uint w,h;
+		gVisibility[0].GetDimensions(w,h);
+		const uint index_1d = idx_curr.y*w + idx_curr.x;
 		v_prev.data[2].zw = asuint( (idx_view_prev + 0.5) / float2(view_size) );
 		for (uint i = 0; i < VISIBILITY_BUFFER_COUNT; i++)
 			gVisibility[i][idx_curr] = v_prev.data[i];
-			
-		uint w,h;
-		gVisibility[0].GetDimensions(w,h);
-		const float3 dir = instance.transform.transform_point(pos_obj) - gPathStates[idx_curr.y*w + idx_curr.x].ray_origin;
-		const float z = length(dir);
-		RayDifferential ray = gPathStates[idx_curr.y*w + idx_curr.x].ray();
-		ray.direction = dir/z;
 		
-		const float2 bary_or_z = v_prev.primitive_index() == INVALID_PRIMITIVE ? z : v_prev.bary();
-		store_path_bounce_state(gPathStates[idx_curr.y*w + idx_curr.x], v_prev.rng_seed(), gPathStates[idx_curr.y*w + idx_curr.x].throughput(), gPathStates[idx_curr.y*w + idx_curr.x].eta_scale(), bary_or_z, ray, v_prev.data[1].x);
+		gPathStates[index_1d].rng = v_prev.rng_seed();
+		gPathStates[index_1d].position = instance.transform.transform_point(pos_obj);
+		gPathStates[index_1d].instance_primitive_index = v_prev.data[1].x;
+		gPathStates[index_1d].bary = v_prev.bary();
+		
+		gReservoirs[index_1d] = gPrevReservoirs[index_1d];
 	}
 }

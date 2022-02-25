@@ -49,7 +49,7 @@ inline float2 sample_dist2d(StructuredBuffer<float> data, const uint cdf_margina
 }
 #endif
 
-struct Environment : BSDF {
+struct Environment {
 	ImageValue3 emission;
 	
 #ifdef __HLSL_VERSION
@@ -58,39 +58,49 @@ struct Environment : BSDF {
 	uint marginal_cdf;
 	uint row_cdf;
 
-	inline BSDFSampleRecord sample(const float3 rnd, const float3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-			uint w, h;
-			emission.image().GetDimensions(w, h);
-			const float2 uv = sample_dist2d(gDistributions, marginal_cdf, row_cdf, w, h, rnd.xy);
-			BSDFSampleRecord r;
-			r.dir_out = spherical_uv_to_cartesian(uv);
-			r.eval.f = emission.eval(uv);
-			r.eval.pdfW = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - r.dir_out.y*r.dir_out.y));
-			r.eta = 0;
-			return r;
+	template<typename Real, bool TransportToLight>
+	inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
+		uint w, h;
+		emission.image().GetDimensions(w, h);
+		const float2 uv = sample_dist2d(gDistributions, marginal_cdf, row_cdf, w, h, rnd.xy);
+		BSDFSampleRecord<Real> r;
+		r.dir_out = spherical_uv_to_cartesian(uv);
+		if (emission.has_image())
+			r.eval.f = emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
+		else
+			r.eval.f = emission.value;
+		r.eval.pdfW = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - r.dir_out.y*r.dir_out.y));
+		r.eta = 0;
+		return r;
 	}
 
-	inline BSDFEvalRecord eval(const float3 dir_in, const float3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir = TransportDirection::eToLight) {
-			BSDFEvalRecord r;
-			r.f = 0;
-			uint w, h;
-			emission.image().GetDimensions(w, h);
-			const float2 uv = cartesian_to_spherical_uv(dir_out);
-			r.pdfW = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
-			return r;
+    template<typename Real>
+	inline Real eval_pdfW(const vector<Real,3> dir_out) {
+		const float2 uv = cartesian_to_spherical_uv(dir_out);
+		uint w, h;
+		emission.image().GetDimensions(w, h);
+		return dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+	}
+    template<typename Real, bool TransportToLight>
+	inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
+		BSDFEvalRecord<Real> r;
+		r.f = 0;
+		uint w, h;
+		emission.image().GetDimensions(w, h);
+		const float2 uv = cartesian_to_spherical_uv(dir_out);
+		r.pdfW = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+		return r;
 	}
 
-	inline float3 eval_emission(const PathVertexGeometry vertex) {
-			return emission.eval(vertex);
-	}
-	inline float3 eval_albedo(const PathVertexGeometry vertex) { return 0; }
+    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
+    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return 0; }
 
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
-			emission.load(bytes, address);
-			marginal_pdf = bytes.Load(address); address += 4;
-			row_pdf = bytes.Load(address); address += 4;
-			marginal_cdf = bytes.Load(address); address += 4;
-			row_cdf = bytes.Load(address); address += 4;
+		emission.load(bytes, address);
+		marginal_pdf = bytes.Load(address); address += 4;
+		row_pdf = bytes.Load(address); address += 4;
+		marginal_cdf = bytes.Load(address); address += 4;
+		row_cdf = bytes.Load(address); address += 4;
 	}
 
 #endif // __HLSL_VERSION

@@ -10,6 +10,7 @@ namespace stm {
 #pragma pack(1)
 namespace hlsl {
 #include <HLSL/visibility_buffer.hlsli>
+#include <HLSL/reservoir.hlsli>
 }
 #pragma pack(pop)
 
@@ -37,7 +38,7 @@ public:
 	STRATUM_API void create_pipelines();
 	
 	STRATUM_API void on_inspector_gui();
-	STRATUM_API void update(CommandBuffer& commandBuffer);
+	STRATUM_API void update(CommandBuffer& commandBuffer, float deltaTime);
 	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<hlsl::ViewData>& views);
 
 private:
@@ -79,7 +80,7 @@ private:
 	uint32_t mHistoryTap = 0;
 	uint32_t mMinDepth = 2;
 	uint32_t mMaxDepth = 5;
-	uint32_t mMISDepth = 4;
+	uint32_t mDirectLightDepth = 4;
 
 	struct FrameData {
 		Buffer::View<hlsl::PackedVertexData> mVertices;
@@ -88,7 +89,8 @@ private:
 		Buffer::View<hlsl::InstanceData> mInstances;
 		Buffer::View<uint32_t> mLightInstances;
 		Buffer::View<float> mDistributionData;
-		Buffer::View<byte> mPathBounceData;
+		Buffer::View<hlsl::Reservoir> mReservoirs;
+		Buffer::View<hlsl::PathBounceState> mPathBounceData;
 
 		Buffer::View<hlsl::ViewData> mViews;
 		
@@ -96,18 +98,20 @@ private:
 		Image::View mRadiance;
 		Image::View mAlbedo;
 
-		Image::View mReservoirs;
-		Image::View mReservoirRNG;
-		
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
 		
-		Image::View mGradientPositions;
+		Image::View mGradientSamples;
 		array<Image::View, 2> mTemp;
 		array<array<Image::View, 2>, 2> mDiffTemp;
 
 		uint32_t mFrameId;
 	};
+
+	Buffer::View<uint32_t> mCounterValues;
+	uint32_t mPrevCounterValue;
+	float mRaysPerSecond;
+	float mRaysPerSecondTimer;
 
 	unique_ptr<FrameData> mCurFrame, mPrevFrame;
 };

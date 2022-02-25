@@ -10,7 +10,7 @@ NodeGraph gNodeGraph;
 
 void make_scene(const component_ptr<Application>& app) {
   auto scene = app.node().make_component<RayTraceScene>();
-  app->OnUpdate.listen(scene.node(), bind(&RayTraceScene::update, scene.get(), std::placeholders::_1), EventPriority::eAlmostLast);
+  app->OnUpdate.listen(scene.node(), bind(&RayTraceScene::update, scene.get(), std::placeholders::_1, std::placeholders::_2), EventPriority::eAlmostLast);
 
 #ifdef STRATUM_ENABLE_OPENXR
   auto xrnode = app.node().find_in_descendants<XR>();

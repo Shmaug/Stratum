@@ -1,15 +1,41 @@
-#ifndef LIGHT_HPP
-#define LIGHT_HPP
+#ifndef LIGHT_H
+#define LIGHT_H
 
 #include "common.hlsli"
 
+template<typename Real>
+struct PDFMeasure {
+	Real pdf;
+	Real G;
+	bool is_solid_angle;
+	inline float solid_angle() {return is_solid_angle ? pdf : pdf/G; }
+	inline float area() {return is_solid_angle ? pdf*G : pdf; }
+};
+template<typename Real>
+inline PDFMeasure<Real> make_area_pdf(const Real pdfA, const Real cos_theta, const Real dist) {
+	PDFMeasure<Real> pdf;
+	pdf.pdf = pdfA;
+	pdf.G = cos_theta / pow2(dist);
+	pdf.is_solid_angle = false;
+	return pdf;
+}
+template<typename Real>
+inline PDFMeasure<Real> make_solid_angle_pdf(const Real pdfW, const Real cos_theta, const Real dist) {
+	PDFMeasure<Real> pdf;
+	pdf.pdf = pdfW;
+	pdf.G = cos_theta / pow2(dist);
+	pdf.is_solid_angle = true;
+	return pdf;
+}
+
 struct LightSampleRecord {
+	float3 position_or_bary;
 	uint instance_primitive_index;
-	uint material_address;
 	float3 radiance;
-	float dist;
+	uint material_address;
 	float3 to_light;
-	PDFMeasure pdf;
+	float dist;
+	PDFMeasure<float> pdf;
 
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
@@ -23,11 +49,15 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 		BF_SET(ls.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 		BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		ls.material_address = gPushConstants.gEnvironmentMaterialAddress;
-		const BSDFSampleRecord s = sample_material(gMaterialData, gPushConstants.gEnvironmentMaterialAddress, float3(rng.next(), rng.next(), rng.next()), -ray.direction, v);
+		Environment env;
+		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
+		env.load(gMaterialData, tmp);
+		const BSDFSampleRecord<float> s = env.sample<float,true>(float3(rng.next(), rng.next(), rng.next()), -ray.direction, v);
 		ls.radiance = s.eval.f;
 		ls.to_light = s.dir_out;
 		ls.dist = 1.#INF;
-		ls.pdf = make_solid_angle_pdf(s.eval.pdfW, 1, 1);
+		ls.pdf = make_solid_angle_pdf<float>(s.eval.pdfW, 1, 1);
+		ls.position_or_bary = s.dir_out;
 	} else if (gSampleLights) {
 		// sample a light
 		BF_SET(ls.instance_primitive_index, min(uint(rng.next() * gPushConstants.gLightCount), gPushConstants.gLightCount-1), 0, 16);
@@ -59,34 +89,20 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 
 				ls.to_light = T*sinTheta*cos(phi) + B*sinTheta*sin(phi) + to_center*cosTheta;
 				ls.dist = ray_sphere(v.position, ls.to_light, center, r).x;
-				/*
-				// Now we have a ray direction and a sphere, we can just ray trace and find
-				// the intersection point. Pbrt uses an more clever and numerically robust
-				// approach which I will just shamelessly copy here.
-				const float ds = dist * cosTheta - sqrt(max(0, r * r - dist * dist * sinTheta * sinTheta));
-				const float cos_alpha = (dist * dist + r * r - ds * ds) / (2 * dist * r);
-				const float sin_alpha = sqrt(max(0, 1 - cos_alpha * cos_alpha));
-				// Add negative sign since normals point outwards.
-				*/
-				//g.geometry_normal = g.shading_normal = T*sin_alpha * cos(phi) + B*sin_alpha * sin(phi) - to_center*cos_alpha;
-				//g.position = center + r * g.geometry_normal;
-				g.position = v.position + ls.to_light*ls.dist;
-				g.geometry_normal = g.shading_normal = (min16float3)((g.position - center)/r);
-				g.uv      = (min16float2)cartesian_to_spherical_uv(g.geometry_normal);
-				g.tangent = min16float4(cross(instance.transform.transform_vector(float3(0, 1, 0)), g.geometry_normal), 1);
-				g.shape_area = (min16float)(4*M_PI*r*r);
+				ls.position_or_bary = v.position + ls.to_light*ls.dist;
+				
+				g = make_sphere_geometry(instance.transform, r, ls.position_or_bary);
 
 				ls.pdf = make_solid_angle_pdf(1 / (2 * M_PI * (1 - cosThetaMax)), abs(dot(ls.to_light, g.geometry_normal)), ls.dist);
-
 				break;
 			}
 			case INSTANCE_TYPE_TRIANGLES: {
 				const uint prim_index = min(rng.next()*instance.prim_count(), instance.prim_count() - 1);
 				BF_SET(ls.instance_primitive_index, prim_index, 16, 16);
 				const float a = sqrt(rng.next());
-				const float2 bary = float2(1 - a, a*rng.next());
+				ls.position_or_bary = float3(1 - a, a*rng.next(), 0);
 				const uint3 tri = load_tri(gIndices, instance, ls.primitive_index());
-				g = make_triangle_geometry(instance.transform, ray, tri, bary);
+				g = make_triangle_geometry(instance.transform, tri, ls.position_or_bary.xy);
 
 				ls.to_light = g.position - v.position;
 				ls.dist = length(ls.to_light);
@@ -96,7 +112,7 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 				break;
 			}
 		}
-		ls.radiance = eval_material_emission(gMaterialData, ls.material_address, g);
+		ls.radiance = eval_material_emission<float>(gMaterialData, ls.material_address, g);
 		ls.pdf.pdf /= (float)gPushConstants.gLightCount;
 	}
 	if (gSampleBG && gSampleLights)
@@ -104,14 +120,17 @@ inline LightSampleRecord sample_light_or_environment(inout rng_t rng, const Path
 	return ls;
 }
 
-inline PDFMeasure light_sample_pdf(const PathVertex light_vertex, const RayDifferential ray, const float dist) {
-	PDFMeasure pdf;
+inline PDFMeasure<float> light_sample_pdf(const PathVertex light_vertex, const RayDifferential ray, const float dist) {
+	PDFMeasure<float> pdf;
 
 	if (light_vertex.instance_index() == INVALID_INSTANCE) {
-		if (!gSampleBG) return make_area_pdf(0, 1, 1);
-		return make_solid_angle_pdf(light_vertex.eval_material(ray.direction, ray.direction).pdfW*gPushConstants.gEnvironmentSampleProbability, 1, 1);
+		if (!gSampleBG) return make_area_pdf<float>(0, 1, 1);
+		Environment env;
+		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
+		env.load(gMaterialData, tmp);
+		return make_solid_angle_pdf<float>(env.eval_pdfW(ray.direction)*gPushConstants.gEnvironmentSampleProbability, 1, 1);
 	} else {
-		if (!gSampleLights) return make_area_pdf(0, 1, 1);
+		if (!gSampleLights) return make_area_pdf<float>(0, 1, 1);
 		const InstanceData instance = gInstances[light_vertex.instance_index()];
 		switch (instance.type()) {
 			case INSTANCE_TYPE_SPHERE: {
@@ -138,5 +157,4 @@ inline float mis_heuristic(const float a, const float b) {
 	const float a2 = a * a;
 	return a2 / (b*b + a2);
 }
-
 #endif

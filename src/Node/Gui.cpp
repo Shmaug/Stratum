@@ -72,13 +72,6 @@ inline void inspector_gui_fn(Instance* instance) {
     VK_API_VERSION_MINOR(instance->vulkan_version()),
     VK_API_VERSION_PATCH(instance->vulkan_version()) );
 
-  VmaStats stats;
-  vmaCalculateStats(instance->device().allocator(), &stats);
-  auto used = format_bytes(stats.total.usedBytes);
-  auto unused = format_bytes(stats.total.unusedBytes);
-  ImGui::LabelText("Used memory", "%zu %s", used.first, used.second);
-  ImGui::LabelText("Unused memory", "%zu %s", unused.first, unused.second);
-  ImGui::LabelText("Device allocations", "%u", stats.total.blockCount);
   ImGui::LabelText("Descriptor Sets", "%u", instance->device().descriptor_set_count());
 
   ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
@@ -400,7 +393,7 @@ void Profiler::on_gui() {
     uint32_t frameCount = 0;
     for (frameCount = 0; frameCount < frameTimings.size(); frameCount++) {
       timeAccum += frameTimings[frameCount];
-      if (timeAccum > 2000.f) break;
+      if (timeAccum > 1000.f) break;
     }
     ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
 

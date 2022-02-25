@@ -564,6 +564,15 @@ inline auto format_bytes(size_t bytes) {
 	}
 	return make_pair(bytes, units[i]);
 }
+inline auto format_number(float number) { 
+	const char* units[] { "", "K", "M", "B" };
+	uint32_t i = 0;
+	while (number > 1000 && i < ranges::size(units)-1) {
+		number /= 1000;
+		i++;
+	}
+	return make_pair(number, units[i]);
+}
 
 template<typename T>
 inline static void store_texel(void* data, const T v, uint32_t c, vk::Format format) {

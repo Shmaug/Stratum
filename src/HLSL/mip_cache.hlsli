@@ -27,7 +27,6 @@ inline PathVertexCacheEntry get_cache_entry(const uint instance_primitive_index,
 	const int3 v = pos / sqrt(dot(d_pos.dx, d_pos.dx) + dot(d_pos.dy, d_pos.dy));
 	const uint packed_normal = pack_normal_octahedron(normal);
 
-
 	static const uint gPathVertexCacheHeaderSize = gPushConstants.gPathVertexCacheEntries*4;
 	static const uint gPathVertexCacheSize = gPushConstants.gPathVertexCacheEntries*16;
 

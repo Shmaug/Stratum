@@ -131,12 +131,12 @@ inline float2 sample_uniform_sphere(const float u1, const float u2) {
 }
 
 inline float3 sample_cos_hemisphere(const float u1, const float u2) {
-    const float phi = (2*M_PI) * u2;
-    float2 xy = sqrt(u1) * float2(cos(phi), sin(phi));
-    return float3(xy[0], xy[1], sqrt(max(0.f, 1 - dot(xy, xy))));
+	const float phi = (2*M_PI) * u2;
+	float2 xy = sqrt(u1) * float2(cos(phi), sin(phi));
+	return float3(xy[0], xy[1], sqrt(max(0.f, 1 - dot(xy, xy))));
 }
 inline float cosine_hemisphere_pdfW(const float cos_theta) {
-    return max(cos_theta, 0.f) / M_PI;
+	return max(cos_theta, 0.f) / M_PI;
 }
 
 inline float2 ray_sphere(const float3 origin, const float3 dir, const float3 p, const float r) {

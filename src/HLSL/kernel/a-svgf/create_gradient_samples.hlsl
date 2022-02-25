@@ -33,7 +33,7 @@ RWTexture2D<float2> gOutput1;
 RWTexture2D<float4> gOutput2;
 Texture2D<float4> gRadiance;
 Texture2D<float4> gPrevRadiance;
-Texture2D<uint> gGradientPositions;
+Texture2D<uint> gGradientSamples;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
 
@@ -48,7 +48,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const ViewData view = gViews[viewIndex];
 
 	const uint2 gradPos = index.xy;
-	const uint u = gGradientPositions[gradPos];
+	const uint u = gGradientSamples[gradPos];
 	const uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
 	const uint2 ipos = gradPos*gGradientDownsample + tile_pos;
 	if (!test_inside_screen(ipos, view)) return;
@@ -81,5 +81,5 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 	moments /= float2(sum_w, sum_w*sum_w);
 
-	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(float2(v.dz_dx(), v.dz_dy())));
+	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(v.dz_dxy()));
 }

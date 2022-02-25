@@ -13,12 +13,17 @@ enum DebugMode {
 	eNone,
 	eZ,
 	eDz,
-	eNormals,
-	eAlbedo,
+	eShadingNormal,
+	eGeometryNormal,
+	eTangent,
+	eMeanCurvature,
+	eRayRadius,
+	eUVScreenSize,
 	ePrevUV,
+	eAlbedo,
 	eAccumLength,
-	eAntilag,
-	eVariance,
+	eTemporalGradient,
+	eRelativeTemporalGradient,
 	eDebugModeCount
 };
 
@@ -38,12 +43,17 @@ inline string to_string(const DebugMode& m) {
 		case DebugMode::eNone: return "None";
 		case DebugMode::eZ: return "Z";
 		case DebugMode::eDz: return "Dz";
-		case DebugMode::eNormals: return "Normals";
-		case DebugMode::eAlbedo: return "Albedo";
+		case DebugMode::eShadingNormal: return "Shading Normal";
+		case DebugMode::eGeometryNormal: return "Geometry Normal";
+		case DebugMode::eTangent: return "Tangent";
+		case DebugMode::eMeanCurvature: return "Mean Curvature";
+		case DebugMode::eRayRadius: return "Ray Radius";
+		case DebugMode::eUVScreenSize: return "UV Screen Size";
 		case DebugMode::ePrevUV: return "PrevUV";
-		case DebugMode::eAccumLength: return "AccumLength";
-		case DebugMode::eAntilag: return "Antilag";
-		case DebugMode::eVariance: return "Variance";
+		case DebugMode::eAlbedo: return "Albedo";
+		case DebugMode::eAccumLength: return "Accum Length";
+		case DebugMode::eTemporalGradient: return "Temporal Gradient";
+		case DebugMode::eRelativeTemporalGradient: return "Relative Temporal Gradient (Antilag)";
 	}
 };
 #endif

@@ -7,6 +7,8 @@
 #define SAMPLE_FLAG_RR BIT(0)
 #define SAMPLE_FLAG_BG_IS BIT(1)
 #define SAMPLE_FLAG_LIGHT_IS BIT(2)
+#define SAMPLE_FLAG_MIS BIT(3)
+#define SAMPLE_FLAG_RAY_CONE_LOD BIT(4)
 
 #define INSTANCE_TYPE_SPHERE 0
 #define INSTANCE_TYPE_TRIANGLES 1
@@ -18,6 +20,8 @@
 
 #define INVALID_INSTANCE 0xFFFF
 #define INVALID_PRIMITIVE 0xFFFF
+
+#define COUNTER_ADDRESS_RAY_COUNT 0
 
 struct InstanceData {
 	// instance -> world
@@ -69,11 +73,36 @@ struct PackedVertexData {
 	float3 normal;
 	float v;
 	float4 tangent;
+
+	inline float2 uv() { return float2(u, v); }
 };
 
 #ifdef __HLSL_VERSION
-#include "ray_differential.hlsli"
+struct RayDifferential {
+  float3 origin;
+  float t_min;
+  float3 direction;
+  float t_max;
+
+  float radius;
+  float spread;
+    
+  inline float differential_transfer(const float t) {
+    return radius + spread*t;
+  }
+  inline void differential_reflect(const float mean_curvature, const float roughness) {
+    const float spec_spread = spread + 2 * mean_curvature * radius;
+    const float diff_spread = 0.2;
+    spread = max(0, lerp(spec_spread, diff_spread, roughness));
+  }
+  inline void differential_refract(const float mean_curvature, const float roughness, const float eta) {
+    const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
+    const float diff_spread = 0.2;
+    spread = max(0, lerp(spec_spread, diff_spread, roughness));
+  }
+};
 #endif
+
 struct ViewData {
 	TransformData camera_to_world;
 	TransformData world_to_camera;
@@ -81,29 +110,21 @@ struct ViewData {
 	uint2 image_min;
 	uint2 image_max;
 #ifdef __HLSL_VERSION
-	inline RayDifferential create_ray(const float2 uv) {
+	inline RayDifferential create_ray(const float2 uv, const float2 size) {
 		float2 clipPos = 2*uv - 1;
 		clipPos.y = -clipPos.y;
 
 		RayDifferential ray;
-		ray.direction = normalize(camera_to_world.transform_vector(projection.back_project(clipPos)));
 		#ifdef TRANSFORM_UNIFORM_SCALING
 		ray.origin = gCameraToWorld.mTranslation;
 		#else
 		ray.origin = float3(camera_to_world.m[0][3], camera_to_world.m[1][3], camera_to_world.m[2][3]);
 		#endif
+		ray.direction = normalize(camera_to_world.transform_vector(projection.back_project(clipPos)));
+		ray.t_min = 0;
 		ray.t_max = 1.#INF;
-
-		ray.dP.dx = 0;
-		ray.dP.dy = 0;
-
-		float2 clipPos_dx = 2*(uv + float2(1/(float)(image_max.x - image_min.x), 0)) - 1;
-		float2 clipPos_dy = 2*(uv + float2(0, 1/(float)(image_max.y - image_min.y))) - 1;
-		clipPos_dx.y = -clipPos_dx.y;
-		clipPos_dy.y = -clipPos_dy.y;
-		ray.dD.dx = (min16float3)(normalize(camera_to_world.transform_vector(projection.back_project(clipPos_dx))) - ray.direction);
-		ray.dD.dy = (min16float3)(normalize(camera_to_world.transform_vector(projection.back_project(clipPos_dy))) - ray.direction);
-
+		ray.radius = 0;
+		ray.spread = 1 / min(size.x, size.y);
 		return ray;
 	}
 #endif
@@ -119,28 +140,6 @@ struct ShadingFrame {
     inline float3 to_world(const float3 v_l) { return v_l[0]*t + v_l[1]*b + v_l[2]*n; }
     inline float3 to_local(const float3 v_w) { return float3(dot(v_w, t), dot(v_w, b), dot(v_w, n)); }
 };
-
-struct PDFMeasure {
-	float pdf;
-	float G;
-	bool is_solid_angle;
-	inline float solid_angle() {return is_solid_angle ? pdf : pdf/G; }
-	inline float area() {return is_solid_angle ? pdf*G : pdf; }
-};
-inline PDFMeasure make_area_pdf(const float pdfA, const float cos_theta, const float dist) {
-	PDFMeasure pdf;
-	pdf.pdf = pdfA;
-	pdf.G = cos_theta / pow2(dist);
-	pdf.is_solid_angle = false;
-	return pdf;
-}
-inline PDFMeasure make_solid_angle_pdf(const float pdfW, const float cos_theta, const float dist) {
-	PDFMeasure pdf;
-	pdf.pdf = pdfW;
-	pdf.G = cos_theta / pow2(dist);
-	pdf.is_solid_angle = true;
-	return pdf;
-}
 
 #ifdef __HLSL_VERSION
 
@@ -169,7 +168,7 @@ inline float3 ray_offset(const float3 P, const float3 Ng) {
                 abs(P.z) < origin ? P.z + float_scale * Ng.z : p_i.z);
 }
 
-inline uint3 load_tri(ByteAddressBuffer indices, uint indexByteOffset, uint indexStride, uint primitiveIndex) {
+inline uint3 load_tri_(ByteAddressBuffer indices, uint indexByteOffset, uint indexStride, uint primitiveIndex) {
 	const uint offsetBytes = indexByteOffset + primitiveIndex*3*indexStride;
 	uint3 tri;
 	if (indexStride == 2) {
@@ -190,7 +189,7 @@ inline uint3 load_tri(ByteAddressBuffer indices, uint indexByteOffset, uint inde
 	return tri;
 }
 inline uint3 load_tri(ByteAddressBuffer indices, const InstanceData instance, uint primitiveIndex) {
-	return instance.first_vertex() + load_tri(indices, instance.indices_byte_offset(), instance.index_stride(), primitiveIndex);
+	return instance.first_vertex() + load_tri_(indices, instance.indices_byte_offset(), instance.index_stride(), primitiveIndex);
 }
 
 #endif

@@ -95,7 +95,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			const VisibilityInfo v_p = load_visibility(p);
 			if (v.instance_index() != v_p.instance_index()) continue;
 
-			const float w_z = abs(v_p.z() - v.z()) / (length(float2(v.dz_dx(), v.dz_dy()) * float2(xx, yy)) + 1e-2);
+			const float w_z = abs(v_p.z() - v.z()) / (length(v.dz_dxy() * float2(xx, yy)) + 1e-2);
 			const float w_n = pow(saturate(dot(v_p.normal(), v.normal())), 128); 
 			const min16float w = (min16float)(exp(-w_z) * w_n);
 

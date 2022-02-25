@@ -79,7 +79,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 			const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
 			if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
-			if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 2, vis_prev.dz_dx(), vis_prev.dz_dy())) continue;
+			//if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), float2(xx, yy) - 0.5, 2*vis_prev.dz_dxy())) continue;
 			if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
 
 			const float4 c = gHistory[ipos_prev];
@@ -120,10 +120,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 					}
 			}
 			antilag_alpha = saturate(antilag_alpha*gPushConstants.gAntilagScale);
-			if (isnan(antilag_alpha) || isinf(antilag_alpha))
-				antilag_alpha = 1;
-			
-			n = lerp(n, color_curr.a, antilag_alpha);
+			if (!isnan(antilag_alpha) && !isinf(antilag_alpha))		
+				n = lerp(n, color_curr.a, antilag_alpha);
 		}
 
 		const float alpha = color_curr.a / n;

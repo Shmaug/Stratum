@@ -50,8 +50,8 @@ struct TapData {
 	int2 index;
 	uint2 s_mem_index;
 	float3 center_normal;
-	float z_center;
-	float2 dz_center;
+	min16float z_center;
+	min16float2 dz_center;
 	float l_center;
 	float sigma_l;
 
@@ -80,13 +80,13 @@ struct TapData {
 
 		const float4 color_p  = gInput[p];
 
-		const float l_p       = luminance(color_p.rgb);
+		const float l_p = luminance(color_p.rgb);
 
 		const VisibilityInfo v_p = load_visibility(p);
 
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10); 
-		const float w_z = 3 * abs(v_p.z() - z_center) / (length(dz_center * offset * gPushConstants.gStepSize) + 1e-2);
-		const float w_n = pow(max(0, dot(v_p.normal(), center_normal)), 128); 
+		const float w_z = 3 * abs(v_p.z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2);
+		const float w_n = pow(max(0, dot(v_p.normal(), center_normal)), 256); 
 
 		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
 		if (isinf(w) || isnan(w) || w == 0) return;
@@ -196,7 +196,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const VisibilityInfo v = load_visibility(t.index);
 	t.center_normal = v.normal();
 	t.z_center = v.z();
-	t.dz_center = float2(v.dz_dx(), v.dz_dy());
+	t.dz_center = v.dz_dxy();
 	t.sum_weight = 1;
 	t.sum_color = gInput[index.xy];
 	t.l_center = luminance(t.sum_color.rgb);

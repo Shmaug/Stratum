@@ -61,18 +61,7 @@ struct ImageValue1 {
 	inline bool has_image() { return BF_GET(image_index_and_channel, 0, 30) < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channel, 0, 30))]; }
 	inline uint channel() { return BF_GET(image_index_and_channel, 30, 2); }
-	inline float eval(const PathVertexGeometry v) {
-		if (has_image())
-			return value * image().SampleGrad(gSampler, v.uv, v.d_uv.dx, v.d_uv.dy)[channel()];
-		else
-			return value;
-	}
-	inline float eval(const float2 uv) {
-		if (has_image())
-			return value * image().SampleLevel(gSampler, uv, 0)[channel()];
-		else
-			return value;
-	}
+
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
 		image_index_and_channel = bytes.Load(address); address += 4;
 		value = (min16float)asfloat(bytes.Load(address)); address += 4;
@@ -105,22 +94,7 @@ struct ImageValue2 {
 	inline bool has_image() { return BF_GET(image_index_and_channels, 0, 28) < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channels, 0, 28))]; }
 	inline uint2 channels() { return uint2(BF_GET(image_index_and_channels, 28, 2), BF_GET(image_index_and_channels, 30, 2)); }
-	inline float2 eval(const PathVertexGeometry v) {
-		if (has_image()) {
-			const float4 s = image().SampleGrad(gSampler, v.uv, v.d_uv.dx, v.d_uv.dy);
-			const uint2 c = channels();
-			return value * float2(s[c[0]], s[c[1]]);
-		} else
-			return value;
-	}
-	inline float2 eval(const float2 uv) {
-		if (has_image()) {
-			const float4 s = image().SampleLevel(gSampler, uv, 0);
-			const uint2 c = channels();
-			return value * float2(s[c[0]], s[c[1]]);
-		} else
-			return value;
-	}
+
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
 		image_index_and_channels = bytes.Load(address); address += 4;
 		value = (min16float2)asfloat(bytes.Load2(address)); address += 8;
@@ -155,22 +129,7 @@ struct ImageValue3 {
 	inline bool has_image() { return BF_GET(image_index_and_channels, 0, 26) < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channels, 0, 26))]; }
 	inline uint3 channels() { return uint3(BF_GET(image_index_and_channels, 26, 2), BF_GET(image_index_and_channels, 28, 2), BF_GET(image_index_and_channels, 30, 2)); }
-	inline float3 eval(const PathVertexGeometry v) {
-		if (has_image()) {
-			float4 s = image().SampleGrad(gSampler, v.uv, v.d_uv.dx, v.d_uv.dy);
-			const uint3 c = channels();
-			return value * float3(s[c[0]], s[c[1]], s[c[2]]);
-		} else
-			return value;
-	}
-	inline float3 eval(const float2 uv) {
-		if (has_image()) {
-			float4 s = image().SampleLevel(gSampler, uv, 0);
-			const uint3 c = channels();
-			return value * float3(s[c[0]], s[c[1]], s[c[2]]);
-		} else
-			return value;
-	}
+
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
 		image_index_and_channels = bytes.Load(address); address += 4;
 		value = (min16float3)asfloat(bytes.Load3(address)); address += 12;
@@ -206,18 +165,7 @@ struct ImageValue4 {
 	uint image_index;
 	inline bool has_image() { return image_index < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
-	inline float4 eval(const PathVertexGeometry v) {
-		if (has_image())
-			return value * image().SampleGrad(gSampler, v.uv, v.d_uv.dx, v.d_uv.dy);
-		else
-			return value;
-	}
-	inline float4 eval(const float2 uv) {
-		if (has_image())
-			return value * image().SampleLevel(gSampler, uv, 0);
-		else
-			return value;
-	}
+
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
 		image_index = bytes.Load(address); address += 4;
 		value = (min16float4)asfloat(bytes.Load4(address)); address += 16;

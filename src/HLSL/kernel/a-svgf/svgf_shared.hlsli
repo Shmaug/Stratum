@@ -32,15 +32,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../../scene.hlsli"
 
 inline bool test_reprojected_normal(const float3 n1, const float3 n2) {
-	return dot(n1, n2) > 0.99619469809; // cos(5 degrees)
+	return dot(n1, n2) > cos(degrees(5));
 }
 
 inline bool test_inside_screen(const int2 p, ViewData view) {
 	return all(p >= view.image_min) && all(p < view.image_max);
 }
 
-inline bool test_reprojected_depth(const float z1, const float z2, const float2 offset, const float dz_dx, const float dz_dy) {
-	return abs(z1 - z2) < 2*(length(float2(dz_dx*offset.x, dz_dy*offset.y)) + 1e-2);
+inline bool test_reprojected_depth(const float z1, const float z2, const float2 offset, const float2 dz) {
+	return abs(z1 - z2) < (length(dz*offset) + 1e-2)*1.5;
 }
 
 #define TILE_OFFSET_SHIFT 3u
