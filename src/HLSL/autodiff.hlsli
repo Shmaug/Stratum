@@ -1,415 +1,346 @@
 #ifndef AUTODIFF_H
 #define AUTODIFF_H
 
-template<typename Real>
-class DiffScalar {
-	typedef T       value_type;
-	typedef VecType deriv1_type;
-	typedef MatType deriv2_type;
+template<typename Real, uint M, uint N>
+inline matrix<Real,M,N> outer_prod(const vector<Real,M> u, const vector<Real,N> v) {
+	matrix<Real,M,N> r;
+	for (uint i = 0; i < N; i++)
+		for (uint j = 0; j < N; j++)
+			r[i][j] = u[i]*v[j];
+	return r;
+}
 
-	/// ====================  Addition  ===================
-	inline DiffScalar operator+(const DiffScalar lhs, const DiffScalar rhs) {
-		return DiffScalar(lhs.env, lhs.value+rhs.value, lhs.deriv1+rhs.deriv1, lhs.deriv2+rhs.deriv2);
+template<typename Real, uint N, uint DerivativeLevel>
+class DiffScalarN {
+	typedef DiffScalarN<Real, N, DerivativeLevel> diff_scalar_type;
+
+	Real value;
+	vector<Real, N> grad;
+	matrix<Real, N, N> hess;
+
+	inline diff_scalar_type operator+(const diff_scalar_type rhs) {
+		diff_scalar_type s;
+		s.value = value + rhs.value;
+		s.grad  = grad  + rhs.grad;
+		s.hess  = hess  + rhs.hess;
+		return s;
 	}
 
-	inline DiffScalar operator+(const DiffScalar lhs, const value_type rhs) {
-		return DiffScalar(lhs.env, lhs.value+rhs, lhs.deriv1, lhs.deriv2);
+	inline diff_scalar_type operator-(const diff_scalar_type rhs) {
+		diff_scalar_type s;
+		s.value = value - rhs.value;
+		s.grad  = grad  - rhs.grad;
+		s.hess  = hess  - rhs.hess;
+		return s;
 	}
 
-	inline DiffScalar operator+(const value_type lhs, const DiffScalar rhs) {
-		return DiffScalar(rhs.env, rhs.value+lhs, rhs.deriv1, rhs.deriv2);
+	inline diff_scalar_type operator-() {
+		diff_scalar_type s;
+		s.value = -value;
+		s.grad  = -grad;
+		s.hess  = -hess;
+		return s;
 	}
 
-	inline DiffScalar& operator+=(const DiffScalar &s) {
-		if (env == NULL) {
-			env    = s.env;
-			value  = s.value;
-			deriv1 = s.deriv1;
-			deriv2 = s.deriv2;
-		} else {
-			value  += s.value;
-			deriv1 += s.deriv1;
-			deriv2 += s.deriv2;
-		}
-		return *this;
-	}
+	inline diff_scalar_type operator*(const diff_scalar_type rhs) {
+		diff_scalar_type result;
+		result.value = value*rhs.value;
 
-	inline DiffScalar& operator+=(const value_type &v) {
-		value  += v;
-		return *this;
-	}
-
-	/// ==================  Subtraction  ==================
-	friend DiffScalar operator-(const DiffScalar &lhs, const DiffScalar &rhs) {
-		return DiffScalar(lhs.env, lhs.value-rhs.value, lhs.deriv1-rhs.deriv1, lhs.deriv2-rhs.deriv2);
-	}
-
-	friend DiffScalar operator-(const DiffScalar &lhs, const value_type &rhs) {
-		return DiffScalar(lhs.env, lhs.value-rhs, lhs.deriv1, lhs.deriv2);
-	}
-
-	friend DiffScalar operator-(const value_type &lhs, const DiffScalar &rhs) {
-		return DiffScalar(rhs.env, lhs-rhs.value, -rhs.deriv1, -rhs.deriv2);
-	}
-
-	friend DiffScalar operator-(const DiffScalar &s) {
-		return DiffScalar(s.env, -s.value, -s.deriv1, -s.deriv2);
-	}
-
-	inline DiffScalar& operator-=(const DiffScalar &s) {
-		if (env == NULL) {
-			env    = s.env;
-			value  = -s.value;
-			deriv1 = -s.deriv1;
-			deriv2 = -s.deriv2;
-		} else {
-			value  -= s.value;
-			deriv1 -= s.deriv1;
-			deriv2 -= s.deriv2;
-		}
-		return *this;
-	}
-
-	inline DiffScalar& operator-=(const value_type &v) {
-		value  -= v;
-		return *this;
-	}
-
-	/// ===================  Division  ====================
-	friend DiffScalar operator/(const DiffScalar &lhs, const value_type &rhs) {
-		return DiffScalar(lhs.env, lhs.value/rhs, lhs.deriv1/rhs, lhs.deriv2/rhs);
-	}
-
-	friend DiffScalar operator/(const value_type &lhs, const DiffScalar &rhs) {
-		return lhs * inverse(rhs);
-	}
-
-	friend DiffScalar operator/(const DiffScalar &lhs, const DiffScalar &rhs) {
-		return lhs * inverse(rhs);
-	}
-
-	friend DiffScalar inverse(const DiffScalar &s) {
-		value_type valueSqr = s.value*s.value,
-			valueCub = valueSqr * s.value,
-			invValueSqr = (T) 1 / valueSqr;
-		// vn = 1/v
-		DiffScalar result(s.env, (T) 1 / s.value);
-
-		// Dvn = -1/(v^2) Dv
-		if (s.env->getDerivativeLevel() > 0) 
-			result.deriv1 = s.deriv1 * -invValueSqr;
-
-		// D^2vn = -1/(v^2) D^2v + 2/(v^3) Dv Dv^T
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * -invValueSqr;;
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* ((T) 2 / valueCub);
-		}
-
-		return result;
-	}
-
-	inline DiffScalar& operator/=(const value_type &v) {
-		value  /= v;
-		deriv1 /= v;
-		deriv2 /= v;
-		return *this;
-	}
-
-	/// ================  Multiplication  =================
-	friend DiffScalar operator*(const DiffScalar &lhs, const value_type &rhs) {
-		return DiffScalar(lhs.env, lhs.value*rhs, lhs.deriv1*rhs, lhs.deriv2*rhs);
-	}
-
-	friend DiffScalar operator*(const value_type &lhs, const DiffScalar &rhs) {
-		return DiffScalar(rhs.env, rhs.value*lhs, rhs.deriv1*lhs, rhs.deriv2*lhs);
-	}
-
-	friend DiffScalar operator*(const DiffScalar &lhs, const DiffScalar &rhs) {
-		DiffScalar result(lhs.env, lhs.value*rhs.value);
-
-		/// Product rule
-		if (lhs.env->getDerivativeLevel() > 0) 
-			result.deriv1 = rhs.deriv1 * lhs.value + lhs.deriv1 * rhs.value;
+		// Product rule
+		if (DerivativeLevel > 0)
+			result.grad = rhs.grad * value + grad * rhs.value;
 
 		// (i,j) = g*F_xixj + g*G_xixj + F_xi*G_xj + F_xj*G_xi
-		if (lhs.env->getDerivativeLevel() > 1) {
-			result.deriv2 = rhs.deriv2 * lhs.value;	
-			result.deriv2 += lhs.deriv2 * rhs.value;	
-			result.deriv2 += ublas::outer_prod(lhs.deriv1, rhs.deriv1);
-			result.deriv2 += ublas::outer_prod(rhs.deriv1, lhs.deriv1);
+		if (DerivativeLevel > 1) {
+			result.hess = rhs.hess * value;	
+			result.hess += hess * rhs.value;	
+			result.hess += outer_prod<Real,N,N>(grad, rhs.grad);
+			result.hess += outer_prod<Real,N,N>(rhs.grad, grad);
 		}
 		
 		return result;
 	}
 
-	inline DiffScalar& operator*=(const value_type &v) {
-		value  *= v;
-		deriv1 *= v;
-		deriv2 *= v;
-		return *this;
-	}
+	inline diff_scalar_type inverse() {
+		const Real valueSqr = value*value;
+    const Real valueCub = valueSqr * value;
+    const Real invValueSqr = 1 / valueSqr;
+		// vn = 1/v
+		diff_scalar_type result;
+		result.value = 1 / value;
 
-	/// ================= Misc Operations =================
-	friend DiffScalar sqrt(const DiffScalar &s) {
-		value_type sqrtVal = std::sqrt(s.value),
-                   temp    = (T) 1 /((T) 2 * sqrtVal);
+		// Dvn = -1/(v^2) Dv
+		if (DerivativeLevel > 0) 
+			result.grad = grad * -invValueSqr;
 
-		// vn = sqrt(v)
-		DiffScalar result(s.env, sqrtVal);
-
-		// Dvn = 1/(2 sqrt(v)) Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * temp;
-
-		// D^2vn = 1/(2 sqrt(v)) D^2v - 1/(4 v*sqrt(v)) Dv Dv^T
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * temp;
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* (-(T) 1 / ((T) 4 * s.value * sqrtVal));
-		}
-
-		return result;
-	}
-
-	friend DiffScalar pow(const DiffScalar &s, const value_type &a) {
-		value_type powVal = std::pow(s.value, a),
-                   temp   = a * std::pow(s.value, a-1);
-		// vn = v ^ a
-		DiffScalar result(s.env, powVal);
-
-		// Dvn = a*v^(a-1) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * temp;
-
-		// D^2vn = a*v^(a-1) D^2v - 1/(4 v*sqrt(v)) Dv Dv^T
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * temp;
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* (a * (a-1) * std::pow(s.value, a-2));
+		// D^2vn = -1/(v^2) D^2v + 2/(v^3) Dv Dv^T
+		if (DerivativeLevel > 1) {
+			result.hess = hess * -invValueSqr;
+			result.hess += outer_prod<Real,N,N>(grad, grad) * (2 / valueCub);
 		}
 
 		return result;
 	}
 	
-	friend DiffScalar exp(const DiffScalar &s) {
-		value_type expVal = std::exp(s.value);
+	inline diff_scalar_type operator/(const diff_scalar_type rhs) { return operator*(rhs.inverse()); }
 
-		// vn = exp(v)
-		DiffScalar result(s.env, expVal);
-
-		// Dvn = exp(v) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * expVal;
-
-		// D^2vn = exp(v) * Dv*Dv^T + exp(v) * D^2v
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv2 = (ublas::outer_prod(s.deriv1, s.deriv1)
-				+ s.deriv2) * expVal;
-
-		return result;
-	}
-
-	friend DiffScalar log(const DiffScalar &s) {
-		value_type logVal = std::log(s.value);
-
-		// vn = log(v)
-		DiffScalar result(s.env, logVal);
-
-		// Dvn = Dv / v
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 / s.value;
-
-		// D^2vn = (v*D^2v - Dv*Dv^T)/(v^2)
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv2 = s.deriv2 / s.value - 
-			(ublas::outer_prod(s.deriv1, s.deriv1)
-			/ (s.value*s.value));
-
-		return result;
-	}
-
-	friend DiffScalar sin(const DiffScalar &s) {
-		value_type sinVal = std::sin(s.value),
-                   cosVal = std::cos(s.value);
-		// vn = sin(v)
-		DiffScalar result(s.env, sinVal);
-
-		// Dvn = cos(v) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * cosVal;
-
-		// D^2vn = -sin(v) * Dv*Dv^T + cos(v) * Dv^2
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * cosVal;
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* (-sinVal);
-		}
-
-		return result;
-	}
-
-	friend DiffScalar cos(const DiffScalar &s) {
-		value_type sinVal = std::sin(s.value),
-                   cosVal = std::cos(s.value);
-		// vn = cos(v)
-		DiffScalar result(s.env, cosVal);
-
-		// Dvn = -sin(v) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * -sinVal;
-
-		// D^2vn = -cos(v) * Dv*Dv^T - sin(v) * Dv^2
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * -sinVal;
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* (-cosVal);
-		}
-
-		return result;
-	}
-
-	friend DiffScalar acos(const DiffScalar &s) {
-		if (std::abs(s.value) >= 1)
-			throw std::range_error("acos: Expected a value in (-1, 1)");
-
-		value_type temp = -std::sqrt((T) 1 - s.value*s.value);
-
-		// vn = acos(v)
-		DiffScalar result(s.env, std::acos(s.value));
-
-		// Dvn = -1/sqrt(1-v^2) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * ((T) 1 / temp);
-
-		// D^2vn = -1/sqrt(1-v^2) * D^2v - v/[(1-v^2)^(3/2)] * Dv*Dv^T
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * ((T) 1 / temp);
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* s.value / (temp*temp*temp);
-		}
-
-		return result;
-	}
-
-	friend DiffScalar asin(const DiffScalar &s) {
-		if (std::abs(s.value) >= 1)
-			throw std::range_error("asin: Expected a value in (-1, 1)");
-
-		value_type temp = std::sqrt((T) 1 - s.value*s.value);
-
-		// vn = asin(v)
-		DiffScalar result(s.env, std::asin(s.value));
-
-		// Dvn = 1/sqrt(1-v^2) * Dv
-		if (s.env->getDerivativeLevel() > 0)
-			result.deriv1 = s.deriv1 * ((T) 1 / temp);
-
-		// D^2vn = 1/sqrt(1-v*v) * D^2v + v/[(1-v^2)^(3/2)] * Dv*Dv^T
-		if (s.env->getDerivativeLevel() > 1) {
-			result.deriv2 = s.deriv2 * ((T) 1 / temp);
-			result.deriv2 += ublas::outer_prod(s.deriv1, s.deriv1) 
-				* s.value / (temp*temp*temp);
-		}
-
-		return result;
-	}
-
-	friend DiffScalar atan2(const DiffScalar &y, const DiffScalar &x) {
-		// vn = atan2(y, x)
-		DiffScalar result(x.env, std::atan2(y.value, x.value));
-
-		// Dvn = (x*Dy - y*Dx) / (x^2 + y^2)
-		if (x.env->getDerivativeLevel() > 0) {
-			value_type denom = x.value*x.value + y.value*y.value;
-			result.deriv1 = y.deriv1 * (x.value / denom)
-				-x.deriv1 * (y.value / denom);
-		}
-
-		// D^2vn = (Dy*Dx^T + xD^2y - Dx*Dy^T - yD^2x) / (x^2+y^2)
-		//    - [(x*Dy - y*Dx) * (2*x*Dx + 2*y*Dy)^T] / (x^2+y^2)^2
-		if (x.env->getDerivativeLevel() > 1) {
-			value_type denom = x.value*x.value + y.value*y.value,
-				denomSqr = denom*denom;
-
-			result.deriv2 = (y.deriv2*x.value 
-			 	+ ublas::outer_prod(y.deriv1, x.deriv1)
-				- x.deriv2*y.value 
-				- ublas::outer_prod(x.deriv1, y.deriv1)
-			) / denom;
-
-			result.deriv2 -= ublas::outer_prod(
-				y.deriv1*(x.value/denomSqr) - x.deriv1*(y.value/denomSqr),
-				x.deriv1*((T) 2 * x.value) + y.deriv1*((T) 2 * y.value)
-			);
-		}
-
-		return result;
-	}
-
-	/// ============  Comparison & Assignment  ============
-	void operator=(const DiffScalar& s) {
-		env = s.env;
-		value = s.value;
-		deriv1 = s.deriv1;
-		deriv2 = s.deriv2;
-	}
-
-	void operator=(const value_type &v) {
-		value = v;
-		deriv1.clear();
-		deriv2.clear();
-	}
-
-	bool operator<(const DiffScalar& s) const {
+	inline bool operator<(const diff_scalar_type s) {
 		return value < s.value;
 	}
 	
-	bool operator<=(const DiffScalar& s) const {
+	inline bool operator<=(const diff_scalar_type s) {
 		return value <= s.value;
 	}
 
-	bool operator>(const DiffScalar& s) const {
+	inline bool operator>(const diff_scalar_type s) {
 		return value > s.value;
 	}
 	
-	bool operator>=(const DiffScalar& s) const {
+	inline bool operator>=(const diff_scalar_type s) {
 		return value >= s.value;
 	}
 
-	bool operator<(const value_type& s) const {
+	inline bool operator<(const Real s) {
 		return value < s;
 	}
 	
-	bool operator<=(const value_type& s) const {
+	inline bool operator<=(const Real s) {
 		return value <= s;
 	}
 
-	bool operator>(const value_type& s) const {
+	inline bool operator>(const Real s) {
 		return value > s;
 	}
 	
-	bool operator>=(const value_type& s) const {
+	inline bool operator>=(const Real s) {
 		return value >= s;
 	}
 
-	bool operator==(const value_type& s) const {
+	inline bool operator==(const Real s) {
 		return value == s;
 	}
 
-	bool operator!=(const value_type& s) const {
+	inline bool operator!=(const Real s) {
 		return value != s;
 	}
-
-	inline const value_type &getValue() const { return value; }
-	inline const deriv1_type &getGradient() const { return deriv1; }
-	inline const deriv2_type &getHessian() const { return deriv2; }
-	inline const DiffEnvBase<T> *getDiffEnv() const { return env; }
-protected:
-	const DiffEnvBase<T> *env;
-	value_type value;
-	deriv1_type deriv1;
-	deriv2_type deriv2;
 };
 
-#endif AUTODIFF_H
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> make_diff_scalar(const Real v) {
+	DiffScalarN<Real, N, DerivativeLevel> r;
+	r.value = v;
+	r.grad = 0;
+	r.hess = 0;
+	return r;
+}
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> make_diff_scalar_var(const Real v, const uint var_index) {
+	DiffScalarN<Real, N, DerivativeLevel> r;
+	r.value = v;
+	r.grad = 0;
+	r.grad[var_index] = 1;
+	r.hess = 0;
+	return r;
+}
+
+
+/// ================= Misc Operations =================
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> sqrt(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real sqrtVal = sqrt(s.value);
+	const Real temp    = 1 / (2 * sqrtVal);
+
+	// vn = sqrt(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = sqrtVal;
+
+	// Dvn = 1/(2 sqrt(v)) Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * temp;
+
+	// D^2vn = 1/(2 sqrt(v)) D^2v - 1/(4 v*sqrt(v)) Dv Dv^T
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * temp;
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * (-1 / (4 * s.value * sqrtVal));
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> pow(const DiffScalarN<Real, N, DerivativeLevel> s, const Real a) {
+	const Real powVal = pow(s.value, a);
+	const Real temp   = a * pow(s.value, a-1);
+	// vn = v ^ a
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = powVal;
+
+	// Dvn = a*v^(a-1) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * temp;
+
+	// D^2vn = a*v^(a-1) D^2v - 1/(4 v*sqrt(v)) Dv Dv^T
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * temp;
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * (a * (a-1) * pow(s.value, a-2));
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> exp(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real expVal = exp(s.value);
+
+	// vn = exp(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = expVal;
+
+	// Dvn = exp(v) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * expVal;
+
+	// D^2vn = exp(v) * Dv*Dv^T + exp(v) * D^2v
+	if (DerivativeLevel > 0)
+		result.hess = (outer_prod<Real,N,N>(s.grad, s.grad) + s.hess) * expVal;
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> log(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real logVal = log(s.value);
+
+	// vn = log(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = logVal;
+
+	// Dvn = Dv / v
+	if (DerivativeLevel > 0)
+		result.grad = s.grad / s.value;
+
+	// D^2vn = (v*D^2v - Dv*Dv^T)/(v^2)
+	if (DerivativeLevel > 0)
+		result.hess = s.hess / s.value - (outer_prod<Real,N,N>(s.grad, s.grad) / (s.value*s.value));
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> sin(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real sinVal = sin(s.value);
+	const Real cosVal = cos(s.value);
+	// vn = sin(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = sinVal;
+
+	// Dvn = cos(v) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * cosVal;
+
+	// D^2vn = -sin(v) * Dv*Dv^T + cos(v) * Dv^2
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * cosVal;
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * (-sinVal);
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> cos(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real sinVal = sin(s.value);
+	const Real cosVal = cos(s.value);
+	// vn = cos(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = cosVal;
+
+	// Dvn = -sin(v) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * -sinVal;
+
+	// D^2vn = -cos(v) * Dv*Dv^T - sin(v) * Dv^2
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * -sinVal;
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * (-cosVal);
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> acos(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real temp = -sqrt(1 - s.value*s.value);
+
+	// vn = acos(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = acos(s.value);
+
+	// Dvn = -1/sqrt(1-v^2) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * (1 / temp);
+
+	// D^2vn = -1/sqrt(1-v^2) * D^2v - v/[(1-v^2)^(3/2)] * Dv*Dv^T
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * (1 / temp);
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * s.value / (temp*temp*temp);
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> asin(const DiffScalarN<Real, N, DerivativeLevel> s) {
+	const Real temp = sqrt(1 - s.value*s.value);
+
+	// vn = asin(v)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = asin(s.value);
+
+	// Dvn = 1/sqrt(1-v^2) * Dv
+	if (DerivativeLevel > 0)
+		result.grad = s.grad * (1 / temp);
+
+	// D^2vn = 1/sqrt(1-v*v) * D^2v + v/[(1-v^2)^(3/2)] * Dv*Dv^T
+	if (DerivativeLevel > 1) {
+		result.hess = s.hess * (1 / temp);
+		result.hess += outer_prod<Real,N,N>(s.grad, s.grad) * s.value / (temp*temp*temp);
+	}
+
+	return result;
+}
+
+template<typename Real, uint N, uint DerivativeLevel>
+inline DiffScalarN<Real, N, DerivativeLevel> atan2(const DiffScalarN<Real, N, DerivativeLevel> y, const DiffScalarN<Real, N, DerivativeLevel> x) {
+	// vn = atan2(y, x)
+	DiffScalarN<Real, N, DerivativeLevel> result;
+	result.value = atan2(y.value, x.value);
+
+	// Dvn = (x*Dy - y*Dx) / (x^2 + y^2)
+	if (DerivativeLevel > 0) {
+		const Real denom = x.value*x.value + y.value*y.value;
+		result.grad = y.grad * (x.value / denom) - x.grad * (y.value / denom);
+	}
+
+	// D^2vn = (Dy*Dx^T + xD^2y - Dx*Dy^T - yD^2x) / (x^2+y^2)
+	//    - [(x*Dy - y*Dx) * (2*x*Dx + 2*y*Dy)^T] / (x^2+y^2)^2
+	if (DerivativeLevel > 1) {
+		const Real denom = x.value*x.value + y.value*y.value;
+		const Real denomSqr = denom*denom;
+
+		result.hess = (y.hess*x.value 
+			+ outer_prod(y.grad, x.grad)
+			- x.hess*y.value 
+			- outer_prod(x.grad, y.grad)
+		) / denom;
+
+		result.hess -= outer_prod<Real,N,N>(
+			y.grad*(x.value/denomSqr) - x.grad*(y.value/denomSqr),
+			x.grad*(2 * x.value) + y.grad*(2 * y.value)
+		);
+	}
+
+	return result;
+}
+
+#endif

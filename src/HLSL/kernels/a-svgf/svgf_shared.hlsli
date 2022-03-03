@@ -25,7 +25,29 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#define gGradientDownsample 3
+enum FilterKernelType {
+  eAtrous,
+  eBox3,
+  eBox5,
+  eSubsampled,
+  eBox3Subsampled,
+  eBox5Subsampled,
+  eFilterKernelTypeCount
+};
+
+#ifdef __cplusplus
+inline string to_string(const FilterKernelType& t) {
+  switch (t) {
+		default: return "Unknown";
+		case FilterKernelType::eAtrous: return "Atrous";
+    case FilterKernelType::eBox3: return "3x3 Box";
+    case FilterKernelType::eBox5: return "5x5 Box";
+    case FilterKernelType::eSubsampled: return "Subsampled";
+    case FilterKernelType::eBox3Subsampled: return "3x3 Box, then Subsampled";
+    case FilterKernelType::eBox5Subsampled: return "5x5 Box, then Subsampled";
+  }
+}
+#endif
 
 #ifdef __HLSL_VERSION
 
@@ -40,28 +62,14 @@ inline bool test_inside_screen(const int2 p, ViewData view) {
 }
 
 inline bool test_reprojected_depth(const float z1, const float z2, const float2 offset, const float2 dz) {
-	return abs(z1 - z2) < (length(dz*offset) + 1e-2)*1.5;
+	return abs(z1 - z2) < (length(dz*offset)*1.25 + 1e-2);
 }
 
 #define TILE_OFFSET_SHIFT 3u
 #define TILE_OFFSET_MASK ((1u << TILE_OFFSET_SHIFT) - 1u)
 
-inline uint2 get_gradient_tile_pos(const uint idx) {
-	/* didn't store a gradient sample in the previous frame, this creates
-	   a new sample in the center of the tile */
-	if (idx < (1u<<31)) return gGradientDownsample / 2;
-	return uint2((idx & TILE_OFFSET_MASK), (idx >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
-}
-
 inline uint get_gradient_idx_from_tile_pos(const uint2 pos) {
 	return (1 << 31) | pos.x | (pos.y << TILE_OFFSET_SHIFT);
 }
-
-inline bool is_gradient_sample(Texture2D<float> tex_gradient, const uint2 ipos) {
-	uint2 ipos_grad = ipos / gGradientDownsample;
-	uint u = tex_gradient.Load(int3(ipos_grad,0)).r;
-	uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
-	return u >= (1u << 31) && all(ipos == ipos_grad * gGradientDownsample + tile_pos);
- }
 
 #endif

@@ -70,6 +70,7 @@ private:
 	component_ptr<ComputePipelineState> mAtrousPipeline;
 	component_ptr<ComputePipelineState> mCreateGradientSamplesPipeline;
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
+	component_ptr<ComputePipelineState> mCopyRGBPipeline;
 
 	bool mRandomPerFrame = true;
 	bool mReprojection = true;
@@ -93,6 +94,7 @@ private:
 		Buffer::View<hlsl::PathBounceState> mPathBounceData;
 
 		Buffer::View<hlsl::ViewData> mViews;
+		Buffer::View<uint32_t> mViewMediumIndices;
 		
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
 		Image::View mRadiance;

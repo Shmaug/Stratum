@@ -34,6 +34,7 @@ float3 tonemap_filmic(float3 color) {
 [[vk::constant_id(1)]] const bool gModulateAlbedo = true;
 [[vk::constant_id(2)]] const bool gGammaCorrection = true;
 [[vk::constant_id(3)]] const uint gDebugMode = 0;
+[[vk::constant_id(4)]] const uint gGradientDownsample = 3u;
 
 Texture2D<float4> gInput;
 RWTexture2D<float4> gOutput;
@@ -66,19 +67,18 @@ void main(uint3 index : SV_DispatchThreadID) {
 	if (any(index.xy >= resolution)) return;
 
 	float3 radiance = gInput[index.xy].rgb;
-	if (gModulateAlbedo) {
-	 	const float3 albedo = gAlbedo[index.xy].rgb;
+	const float3 albedo = gAlbedo[index.xy].rgb;
+	if (gModulateAlbedo && gDebugMode != DebugMode::eDemodulatedRadiance) {
 		if (albedo.r > 0) radiance.r *= albedo.r;
 		if (albedo.g > 0) radiance.g *= albedo.g;
 		if (albedo.b > 0) radiance.b *= albedo.b;
 	}
-	if (gDebugMode == 0) {
-	}
+	if (gDebugMode == DebugMode::eAlbedo)
+		radiance = gAlbedo[index.xy].rgb;
 	
 	switch (gDebugMode) {
 		default:
-		case DebugMode::eNone:
-			radiance = radiance*gPushConstants.gExposure;
+			radiance *= gPushConstants.gExposure;
 			switch (gMode) {
 			case TonemapMode::eReinhard:
 				radiance = tonemap_reinhard(radiance);
@@ -92,10 +92,7 @@ void main(uint3 index : SV_DispatchThreadID) {
 			}
 			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
 			break;
-		case DebugMode::eAlbedo:
-			radiance = gAlbedo[index.xy].rgb*gPushConstants.gExposure;
-			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
-			break;
+			
 		case DebugMode::eAccumLength:
 			radiance = viridis_quintic(saturate(gDebug1[index.xy].a*gPushConstants.gExposure));
 			break;
@@ -104,7 +101,7 @@ void main(uint3 index : SV_DispatchThreadID) {
 			break;
 		case DebugMode::eRelativeTemporalGradient: {
 			const float2 diff1 = gDebug2[index.xy/gGradientDownsample];
-			radiance = viridis_quintic(saturate(diff1.r > 1e-4 ? abs(diff1.g)/diff1.r : 0));
+			radiance = viridis_quintic(saturate((diff1.r > 1e-4 ? abs(diff1.g)/diff1.r : 0)*gPushConstants.gExposure));
 			break;
 		}
 	}

@@ -27,6 +27,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -T cs_6_7 -E main
 
+[[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
+
 #include "svgf_shared.hlsli"
 #include "../../scene.hlsli"
 
@@ -96,7 +98,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const VisibilityInfo v_curr = load_visibility(idx_curr);
 
 	if (v_curr.instance_index() != v_prev.instance_index()) return;
-	//if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), gGradientDownsample, v_prev.dz_dxy())) return;
+	if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), gGradientDownsample, v_prev.dz_dxy())) return;
 	if (!test_reprojected_normal(v_curr.normal(), v_prev.normal())) return;
 
 	const uint2 tile_pos_curr = idx_curr / gGradientDownsample;

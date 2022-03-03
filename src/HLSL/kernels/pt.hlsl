@@ -5,9 +5,6 @@
 #include "../tonemap.hlsli"
 #include "../reservoir.hlsli"
 
-[[vk::constant_id(0)]] const uint gViewCount = 1;
-[[vk::constant_id(1)]] uint gSampleCount = 1;
-
 #define gImageCount 1024
 
 RaytracingAccelerationStructure gScene;
@@ -19,15 +16,17 @@ StructuredBuffer<uint> gLightInstances;
 
 StructuredBuffer<ViewData> gViews;
 StructuredBuffer<ViewData> gPrevViews;
+StructuredBuffer<uint> gViewMediumIndices;
+
+#include "../visibility_buffer.hlsli"
+
+#include "../reservoir.hlsli"
+RWStructuredBuffer<Reservoir> gReservoirs;
 
 RWByteAddressBuffer gCounters;
 
 RWTexture2D<float4> gRadiance;
 RWTexture2D<float4> gAlbedo;
-
-#include "../visibility_buffer.hlsli"
-#include "../reservoir.hlsli"
-RWStructuredBuffer<Reservoir> gReservoirs;
 
 StructuredBuffer<float> gDistributions;
 SamplerState gSampler;
@@ -36,6 +35,7 @@ Texture2D<float4> gImages[gImageCount];
 [[vk::push_constant]] const struct {
 	uint gRandomSeed;
 	uint gLightCount;
+	uint gMediumCount;
 	uint gViewCount;
 	uint gEnvironmentMaterialAddress;
 	float gEnvironmentSampleProbability;	
@@ -44,7 +44,7 @@ Texture2D<float4> gImages[gImageCount];
 	uint gDebugMode;
 } gPushConstants;
 
-static const bool gSampleBG = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_BG_IS) && gPushConstants.gEnvironmentSampleProbability > 0 && gPushConstants.gEnvironmentMaterialAddress != -1;
+static const bool gSampleBG     = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_BG_IS)    && gPushConstants.gEnvironmentSampleProbability > 0 && gPushConstants.gEnvironmentMaterialAddress != -1;
 static const bool gSampleLights = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_LIGHT_IS) && gPushConstants.gLightCount > 0;
 
 inline uint4 pcg4d(uint4 v) {
@@ -223,21 +223,24 @@ inline PathVertexGeometry make_geometry(const uint instance_primitive_index, con
 struct PathVertex {
 	uint instance_primitive_index;
 	uint material_address;
+	uint medium_index;
 	float ray_radius;
 	PathVertexGeometry g;
 	
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+	inline bool is_surface() { return true; }
 };
-inline void make_vertex(const uint instance_primitive_index, const float3 position, const float2 bary, const RayDifferential ray, out PathVertex r) {
+inline void make_vertex(out PathVertex r, const uint instance_primitive_index, const uint medium_index, const float3 position, const float2 bary, const RayDifferential ray) {
 	r.instance_primitive_index = instance_primitive_index;
+	r.medium_index = medium_index;
 	r.g = make_geometry(instance_primitive_index, position, bary);
 	if (r.instance_index() == INVALID_INSTANCE) {
 		r.material_address = gPushConstants.gEnvironmentMaterialAddress;
 		r.ray_radius = ray.radius;
 	} else {
 		r.material_address = gInstances[r.instance_index()].material_address();
-		r.ray_radius = (min16float)ray.differential_transfer(length(r.g.position - ray.origin));
+		r.ray_radius = ray.differential_transfer(length(r.g.position - ray.origin));
 	}
 	r.g.uv_screen_size = r.ray_radius / r.g.inv_uv_size;
 }
@@ -257,17 +260,26 @@ inline bool do_ray_query(inout ray_query_t rayQuery, const RayDifferential ray) 
 	while (rayQuery.Proceed()) {
 		switch (rayQuery.CandidateType()) {
 			case CANDIDATE_PROCEDURAL_PRIMITIVE: {
-				const float2 st = ray_sphere(rayQuery.CandidateObjectRayOrigin(), rayQuery.CandidateObjectRayDirection(), 0, 1);
-				if (st.x < st.y) {
-					const float t = st.x < 0 ? st.y : st.x;
-					if (t <= rayQuery.CommittedRayT() && t >= rayQuery.RayTMin())
-						rayQuery.CommitProceduralPrimitiveHit(t);
+				const InstanceData instance = gInstances[rayQuery.CandidateInstanceID()];
+				switch (instance.type()) {
+					case INSTANCE_TYPE_SPHERE: {
+						const float2 st = ray_sphere(rayQuery.CandidateObjectRayOrigin(), rayQuery.CandidateObjectRayDirection(), 0, 1);
+						if (st.x < st.y) {
+							const float t = st.x < 0 ? st.y : st.x;
+							if (t <= rayQuery.CommittedRayT() && t >= rayQuery.RayTMin())
+								rayQuery.CommitProceduralPrimitiveHit(t);
+						}
+						break;
+					}
 				}
-				break;
 			}
 			case CANDIDATE_NON_OPAQUE_TRIANGLE: {
+				//uint instance_primitive_index = 0;
+				//BF_SET(instance_primitive_index, rayQuery.CandidateInstanceID(), 0, 16);
+				//BF_SET(instance_primitive_index, rayQuery.CandidatePrimitiveIndex(), 16, 16);
 				//PathVertex v;
-				//make_vertex(rayQuery.CandidateInstanceIndex()|(rayQuery.CandidatePrimitiveIndex()<<16), rayQuery.CommittedTriangleBarycentrics(), ray, v);
+				//make_vertex(instance_primitive_index, ray.origin + ray.direction*rayQuery.CandidateTriangleRayT(), rayQuery.CandidateTriangleBarycentrics(), ray, v);
+				// TODO: test alpha
 				rayQuery.CommitNonOpaqueTriangleHit();
 				break;
 			}
@@ -275,22 +287,28 @@ inline bool do_ray_query(inout ray_query_t rayQuery, const RayDifferential ray) 
 	}
 	return rayQuery.CommittedStatus() != COMMITTED_NOTHING;
 }
-inline void intersect(inout ray_query_t rayQuery, const RayDifferential ray, out PathVertex v) {
+inline void intersect(inout ray_query_t rayQuery, const RayDifferential ray, inout PathVertex v) {
 	if (do_ray_query(rayQuery, ray)) {
+		// hit an instance
 		BF_SET(v.instance_primitive_index, rayQuery.CommittedInstanceID(), 0, 16);
 		const InstanceData instance = gInstances[v.instance_index()];
 		v.material_address = instance.material_address();
 		if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
-			// Sphere
+			// sphere
 			BF_SET(v.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
-			v.g = make_sphere_geometry(instance.transform, instance.radius(), ray.origin + ray.direction*rayQuery.CommittedRayT());
+			switch (instance.type()) {
+				case INSTANCE_TYPE_SPHERE:
+					v.g = make_sphere_geometry(instance.transform, instance.radius(), ray.origin + ray.direction*rayQuery.CommittedRayT());
+					break;
+			}
 		} else {
-			// Triangle
+			// triangle
 			BF_SET(v.instance_primitive_index, rayQuery.CommittedPrimitiveIndex(), 16, 16);
 			v.g = make_triangle_geometry(instance.transform, load_tri(gIndices, instance, v.primitive_index()), rayQuery.CommittedTriangleBarycentrics());
 		}
 		v.ray_radius = ray.differential_transfer(rayQuery.CommittedRayT());
 	} else {
+		// background
 		BF_SET(v.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 		BF_SET(v.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		v.material_address = gPushConstants.gEnvironmentMaterialAddress;
@@ -306,28 +324,44 @@ inline void intersect(inout ray_query_t rayQuery, const RayDifferential ray, out
 	v.g.uv_screen_size = v.ray_radius / v.g.inv_uv_size;
 }
 
+inline float3 transmittance_along_ray(inout ray_query_t rayQuery, const RayDifferential ray, const uint medium_index) {
+	if (do_ray_query(rayQuery, ray)) {
+
+		return 0;
+	} else
+		return 1;
+}
+
 inline float3 sample_direct_light(const PathVertex vertex, const RayDifferential ray_in, inout ray_query_t rayQuery, inout rng_t rng) {
 	const LightSampleRecord light_sample = sample_light_or_environment(rng, vertex.g, ray_in);
 	if (light_sample.pdf.pdf <= 0) return float3(1,0,1);
-	const BSDFEvalRecord<float> f = eval_material<float, true>(gMaterialData, vertex.material_address, -ray_in.direction, light_sample.to_light, vertex.g);
+
+	BSDFEvalRecord<float> f;
+	if (vertex.is_surface()) {
+		f = eval_material<float, true>(gMaterialData, vertex.material_address, -ray_in.direction, light_sample.to_light, vertex.g);
+	} else {
+		// TODO: sample phase function
+	}
 	if (f.pdfW <= 0) return 0;
 
 	float3 C1 = f.f * light_sample.radiance / light_sample.pdf.pdf;
 	if (!light_sample.pdf.is_solid_angle)
 		C1 *= light_sample.pdf.G;
 
+	const bool inside = dot(light_sample.to_light, vertex.g.geometry_normal) < 0;
+
 	RayDifferential shadowRay;
-	shadowRay.origin = ray_offset(vertex.g.position, dot(light_sample.to_light, vertex.g.geometry_normal) < 0 ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
+	shadowRay.origin = ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
 	shadowRay.direction = light_sample.to_light;
 	shadowRay.t_min = 0;
 	shadowRay.t_max = light_sample.dist*.999;
 	shadowRay.radius = ray_in.radius;
 	shadowRay.spread = ray_in.spread;
-	if (do_ray_query(rayQuery, shadowRay))
-		return 0;
+	const float3 T = transmittance_along_ray(rayQuery, shadowRay, vertex.medium_index); // TODO: set to inner_medium if inside
+	if (all(T <= 0)) return 0;
 
 	const float w = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) ? mis_heuristic(light_sample.pdf.solid_angle(), f.pdfW) : 0.5;
-	return C1 * w;
+	return T * C1 * w;
 }
 inline float3 sample_reservoir(const PathVertex vertex, const RayDifferential ray_in, inout ray_query_t rayQuery, const uint index_1d) {
  const Reservoir r = gReservoirs[index_1d];
@@ -339,78 +373,110 @@ inline float3 sample_reservoir(const PathVertex vertex, const RayDifferential ra
 	const float rcp_dist = 1/dist;
 	to_light *= rcp_dist;
 	
-	const BSDFEvalRecord<float> f = eval_material<float, true>(gMaterialData, vertex.material_address, -ray_in.direction, to_light, vertex.g);
+	BSDFEvalRecord<float> f;
+	if (vertex.is_surface()) {
+		f = eval_material<float, true>(gMaterialData, vertex.material_address, -ray_in.direction, to_light, vertex.g);
+	} else {
+		// TODO: sample phase function
+	}
 	if (f.pdfW <= 0) return 0;
 	
+	const bool inside = dot(to_light, vertex.g.geometry_normal) < 0;
+
 	RayDifferential shadowRay;
-	shadowRay.origin = ray_offset(vertex.g.position, dot(to_light, vertex.g.geometry_normal) < 0 ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
+	shadowRay.origin = ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
 	shadowRay.direction = to_light;
 	shadowRay.t_min = 0;
 	shadowRay.t_max = dist*.999;
 	shadowRay.radius = ray_in.radius;
 	shadowRay.spread = ray_in.spread;
-	if (do_ray_query(rayQuery, shadowRay))
-		return 0;
+	const float3 T = transmittance_along_ray(rayQuery, shadowRay, vertex.medium_index); // TODO: set to inner_medium if inside
+	if (all(T <= 0)) return 0;
 
-	const uint material_address = r.light_sample.instance_index() == INVALID_INSTANCE ?
+	const uint light_material_address = r.light_sample.instance_index() == INVALID_INSTANCE ?
 		gPushConstants.gEnvironmentMaterialAddress : gInstances[r.light_sample.instance_index()].material_address();
-	const float3 L = eval_material_emission<float>(gMaterialData, material_address, light_vertex);
+	const float3 L = eval_material_emission<float>(gMaterialData, light_material_address, light_vertex);
 	const float G = abs(dot(light_vertex.geometry_normal, to_light)) * (rcp_dist*rcp_dist);
 	float w;
 	if (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) {
 		PathVertex lv;
 		lv.instance_primitive_index = r.light_sample.instance_primitive_index;
-		lv.material_address = material_address;
+		lv.material_address = light_material_address;
 		lv.ray_radius = shadowRay.differential_transfer(dist);
 		lv.g = light_vertex;
 		const PDFMeasure<float> pdf = light_sample_pdf(lv, shadowRay, dist);
 		w = mis_heuristic(pdf.solid_angle(), f.pdfW);
 	} else
 		w = 0.5;
-	return f.f * L * G * r.W() * w;
+	return T * f.f * L * G * r.W() * w;
 }
-inline float3 sample_bsdf(inout PathVertex vertex, inout RayDifferential ray, inout ray_query_t rayQuery, inout rng_t rng, inout float3 throughput, inout float eta_scale, const uint index_1d) {
+inline float3 sample_indirect_light(inout PathVertex vertex, inout RayDifferential ray, inout ray_query_t rayQuery, inout rng_t rng, const uint index_1d) {
 	const float3 dir_in = -ray.direction;
-	const BSDFSampleRecord<float> bsdf_sample = sample_material<float, true>(gMaterialData, vertex.material_address, float3(rng.next(), rng.next(), rng.next()), dir_in, vertex.g);
-	if (bsdf_sample.eval.pdfW <= 0) {
-		throughput = 0;
-		return 0;
-	}
-	throughput *= bsdf_sample.eval.f / bsdf_sample.eval.pdfW;
+	
+	bool has_bsdf = true;
+	
+	if (vertex.is_surface()) {
+		const BSDFSampleRecord<float> bsdf_sample = sample_material<float, true>(gMaterialData, vertex.material_address, float3(rng.next(), rng.next(), rng.next()), dir_in, vertex.g);
+		if (bsdf_sample.eval.pdfW <= 0) {
+			gPathStates[index_1d].throughput = 0;
+			return 0;
+		}
+		gPathStates[index_1d].dir_pdf = bsdf_sample.eval.pdfW;
+		gPathStates[index_1d].throughput *= bsdf_sample.eval.f / bsdf_sample.eval.pdfW;
 
-	// modify eta_scale, trace bsdf ray
-	if (bsdf_sample.eta == 0) {
-		ray.differential_reflect(vertex.g.mean_curvature, bsdf_sample.roughness);
+		ray.direction = bsdf_sample.dir_out;
+		if (bsdf_sample.eta == 0) {
+			ray.differential_reflect(vertex.g.mean_curvature, bsdf_sample.roughness);
+		} else {
+			ray.differential_refract(vertex.g.mean_curvature, bsdf_sample.roughness, bsdf_sample.eta);
+			gPathStates[index_1d].eta_scale /= bsdf_sample.eta*bsdf_sample.eta;
+		}
 	} else {
-		ray.differential_refract(vertex.g.mean_curvature, bsdf_sample.roughness, bsdf_sample.eta);
-		eta_scale /= bsdf_sample.eta*bsdf_sample.eta;
+		// TODO: sample phase function, update throughput, dir_pdf & ray
 	}
-	ray.origin = ray_offset(vertex.g.position, dot(bsdf_sample.dir_out, vertex.g.geometry_normal) < 0 ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
-	ray.direction = bsdf_sample.dir_out;
 
+	const bool inside = dot(ray.direction, vertex.g.geometry_normal) < 0;
+	ray.origin = ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
 	intersect(rayQuery, ray, vertex);
+	float hit_t = rayQuery.CommittedRayT();
+	
+	// TODO: keep tracing through medium boundaries, update hit_t & medium_index
 
+	if (gPathStates[index_1d].medium_index < gPushConstants.gMediumCount) {
+		bool scatter = false;
+		// TODO: compute transmittance & scattering up to vertex
+		if (scatter) {
+			//hit_t = t;
+			//gPathStates[index_1d].medium_index = inner_medium;
+		}
+	}
+	
+	if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+		gPathStates[index_1d].bary = rayQuery.CommittedTriangleBarycentrics();
+	
+	gPathStates[index_1d].position = vertex.g.position;
+	gPathStates[index_1d].ray_origin = ray.origin;
+	gPathStates[index_1d].radius_spread = pack_f16_2(float2(vertex.ray_radius, ray.spread));
+	gPathStates[index_1d].instance_primitive_index = vertex.instance_primitive_index;
+	
 	const float3 L = eval_material_emission<float>(gMaterialData, vertex.material_address, vertex.g);
 	if (any(L > 0)) {
-		float w;
+		float w = 1;
 		if (gSampleLights || gSampleBG) {
-			if (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) {
-				const PDFMeasure<float> pdf = light_sample_pdf(vertex, ray, rayQuery.CommittedRayT());
+			w = 0.5;
+			if ((gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) && gPathStates[index_1d].dir_pdf > 0) {
+				const PDFMeasure<float> pdf = light_sample_pdf(vertex, ray, hit_t);
 				if (pdf.pdf > 0) {
 					//if (gPushConstants.gReservoirSamples > 0)
-					//	w = mis_heuristic(bsdf_sample.eval.pdfW, 1/gReservoirs[index_1d].W());
+					//	w = mis_heuristic(gPathStates[index_1d].dir_pdf, 1/gReservoirs[index_1d].W());
 					//else
-						w = mis_heuristic(bsdf_sample.eval.pdfW, pdf.solid_angle());
-				} else
-					w = 0.5;
-			} else
-				w = 0.5;
-		} else
-			w = 1;
-
-		return throughput * L * w;
+						w = mis_heuristic(gPathStates[index_1d].dir_pdf, pdf.solid_angle());
+				}
+			}
+		}
+		return gPathStates[index_1d].throughput * L * w;
 	}
-
+	
 	return 0;
 }
 
@@ -434,21 +500,26 @@ void trace_visibility(uint3 index : SV_DispatchThreadID) {
 
 	ray_query_t rayQuery;
   PathVertex primary_vertex;
+	primary_vertex.medium_index = gViewMediumIndices[viewIndex];
+
 	const RayDifferential view_ray = gViews[viewIndex].create_ray(prev_uv, view_size);
 	intersect(rayQuery, view_ray, primary_vertex);
 
-	gRadiance[index.xy] = float4(eval_material_emission<float>(gMaterialData, primary_vertex.material_address, primary_vertex.g), 1);
-	gAlbedo[index.xy]   = float4(eval_material_albedo<float>(gMaterialData, primary_vertex.material_address, primary_vertex.g)  , 1);
+
+	float3 transmittance = 1;
+	// TODO: keep tracing through medium boundaries, update transmittance & medium_index
+
+	gRadiance[index.xy] = float4(transmittance * eval_material_emission<float>(gMaterialData, primary_vertex.material_address, primary_vertex.g), 1);
+	gAlbedo  [index.xy] = float4(transmittance *   eval_material_albedo<float>(gMaterialData, primary_vertex.material_address, primary_vertex.g), 1);
 
 	if (primary_vertex.instance_index() != INVALID_INSTANCE) {
 		z = rayQuery.CommittedRayT();
-		const float3 D_dx = gViews[viewIndex].create_ray(prev_uv + float2(1,0)/view_size, view_size).direction;
-		const float3 D_dy = gViews[viewIndex].create_ray(prev_uv + float2(0,1)/view_size, view_size).direction;
 		if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
 			bary = rayQuery.CommittedTriangleBarycentrics();
-			const float numerator = -dot(primary_vertex.g.geometry_normal, view_ray.origin - primary_vertex.g.position);
-			dz.x = numerator / dot(primary_vertex.g.geometry_normal, D_dx) - z;
-			dz.y = numerator / dot(primary_vertex.g.geometry_normal, D_dy) - z;
+			const float3 view_normal = gViews[viewIndex].world_to_camera.transform_vector(primary_vertex.g.geometry_normal);
+			// TODO: figure out dz
+			dz.x = 1;//1/(abs(view_normal.x) + 1e-2);
+			dz.y = 1;//1/(abs(view_normal.y) + 1e-2);
 		} else {
 			bary = primary_vertex.g.uv;
 			const float radius = gInstances[primary_vertex.instance_index()].radius();
@@ -460,7 +531,8 @@ void trace_visibility(uint3 index : SV_DispatchThreadID) {
 		float4 prevScreenPos = gPrevViews[viewIndex].projection.project_point(prevCamPos);
 		prevScreenPos.y = -prevScreenPos.y;
 		prev_uv = (prevScreenPos.xy / prevScreenPos.w)*.5 + .5;
-	}
+	} else
+		transmittance = 0;
 
 	switch (gPushConstants.gDebugMode) {
 		default:
@@ -493,31 +565,27 @@ void trace_visibility(uint3 index : SV_DispatchThreadID) {
 			gRadiance[index.xy].rgb = float3(prev_uv, 0);
 			break;
 	}
-	
+
 	store_visibility(index.xy,
 									 rng.v,
 									 primary_vertex.instance_index(),
 									 primary_vertex.primitive_index(),
-									 bary,
-									 primary_vertex.g.shading_normal,
-									 z,
-									 prev_z,
-									 dz,
+									 bary, primary_vertex.g.shading_normal,
+									 z, prev_z, dz,
 									 prev_uv);
 
 	uint w,h;
 	gRadiance.GetDimensions(w,h);
 	const uint index_1d = index.y*w + index.x;
-	store_path_bounce_state(gPathStates[index_1d],
-		rng.v,
-		primary_vertex.instance_index() == INVALID_INSTANCE ? 0 : 1, // throughput
-		1, // eta_scale
-		primary_vertex.g.position,
-		bary,
-		view_ray.origin,
-		primary_vertex.ray_radius,
-		view_ray.spread,
-		primary_vertex.instance_primitive_index);
+	gPathStates[index_1d].rng = rng.v;
+	gPathStates[index_1d].throughput = transmittance;
+	gPathStates[index_1d].eta_scale = 1;
+	gPathStates[index_1d].position = primary_vertex.g.position;
+	gPathStates[index_1d].bary = bary;
+	gPathStates[index_1d].ray_origin = view_ray.origin;
+	gPathStates[index_1d].radius_spread = pack_f16_2(float2(primary_vertex.ray_radius, view_ray.spread));
+	gPathStates[index_1d].instance_primitive_index = primary_vertex.instance_primitive_index;
+	gPathStates[index_1d].medium_index = primary_vertex.medium_index;
 
 	if (gPushConstants.gReservoirSamples > 0 && (gSampleLights || gSampleBG) && primary_vertex.instance_index() != INVALID_INSTANCE) {
 		Reservoir r = init_reservoir();
@@ -541,45 +609,41 @@ void trace_path_bounce(uint3 index : SV_DispatchThreadID) {
 	uint w,h;
 	gRadiance.GetDimensions(w,h);
 	const uint index_1d = index.y*w + index.x;
-	#define state gPathStates[index_1d]
 
-	float3 throughput = state.throughput();
-	if (all(throughput <= 1e-6)) return;
+	if (all(gPathStates[index_1d].throughput <= 1e-6)) return;
 
-	RayDifferential ray_in = state.ray();
+	RayDifferential ray_in = gPathStates[index_1d].ray();
 	PathVertex vertex;
-	make_vertex(state.instance_primitive_index, state.position, state.bary, ray_in, vertex);
+	make_vertex(vertex, gPathStates[index_1d].instance_primitive_index, gPathStates[index_1d].medium_index, gPathStates[index_1d].position, gPathStates[index_1d].bary, ray_in);
 
-	rng_t rng = { state.rng };
+	rng_t rng = { gPathStates[index_1d].rng };
 
 	ray_query_t rayQuery;
 
 	if (gSampleLights || gSampleBG) {
-		if (gPushConstants.gReservoirSamples == 0)
-			gRadiance[index.xy].rgb += throughput * sample_direct_light(vertex, ray_in, rayQuery, rng);
+		if (gPushConstants.gReservoirSamples > 0)
+			gRadiance[index.xy].rgb += gPathStates[index_1d].throughput * sample_reservoir(vertex, ray_in, rayQuery, index_1d);
 		else
-			gRadiance[index.xy].rgb += throughput * sample_reservoir(vertex, ray_in, rayQuery, index_1d);
+			gRadiance[index.xy].rgb += gPathStates[index_1d].throughput * sample_direct_light(vertex, ray_in, rayQuery, rng);
+	}
+	gRadiance[index.xy].rgb += sample_indirect_light(vertex, ray_in, rayQuery, rng, index_1d);
+
+	if (vertex.instance_index() == INVALID_INSTANCE) {
+		gPathStates[index_1d].throughput = 0;
+		return;
+	}
+
+	if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+		gPathStates[index_1d].bary = rayQuery.CommittedTriangleBarycentrics();
+
+	if (gPushConstants.gSamplingFlags & SAMPLE_FLAG_RR) {
+		const float l = min(max3(gPathStates[index_1d].throughput) / gPathStates[index_1d].eta_scale, 0.95);
+		if (rng.next() > l) {
+			gPathStates[index_1d].throughput = 0;
+			return;
+		} else
+			gPathStates[index_1d].throughput /= l;
 	}
 	
-	float eta_scale = state.eta_scale();
-	gRadiance[index.xy].rgb += sample_bsdf(vertex, ray_in, rayQuery, rng, throughput, eta_scale, index_1d);
-
-	float2 bary = 0;
-	if (vertex.instance_index() == INVALID_INSTANCE) {
-		throughput = 0;
-	} else {
-		if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
-			bary = rayQuery.CommittedTriangleBarycentrics();
-
-		if (gPushConstants.gSamplingFlags & SAMPLE_FLAG_RR) {
-			const float l = min(max3(throughput) / eta_scale, 0.95);
-			if (rng.next() > l)
-				throughput = 0;
-			else
-				throughput /= l;
-		}
-	}
-
-	store_path_bounce_state(state, rng.v, throughput, eta_scale, vertex.g.position, bary, ray_in.origin, vertex.ray_radius, ray_in.spread, vertex.instance_primitive_index);
-	#undef state
+	gPathStates[index_1d].rng = rng.v;
 }

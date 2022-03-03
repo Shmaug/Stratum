@@ -18,7 +18,7 @@ uint32_t PipelineState::descriptor_count(const string& name) const {
 	return 0;
 }
 
-stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayIndex) {		
+stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayIndex) {
 	auto desc_it = mDescriptors.find(name);
 	if (desc_it != mDescriptors.end()) {
 		auto it = desc_it->second.find(arrayIndex);

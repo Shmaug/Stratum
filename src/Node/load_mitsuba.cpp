@@ -244,7 +244,7 @@ tuple<string /* ID */, component_ptr<Material>> parse_bsdf(Node& dst, CommandBuf
 		return make_tuple(id,  dst.make_component<Material>(l));
 	} else if (type == "roughplastic" || type == "plastic") {
 		RoughPlastic r;
-		r.diffuse_reflectance = make_image_value3({}, float3::Constant(0.5f));
+		r.diffuse_reflectance  = make_image_value3({}, float3::Constant(0.5f));
 		r.specular_reflectance = make_image_value3({}, float3::Ones());
 		r.roughness = make_image_value1({}, 0.1f);
 		if (type == "plastic") {

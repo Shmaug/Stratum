@@ -76,6 +76,8 @@ template<typename T> inline MatrixType<T,3,1> cross(const MatrixType<T,3,1>& a, 
 
 inline float asfloat(uint32_t v) { return *reinterpret_cast<float*>(&v); }
 inline uint32_t asuint(float v) { return *reinterpret_cast<uint32_t*>(&v); }
+template<int M, int N> inline MatrixType<float, M, N> asfloat(const MatrixType<uint32_t, M, N>& v) { return v.cast<float>(); }
+template<int M, int N> inline MatrixType<uint,  M, N> asuint (const MatrixType<float, M, N>& v)    { return v.cast<uint32_t>(); }
 
 }
 }

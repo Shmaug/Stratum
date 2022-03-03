@@ -29,8 +29,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
-[[vk::constant_id(0)]] const float gHistoryLengthThreshold = 4;
-
 RWTexture2D<float4> gOutput;
 Texture2D<float4> gInput;
 Texture2D<float2> gMoments;
@@ -39,6 +37,7 @@ StructuredBuffer<ViewData> gViews;
 
 [[vk::push_constant]] struct {
 	uint gViewCount;
+	float gHistoryLimit;
 } gPushConstants;
 
 #define GROUP_SIZE 8
@@ -78,7 +77,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	const VisibilityInfo v = load_visibility(index.xy);
 
 	const float histlen = c.a;
-	if (v.instance_index() == INVALID_INSTANCE || histlen >= gHistoryLengthThreshold) {
+	if (v.instance_index() == INVALID_INSTANCE || histlen >= gPushConstants.gHistoryLimit) {
 		gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
 		return;
 	}
@@ -110,5 +109,5 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	m *= sum_w;
 	c.rgb *= sum_w;
 	
-	gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gHistoryLengthThreshold)));
+	gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gPushConstants.gHistoryLimit)));
 }

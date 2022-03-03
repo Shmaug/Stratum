@@ -10,13 +10,6 @@ using namespace stm::hlsl;
 
 namespace stm {
 	
-namespace hlsl{
-#include <HLSL/kernel/a-svgf/svgf_shared.hlsli>
-#include <HLSL/tonemap.hlsli>
-}
-
-void inspector_gui_fn(RayTraceScene* v) { v->on_inspector_gui(); }
-
 AccelerationStructure::AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureGeometryKHR>& geometries,  const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges) : DeviceResource(commandBuffer.mDevice, name) {
 	vk::AccelerationStructureBuildGeometryInfoKHR buildGeometry(type,vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace, vk::BuildAccelerationStructureModeKHR::eBuild);
 	buildGeometry.setGeometries(geometries);
@@ -41,6 +34,13 @@ AccelerationStructure::~AccelerationStructure() {
 		mDevice->destroyAccelerationStructureKHR(mAccelerationStructure);
 }
 
+namespace hlsl {
+#include <HLSL/kernels/a-svgf/svgf_shared.hlsli>
+#include <HLSL/tonemap.hlsli>
+}
+
+void inspector_gui_fn(RayTraceScene* v) { v->on_inspector_gui(); }
+
 RayTraceScene::RayTraceScene(Node& node) : mNode(node), mCurFrame(make_unique<FrameData>()), mPrevFrame(make_unique<FrameData>()) {
 	auto app = mNode.find_in_ancestor<Application>();
 	app.node().find_in_descendants<Gui>()->register_inspector_gui_fn(&inspector_gui_fn);
@@ -63,8 +63,11 @@ void RayTraceScene::create_pipelines() {
 		vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
 
-	if (mTraceVisibilityPipeline)
+	optional<uint32_t> debugMode;
+	if (mTraceVisibilityPipeline) {
+		debugMode = mTonemapPipeline->specialization_constant("gDebugMode");
 		mNode.node_graph().erase_recurse(*mTraceVisibilityPipeline.node().parent());
+	}
 	Node& n = mNode.make_child("pipelines");
 	
 	const ShaderDatabase& shaders = *mNode.node_graph().find_components<ShaderDatabase>().front();
@@ -74,10 +77,12 @@ void RayTraceScene::create_pipelines() {
 	mTraceVisibilityPipeline = n.make_child("pt_trace_visibility").make_component<ComputePipelineState>("pt_trace_visibility", shaders.at("pt_trace_visibility"));
 	mTraceVisibilityPipeline->set_immutable_sampler("gSampler", samplerRepeat);
 	mTraceVisibilityPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+	mTraceVisibilityPipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	
 	mTraceBouncePipeline = n.make_child("pt_trace_path_bounce").make_component<ComputePipelineState>("pt_trace_path_bounce", shaders.at("pt_trace_path_bounce"));
 	mTraceBouncePipeline->set_immutable_sampler("gSampler", samplerRepeat);
 	mTraceBouncePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+	mTraceBouncePipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples") = 0;
 	mTraceBouncePipeline->push_constant<uint32_t>("gSamplingFlags") = SAMPLE_FLAG_BG_IS | SAMPLE_FLAG_LIGHT_IS | SAMPLE_FLAG_MIS | SAMPLE_FLAG_RAY_CONE_LOD;
 	
@@ -96,11 +101,12 @@ void RayTraceScene::create_pipelines() {
 	
 	mTonemapPipeline = n.make_child("tonemap").make_component<ComputePipelineState>("tonemap", shaders.at("tonemap"));
 	mTonemapPipeline->push_constant<float>("gExposure") = 1;
+	if (debugMode) mTonemapPipeline->specialization_constant("gDebugMode") = *debugMode;
 
 	mGradientForwardProjectPipeline = n.make_child("gradient_forward_project").make_component<ComputePipelineState>("gradient_forward_project", shaders.at("gradient_forward_project"));
-	
 	mCreateGradientSamplesPipeline = n.make_child("create_gradient_samples").make_component<ComputePipelineState>("create_gradient_samples", shaders.at("create_gradient_samples"));
 	mAtrousGradientPipeline = n.make_child("atrous_gradient").make_component<ComputePipelineState>("atrous_gradient", shaders.at("atrous_gradient"));
+	mAtrousGradientPipeline->push_constant<float>("gSigmaLuminanceBoost") = 1;
 	mTemporalAccumulationPipeline = n.make_child("temporal_accumulation").make_component<ComputePipelineState>("temporal_accumulation", shaders.at("temporal_accumulation"));
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 128;
 	mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") = 1.f;
@@ -108,6 +114,7 @@ void RayTraceScene::create_pipelines() {
 	mEstimateVariancePipeline = n.make_child("estimate_variance").make_component<ComputePipelineState>("estimate_variance", shaders.at("estimate_variance"));
 	mAtrousPipeline = n.make_child("atrous").make_component<ComputePipelineState>("atrous", shaders.at("atrous"));
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
+	mCopyRGBPipeline = n.make_child("copy_rgb").make_component<ComputePipelineState>("atrous_copy_rgb", shaders.at("atrous_copy_rgb"));
 }
 
 void RayTraceScene::on_inspector_gui() {
@@ -116,10 +123,10 @@ void RayTraceScene::on_inspector_gui() {
 
 	if (ImGui::CollapsingHeader("Path Tracing")) {
 		ImGui::PushItemWidth(40);
-		ImGui::InputScalar("Max Depth", ImGuiDataType_U32, &mMaxDepth);
-		ImGui::InputScalar("Min Depth", ImGuiDataType_U32, &mMinDepth);
-		ImGui::InputScalar("Direct Light Sampling Depth", ImGuiDataType_U32, &mDirectLightDepth);
-		ImGui::InputScalar("Reservoir Samples", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples"));
+		ImGui::DragScalar("Max Depth", ImGuiDataType_U32, &mMaxDepth, 1);
+		ImGui::DragScalar("Min Depth", ImGuiDataType_U32, &mMinDepth, 1);
+		ImGui::DragScalar("Direct Light Sampling Depth", ImGuiDataType_U32, &mDirectLightDepth, 1);
+		ImGui::DragScalar("Reservoir Samples", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples"), 1);
 
 		ImGui::PopItemWidth();
 
@@ -131,7 +138,7 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::CheckboxFlags("Ray Cone LoD", &samplingFlags, SAMPLE_FLAG_RAY_CONE_LOD);
 		if (samplingFlags & SAMPLE_FLAG_BG_IS) {
 			ImGui::PushItemWidth(40);
-			ImGui::InputFloat("Environment Sample Probability", reinterpret_cast<float*>(&mTraceBouncePipeline->push_constant<float>("gEnvironmentSampleProbability")));
+			ImGui::DragFloat("Environment Sample Probability", reinterpret_cast<float*>(&mTraceBouncePipeline->push_constant<float>("gEnvironmentSampleProbability")), .1f, 0, 1);
 			ImGui::PopItemWidth();
 		}
 		ImGui::Checkbox("Demodulate Albedo", &mDemodulateAlbedo);
@@ -140,16 +147,22 @@ void RayTraceScene::on_inspector_gui() {
 	if (ImGui::CollapsingHeader("Denoising")) {
 		ImGui::Checkbox("Reprojection", &mReprojection);
 		if (mReprojection) {
-			ImGui::InputFloat("History Limit", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
-				
 			ImGui::PushItemWidth(40);
-			ImGui::DragFloat("History Length Threshold", reinterpret_cast<float*>(&mEstimateVariancePipeline->specialization_constant("gHistoryLengthThreshold")), 1);
-			ImGui::InputScalar("Filter Iterations", ImGuiDataType_U32, &mAtrousIterations);
+			ImGui::DragFloat("Target Sample Count", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
+			ImGui::DragScalar("Filter Iterations", ImGuiDataType_U32, &mAtrousIterations, 0.1f);
 			if (mAtrousIterations > 0) {
 				ImGui::Indent();
-				ImGui::DragFloat("Sigma Luminance Boost", &mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost"), .01f, 0, 0, "%.2f");
-				ImGui::InputScalar("Filter Type", ImGuiDataType_U32, &mAtrousPipeline->specialization_constant("gFilterKernelType"));
-				ImGui::InputScalar("History Tap Iteration", ImGuiDataType_U32, &mHistoryTap);
+				ImGui::DragFloat("Sigma Luminance Boost", &mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost"), .1f, 0, 0, "%.2f");
+				ImGui::PopItemWidth();
+				const uint32_t m = mAtrousPipeline->specialization_constant("gFilterKernelType");
+				if (ImGui::BeginCombo("Filter Type", to_string((FilterKernelType)m).c_str())) {
+					for (uint32_t i = 0; i < FilterKernelType::eFilterKernelTypeCount; i++)
+						if (ImGui::Selectable(to_string((FilterKernelType)i).c_str(), m == i))
+							mAtrousPipeline->specialization_constant("gFilterKernelType") = i;
+					ImGui::EndCombo();
+				}
+				ImGui::PushItemWidth(40);
+				ImGui::DragScalar("History Tap Iteration", ImGuiDataType_U32, &mHistoryTap, 0.1f);
 				ImGui::Unindent();
 			}
 			
@@ -159,9 +172,27 @@ void RayTraceScene::on_inspector_gui() {
 			if (mTemporalAccumulationPipeline->specialization_constant("gAntilag")) {
 				ImGui::Indent();
 				ImGui::PushItemWidth(40);
-				ImGui::InputScalar("Gradient Filter Iterations", ImGuiDataType_U32, &mDiffAtrousIterations);
-				if (mDiffAtrousIterations > 0)
-					ImGui::InputScalar("Gradient Filter Type", ImGuiDataType_U32, &mAtrousGradientPipeline->specialization_constant("gFilterKernelType"));
+				if (ImGui::DragScalar("Gradient Downsample", ImGuiDataType_U32, &mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample"), 0.1f)) {
+					const uint32_t& gGradientDownsample = max(1u, min(7u, mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample")));
+					mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mGradientForwardProjectPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mAtrousGradientPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mTemporalAccumulationPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mTonemapPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+				}
+				ImGui::DragScalar("Gradient Filter Iterations", ImGuiDataType_U32, &mDiffAtrousIterations, 0.1f);
+				if (mDiffAtrousIterations > 0) {
+					ImGui::DragFloat("Gradient Sigma Luminance Boost", &mAtrousGradientPipeline->push_constant<float>("gSigmaLuminanceBoost"), .1f, 0, 0, "%.2f");
+					ImGui::PopItemWidth();
+					const uint32_t m = mAtrousGradientPipeline->specialization_constant("gFilterKernelType");
+					if (ImGui::BeginCombo("Gradient Filter Type", to_string((FilterKernelType)m).c_str())) {
+						for (uint32_t i = 0; i < FilterKernelType::eFilterKernelTypeCount; i++)
+							if (ImGui::Selectable(to_string((FilterKernelType)i).c_str(), m == i))
+								mAtrousGradientPipeline->specialization_constant("gFilterKernelType") = i;
+						ImGui::EndCombo();
+					}
+					ImGui::PushItemWidth(40);
+				}
 				ImGui::DragFloat("Antilag Scale", &mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"), .01f, 0, 0, "%.1f");
 				ImGui::InputScalar("Antilag Radius", ImGuiDataType_U32, &mTemporalAccumulationPipeline->specialization_constant("gGradientFilterRadius"));				
 				ImGui::PopItemWidth();
@@ -180,8 +211,8 @@ void RayTraceScene::on_inspector_gui() {
 		}
 		ImGui::PushItemWidth(40);
 		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, 0, 10);
-		ImGui::Checkbox("Gamma Correct", reinterpret_cast<bool*>(&mTonemapPipeline->specialization_constant("gGammaCorrection")));
 		ImGui::PopItemWidth();
+		ImGui::Checkbox("Gamma Correct", reinterpret_cast<bool*>(&mTonemapPipeline->specialization_constant("gGammaCorrection")));
 	}
 
 	uint32_t m = mTonemapPipeline->specialization_constant("gDebugMode");
@@ -523,7 +554,6 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	ProfilerRegion ps("RayTraceScene::render", commandBuffer);
 
 	const vk::Extent3D extent = renderTarget.extent();
-	const vk::Extent3D gradExtent((extent.width + gGradientDownsample-1) / gGradientDownsample, (extent.height + gGradientDownsample-1) / gGradientDownsample, 1);
 	if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != extent) {
 		mCurFrame = make_unique<FrameData>();
 		for (Image::View& v : mCurFrame->mVisibility)
@@ -538,22 +568,30 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		mCurFrame->mReservoirs = make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", extent.width*extent.height*sizeof(Reservoir), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 		mCurFrame->mPathBounceData = make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", extent.width*extent.height*sizeof(PathBounceState), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
-		mCurFrame->mGradientSamples = make_shared<Image>(commandBuffer.mDevice, "gGradientSamples", gradExtent, vk::Format::eR32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
 		for (Image::View& v : mCurFrame->mTemp)
 			v = make_shared<Image>(commandBuffer.mDevice, "pingpong", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+		
+		mCurFrame->mFrameId = 0;
+		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
+	}
+	
+	const uint32_t& gGradientDownsample = mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample");
+	const vk::Extent3D gradExtent((extent.width + gGradientDownsample-1) / gGradientDownsample, (extent.height + gGradientDownsample-1) / gGradientDownsample, 1);
+	if (!mCurFrame->mGradientSamples || mCurFrame->mGradientSamples.extent() != gradExtent) {
+		mCurFrame->mGradientSamples = make_shared<Image>(commandBuffer.mDevice, "gGradientSamples", gradExtent, vk::Format::eR32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
 		for (array<Image::View, 2>& v : mCurFrame->mDiffTemp) {
 			v[0] = make_shared<Image>(commandBuffer.mDevice, "diff1 pingpong", gradExtent, vk::Format::eR16G16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 			v[1] = make_shared<Image>(commandBuffer.mDevice, "diff2 pingpong", gradExtent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		}
-		
-		mCurFrame->mFrameId = 0;
-		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
 	}
 	
 	const bool hasHistory = mPrevFrame->mRadiance && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent();
 
 	mCurFrame->mViews = make_shared<Buffer>(commandBuffer.mDevice, "gViews", views.size()*sizeof(hlsl::ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
 	memcpy(mCurFrame->mViews.data(), views.data(), mCurFrame->mViews.size_bytes());
+	
+	mCurFrame->mViewMediumIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewMediumIndices", views.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
+	memset(mCurFrame->mViewMediumIndices.data(), -1, mCurFrame->mViewMediumIndices.size_bytes());
 
 	mTraceBouncePipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 	
@@ -567,6 +605,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		mTraceVisibilityPipeline->descriptor("gAlbedo")   = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceVisibilityPipeline->descriptor("gPathStates") = mCurFrame->mPathBounceData;
 		mTraceVisibilityPipeline->descriptor("gReservoirs") = mCurFrame->mReservoirs;
+		mTraceVisibilityPipeline->descriptor("gViewMediumIndices") = mCurFrame->mViewMediumIndices;
 		commandBuffer.bind_pipeline(mTraceVisibilityPipeline->get_pipeline());
 		mTraceVisibilityPipeline->bind_descriptor_sets(commandBuffer);
 		mTraceBouncePipeline->push_constants(commandBuffer);
@@ -600,7 +639,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 
 	commandBuffer.clear_color_image(mCurFrame->mGradientSamples, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
 
-	if (mTemporalAccumulationPipeline->specialization_constant("gAntilag") && hasHistory) {
+	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->specialization_constant("gAntilag")) {
 		// forward project
 		ProfilerRegion ps("Forward projection", commandBuffer);
 		mGradientForwardProjectPipeline->descriptor("gViews") = mCurFrame->mViews;
@@ -667,12 +706,15 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 				mCreateGradientSamplesPipeline->descriptor("gViews")   = mCurFrame->mViews;
 				mCreateGradientSamplesPipeline->descriptor("gOutput1") = image_descriptor(mCurFrame->mDiffTemp[0][0], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 				mCreateGradientSamplesPipeline->descriptor("gOutput2") = image_descriptor(mCurFrame->mDiffTemp[0][1], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-				mCreateGradientSamplesPipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+				mCreateGradientSamplesPipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 				mCreateGradientSamplesPipeline->descriptor("gPrevRadiance") = image_descriptor(mPrevFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+				mCreateGradientSamplesPipeline->descriptor("gAlbedo") = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+				mCreateGradientSamplesPipeline->descriptor("gPrevAlbedo") = image_descriptor(mPrevFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 				mCreateGradientSamplesPipeline->descriptor("gGradientSamples") = image_descriptor(mCurFrame->mGradientSamples, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 				for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
 						mCreateGradientSamplesPipeline->descriptor("gVisibility",i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 				mCreateGradientSamplesPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
+				mCreateGradientSamplesPipeline->specialization_constant("gModulateAlbedo") = mDemodulateAlbedo;
 
 				commandBuffer.bind_pipeline(mCreateGradientSamplesPipeline->get_pipeline());
 				mCreateGradientSamplesPipeline->bind_descriptor_sets(commandBuffer);
@@ -688,13 +730,13 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 				mAtrousGradientPipeline->descriptor("gImage2",1) = image_descriptor(mCurFrame->mDiffTemp[1][1], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 				commandBuffer.bind_pipeline(mAtrousGradientPipeline->get_pipeline());
 				mAtrousGradientPipeline->bind_descriptor_sets(commandBuffer);
+				mAtrousGradientPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
+				mAtrousGradientPipeline->push_constants(commandBuffer);
 				for (int i = 0; i < mDiffAtrousIterations; i++) {
-					mAtrousGradientPipeline->push_constant<uint32_t>("gIteration") = i;
-					mAtrousGradientPipeline->push_constant<uint32_t>("gStepSize") = (1 << i);
-					mAtrousGradientPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
-					mAtrousGradientPipeline->push_constants(commandBuffer);
+					commandBuffer.push_constant<uint32_t>("gIteration", i);
+					commandBuffer.push_constant<uint32_t>("gStepSize", (1 << i));
+					if (i > 0) mAtrousGradientPipeline->transition_images(commandBuffer);
 					commandBuffer.dispatch_over(gradExtent);
-					mAtrousGradientPipeline->transition_images(commandBuffer);
 				}
 			}
 		}
@@ -732,11 +774,10 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
 				mEstimateVariancePipeline->descriptor("gVisibility", i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 			mEstimateVariancePipeline->descriptor("gMoments") = image_descriptor(mCurFrame->mAccumMoments, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
-			mEstimateVariancePipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 
 			commandBuffer.bind_pipeline(mEstimateVariancePipeline->get_pipeline());
 			mEstimateVariancePipeline->bind_descriptor_sets(commandBuffer);
-			mEstimateVariancePipeline->push_constants(commandBuffer);
+			mTemporalAccumulationPipeline->push_constants(commandBuffer);
 			commandBuffer.dispatch_over(extent);
 		}
 
@@ -750,15 +791,28 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			mAtrousPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 			commandBuffer.bind_pipeline(mAtrousPipeline->get_pipeline());
 			mAtrousPipeline->bind_descriptor_sets(commandBuffer);
+			mAtrousPipeline->push_constants(commandBuffer);
+
 			for (uint32_t i = 0; i < mAtrousIterations; i++) {
-				mAtrousPipeline->push_constant<uint32_t>("gIteration") = i;
-				mAtrousPipeline->push_constant<uint32_t>("gStepSize") = 1 << i;
-				mAtrousPipeline->push_constants(commandBuffer);
-				mAtrousPipeline->transition_images(commandBuffer);
+				commandBuffer.push_constant<uint32_t>("gIteration", i);
+				commandBuffer.push_constant<uint32_t>("gStepSize", 1 << i);
+				if (i > 0) mAtrousPipeline->transition_images(commandBuffer);
 				commandBuffer.dispatch_over(extent);
 
-				if (i+1 == mHistoryTap)
-					commandBuffer.copy_image(mCurFrame->mTemp[(i+1)%2], mCurFrame->mAccumColor);
+				if (i+1 == mHistoryTap) {
+					mCopyRGBPipeline->descriptor("gImage", 0) = image_descriptor(mCurFrame->mTemp[(i+1)%2], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+					mCopyRGBPipeline->descriptor("gImage", 1) = image_descriptor(mCurFrame->mAccumColor   , vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+					commandBuffer.bind_pipeline(mCopyRGBPipeline->get_pipeline());
+					mCopyRGBPipeline->bind_descriptor_sets(commandBuffer);
+					mCopyRGBPipeline->transition_images(commandBuffer);
+					commandBuffer.dispatch_over(extent);
+
+					if (i+1 < mAtrousIterations) {
+						commandBuffer.bind_pipeline(mAtrousPipeline->get_pipeline());
+						mAtrousPipeline->bind_descriptor_sets(commandBuffer);
+						mAtrousPipeline->push_constants(commandBuffer);
+					}
+				}
 			}
 			tonemap_in = mCurFrame->mTemp[mAtrousIterations%2];
 			tonemap_out = mCurFrame->mTemp[(mAtrousIterations+1)%2];
@@ -779,6 +833,8 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		mTonemapPipeline->bind_descriptor_sets(commandBuffer);
 		if (mTonemapPipeline->specialization_constant("gDebugMode") == DebugMode::eAccumLength)
 			commandBuffer.push_constant("gExposure", 1/mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
+		else if (mTonemapPipeline->specialization_constant("gDebugMode") == DebugMode::eRelativeTemporalGradient || mTonemapPipeline->specialization_constant("gDebugMode") == DebugMode::eTemporalGradient)
+			commandBuffer.push_constant("gExposure", mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"));
 		else
 			mTonemapPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(extent);

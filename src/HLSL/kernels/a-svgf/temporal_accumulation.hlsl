@@ -29,8 +29,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
-[[vk::constant_id(0)]] const bool gAntilag = false;
-[[vk::constant_id(1)]] const int gGradientFilterRadius = 0;
+[[vk::constant_id(1)]] const uint gGradientDownsample = 3u;
+[[vk::constant_id(2)]] const int gGradientFilterRadius = 0;
+[[vk::constant_id(3)]] const bool gAntilag = true;
 
 RWTexture2D<float4> gAccumColor;
 RWTexture2D<float2> gAccumMoments;
@@ -49,9 +50,9 @@ SamplerState gSampler;
 #include "../../visibility_buffer.hlsli"
 
 [[vk::push_constant]] const struct {
+	uint gViewCount;
 	float gHistoryLimit;
 	float gAntilagScale;
-	uint gViewCount;
 } gPushConstants;
 
 [numthreads(8,8,1)]
@@ -79,8 +80,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 			const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
 			if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
-			//if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), float2(xx, yy) - 0.5, 2*vis_prev.dz_dxy())) continue;
 			if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
+			if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
 
 			const float4 c = gHistory[ipos_prev];
 			if (c.a <= 0 || any(isnan(c)))  continue;

@@ -21,6 +21,7 @@ enum DebugMode {
 	eUVScreenSize,
 	ePrevUV,
 	eAlbedo,
+	eDemodulatedRadiance,
 	eAccumLength,
 	eTemporalGradient,
 	eRelativeTemporalGradient,
@@ -30,7 +31,7 @@ enum DebugMode {
 #ifdef __cplusplus
 inline string to_string(const TonemapMode& m) {
 	switch (m) {
-		default:
+		default: return "Unknown";
 		case TonemapMode::eRaw: return "Raw";
 		case TonemapMode::eReinhard: return "Reinhard";
 		case TonemapMode::eUncharted2: return "Uncharted 2";
@@ -51,6 +52,7 @@ inline string to_string(const DebugMode& m) {
 		case DebugMode::eUVScreenSize: return "UV Screen Size";
 		case DebugMode::ePrevUV: return "PrevUV";
 		case DebugMode::eAlbedo: return "Albedo";
+		case DebugMode::eDemodulatedRadiance: return "Demodulated Radiance";
 		case DebugMode::eAccumLength: return "Accum Length";
 		case DebugMode::eTemporalGradient: return "Temporal Gradient";
 		case DebugMode::eRelativeTemporalGradient: return "Relative Temporal Gradient (Antilag)";

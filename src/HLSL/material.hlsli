@@ -53,11 +53,11 @@ struct NullBSDF {
 
 #endif
 
-#include "bsdfs/lambertian.hlsli"
-#include "bsdfs/emissive.hlsli"
-#include "bsdfs/environment.hlsli"
-#include "bsdfs/roughplastic.hlsli"
-#include "bsdfs/roughdielectric.hlsli"
+#include "materials/lambertian.hlsli"
+#include "materials/emissive.hlsli"
+#include "materials/environment.hlsli"
+#include "materials/roughplastic.hlsli"
+#include "materials/roughdielectric.hlsli"
 
 #define FOR_EACH_BSDF_TYPE(FN) \
 	FN ( Lambertian ) \

@@ -27,12 +27,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
+[[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
+[[vk::constant_id(1)]] const bool gModulateAlbedo = true;
+
 #include "svgf_shared.hlsli"
 
 RWTexture2D<float2> gOutput1;
 RWTexture2D<float4> gOutput2;
-Texture2D<float4> gRadiance;
+RWTexture2D<float4> gRadiance;
 Texture2D<float4> gPrevRadiance;
+Texture2D<float4> gAlbedo;
+Texture2D<float4> gPrevAlbedo;
 Texture2D<uint> gGradientSamples;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
@@ -40,6 +45,19 @@ StructuredBuffer<ViewData> gViews;
 [[vk::push_constant]] const struct {
 	uint gViewCount;
 } gPushConstants;
+
+inline float get_luminance(const int2 p) {
+	if (gModulateAlbedo)
+		return luminance(gRadiance[p].rgb*gAlbedo[p].rgb);
+	else
+		return luminance(gRadiance[p].rgb);
+}
+inline float get_prev_luminance(const int2 p) {
+	if (gModulateAlbedo)
+		return luminance(gPrevRadiance[p].rgb*gPrevAlbedo[p].rgb);
+	else
+		return luminance(gPrevRadiance[p].rgb);
+}
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
@@ -53,19 +71,21 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const uint2 ipos = gradPos*gGradientDownsample + tile_pos;
 	if (!test_inside_screen(ipos, view)) return;
 	
-	const float l_curr = luminance(gRadiance[ipos].rgb);
+	const VisibilityInfo v = load_visibility(ipos);
+
+	const float l_curr = get_luminance(ipos);
 	if (u >= (1u << 31u)) {
 		const uint idx_prev = (u >> (2u * TILE_OFFSET_SHIFT)) & ((1u << (31u - 2u * TILE_OFFSET_SHIFT)) - 1u);
-		const uint width = view.image_max.x - view.image_min.x;
-		const uint2 ipos_prev = view.image_min + uint2(idx_prev % width, idx_prev / width);
-		const float l_prev = luminance(gPrevRadiance[ipos_prev].rgb);
+		const uint2 view_size = view.image_max - view.image_min;
+		uint2 ipos_prev = view.image_min + uint2(idx_prev % view_size.x, idx_prev / view_size.x);
+		const float l_prev = get_prev_luminance(ipos_prev);
 		gOutput1[index.xy] = (isinf(l_prev) || isnan(l_prev)) ? l_curr : float2(max(l_curr, l_prev), l_curr - l_prev);
-	} else
+	} else {
 		gOutput1[index.xy] = 0;
+	}
 
 	float2 moments = float2(l_curr, l_curr*l_curr);
 	float sum_w = 1;
-	const VisibilityInfo v = load_visibility(ipos);
 	if (v.instance_index() != INVALID_INSTANCE)
 		for (int yy = 0; yy < gGradientDownsample; yy++) {
 			for (int xx = 0; xx < gGradientDownsample; xx++) {
@@ -73,13 +93,14 @@ void main(uint3 index : SV_DispatchThreadId) {
 				if (all(ipos == p)) continue;
 				if (!test_inside_screen(p, view)) continue;
 				if (v.instance_index() != load_visibility(p).instance_index()) continue;
-				const float l = luminance(gRadiance[p].rgb);
+				const float l = get_luminance(p);
 				if (isinf(l) || isnan(l)) continue;
 				moments += float2(l, l*l);
 				sum_w++;
 			}
 		}
-	moments /= float2(sum_w, sum_w*sum_w);
+	moments /= sum_w;
 
 	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(v.dz_dxy()));
+	gRadiance[ipos] = float4(gRadiance[ipos].rgb, 0 /* set N to zero, to avoid contributing to temporal accumulation */);
 }
