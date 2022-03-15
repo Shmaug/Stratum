@@ -41,6 +41,12 @@ if (OpenXR_FOUND)
     message(STATUS "OpenXR enabled")
 endif()
 
+if (OpenVDB_FOUND)
+    target_link_libraries(Stratum PRIVATE OpenVDB::openvdb)
+    target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_OPENVDB)
+    message(STATUS "OpenVDB enabled")
+endif()
+
 # Shaders
 
 file(GLOB_RECURSE STRATUM_SHADERS "**.[gh]lsl")

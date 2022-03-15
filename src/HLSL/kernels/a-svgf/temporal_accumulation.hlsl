@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::constant_id(1)]] const uint gGradientDownsample = 3u;
 [[vk::constant_id(2)]] const int gGradientFilterRadius = 0;
 [[vk::constant_id(3)]] const bool gAntilag = true;
+[[vk::constant_id(4)]] const float gDisableRejection = false;
 
 RWTexture2D<float4> gAccumColor;
 RWTexture2D<float2> gAccumMoments;
@@ -78,13 +79,16 @@ void main(uint3 index : SV_DispatchThreadId) {
 			const int2 ipos_prev = p + int2(xx, yy);
 			if (!test_inside_screen(ipos_prev, view)) continue;
 
-			const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
-			if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
-			if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
-			if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
-
 			const float4 c = gHistory[ipos_prev];
-			if (c.a <= 0 || any(isnan(c)))  continue;
+
+			if (!gDisableRejection) {
+				const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
+				if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
+				if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
+				if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
+			}
+
+			if (c.a <= 0 || any(isnan(c))) continue;	
 
 			const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
 			color_prev   += c * wc;
@@ -92,7 +96,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 			sum_w        += wc;
 		}
 
-	const float4 color_curr = gSamples[ipos];
+	float4 color_curr = gSamples[ipos];
+
 	const float l = luminance(color_curr.rgb);
 	const float2 moments_curr = float2(l, l*l);
 
@@ -126,7 +131,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 
 		const float alpha = color_curr.a / n;
-	
+
 		gAccumColor[ipos] = float4(lerp(color_prev.rgb, color_curr.rgb, alpha), n);
 		gAccumMoments[ipos] = lerp(moments_prev, moments_curr, max(0.6, alpha));
 	} else {

@@ -13,8 +13,8 @@ struct RoughPlastic {
     float eta;
 
 #ifdef __HLSL_VERSION
-    template<typename Real>
-    inline Real eval_pdfW(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
+    template<typename Real, typename Real3>
+    inline Real eval_pdfW(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
         if (ng_dot_in < 0 || dot(vertex.geometry_normal, dir_out) < 0) {
             // No light below the surface
@@ -25,7 +25,7 @@ struct RoughPlastic {
         if (dot(frame.n, dir_in) < 0)
             frame.flip();
 
-        const vector<Real,3> half_vector = normalize(dir_in + dir_out);
+        const Real3 half_vector = normalize(dir_in + dir_out);
         const Real n_dot_in = dot(frame.n, dir_in);
         const Real n_dot_out = dot(frame.n, dir_out);
         const Real n_dot_h = dot(frame.n, half_vector);
@@ -33,8 +33,8 @@ struct RoughPlastic {
             return 0;
         }
 
-        const vector<Real,3> S = vertex.eval(specular_reflectance);
-        const vector<Real,3> R = vertex.eval(diffuse_reflectance);
+        const Real3 S = vertex.eval(specular_reflectance);
+        const Real3 R = vertex.eval(diffuse_reflectance);
         const Real lS = luminance(S), lR = luminance(R);
         if (lS + lR <= 0) {
             return 0;
@@ -56,12 +56,12 @@ struct RoughPlastic {
         diff_prob *= n_dot_out / M_PI;
         return spec_prob + diff_prob;
     }
-    template<typename Real, bool TransportToLight>
-    inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
+	template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
         if (ng_dot_in < 0 || dot(vertex.geometry_normal, dir_out) < 0) {
             // No light below the surface
-            BSDFEvalRecord<Real> r;
+            BSDFEvalRecord<Real3> r;
             r.pdfW = 0;
             r.f = 0;
             return r;
@@ -77,12 +77,12 @@ struct RoughPlastic {
         // of the mirror our ray hits (since applying reflection of dir_in over half_vector
         // gives us dir_out). Microfacet models build all sorts of quantities based on the
         // half vector. It's also called the "micro normal".
-        const vector<Real,3> half_vector = normalize(dir_in + dir_out);
+        const Real3 half_vector = normalize(dir_in + dir_out);
         const Real n_dot_h = dot(frame.n, half_vector);
         const Real n_dot_in = dot(frame.n, dir_in);
         const Real n_dot_out = dot(frame.n, dir_out);
         if (n_dot_out <= 0 || n_dot_h <= 0) {
-            BSDFEvalRecord<Real> r;
+            BSDFEvalRecord<Real3> r;
             r.pdfW = 0;
             r.f = 0;
             return r;
@@ -107,10 +107,10 @@ struct RoughPlastic {
         const Real D = GTR2(n_dot_h, rgh); // "Generalized Trowbridge Reitz", GTR2 is equivalent to GGX.
         const Real G = smith_masking_gtr2(frame.to_local(dir_in), rgh) * smith_masking_gtr2(frame.to_local(dir_out), rgh);
 
-        const vector<Real,3> Kd = vertex.eval(diffuse_reflectance);
-        const vector<Real,3> Ks = vertex.eval(specular_reflectance);
+        const Real3 Kd = vertex.eval(diffuse_reflectance);
+        const Real3 Ks = vertex.eval(specular_reflectance);
 
-        const vector<Real,3> spec_contrib = Ks * ((G * F_o * D) / (4 * n_dot_in * n_dot_out));
+        const Real3 spec_contrib = Ks * ((G * F_o * D) / (4 * n_dot_in * n_dot_out));
 
         // Next we account for the diffuse layer.
         // In order to reflect from the diffuse layer,
@@ -119,19 +119,19 @@ struct RoughPlastic {
         const Real F_i = fresnel_dielectric(dot(half_vector, dir_in), local_eta);
         // Multiplying with Fresnels leads to an overly dark appearance at the 
         // object boundaries. Disney BRDF proposes a fix to this -- we will implement this in problem set 1.
-        const vector<Real,3> diffuse_contrib = (Kd * (1 - F_o) * (1 - F_i)) / M_PI;
+        const Real3 diffuse_contrib = (Kd * (1 - F_o) * (1 - F_i)) / M_PI;
 
-        BSDFEvalRecord<Real> r;
-        r.pdfW = eval_pdfW(dir_in, dir_out, vertex);
+        BSDFEvalRecord<Real3> r;
+        r.pdfW = eval_pdfW<Real,Real3>(dir_in, dir_out, vertex);
         r.f = (spec_contrib + diffuse_contrib) * n_dot_out;
         return r;
     }
-    template<typename Real, bool TransportToLight>
-    inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
+	template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
         if (ng_dot_in < 0) {
             // No light below the surface
-            BSDFSampleRecord<Real> r;
+            BSDFSampleRecord<Real3> r;
             r.dir_out = 0;
             r.eta = 0;
             r.eval.f = 0;
@@ -144,11 +144,11 @@ struct RoughPlastic {
             frame.flip();
 
         // We use the reflectance to choose between sampling the dielectric or diffuse layer.
-        const vector<Real,3> Ks = vertex.eval(specular_reflectance);
-        const vector<Real,3> Kd = vertex.eval(diffuse_reflectance);
+        const Real3 Ks = vertex.eval(specular_reflectance);
+        const Real3 Kd = vertex.eval(diffuse_reflectance);
         const Real lS = luminance(Ks), lR = luminance(Kd);
         if (lS + lR <= 0) {
-            BSDFSampleRecord<Real> r;
+            BSDFSampleRecord<Real3> r;
             r.dir_out = 0;
             r.eta = 0;
             r.eval.f = 0;
@@ -160,49 +160,49 @@ struct RoughPlastic {
             // Sample from the specular lobe.
 
             // Convert the incoming direction to local coordinates
-            vector<Real,3> local_dir_in = frame.to_local(dir_in);
+            const Real3 local_dir_in = frame.to_local(dir_in);
             // Clamp roughness to avoid numerical issues.
             const Real rgh = clamp(vertex.eval(roughness), gMinRoughness, 1);
             const Real alpha = rgh * rgh;
-            vector<Real,3> local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
+            Real3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
             
             // Transform the micro normal to world space
-            vector<Real,3> half_vector = frame.to_world(local_micro_normal);
-            BSDFSampleRecord<Real> r;
+            Real3 half_vector = frame.to_world(local_micro_normal);
+            BSDFSampleRecord<Real3> r;
             // Reflect over the world space normal
             r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
             r.eta = 0;
-            r.roughness = rgh;
-            r.eval = eval<Real, TransportToLight>(dir_in, r.dir_out, vertex);
+            r.roughness = (min16float)rgh;
+            r.eval = eval<TransportToLight, Real, Real3>(dir_in, r.dir_out, vertex);
             return r;
         } else {
-            BSDFSampleRecord<Real> r;
+            BSDFSampleRecord<Real3> r;
             r.dir_out = frame.to_world(sample_cos_hemisphere(rnd.x, rnd.y));
             r.eta = 0;
             r.roughness = 1;
-            r.eval = eval<Real, TransportToLight>(dir_in, r.dir_out, vertex);
+            r.eval = eval<TransportToLight, Real, Real3>(dir_in, r.dir_out, vertex);
             return r;
         }
     }
-    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(diffuse_reflectance); }
-    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return 0; }
+    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(diffuse_reflectance); }
+    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return 0; }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         diffuse_reflectance.load(bytes, address);
         specular_reflectance.load(bytes, address);
         roughness.load(bytes, address);
-        eta = asfloat(bytes.Load(address)); address += 4;
+        eta = bytes.Load<float>(address); address += 4;
     }
 
 #endif // __HLSL_VERSION
 
 #ifdef __cplusplus
 
-    inline void store(ByteAppendBuffer& bytes, ImagePool& images) const {
-        diffuse_reflectance.store(bytes, images);
-        specular_reflectance.store(bytes, images);
-        roughness.store(bytes, images);
-        bytes.Append(asuint(eta));
+    inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
+        diffuse_reflectance.store(bytes, resources);
+        specular_reflectance.store(bytes, resources);
+        roughness.store(bytes, resources);
+        bytes.Appendf(eta);
     }
     inline void inspector_gui() {
         image_value_field("Diffuse Reflectance", diffuse_reflectance);

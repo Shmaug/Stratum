@@ -37,9 +37,9 @@ void skin(uint3 index : SV_DispatchThreadID) {
 	transform += gPose[w.indices[3]] * w.weights[3];
 	
 	uint address = index.x * gPushConstants.gVertexStride;
-	float3 vertex = asfloat(gVertices.Load3(address));
-	float3 normal = asfloat(gVertices.Load3(address + gPushConstants.gNormalOffset));
-	float3 tangent = asfloat(gVertices.Load3(address + gPushConstants.gTangentOffset));
+	float3 vertex  = gVertices.Load<float3>(address);
+	float3 normal  = gVertices.Load<float3>(address + gPushConstants.gNormalOffset);
+	float3 tangent = gVertices.Load<float3>(address + gPushConstants.gTangentOffset);
 
 	vertex = mul(transform, float4(vertex, 1));
 	normal = mul((float3x3)transform, normal);
@@ -54,30 +54,29 @@ void skin(uint3 index : SV_DispatchThreadID) {
 void blend(uint3 index : SV_DispatchThreadID) {
 	if (index.x >= gPushConstants.gVertexCount) return;
 	
-	uint address = index.x * gPushConstants.gVertexStride;
+	const uint address = index.x * gPushConstants.gVertexStride;
 
-	float sum = dot(1, abs(gPushConstants.gBlendFactors));
-	float isum = max(0, 1 - sum);
+	const float f = max(0, 1 - dot(1, abs(gPushConstants.gBlendFactors)));
 
-	float3 vertex  = isum * asfloat(gVertices.Load3(address));
-	float3 normal  = isum * asfloat(gVertices.Load3(address + gPushConstants.gNormalOffset));
-	float3 tangent = isum * asfloat(gVertices.Load3(address + gPushConstants.gTangentOffset));
+	float3 vertex  = f * gVertices.Load<float3>(address);
+	float3 normal  = f * gVertices.Load<float3>(address + gPushConstants.gNormalOffset);
+	float3 tangent = f * gVertices.Load<float3>(address + gPushConstants.gTangentOffset);
 
-	vertex  += gPushConstants.gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address));
-	normal  += gPushConstants.gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address + gPushConstants.gNormalOffset));
-	tangent += gPushConstants.gBlendFactors[0] * asfloat(gBlendTarget0.Load3(address + gPushConstants.gTangentOffset));
+	vertex  += gPushConstants.gBlendFactors[0] * gBlendTarget0.Load<float3>(address);
+	normal  += gPushConstants.gBlendFactors[0] * gBlendTarget0.Load<float3>(address + gPushConstants.gNormalOffset);
+	tangent += gPushConstants.gBlendFactors[0] * gBlendTarget0.Load<float3>(address + gPushConstants.gTangentOffset);
 
-	vertex  += gPushConstants.gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address));
-	normal  += gPushConstants.gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address + gPushConstants.gNormalOffset));
-	tangent += gPushConstants.gBlendFactors[1] * asfloat(gBlendTarget1.Load3(address + gPushConstants.gTangentOffset));
+	vertex  += gPushConstants.gBlendFactors[1] * gBlendTarget1.Load<float3>(address);
+	normal  += gPushConstants.gBlendFactors[1] * gBlendTarget1.Load<float3>(address + gPushConstants.gNormalOffset);
+	tangent += gPushConstants.gBlendFactors[1] * gBlendTarget1.Load<float3>(address + gPushConstants.gTangentOffset);
 
-	vertex  += gPushConstants.gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address));
-	normal  += gPushConstants.gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address + gPushConstants.gNormalOffset));
-	tangent += gPushConstants.gBlendFactors[2] * asfloat(gBlendTarget2.Load3(address + gPushConstants.gTangentOffset));
+	vertex  += gPushConstants.gBlendFactors[2] * gBlendTarget2.Load<float3>(address);
+	normal  += gPushConstants.gBlendFactors[2] * gBlendTarget2.Load<float3>(address + gPushConstants.gNormalOffset);
+	tangent += gPushConstants.gBlendFactors[2] * gBlendTarget2.Load<float3>(address + gPushConstants.gTangentOffset);
 
-	vertex  += gPushConstants.gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address));
-	normal  += gPushConstants.gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address + gPushConstants.gNormalOffset));
-	tangent += gPushConstants.gBlendFactors[3] * asfloat(gBlendTarget3.Load3(address + gPushConstants.gTangentOffset));
+	vertex  += gPushConstants.gBlendFactors[3] * gBlendTarget3.Load<float3>(address);
+	normal  += gPushConstants.gBlendFactors[3] * gBlendTarget3.Load<float3>(address + gPushConstants.gNormalOffset);
+	tangent += gPushConstants.gBlendFactors[3] * gBlendTarget3.Load<float3>(address + gPushConstants.gTangentOffset);
 
 	normal = normalize(normal);
 

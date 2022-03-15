@@ -3,7 +3,6 @@
 build
 install
 bin
-extern
 CMakeSettings.json
 CMakeCache.txt
 CMakeFiles

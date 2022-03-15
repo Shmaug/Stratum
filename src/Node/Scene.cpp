@@ -46,29 +46,24 @@ inline void inspector_gui_fn(TransformData* t) {
     t->mRotation = normalize(t->mRotation);
 	#else
 	float3 translate = t->m.topRightCorner(3,1);
-  if (ImGui::DragFloat3("Translation", translate.data(), .1f)) t->m.topRightCorner(3,1) = translate;
-
 	float3 scale;
 	scale.x() = t->m.block(0, 0, 3, 1).matrix().norm();
 	scale.y() = t->m.block(0, 1, 3, 1).matrix().norm();
 	scale.z() = t->m.block(0, 2, 3, 1).matrix().norm();
-	Matrix3f r = t->m.block<3,3>(0,0).matrix() * DiagonalMatrix<float,3,3>(1/scale.x(), 1/scale.y(), 1/scale.z());
+	const Matrix3f r = t->m.block<3,3>(0,0).matrix() * DiagonalMatrix<float,3,3>(1/scale.x(), 1/scale.y(), 1/scale.z());
 	Quaternionf rotation(r);
+
+  if (ImGui::DragFloat3("Translation", translate.data(), .1f) && !translate.hasNaN())
+		t->m.topRightCorner(3,1) = translate;
+		
 	bool v = ImGui::DragFloat3("Rotation (XYZ)", rotation.vec().data(), .1f);
 	v |= ImGui::DragFloat("Rotation (W)", &rotation.w(), .1f);
-	v |= ImGui::DragFloat3("Scale", scale.data(), .1f);
-	if (v) t->m.block<3,3>(0,0) = rotation.normalized().matrix() * DiagonalMatrix<float,3,3>(scale.x(), scale.y(), scale.z());
+	if (v && !rotation.vec().hasNaN())
+		t->m.block<3,3>(0,0) = rotation.normalized().matrix();
 
-	if (t->m.isNaN().any()) {
-		if (translate.isNaN().any())
-			translate = float3::Zero();
-		if (scale.isNaN().any() || scale.isZero())
-			scale = float3::Ones();
-		if (isnan(rotation.x()) || isnan(rotation.y()) || isnan(rotation.z()) || isnan(rotation.w()))
-			rotation = Quaternionf(1,0,0,0);
-		*t = make_transform(translate, make_quatf(rotation.x(), rotation.y(), rotation.z(), rotation.w()), scale);
-	}
-	
+	if (ImGui::DragFloat3("Scale", scale.data(), .1f) && !rotation.vec().hasNaN() && !scale.hasNaN())
+		t->m.block<3,3>(0,0) = rotation.normalized().matrix() * DiagonalMatrix<float,3,3>(scale.x(), scale.y(), scale.z());
+
 	#endif
 	
 	if (gAnimatedTransform == t) {
@@ -77,9 +72,6 @@ inline void inspector_gui_fn(TransformData* t) {
 			ImGui::DragFloat3("Rotate", gAnimateRotate.data(), .01f);
 	} else if (ImGui::Button("Animate"))
 		gAnimatedTransform = t;
-}
-inline void inspector_gui_fn(Material* material) {
-	material_inspector_gui_fn(*material);
 }
 inline void inspector_gui_fn(MeshPrimitive* mesh) {
 	ImGui::LabelText("Material", mesh->mMaterial ? mesh->mMaterial.node().name().c_str() : "nullptr");
@@ -97,9 +89,14 @@ TransformData node_to_world(const Node& node) {
 		component_ptr<Gui> gui = node.node_graph().find_components<Gui>().front();
 		gui->register_inspector_gui_fn<TransformData>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<Camera>(&inspector_gui_fn);
-		gui->register_inspector_gui_fn<Material>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<MeshPrimitive>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<SpherePrimitive>(&inspector_gui_fn);
+
+		gui->register_inspector_gui_fn<Material>([](Material* material) { material_inspector_gui_fn(*material); });
+
+		#define REGISTER_BSDF_GUI_FN(BSDF_T) gui->register_inspector_gui_fn<BSDF_T>([](BSDF_T* bsdf){ bsdf->inspector_gui(); });
+		FOR_EACH_BSDF_TYPE( REGISTER_BSDF_GUI_FN )
+		#undef REGISTER_BSDF_GUI_FN
 		
 		gAnimatedTransform = nullptr;
 		node.node_graph().find_components<Application>().front()->OnUpdate.listen(gui.node(), &animate);

@@ -7,17 +7,17 @@ struct Emissive {
     ImageValue3 emission;
     
 #ifdef __HLSL_VERSION
-    template<typename Real, bool TransportToLight>
-    inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
-        BSDFEvalRecord<Real> r;
+    template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+        BSDFEvalRecord<Real3> r;
         r.f = 0;
         r.pdfW = 0;
         return r;
     }
 
-    template<typename Real, bool TransportToLight>
-    inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
-        BSDFSampleRecord<Real> r;
+    template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
+        BSDFSampleRecord<Real3> r;
         r.dir_out = 0,
         r.eta = 0;
         r.eval.f = 0;
@@ -25,8 +25,8 @@ struct Emissive {
         return r;
     }
 
-    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return 0; }
-    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
+    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return 0; }
+    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         emission.load(bytes, address);
@@ -36,8 +36,8 @@ struct Emissive {
 
 #ifdef __cplusplus
 
-    inline void store(ByteAppendBuffer& bytes, ImagePool& images) const {
-        emission.store(bytes, images);
+    inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
+        emission.store(bytes, resources);
     }
     inline void inspector_gui() {
         image_value_field("Emission", emission);

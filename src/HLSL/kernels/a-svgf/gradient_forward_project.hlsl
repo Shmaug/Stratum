@@ -31,6 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 #include "../../scene.hlsli"
+#include "../../reservoir.hlsli"
 
 StructuredBuffer<PackedVertexData> gVertices;
 ByteAddressBuffer gIndices;
@@ -38,7 +39,7 @@ StructuredBuffer<InstanceData> gInstances;
 StructuredBuffer<uint> gInstanceIndexMap;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
-#include "../../reservoir.hlsli"
+RWStructuredBuffer<PathBounceState> gPathStates;
 RWStructuredBuffer<Reservoir> gReservoirs;
 StructuredBuffer<Reservoir> gPrevReservoirs;
 
@@ -80,9 +81,11 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 	const InstanceData instance = gInstances[v_prev.instance_index()];
 	float3 pos_obj;
-	if (v_prev.primitive_index() == INVALID_PRIMITIVE) {
+	if (instance.type() == INSTANCE_TYPE_SPHERE) {
+		// sphere
 		pos_obj = spherical_uv_to_cartesian(v_prev.bary())*instance.radius();
 	} else {
+		// triangles
 		const uint3 tri = load_tri(gIndices, instance, v_prev.primitive_index());
 		const float3 p0 = gVertices[tri.x].position;
 		pos_obj = p0 + (gVertices[tri.y].position - p0) * v_prev.bary().x + (gVertices[tri.z].position - p0) * v_prev.bary().y;
@@ -116,7 +119,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		
 		gPathStates[index_1d].rng = v_prev.rng_seed();
 		gPathStates[index_1d].position = instance.transform.transform_point(pos_obj);
-		gPathStates[index_1d].instance_primitive_index = v_prev.data[1].x;
+		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
 		gPathStates[index_1d].bary = v_prev.bary();
 		
 		gReservoirs[index_1d] = gPrevReservoirs[index_1d];

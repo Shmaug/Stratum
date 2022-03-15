@@ -1,4 +1,4 @@
-#include "Scene.hpp"
+#include "../Scene.hpp"
 #include <regex>
 
 using namespace stm::hlsl;

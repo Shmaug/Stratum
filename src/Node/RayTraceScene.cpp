@@ -76,14 +76,17 @@ void RayTraceScene::create_pipelines() {
 	
 	mTraceVisibilityPipeline = n.make_child("pt_trace_visibility").make_component<ComputePipelineState>("pt_trace_visibility", shaders.at("pt_trace_visibility"));
 	mTraceVisibilityPipeline->set_immutable_sampler("gSampler", samplerRepeat);
+	mTraceVisibilityPipeline->descriptor_binding_flag("gVolumes", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceVisibilityPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceVisibilityPipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	
 	mTraceBouncePipeline = n.make_child("pt_trace_path_bounce").make_component<ComputePipelineState>("pt_trace_path_bounce", shaders.at("pt_trace_path_bounce"));
 	mTraceBouncePipeline->set_immutable_sampler("gSampler", samplerRepeat);
+	mTraceBouncePipeline->descriptor_binding_flag("gVolumes", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceBouncePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceBouncePipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 	mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples") = 0;
+	mTraceBouncePipeline->push_constant<uint32_t>("gMaxNullCollisions") = 64;
 	mTraceBouncePipeline->push_constant<uint32_t>("gSamplingFlags") = SAMPLE_FLAG_BG_IS | SAMPLE_FLAG_LIGHT_IS | SAMPLE_FLAG_MIS | SAMPLE_FLAG_RAY_CONE_LOD;
 	
 	mCounterValues = make_shared<Buffer>(instance->device(), "gCounters", sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
@@ -126,6 +129,7 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::DragScalar("Max Depth", ImGuiDataType_U32, &mMaxDepth, 1);
 		ImGui::DragScalar("Min Depth", ImGuiDataType_U32, &mMinDepth, 1);
 		ImGui::DragScalar("Direct Light Sampling Depth", ImGuiDataType_U32, &mDirectLightDepth, 1);
+		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gMaxNullCollisions"), 1);
 		ImGui::DragScalar("Reservoir Samples", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples"), 1);
 
 		ImGui::PopItemWidth();
@@ -148,6 +152,7 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::Checkbox("Reprojection", &mReprojection);
 		if (mReprojection) {
 			ImGui::PushItemWidth(40);
+			ImGui::Checkbox("Disable Sample Rejection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gDisableRejection")));
 			ImGui::DragFloat("Target Sample Count", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
 			ImGui::DragScalar("Filter Iterations", ImGuiDataType_U32, &mAtrousIterations, 0.1f);
 			if (mAtrousIterations > 0) {
@@ -229,16 +234,23 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::SameLine();
 		if (ImGui::Button("Save")) {
 			Device& d = mPrevFrame->mRadiance.image()->mDevice;
-			d->waitIdle();
-			Image::View img = mReprojection ? mPrevFrame->mAccumColor : mPrevFrame->mRadiance;
-			Buffer::View<float> pixels = make_shared<Buffer>(d, "image copy tmp", img.extent().width*img.extent().height*sizeof(float)*4, vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU);
+			auto cb = d.get_command_buffer("image copy");
 			
-			auto cb = d.get_command_buffer("image copy", vk::QueueFlagBits::eCompute);
-			cb->copy_image_to_buffer(img, pixels);
+			Image::View src = mReprojection ? mPrevFrame->mAccumColor : mPrevFrame->mRadiance;
+			if (src.image()->format() != vk::Format::eR32G32B32A32Sfloat) {
+				Image::View tmp = make_shared<Image>(cb->mDevice, "gRadiance", src.extent(), vk::Format::eR32G32B32A32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eStorage);
+				cb->blit_image(src, tmp);
+				src = tmp;
+			}
+
+			Buffer::View<float> pixels = make_shared<Buffer>(d, "image copy tmp", src.extent().width*src.extent().height*sizeof(float)*4, vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU);
+			cb->copy_image_to_buffer(src, pixels);
+
+			d->waitIdle();
 			d.submit(cb);
 			cb->completion_fence().wait();
 
-			stbi_write_hdr(path, img.extent().width, img.extent().height, 4, pixels.data());
+			stbi_write_hdr(path, src.extent().width, src.extent().height, 4, pixels.data());
 		}
 	}
 }
@@ -251,26 +263,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 
 	vector<vk::BufferMemoryBarrier> blasBarriers;
 
-	if (!mUnitCubeAS) {
-		Buffer::View<vk::AabbPositionsKHR> aabb = make_shared<Buffer>(commandBuffer.mDevice, "Unit cube aabb", sizeof(vk::AabbPositionsKHR), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_CPU_TO_GPU);
-		aabb[0].minX = -1;
-		aabb[0].minY = -1;
-		aabb[0].minZ = -1;
-		aabb[0].maxX = 1;
-		aabb[0].maxY = 1;
-		aabb[0].maxZ = 1;
-		vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
-		vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, vk::GeometryFlagBitsKHR::eOpaque);
-		vk::AccelerationStructureBuildRangeInfoKHR range(1);
-		mUnitCubeAS = make_shared<AccelerationStructure>(commandBuffer, "Unit cube BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, aabbGeometry, range);
-		blasBarriers.emplace_back(
-			vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
-			VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-			**mUnitCubeAS->buffer().buffer(), mUnitCubeAS->buffer().offset(), mUnitCubeAS->buffer().size_bytes());
-	}
-
-	ImagePool images;
-	images.distribution_data_size = 0;
+	mCurFrame->mResources.distribution_data_size = 0;
 
 	uint32_t totalVertexCount = 0;
 	uint32_t totalIndexBufferSize = 0;
@@ -296,16 +289,39 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			auto materialMap_it = materialMap.find(prim->mMaterial.get());
 			if (materialMap_it == materialMap.end()) {
 				materialMap_it = materialMap.emplace(prim->mMaterial.get(), (uint32_t)(materialData.data.size()*sizeof(uint32_t))).first;
-				store_material(materialData, images, *prim->mMaterial);
+				store_material(materialData, mCurFrame->mResources, *prim->mMaterial);
 			}
 			if (prim->mMaterial->index() == BSDFType::eEmissive)
 				lightInstances.emplace_back((uint32_t)instanceDatas.size());
 
+			const float3 mn = -float3::Ones();
+			const float3 mx = float3::Ones();
+			const size_t key = hash_args(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+			auto aabb_it = mAABBs.find(key);
+			if (aabb_it == mAABBs.end()) {
+				Buffer::View<vk::AabbPositionsKHR> aabb = make_shared<Buffer>(commandBuffer.mDevice, "aabb data", sizeof(vk::AabbPositionsKHR), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_CPU_TO_GPU);
+				aabb[0].minX = mn[0];
+				aabb[0].minY = mn[1];
+				aabb[0].minZ = mn[2];
+				aabb[0].maxX = mx[0];
+				aabb[0].maxY = mx[1];
+				aabb[0].maxZ = mx[2];
+				vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
+				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureBuildRangeInfoKHR range(1);
+				shared_ptr<AccelerationStructure> as = make_shared<AccelerationStructure>(commandBuffer, "aabb BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, aabbGeometry, range);
+				blasBarriers.emplace_back(
+					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
+					VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+					**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
+				aabb_it = mAABBs.emplace(key, as).first;
+			}
+			
 			TransformData transform = node_to_world(prim.node());
 			float r = prim->mRadius;
 			#ifdef TRANSFORM_UNIFORM_SCALING
 			r *= transform.mScale;
-			transform.mScale = 1;
+			transform.mScale = prim->mRadius;
 			#else
 			const float3 scale = float3(
 				transform.m.block(0, 0, 3, 1).matrix().norm(),
@@ -314,7 +330,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			const Quaternionf rotation(transform.m.block<3,3>(0,0).matrix() * DiagonalMatrix<float,3,3>(1/scale.x(), 1/scale.y(), 1/scale.z()));
 			
 			r *= transform.m.block<3,3>(0,0).matrix().determinant();
-			transform = make_transform(transform.m.col(3).head<3>(), make_quatf(rotation.x(), rotation.y(), rotation.z(), rotation.w()), float3::Ones());
+			transform = make_transform(transform.m.col(3).head<3>(), make_quatf(rotation.x(), rotation.y(), rotation.z(), rotation.w()), float3::Constant(prim->mRadius));
 			#endif
 			
 			TransformData prevTransform;
@@ -325,10 +341,10 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 				prevTransform = transform;
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
-			Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(tmul(transform, make_transform(float3::Zero(), quatf_identity(), float3::Constant(prim->mRadius))));
+			Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
 			instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
 			instance.mask = BVH_FLAG_SPHERES;
-			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**mUnitCubeAS);
+			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 
 			transformHistory.emplace(prim.get(), make_pair(transform, (uint32_t)instanceDatas.size()));
 			instanceDatas.emplace_back( make_instance_sphere(transform, prevTransform, materialMap_it->second, r) );
@@ -339,7 +355,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		Material error_mat = Lambertian{};
 		get<Lambertian>(error_mat).reflectance = make_image_value3({}, float3(1,0,1));
 		materialMap.emplace(nullptr, (uint32_t)(materialData.data.size()*sizeof(uint32_t)));
-		store_material(materialData, images, error_mat);
+		store_material(materialData, mCurFrame->mResources, error_mat);
 
 		ProfilerRegion s("Process meshes", commandBuffer);
 		mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
@@ -404,7 +420,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			auto materialMap_it = materialMap.find(prim->mMaterial.get());
 			if (materialMap_it == materialMap.end()) {
 				materialMap_it = materialMap.emplace(prim->mMaterial.get(), (uint32_t)(materialData.data.size()*sizeof(uint32_t))).first;
-				store_material(materialData, images, *prim->mMaterial);
+				store_material(materialData, mCurFrame->mResources, *prim->mMaterial);
 			}
 			if (prim->mMaterial->index() == BSDFType::eEmissive)
 				lightInstances.emplace_back((uint32_t)instanceDatas.size());
@@ -432,7 +448,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
 
 			//if (auto mask = prim->mMaterial.node().find_in_descendants<Image::View>(); mask && mask.node().name() == "alpha_mask") {
-			//	const uint32_t ind = images.get_index(*mask);
+			//	const uint32_t ind = mCurFrame->mResources.get_index(*mask);
 			//	BF_SET(instanceDatas.back().v[1], ind, 0, 12);
 			//} else
 			//	BF_SET(instanceDatas.back().v[1], ~0u, 0, 12);
@@ -440,6 +456,61 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		mTransformHistory = transformHistory;
 	}
 	
+	{ // heterogeneous volumes
+		ProfilerRegion s("Process heterogeneous volumes", commandBuffer);
+		mNode.for_each_descendant<HeterogeneousVolume>([&](const component_ptr<HeterogeneousVolume>& vol) {
+			auto materialMap_it = materialMap.find(reinterpret_cast<Material*>(vol.get()));
+			if (materialMap_it == materialMap.end()) {
+				materialMap_it = materialMap.emplace(reinterpret_cast<Material*>(vol.get()), (uint32_t)(materialData.data.size()*sizeof(uint32_t))).first;
+				store_material(materialData, mCurFrame->mResources, *vol);
+			}
+
+			auto grid = vol->handle->grid<float>();
+			const nanovdb::Coord& b0 = grid->indexToWorld( grid->tree().root().bbox().min() );
+			const nanovdb::Coord& b1 = grid->indexToWorld( grid->tree().root().bbox().max() );
+			const float3 mn(min(b0[0], b1[0]), min(b0[1], b1[1]), min(b0[2], b1[2]));
+			const float3 mx(max(b0[0], b1[0]), max(b0[1], b1[1]), max(b0[2], b1[2]));
+			const size_t key = hash_args(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+			auto aabb_it = mAABBs.find(key);
+			if (aabb_it == mAABBs.end()) {
+				Buffer::View<vk::AabbPositionsKHR> aabb = make_shared<Buffer>(commandBuffer.mDevice, "aabb data", sizeof(vk::AabbPositionsKHR), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_CPU_TO_GPU);
+				aabb[0].minX = mn[0];
+				aabb[0].minY = mn[1];
+				aabb[0].minZ = mn[2];
+				aabb[0].maxX = mx[0];
+				aabb[0].maxY = mx[1];
+				aabb[0].maxZ = mx[2];
+				vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
+				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureBuildRangeInfoKHR range(1);
+				shared_ptr<AccelerationStructure> as = make_shared<AccelerationStructure>(commandBuffer, "aabb BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, aabbGeometry, range);
+				blasBarriers.emplace_back(
+					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
+					VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+					**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
+				aabb_it = mAABBs.emplace(key, as).first;
+			}
+			
+			const TransformData transform = node_to_world(vol.node());
+			
+			TransformData prevTransform;
+			if (auto it = mTransformHistory.find(vol.get()); it != mTransformHistory.end()) {
+				prevTransform = it->second.first;
+				instanceIndexMap[it->second.second] = (uint32_t)instanceDatas.size();
+			} else
+				prevTransform = transform;
+
+			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
+			Matrix<float,3,4,RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
+			instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
+			instance.mask = BVH_FLAG_VOLUME;
+			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
+
+			transformHistory.emplace(vol.get(), make_pair(transform, (uint32_t)instanceDatas.size()));
+			instanceDatas.emplace_back( make_instance_volume(transform, prevTransform, materialMap_it->second, mCurFrame->mResources.volume_data_map.at(vol->buffer)) );
+		});
+	}
+
 	{ // Build TLAS
 		ProfilerRegion s("Build TLAS", commandBuffer);
 		commandBuffer.barrier(blasBarriers, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR);
@@ -466,7 +537,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		});
 		if (envMap) {
 			uint32_t address = (uint32_t)(materialData.data.size()*sizeof(uint32_t));
-			store_material(materialData, images, *envMap);
+			store_material(materialData, mCurFrame->mResources, *envMap);
 			mTraceBouncePipeline->push_constant<uint32_t>("gEnvironmentMaterialAddress") = address;
 			mTraceBouncePipeline->push_constant<float>("gEnvironmentSampleProbability") = 0.5f;
 		} else {
@@ -479,14 +550,6 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		mCurFrame->mVertices = make_shared<Buffer>(commandBuffer.mDevice, "gVertices", max(totalVertexCount,1u)*sizeof(PackedVertexData), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 	if (!mCurFrame->mIndices || mCurFrame->mIndices.size() < totalIndexBufferSize)
 		mCurFrame->mIndices = make_shared<Buffer>(commandBuffer.mDevice, "gIndices", align_up(max(totalIndexBufferSize,1u), sizeof(uint32_t)), vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 4);
-	if (!mCurFrame->mInstances || mCurFrame->mInstances.size() < instanceDatas.size())
-		mCurFrame->mInstances = make_shared<Buffer>(commandBuffer.mDevice, "gInstances", max<size_t>(1, instanceDatas.size())*sizeof(InstanceData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	if (!mCurFrame->mMaterialData || mCurFrame->mMaterialData.size_bytes() < materialData.data.size()*sizeof(uint32_t))
-		mCurFrame->mMaterialData = make_shared<Buffer>(commandBuffer.mDevice, "gMaterialData", max<size_t>(1, materialData.data.size())*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	if (!mCurFrame->mLightInstances || mCurFrame->mLightInstances.size() < lightInstances.size())
-		mCurFrame->mLightInstances = make_shared<Buffer>(commandBuffer.mDevice, "gLightInstances", max<size_t>(1, lightInstances.size())*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	if (!mCurFrame->mDistributionData || mCurFrame->mDistributionData.size() < images.distribution_data_size)
-		mCurFrame->mDistributionData = make_shared<Buffer>(commandBuffer.mDevice, "gDistributionData", max<size_t>(1, images.distribution_data_size)*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
 	{ // copy vertices and indices
 		ProfilerRegion s("Copy vertex data", commandBuffer);
@@ -501,10 +564,19 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		commandBuffer.barrier(mCurFrame->mVertices, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 	}
 
+	if (!mCurFrame->mInstances || mCurFrame->mInstances.size() < instanceDatas.size())
+		mCurFrame->mInstances = make_shared<Buffer>(commandBuffer.mDevice, "gInstances", max<size_t>(1, instanceDatas.size())*sizeof(InstanceData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mCurFrame->mMaterialData || mCurFrame->mMaterialData.size_bytes() < materialData.data.size()*sizeof(uint32_t))
+		mCurFrame->mMaterialData = make_shared<Buffer>(commandBuffer.mDevice, "gMaterialData", max<size_t>(1, materialData.data.size())*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mCurFrame->mLightInstances || mCurFrame->mLightInstances.size() < lightInstances.size())
+		mCurFrame->mLightInstances = make_shared<Buffer>(commandBuffer.mDevice, "gLightInstances", max<size_t>(1, lightInstances.size())*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mCurFrame->mDistributionData || mCurFrame->mDistributionData.size() < mCurFrame->mResources.distribution_data_size)
+		mCurFrame->mDistributionData = make_shared<Buffer>(commandBuffer.mDevice, "gDistributionData", max<size_t>(1, mCurFrame->mResources.distribution_data_size)*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+
 	memcpy(mCurFrame->mInstances.data(), instanceDatas.data(), instanceDatas.size()*sizeof(InstanceData));
 	memcpy(mCurFrame->mMaterialData.data(), materialData.data.data(), materialData.data.size()*sizeof(uint32_t));
 	memcpy(mCurFrame->mLightInstances.data(), lightInstances.data(), lightInstances.size()*sizeof(uint32_t));
-	for (const auto&[buf, address] : images.distribution_data_map)
+	for (const auto&[buf, address] : mCurFrame->mResources.distribution_data_map)
 		commandBuffer.copy_buffer(buf, Buffer::View<float>(mCurFrame->mDistributionData, address, buf.size()));
 
 	commandBuffer.barrier(mCurFrame->mDistributionData,
@@ -528,9 +600,13 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 	mTraceBouncePipeline->descriptor("gLightInstances") = mCurFrame->mLightInstances;
 	mTraceBouncePipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lightInstances.size();
 
-	for (const auto&[image, index] : images.images) {
+	for (const auto&[image, index] : mCurFrame->mResources.images) {
 		mTraceVisibilityPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mTraceBouncePipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+	}
+	for (const auto&[vol, index] : mCurFrame->mResources.volume_data_map) {
+		mTraceVisibilityPipeline->descriptor("gVolumes", index) = vol;
+		mTraceBouncePipeline->descriptor("gVolumes", index) = vol;
 	}
 
 	mGradientForwardProjectPipeline->descriptor("gVertices") = mCurFrame->mVertices;
@@ -590,22 +666,34 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	mCurFrame->mViews = make_shared<Buffer>(commandBuffer.mDevice, "gViews", views.size()*sizeof(hlsl::ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
 	memcpy(mCurFrame->mViews.data(), views.data(), mCurFrame->mViews.size_bytes());
 	
-	mCurFrame->mViewMediumIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewMediumIndices", views.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
-	memset(mCurFrame->mViewMediumIndices.data(), -1, mCurFrame->mViewMediumIndices.size_bytes());
-
 	mTraceBouncePipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
+
+	mCurFrame->mViewVolumeIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewVolumeIndices", views.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
+	memset(mCurFrame->mViewVolumeIndices.data(), INVALID_INSTANCE, mCurFrame->mViewVolumeIndices.size_bytes());
+	mNode.for_each_descendant<HeterogeneousVolume>([&](const component_ptr<HeterogeneousVolume>& vol) {
+		for (uint32_t i = 0; i < views.size(); i++) {
+			const float3 view_pos = node_to_world(vol.node()).inverse().transform_point( views[i].camera_to_world.transform_point(float3::Zero()) );
+			auto grid = vol->handle->grid<float>();
+			const nanovdb::Coord& b0 = grid->indexToWorld( grid->tree().root().bbox().min() );
+			const nanovdb::Coord& b1 = grid->indexToWorld( grid->tree().root().bbox().max() );
+			const float3 mn(min(b0[0], b1[0]), min(b0[1], b1[1]), min(b0[2], b1[2]));
+			const float3 mx(max(b0[0], b1[0]), max(b0[1], b1[1]), max(b0[2], b1[2]));
+			if ((view_pos >= mn && view_pos <= mx).all())
+				mCurFrame->mViewVolumeIndices[i] = mCurFrame->mResources.get_index(vol->buffer);
+		}
+	});
 	
 	{ // Visibility
 		ProfilerRegion ps("Visibility", commandBuffer);
 		mTraceVisibilityPipeline->descriptor("gViews") = mCurFrame->mViews;
 		mTraceVisibilityPipeline->descriptor("gPrevViews") = hasHistory ? mPrevFrame->mViews : mCurFrame->mViews;
+		mTraceVisibilityPipeline->descriptor("gViewVolumeIndices") = mCurFrame->mViewVolumeIndices;
 		for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
 			mTraceVisibilityPipeline->descriptor("gVisibility", i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceVisibilityPipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceVisibilityPipeline->descriptor("gAlbedo")   = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceVisibilityPipeline->descriptor("gPathStates") = mCurFrame->mPathBounceData;
 		mTraceVisibilityPipeline->descriptor("gReservoirs") = mCurFrame->mReservoirs;
-		mTraceVisibilityPipeline->descriptor("gViewMediumIndices") = mCurFrame->mViewMediumIndices;
 		commandBuffer.bind_pipeline(mTraceVisibilityPipeline->get_pipeline());
 		mTraceVisibilityPipeline->bind_descriptor_sets(commandBuffer);
 		mTraceBouncePipeline->push_constants(commandBuffer);

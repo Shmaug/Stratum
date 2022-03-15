@@ -25,6 +25,7 @@ enum DebugMode {
 	eAccumLength,
 	eTemporalGradient,
 	eRelativeTemporalGradient,
+	eDirInGradient,
 	eDebugModeCount
 };
 
@@ -56,6 +57,7 @@ inline string to_string(const DebugMode& m) {
 		case DebugMode::eAccumLength: return "Accum Length";
 		case DebugMode::eTemporalGradient: return "Temporal Gradient";
 		case DebugMode::eRelativeTemporalGradient: return "Relative Temporal Gradient (Antilag)";
+		case DebugMode::eDirInGradient: return "Omega In Gradient";
 	}
 };
 #endif

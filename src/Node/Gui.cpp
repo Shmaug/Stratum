@@ -119,6 +119,15 @@ inline void inspector_gui_fn(Mesh* mesh) {
 				}
   }
 }
+inline void inspector_gui_fn(nanovdb::GridHandle<nanovdb::HostBuffer>* grid) {
+  const nanovdb::GridMetaData* metadata = grid->gridMetaData();
+  ImGui::LabelText("grid name", metadata->shortGridName());
+  ImGui::LabelText("grid count", "%u", metadata->gridCount());
+  ImGui::LabelText("grid type", nanovdb::toStr(metadata->gridType()));
+  ImGui::LabelText("grid class", nanovdb::toStr(metadata->gridClass()));
+  ImGui::LabelText("bbox min", "%.02f %.02f %.02f", metadata->worldBBox().min()[0], metadata->worldBBox().min()[1], metadata->worldBBox().min()[2]);
+  ImGui::LabelText("bbox max", "%.02f %.02f %.02f", metadata->worldBBox().max()[0], metadata->worldBBox().max()[1], metadata->worldBBox().max()[2]);
+}
 
 inline void node_graph_gui_fn(Node& n, Node*& selected) {
   ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick|ImGuiTreeNodeFlags_OpenOnArrow;
@@ -462,22 +471,33 @@ Gui::Gui(Node& node) : mNode(node) {
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<Application>(&inspector_gui_fn);
 	register_inspector_gui_fn<Mesh>(&inspector_gui_fn);
+  register_inspector_gui_fn<nanovdb::GridHandle<nanovdb::HostBuffer>>(&inspector_gui_fn);
 
   enum AssetType {
-    eEnvironmentMap,
     eGLTFScene,
     eMitsubaScene,
+    eEnvironmentMap,
+    eNVDBVolume,
+    #ifdef STRATUM_ENABLE_OPENVDB
+    eVDBVolume
+    #endif
   };
+  static const unordered_map<string, AssetType> extensionMap {
+    { ".gltf", eGLTFScene },
+    { ".xml", eMitsubaScene },
+    { ".hdr", eEnvironmentMap },
+    { ".exr", eEnvironmentMap },
+    { ".nvdb", eNVDBVolume },
+    #ifdef STRATUM_ENABLE_OPENVDB
+    { ".vdb", eVDBVolume },
+    #endif
+  };
+
   vector<tuple<fs::path, string, AssetType>> assets;
   for (const string& filepath : app->window().mInstance.find_arguments("assetsFolder"))
-    for (const auto& entry : fs::recursive_directory_iterator(filepath)) {
-      if (entry.path().extension() == ".gltf")
-        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eGLTFScene);
-      else if (entry.path().extension() == ".xml")
-        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eMitsubaScene);
-      else if (entry.path().extension() == ".hdr")
-        assets.emplace_back(entry.path(), entry.path().filename().string(), AssetType::eEnvironmentMap);
-    }
+    for (const auto& entry : fs::recursive_directory_iterator(filepath))
+      if (auto it = extensionMap.find(entry.path().extension().string()); it != extensionMap.end())
+        assets.emplace_back(entry.path(), entry.path().filename().string(), it->second);
 
 	ranges::sort(assets, ranges::less{}, [](const auto& a) { return get<AssetType>(a); });
   
@@ -508,16 +528,23 @@ Gui::Gui(Node& node) : mNode(node) {
             n = filepath.parent_path().filename().string() + "/" + n;
 					if (ImGui::Button(n.c_str()))
 						switch (type) {
+							case AssetType::eEnvironmentMap:
+								app->node().make_child(name).make_component<Material>(load_environment(commandBuffer, filepath));
+								break;
 							case AssetType::eGLTFScene:
 								load_gltf(app->node().make_child(name), commandBuffer, filepath);
 								break;
 							case AssetType::eMitsubaScene:
 								load_mitsuba(app->node().make_child(name), commandBuffer, filepath);
 								break;
-							case AssetType::eEnvironmentMap: {
-								app->node().make_child(filepath.stem().string()).make_component<Material>(load_environment(commandBuffer, filepath));
+							case AssetType::eNVDBVolume:
+                load_nvdb(app->node().make_child(name), commandBuffer, filepath);
 								break;
-							}
+              #ifdef STRATUM_ENABLE_OPENVDB
+							case AssetType::eVDBVolume:
+                load_vdb(app->node().make_child(name), commandBuffer, filepath);
+								break;
+              #endif
 						}
         }
 				break;

@@ -1,4 +1,4 @@
-#include "Scene.hpp"
+#include "../Scene.hpp"
 
 #include <pugixml.hpp>
 #include <regex>

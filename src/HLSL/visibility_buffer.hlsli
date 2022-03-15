@@ -3,66 +3,10 @@
 
 #define VISIBILITY_BUFFER_COUNT 3
 
-struct NEECache {
-};
-
-struct PathBounceState {
-	uint4 rng;
-	float3 throughput;
-	float eta_scale;
-	float3 ray_origin;
-	uint radius_spread;
-	float3 position;
-	uint instance_primitive_index;
-	float2 bary;
-	uint medium_index;
-	float dir_pdf;
-
-#ifdef __HLSL_VERSION
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
-	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
-	inline RayDifferential ray() {
-		RayDifferential r;
-		r.origin    = ray_origin;
-		r.direction = normalize(position - ray_origin);
-		r.t_min = 0;
-		r.t_max = 1.#INF;
-		r.radius = radius();
-		r.spread = spread();
-		return r;
-	}
-#endif
-};
-
 #ifdef __HLSL_VERSION
 
 RWTexture2D<uint4> gVisibility[VISIBILITY_BUFFER_COUNT];
 RWTexture2D<uint4> gPrevVisibility[VISIBILITY_BUFFER_COUNT];
-
-RWStructuredBuffer<PathBounceState> gPathStates;
-inline void store_path_bounce_state(out PathBounceState p,
-																	  const uint4 rng,
-																	  const float3 throughput,
-																	  const float eta_scale,
-																	  const float3 position,
-																	  const float2 bary,
-																	  const float3 ray_origin,
-																	  const float radius,
-																	  const float spread,
-																	  const uint instance_primitive_index,
-																		const uint medium_index) {
-	p.rng = rng;
-	p.throughput = throughput;
-	p.eta_scale = eta_scale;
-	p.ray_origin = ray_origin;
-	p.radius_spread = pack_f16_2(float2(radius, spread));
-	p.position = position;
-	p.instance_primitive_index = instance_primitive_index;
-	p.bary = bary;
-	p.medium_index = medium_index;
-}
 
 struct VisibilityInfo {
 	uint4 data[VISIBILITY_BUFFER_COUNT];

@@ -58,12 +58,12 @@ struct Environment {
 	uint marginal_cdf;
 	uint row_cdf;
 
-	template<typename Real, bool TransportToLight>
-	inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
+	template<bool TransportToLight, typename Real, typename Real3>
+	inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
 		uint w, h;
 		emission.image().GetDimensions(w, h);
 		const float2 uv = sample_dist2d(gDistributions, marginal_cdf, row_cdf, w, h, rnd.xy);
-		BSDFSampleRecord<Real> r;
+		BSDFSampleRecord<Real3> r;
 		r.dir_out = spherical_uv_to_cartesian(uv);
 		if (emission.has_image())
 			r.eval.f = emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
@@ -74,16 +74,17 @@ struct Environment {
 		return r;
 	}
 
-    template<typename Real>
-	inline Real eval_pdfW(const vector<Real,3> dir_out) {
+	template<typename Real, typename Real3>
+	inline Real eval_pdfW(const Real3 dir_out) {
 		const float2 uv = cartesian_to_spherical_uv(dir_out);
 		uint w, h;
 		emission.image().GetDimensions(w, h);
 		return dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	}
-    template<typename Real, bool TransportToLight>
-	inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
-		BSDFEvalRecord<Real> r;
+	
+	template<bool TransportToLight, typename Real, typename Real3>
+	inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+		BSDFEvalRecord<Real3> r;
 		r.f = 0;
 		uint w, h;
 		emission.image().GetDimensions(w, h);
@@ -92,8 +93,8 @@ struct Environment {
 		return r;
 	}
 
-    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
-    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return 0; }
+	template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
+	template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return 0; }
 
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
 		emission.load(bytes, address);
@@ -111,12 +112,12 @@ struct Environment {
 	Buffer::View<float> marginal_cdf;
 	Buffer::View<float> row_cdf;
 
-	inline void store(ByteAppendBuffer& bytes, ImagePool& images) const {
-		emission.store(bytes, images);
-		bytes.Append(images.get_index(marginal_pdf));
-		bytes.Append(images.get_index(row_pdf));
-		bytes.Append(images.get_index(marginal_cdf));
-		bytes.Append(images.get_index(row_cdf));
+	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
+		emission.store(bytes, resources);
+		bytes.Append(resources.get_index(marginal_pdf));
+		bytes.Append(resources.get_index(row_pdf));
+		bytes.Append(resources.get_index(marginal_cdf));
+		bytes.Append(resources.get_index(row_cdf));
 	}
 	inline void inspector_gui() {
 		image_value_field("Emission", emission);

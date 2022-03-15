@@ -10,13 +10,15 @@
 #define SAMPLE_FLAG_MIS BIT(3)
 #define SAMPLE_FLAG_RAY_CONE_LOD BIT(4)
 
-#define INSTANCE_TYPE_SPHERE 0
-#define INSTANCE_TYPE_TRIANGLES 1
+#define INSTANCE_TYPE_TRIANGLES 0
+#define INSTANCE_TYPE_SPHERE 1
+#define INSTANCE_TYPE_VOLUME 2
 
 #define BVH_FLAG_NONE 0
 #define BVH_FLAG_TRIANGLES BIT(0)
 #define BVH_FLAG_SPHERES BIT(1)
-#define BVH_FLAG_EMITTER BIT(2)
+#define BVH_FLAG_VOLUME BIT(2)
+#define BVH_FLAG_EMITTER BIT(3)
 
 #define INVALID_INSTANCE 0xFFFF
 #define INVALID_PRIMITIVE 0xFFFF
@@ -26,7 +28,9 @@
 struct InstanceData {
 	// instance -> world
 	TransformData transform;
-	// instance -> prev world
+	// world -> instance
+	TransformData inv_transform;
+	// cur instance -> prev world
 	TransformData prev_transform;
 
 	uint4 v;
@@ -34,29 +38,29 @@ struct InstanceData {
 	inline uint type() CONST_CPP { return BF_GET(v[0], 0, 4); }
 	inline uint material_address() CONST_CPP { return BF_GET(v[0], 4, 28); }
 
-	// sphere
-	inline float radius() CONST_CPP { return asfloat(v[1]); }
-
 	// mesh
 	inline uint prim_count() CONST_CPP { return BF_GET(v[1], 0, 16); }
 	inline uint index_stride() CONST_CPP { return BF_GET(v[1], 16, 4); }
 	inline uint first_vertex() CONST_CPP { return v[2]; }
 	inline uint indices_byte_offset() CONST_CPP { return v[3]; }
+
+	// sphere
+	inline float radius() CONST_CPP { return asfloat(v[1]); }
+
+	// volume
+	inline uint volume_index() CONST_CPP { return v[1]; }
 };
-inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, uint materialAddress, float radius) {
+inline InstanceData make_instance_triangles(const TransformData objectToWorld,
+																						const TransformData prevObjectToWorld,
+																						const uint materialAddress,
+																						const uint primCount,
+																						const uint firstVertex,
+																						const uint indexByteOffset,
+																						const uint indexStride) {
 	InstanceData r;
 	r.transform = objectToWorld;
-	r.prev_transform = tmul(prevObjectToWorld, objectToWorld.inverse());
-	r.v = 0;
-	BF_SET(r.v[0], INSTANCE_TYPE_SPHERE, 0, 4);
-	BF_SET(r.v[0], materialAddress, 4, 28);
-	r.v[1] = asuint(radius);
-	return r;
-}
-inline InstanceData make_instance_triangles(const TransformData objectToWorld, const TransformData prevObjectToWorld, uint materialAddress, uint primCount, uint firstVertex, uint indexByteOffset, uint indexStride) {
-	InstanceData r;
-	r.transform = objectToWorld;
-	r.prev_transform = tmul(prevObjectToWorld, objectToWorld.inverse());
+	r.inv_transform = objectToWorld.inverse();
+	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
 	r.v = 0;
 	BF_SET(r.v[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
 	BF_SET(r.v[0], materialAddress, 4, 28);
@@ -64,6 +68,28 @@ inline InstanceData make_instance_triangles(const TransformData objectToWorld, c
 	BF_SET(r.v[1], indexStride, 16, 4);
 	r.v[2] = firstVertex;
 	r.v[3] = indexByteOffset;
+	return r;
+}
+inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const float radius) {
+	InstanceData r;
+	r.transform = objectToWorld;
+	r.inv_transform = objectToWorld.inverse();
+	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
+	r.v = 0;
+	BF_SET(r.v[0], INSTANCE_TYPE_SPHERE, 0, 4);
+	BF_SET(r.v[0], materialAddress, 4, 28);
+	r.v[1] = asuint(radius);
+	return r;
+}
+inline InstanceData make_instance_volume(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const uint volume_index) {
+	InstanceData r;
+	r.transform = objectToWorld;
+	r.inv_transform = objectToWorld.inverse();
+	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
+	r.v = 0;
+	BF_SET(r.v[0], INSTANCE_TYPE_VOLUME, 0, 4);
+	BF_SET(r.v[0], materialAddress, 4, 28);
+	r.v[1] = volume_index;
 	return r;
 }
 
@@ -141,6 +167,36 @@ struct ShadingFrame {
     inline float3 to_local(const float3 v_w) { return float3(dot(v_w, t), dot(v_w, b), dot(v_w, n)); }
 };
 
+struct PathBounceState {
+	uint4 rng;
+	float3 throughput;
+	float eta_scale;
+	float3 ray_origin;
+	uint radius_spread;
+	float3 position;
+	uint instance_primitive_index;
+	float2 bary;
+	uint vol_index;
+	float dir_pdf;
+
+#ifdef __HLSL_VERSION
+	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
+	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
+	inline RayDifferential ray() {
+		RayDifferential r;
+		r.origin    = ray_origin;
+		r.direction = normalize(position - ray_origin);
+		r.t_min = 0;
+		r.t_max = 1.#INF;
+		r.radius = radius();
+		r.spread = spread();
+		return r;
+	}
+#endif
+};
+
 #ifdef __HLSL_VERSION
 
 inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, const uint viewCount) {
@@ -157,15 +213,11 @@ inline float3 ray_offset(const float3 P, const float3 Ng) {
   const float int_scale = 256.0f;
   const int3 of_i = int3((int)(int_scale * Ng.x), (int)(int_scale * Ng.y), (int)(int_scale * Ng.z));
 
-  const float3 p_i = float3(asfloat(asint(P.x) + ((P.x < 0) ? -of_i.x : of_i.x)),
-                      		 	asfloat(asint(P.y) + ((P.y < 0) ? -of_i.y : of_i.y)),
-                      		 	asfloat(asint(P.z) + ((P.z < 0) ? -of_i.z : of_i.z)));
-	
   const float origin = 1 / 32.0;
   const float float_scale = 1 / 65536.0;
-  return float3(abs(P.x) < origin ? P.x + float_scale * Ng.x : p_i.x,
-                abs(P.y) < origin ? P.y + float_scale * Ng.y : p_i.y,
-                abs(P.z) < origin ? P.z + float_scale * Ng.z : p_i.z);
+  return float3(abs(P.x) < origin ? P.x + float_scale * Ng.x : asfloat(asint(P.x) + ((P.x < 0) ? -of_i.x : of_i.x)),
+                abs(P.y) < origin ? P.y + float_scale * Ng.y : asfloat(asint(P.y) + ((P.y < 0) ? -of_i.y : of_i.y)),
+                abs(P.z) < origin ? P.z + float_scale * Ng.z : asfloat(asint(P.z) + ((P.z < 0) ? -of_i.z : of_i.z)));
 }
 
 inline uint3 load_tri_(ByteAddressBuffer indices, uint indexByteOffset, uint indexStride, uint primitiveIndex) {

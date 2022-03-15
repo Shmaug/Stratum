@@ -49,7 +49,9 @@ private:
 
 	Node& mNode;
 	shared_ptr<AccelerationStructure> mTopLevel;
-	shared_ptr<AccelerationStructure> mUnitCubeAS;
+	
+	unordered_map<size_t, shared_ptr<AccelerationStructure>> mAABBs;
+
 	unordered_map<Mesh*, Buffer::View<hlsl::PackedVertexData>> mMeshVertices;
 	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
 	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
@@ -94,7 +96,7 @@ private:
 		Buffer::View<hlsl::PathBounceState> mPathBounceData;
 
 		Buffer::View<hlsl::ViewData> mViews;
-		Buffer::View<uint32_t> mViewMediumIndices;
+		Buffer::View<uint32_t> mViewVolumeIndices;
 		
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
 		Image::View mRadiance;
@@ -106,6 +108,8 @@ private:
 		Image::View mGradientSamples;
 		array<Image::View, 2> mTemp;
 		array<array<Image::View, 2>, 2> mDiffTemp;
+
+		hlsl::ResourcePool mResources;
 
 		uint32_t mFrameId;
 	};

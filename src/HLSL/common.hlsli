@@ -150,7 +150,7 @@ inline float2 ray_sphere(const float3 origin, const float3 dir, const float3 p, 
 	det = sqrt(det * inv_a) * inv_a;
 	return -float2(1,1)*b*inv_a + float2(-det, det);
 }
-inline float2 ray_box(const float3 origin, const float3 inv_dir, const float3 mn, const float3 mx) {
+inline float2 ray_aabb(const float3 origin, const float3 inv_dir, const float3 mn, const float3 mx) {
 	#ifdef __cplusplus
 	const float3 t0 = (mn - origin).cwiseProduct(inv_dir);
 	const float3 t1 = (mx - origin).cwiseProduct(inv_dir);

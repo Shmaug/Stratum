@@ -1,4 +1,4 @@
-#include "Scene.hpp"
+#include "../Scene.hpp"
 #include <miniz/miniz.h>
 
 #define MTS_FILEFORMAT_VERSION_V3 0x0003

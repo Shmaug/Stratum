@@ -7,10 +7,10 @@ struct Lambertian {
     ImageValue3 reflectance;
     
 #ifdef __HLSL_VERSION
-    template<typename Real, bool TransportToLight>
-    inline BSDFEvalRecord<Real> eval(const vector<Real,3> dir_in, const vector<Real,3> dir_out, const PathVertexGeometry vertex) {
+	template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
         const Real ndotwo = max(0, dot(vertex.shading_normal, dir_out));
-        BSDFEvalRecord<Real> r;
+        BSDFEvalRecord<Real3> r;
         if (dot(vertex.shading_normal, dir_in) < 0) {
             r.f = 0;
             r.pdfW = 0;
@@ -21,17 +21,16 @@ struct Lambertian {
         return r;
     }
 
-    template<typename Real, bool TransportToLight>
-    inline BSDFSampleRecord<Real> sample(const vector<Real,3> rnd, const vector<Real,3> dir_in, const PathVertexGeometry vertex) {
+	template<bool TransportToLight, typename Real, typename Real3>
+    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
+        BSDFSampleRecord<Real3> r;
         if (dot(dir_in, vertex.shading_normal) < 0) {
-            BSDFSampleRecord<Real> r;
             r.eval.f = 0;
             r.eval.pdfW = 0;
             return r;
         }
 
-        const vector<Real,3> local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
-        BSDFSampleRecord<Real> r;
+        const Real3 local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
         r.dir_out = vertex.shading_frame().to_world(local_dir_out);
         r.eta = 0;
         r.roughness = 1;
@@ -40,8 +39,8 @@ struct Lambertian {
         return r;
     }
 
-    template<typename Real> inline vector<Real,3> eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(reflectance); }
-    template<typename Real> inline vector<Real,3> eval_emission(const PathVertexGeometry vertex) { return 0; }
+    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(reflectance); }
+    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return 0; }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         reflectance.load(bytes, address);
@@ -51,8 +50,8 @@ struct Lambertian {
 
 #ifdef __cplusplus
 
-    inline void store(ByteAppendBuffer& bytes, ImagePool& images) const {
-        reflectance.store(bytes, images);
+    inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
+        reflectance.store(bytes, resources);
     }
     inline void inspector_gui() {
         image_value_field("Reflectance", reflectance);

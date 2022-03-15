@@ -1,4 +1,4 @@
-#include "Scene.hpp"
+#include "../Scene.hpp"
 
 #define TINYGLTF_USE_CPP14
 #define TINYGLTF_NO_STB_IMAGE_WRITE

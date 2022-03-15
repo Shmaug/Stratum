@@ -20,11 +20,11 @@
 void main(uint3 index : SV_DispatchThreadId) {
 	if (index.x >= gPushConstants.gCount) return;
 	PackedVertexData v;
-	float2 uv = gPushConstants.gTexcoordStride > 0 ? asfloat(gTexcoords.Load2(index.x*gPushConstants.gTexcoordStride)) : 0;
-	v.position = asfloat(gPositions.Load3(index.x*gPushConstants.gPositionStride));
+	float2 uv = gPushConstants.gTexcoordStride > 0 ? gTexcoords.Load<float2>(index.x*gPushConstants.gTexcoordStride) : 0;
+	v.position = gPositions.Load<float3>(index.x*gPushConstants.gPositionStride);
 	v.u = uv.x;
-	v.normal = asfloat(gNormals.Load3(index.x*gPushConstants.gNormalStride));
+	v.normal = gNormals.Load<float3>(index.x*gPushConstants.gNormalStride);
 	v.v = uv.y;
-	v.tangent = gPushConstants.gTangentStride > 0 ? asfloat(gTangents.Load4(index.x*gPushConstants.gTangentStride)) : 0;
+	v.tangent = gPushConstants.gTangentStride > 0 ? gTangents.Load<float4>(index.x*gPushConstants.gTangentStride) : 0;
 	gVertices[index.x] = v;
 }

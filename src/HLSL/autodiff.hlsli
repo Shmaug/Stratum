@@ -4,7 +4,7 @@
 template<typename Real, uint M, uint N>
 inline matrix<Real,M,N> outer_prod(const vector<Real,M> u, const vector<Real,N> v) {
 	matrix<Real,M,N> r;
-	for (uint i = 0; i < N; i++)
+	for (uint i = 0; i < M; i++)
 		for (uint j = 0; j < N; j++)
 			r[i][j] = u[i]*v[j];
 	return r;
@@ -126,19 +126,11 @@ class DiffScalarN {
 };
 
 template<typename Real, uint N, uint DerivativeLevel>
-inline DiffScalarN<Real, N, DerivativeLevel> make_diff_scalar(const Real v) {
+inline DiffScalarN<Real, N, DerivativeLevel> make_diff_scalar(const Real v, const uint var_index = -1) {
 	DiffScalarN<Real, N, DerivativeLevel> r;
 	r.value = v;
 	r.grad = 0;
-	r.hess = 0;
-	return r;
-}
-template<typename Real, uint N, uint DerivativeLevel>
-inline DiffScalarN<Real, N, DerivativeLevel> make_diff_scalar_var(const Real v, const uint var_index) {
-	DiffScalarN<Real, N, DerivativeLevel> r;
-	r.value = v;
-	r.grad = 0;
-	r.grad[var_index] = 1;
+	if (var_index != -1) r.grad[var_index] = 1;
 	r.hess = 0;
 	return r;
 }
