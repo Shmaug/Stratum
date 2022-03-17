@@ -14,8 +14,7 @@ struct RoughDielectric {
 
 #ifdef __HLSL_VERSION
 
-    template<typename Real, typename Real3>
-    inline Real eval_pdfW(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+    inline Real eval_pdfW(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
 
         // Flip the shading frame if it is inconsistent with the geometry normal
@@ -29,7 +28,7 @@ struct RoughDielectric {
         // (internal/external), otherwise we use external/internal.
         const Real local_eta = dot(vertex.geometry_normal, dir_in) > 0 ? eta : 1 / eta;
 
-        Real3 half_vector;
+        Vector3 half_vector;
         if (reflect) {
             half_vector = normalize(dir_in + dir_out);
         } else {
@@ -62,8 +61,8 @@ struct RoughDielectric {
         }
     }
     
-	template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+	template<bool TransportToLight>
+    inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
 
         // Flip the shading frame if it is inconsistent with the geometry normal
@@ -77,12 +76,12 @@ struct RoughDielectric {
         // (internal/external), otherwise we use external/internal.
         const Real local_eta = ng_dot_in > 0 ? eta : 1 / eta;
 
-        const Real3 Ks = vertex.eval(specular_reflectance);
-        const Real3 Kt = vertex.eval(specular_transmittance);
+        const Spectrum Ks = vertex.eval(specular_reflectance);
+        const Spectrum Kt = vertex.eval(specular_transmittance);
         // Clamp roughness to avoid numerical issues.
         const Real rgh = clamp(vertex.eval(roughness), gMinRoughness, 1);
 
-        Real3 half_vector;
+        Vector3 half_vector;
         if (reflect) {
             half_vector = normalize(dir_in + dir_out);
         } else {
@@ -109,7 +108,7 @@ struct RoughDielectric {
         const Real F = fresnel_dielectric(h_dot_in, local_eta);
         const Real D = GTR2(h_dot_n, rgh);
         const Real G = smith_masking_gtr2(frame.to_local(dir_in), rgh) * smith_masking_gtr2(frame.to_local(dir_out), rgh);
-        BSDFEvalRecord<Real3> r;
+        BSDFEvalRecord r;
         if (reflect) {
             r.f = Ks * (F * D * G) / (4 * abs(dot(frame.n, dir_in)));
         } else {
@@ -130,12 +129,12 @@ struct RoughDielectric {
             // "Microfacet Models for Refraction through Rough Surfaces"
             r.f = Kt * (eta_factor * (1 - F) * D * G * local_eta * local_eta * abs(h_dot_out * h_dot_in)) / (abs(dot(frame.n, dir_in)) * sqrt_denom * sqrt_denom);
         }
-        r.pdfW = eval_pdfW<Real, Real3>(dir_in, dir_out, vertex);
+        r.pdfW = eval_pdfW(dir_in, dir_out, vertex);
         return r;
     }
 
-    template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
+    template<bool TransportToLight>
+    inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
         const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
 
         // If we are going into the surface, then we use normal eta
@@ -151,10 +150,10 @@ struct RoughDielectric {
         const Real rgh = clamp(vertex.eval(roughness), gMinRoughness, 1);
         // Sample a micro normal and transform it to world space -- this is our half-vector.
         const Real alpha = rgh * rgh;
-        const Real3 local_dir_in = frame.to_local(dir_in);
-        const Real3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
+        const Vector3 local_dir_in = frame.to_local(dir_in);
+        const Vector3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
 
-        Real3 half_vector = frame.to_world(local_micro_normal);
+        Vector3 half_vector = frame.to_world(local_micro_normal);
         // Flip half-vector if it's below surface
         if (dot(half_vector, frame.n) < 0)
             half_vector = -half_vector;
@@ -166,11 +165,11 @@ struct RoughDielectric {
 
         if (rnd.z <= F) {
             // Reflection
-            BSDFSampleRecord<Real3> r;
+            BSDFSampleRecord r;
             r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
             r.eta = 0;
             r.roughness = (min16float)rgh;
-            r.eval = eval<TransportToLight, Real, Real3>(dir_in, r.dir_out, vertex);
+            r.eval = eval<TransportToLight>(dir_in, r.dir_out, vertex);
             return r;
         } else {
             // Refraction
@@ -180,7 +179,7 @@ struct RoughDielectric {
             if (h_dot_out_sq <= 0) {
                 // Total internal reflection
                 // This shouldn't really happen, as F will be 1 in this case.
-                BSDFSampleRecord<Real3> r;
+                BSDFSampleRecord r;
                 r.dir_out = 0;
                 r.eta = 0;
                 r.eval.f = 0;
@@ -192,17 +191,17 @@ struct RoughDielectric {
                 half_vector = -half_vector;
             
             const Real h_dot_out = sqrt(h_dot_out_sq);
-            BSDFSampleRecord<Real3> r;
+            BSDFSampleRecord r;
             r.dir_out = normalize(-dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector);
             r.eta = (min16float)local_eta;
             r.roughness = (min16float)rgh;
-            r.eval = eval<TransportToLight, Real, Real3>(dir_in, r.dir_out, vertex);
+            r.eval = eval<TransportToLight>(dir_in, r.dir_out, vertex);
             return r;
         }
     }
 
-    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(specular_reflectance); }
-    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return 0; }
+    inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(specular_reflectance); }
+    inline Spectrum eval_emission(const PathVertexGeometry vertex) { return 0; }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         specular_reflectance.load(bytes, address);

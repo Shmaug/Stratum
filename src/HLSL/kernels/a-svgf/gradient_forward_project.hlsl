@@ -117,7 +117,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		for (uint i = 0; i < VISIBILITY_BUFFER_COUNT; i++)
 			gVisibility[i][idx_curr] = v_prev.data[i];
 		
-		gPathStates[index_1d].rng = v_prev.rng_seed();
+		gPathStates[index_1d].rng_state = v_prev.rng_seed();
 		gPathStates[index_1d].position = instance.transform.transform_point(pos_obj);
 		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
 		gPathStates[index_1d].bary = v_prev.bary();

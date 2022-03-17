@@ -125,31 +125,11 @@ inline PathVertexGeometry instance_sphere_geometry(const InstanceData instance, 
 	r.inv_uv_size = (length(dpdu) + length(dpdv)) / 2;
 	return r;
 }
-inline PathVertexGeometry instance_volume_geometry(const InstanceData instance, const float3 local_pos) {
-	pnanovdb_buf_t buf = gVolumes[instance.volume_index()];
-	pnanovdb_grid_handle_t grid = pnanovdb_grid_handle_t(0);
-	pnanovdb_root_handle_t root = pnanovdb_tree_get_root(buf, pnanovdb_grid_get_tree(buf, grid));
-	const pnanovdb_coord_t b0 = pnanovdb_grid_index_to_worldf(buf, grid, pnanovdb_root_get_bbox_min(buf, root));
-	const pnanovdb_coord_t b1 = pnanovdb_grid_index_to_worldf(buf, grid, pnanovdb_root_get_bbox_max(buf, root) + pnanovdb_coord_uniform(1));
-	const pnanovdb_coord_t bbox_min = min(b0,b1);
-	const pnanovdb_coord_t bbox_max = max(b0,b1);
-	const pnanovdb_coord_t center = (bbox_max + bbox_min) / 2;
-	const pnanovdb_coord_t half_extent = (bbox_max - bbox_min) / 2;
-
-	const float3 dp = (local_pos - center) / half_extent;
-	const float3 adp = abs(dp);
-	float3 n = 0;
-	if (adp.x > adp.y && adp.x > adp.z)
-		n.x = dp.x > 0 ? 1 : -1;
-	else if (adp.y > adp.x && adp.y > adp.z)
-		n.y = dp.y > 0 ? 1 : -1;
-	else
-		n.z = dp.z > 0 ? 1 : -1;
-
+inline PathVertexGeometry instance_volume_geometry(const InstanceData instance, const float3 local_position) {
 	PathVertexGeometry r;
-	r.position = instance.transform.transform_point(local_pos);
+	r.position = instance.transform.transform_point(local_position);
 	r.shape_area = 0;
-	r.geometry_normal = r.shading_normal = normalize(instance.transform.transform_vector(n));
+	r.geometry_normal = r.shading_normal = 0;
 	r.mean_curvature = 0;
 	r.tangent = 0;
 	r.uv = 0;

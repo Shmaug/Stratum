@@ -5,16 +5,19 @@
 
 #ifdef __HLSL_VERSION
 
-template<typename Real3>
+#ifndef Real
+#define Real float
+#define Vector3 float3
+#define Spectrum float3
+#endif
+
 struct BSDFEvalRecord {
-	Real3 f;
+	Spectrum f;
 	float pdfW;
 };
-
-template<typename Real3>
 struct BSDFSampleRecord {
-	BSDFEvalRecord<Real3> eval;
-	Real3 dir_out;
+	BSDFEvalRecord eval;
+	Vector3 dir_out;
 	// The index of refraction ratio. Set to 0 if it's not a transmission event.
 	min16float eta;
 	min16float roughness;
@@ -26,10 +29,10 @@ struct NullBSDF {
 
 	// outputs the BSDF times the cosine between outgoing direction and the shading normal, evaluated at a point.
 	// When the transport direction is towards the lights, dir_in is the view direction, and dir_out is the light direction.
-	template<bool TransportToLight, typename Real, typename Real3>
-	inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
-		BSDFEvalRecord<Real3> e;
-		e.f = Real3(1,0,1);
+	template<bool TransportToLight>
+	inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
+		BSDFEvalRecord e;
+		e.f = Spectrum(1,0,1);
 		e.pdfW = 0;
 		return e;
 	}
@@ -37,17 +40,17 @@ struct NullBSDF {
 	// samples an outgoing direction. Also returns the index of refraction
 	// Returns 0 if the sampling failed (e.g., if the incoming direction is invalid).
 	// If dir == TO_LIGHT, incoming direction is the view direction and we're sampling for the light direction.
-	template<bool TransportToLight, typename Real, typename Real3>
-	inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
-		BSDFSampleRecord<Real3> s;
+	template<bool TransportToLight>
+	inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
+		BSDFSampleRecord s;
 		s.dir_out = 0;
 		s.eta = 0;
 		s.roughness = 0;
-		s.eval = eval<TransportToLight, Real, Real3>(dir_in, s.dir_out, vertex);
+		s.eval = eval<TransportToLight>(dir_in, s.dir_out, vertex);
 		return s;
 	}
-	template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return 0; }
-	template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return 0; }
+	inline Spectrum eval_emission(const PathVertexGeometry vertex) { return 0; }
+	inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return 0; }
 };
 #endif
 
@@ -59,27 +62,27 @@ struct NullBSDF {
 #include "materials/het_volume.hlsli"
 
 #define FOR_EACH_BSDF_TYPE(FN) \
-	FN ( Lambertian ) 					 \
-	FN ( Emissive )        			 \
-	FN ( Environment )     			 \
-	FN ( RoughPlastic )    			 \
-	FN ( RoughDielectric )			 \
-	FN ( HeterogeneousVolume )
+	FN( Lambertian ) 						 \
+	FN( Emissive )        			 \
+	FN( Environment )     			 \
+	FN( HeterogeneousVolume )		 \
+	FN( RoughPlastic )					 \
+	FN( RoughDielectric )
 	/* Append BSDF types here */
 
-#define ENUMIFY(T) e##T ,
+#define ENUMIFY(T) e ## T ,
 enum BSDFType : uint { FOR_EACH_BSDF_TYPE( ENUMIFY ) eBSDFTypeCount };
 #undef ENUMIFY
 
 #ifdef __HLSL_VERSION
 
-template<bool TransportToLight, typename Real, typename Real3>
-inline BSDFSampleRecord<Real3> sample_material(ByteAddressBuffer data, uint address, const float3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
+template<bool TransportToLight>
+inline BSDFSampleRecord sample_material(ByteAddressBuffer data, uint address, const float3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
 	#define CASE_FN(BSDF_T) \
 	case e##BSDF_T: { \
 		BSDF_T bsdf; \
 		bsdf.load(data, address); \
-		return bsdf.sample<TransportToLight, Real, Real3>(rnd, dir_in, vertex); } \
+		return bsdf.sample<TransportToLight>(rnd, dir_in, vertex); } \
 
 	const uint type = data.Load(address); address += 4;
 	switch (type) {
@@ -88,29 +91,13 @@ inline BSDFSampleRecord<Real3> sample_material(ByteAddressBuffer data, uint addr
 	}
 	#undef CASE_FN
 }
-template<bool TransportToLight, typename Real, typename Real3>
-inline BSDFEvalRecord<Real3> eval_material(ByteAddressBuffer data, uint address, const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+template<bool TransportToLight>
+inline BSDFEvalRecord eval_material(ByteAddressBuffer data, uint address, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
 	#define CASE_FN(BSDF_T) \
 	case e##BSDF_T: { \
 		BSDF_T bsdf; \
 		bsdf.load(data, address); \
-		return bsdf.eval<TransportToLight, Real, Real3>(dir_in, dir_out, vertex); } \
-
-	const uint type = data.Load(address); address += 4;
-	switch (type) {
-	default:
-	FOR_EACH_BSDF_TYPE( CASE_FN )
-	}
-	#undef CASE_FN
-}
-
-template<typename Real3>
-inline Real3 eval_material_albedo(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
-	#define CASE_FN(BSDF_T) \
-	case e##BSDF_T: { \
-		BSDF_T bsdf; \
-		bsdf.load(data, address); \
-		return bsdf.eval_albedo<Real3>(vertex); } \
+		return bsdf.eval<TransportToLight>(dir_in, dir_out, vertex); } \
 
 	const uint type = data.Load(address); address += 4;
 	switch (type) {
@@ -120,13 +107,12 @@ inline Real3 eval_material_albedo(ByteAddressBuffer data, uint address, const Pa
 	#undef CASE_FN
 }
 
-template<typename Real3>
-inline Real3 eval_material_emission(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
+inline Spectrum eval_material_albedo(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
 	#define CASE_FN(BSDF_T) \
 	case e##BSDF_T: { \
 		BSDF_T bsdf; \
 		bsdf.load(data, address); \
-		return bsdf.eval_emission<Real3>(vertex); } \
+		return bsdf.eval_albedo(vertex); } \
 
 	const uint type = data.Load(address); address += 4;
 	switch (type) {
@@ -134,6 +120,20 @@ inline Real3 eval_material_emission(ByteAddressBuffer data, uint address, const 
 	FOR_EACH_BSDF_TYPE( CASE_FN )
 	}
 	#undef CASE_FN
+}
+
+inline Spectrum eval_material_emission(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
+	const uint type = data.Load(address); address += 4;
+	if (type == BSDFType::eEmissive) {
+		Emissive bsdf;
+		bsdf.load(data, address);
+		return bsdf.eval_emission(vertex);
+	} else if (type == BSDFType::eEnvironment) {
+		Environment bsdf;
+		bsdf.load(data, address);
+		return bsdf.eval_emission(vertex);
+	} else
+		return 0;
 }
 
 #undef BSDF_SWITCH

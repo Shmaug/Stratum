@@ -3,31 +3,27 @@
 
 #include "common.hlsli"
 
-template<typename Real>
 struct PDFMeasure {
-	Real pdf;
-	Real G;
+	float pdf;
+	float G;
 	bool is_solid_angle;
 	inline float solid_angle() {return is_solid_angle ? pdf : pdf/G; }
 	inline float area() {return is_solid_angle ? pdf*G : pdf; }
 };
-template<typename Real>
-inline PDFMeasure<Real> make_area_pdf(const Real pdfA, const Real cos_theta, const Real dist) {
-	PDFMeasure<Real> pdf;
+inline PDFMeasure make_area_pdf(const float pdfA, const float cos_theta, const float dist) {
+	PDFMeasure pdf;
 	pdf.pdf = pdfA;
 	pdf.G = cos_theta / pow2(dist);
 	pdf.is_solid_angle = false;
 	return pdf;
 }
-template<typename Real>
-inline PDFMeasure<Real> make_solid_angle_pdf(const Real pdfW, const Real cos_theta, const Real dist) {
-	PDFMeasure<Real> pdf;
+inline PDFMeasure make_solid_angle_pdf(const float pdfW, const float cos_theta, const float dist) {
+	PDFMeasure pdf;
 	pdf.pdf = pdfW;
 	pdf.G = cos_theta / pow2(dist);
 	pdf.is_solid_angle = true;
 	return pdf;
 }
-
 
 struct LightSampleRecord {
 	float3 position_or_bary;
@@ -36,7 +32,7 @@ struct LightSampleRecord {
 	uint material_address;
 	float3 to_light;
 	float dist;
-	PDFMeasure<float> pdf;
+	PDFMeasure pdf;
 
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
@@ -53,11 +49,11 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 		Environment env;
 		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
 		env.load(gMaterialData, tmp);
-		const BSDFSampleRecord<float3> s = env.sample<true,float,float3>(rnd.xyz, dir_in, v);
+		const BSDFSampleRecord s = env.sample<true>(rnd.xyz, dir_in, v);
 		ls.radiance = s.eval.f;
 		ls.to_light = s.dir_out;
 		ls.dist = 1.#INF;
-		ls.pdf = make_solid_angle_pdf<float>(s.eval.pdfW, 1, 1);
+		ls.pdf = make_solid_angle_pdf(s.eval.pdfW, 1, 1);
 		ls.position_or_bary = s.dir_out;
 	} else if (gSampleLights) {
 		// pick random light
@@ -113,7 +109,7 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 				break;
 			}
 		}
-		ls.radiance = eval_material_emission<float3>(gMaterialData, ls.material_address, g);
+		ls.radiance = eval_material_emission(gMaterialData, ls.material_address, g);
 		ls.pdf.pdf /= (float)gPushConstants.gLightCount;
 	}
 	if (gSampleBG && gSampleLights)
@@ -121,17 +117,17 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 	return ls;
 }
 
-inline PDFMeasure<float> light_sample_pdf(const PathVertex light_vertex, const float3 ref_pos) {
-	PDFMeasure<float> pdf;
+inline PDFMeasure light_sample_pdf(const PathVertex light_vertex, const float3 ref_pos) {
+	PDFMeasure pdf;
 
 	if (light_vertex.instance_index() == INVALID_INSTANCE) {
-		if (!gSampleBG) return make_area_pdf<float>(0, 1, 1);
+		if (!gSampleBG) return make_area_pdf(0, 1, 1);
 		Environment env;
 		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
 		env.load(gMaterialData, tmp);
-		return make_solid_angle_pdf<float>(env.eval_pdfW<float, float3>(light_vertex.g.position)*gPushConstants.gEnvironmentSampleProbability, 1, 1);
+		return make_solid_angle_pdf(env.eval_pdfW(light_vertex.g.position)*gPushConstants.gEnvironmentSampleProbability, 1, 1);
 	} else {
-		if (!gSampleLights) return make_area_pdf<float>(0, 1, 1);
+		if (!gSampleLights) return make_area_pdf(0, 1, 1);
 		float3 dir = normalize(ref_pos - light_vertex.g.position);
 		const float dist = length(dir);
 		dir /= dist;

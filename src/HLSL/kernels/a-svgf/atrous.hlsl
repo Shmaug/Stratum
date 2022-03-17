@@ -32,6 +32,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "../../visibility_buffer.hlsli"
 
 [[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
+[[vk::constant_id(1)]] const bool gUseVisibility = true;
 
 RWTexture2D<float4> gImage[2];
 StructuredBuffer<ViewData> gViews;
@@ -86,8 +87,8 @@ struct TapData {
 		const VisibilityInfo v_p = load_visibility(p);
 
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10); 
-		const float w_z = 3 * abs(v_p.z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2);
-		const float w_n = pow(max(0, dot(v_p.normal(), center_normal)), 256); 
+		const float w_z = gUseVisibility ? 3 * abs(v_p.z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2) : 0;
+		const float w_n = gUseVisibility ? pow(max(0, dot(v_p.normal(), center_normal)), 256) : 1;
 
 		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
 		if (isinf(w) || isnan(w) || w == 0) return;

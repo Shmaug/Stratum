@@ -161,6 +161,10 @@ inline float2 ray_aabb(const float3 origin, const float3 inv_dir, const float3 m
 	return float2(max3(min(t0, t1)), min3(max(t0, t1)));
 }
 
+inline float average(const float2 x) { return (x[0] + x[1])/2; }
+inline float average(const float3 x) { return (x[0] + x[1] + x[2])/3; }
+inline float average(const float4 x) { return (x[0] + x[1] + x[2] + x[3])/4; }
+
 #ifdef __cplusplus
 
 // To support spectral data, we need to convert spectral measurements (how much energy at each wavelength) to

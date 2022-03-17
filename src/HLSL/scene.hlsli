@@ -168,7 +168,7 @@ struct ShadingFrame {
 };
 
 struct PathBounceState {
-	uint4 rng;
+	uint4 rng_state;
 	float3 throughput;
 	float eta_scale;
 	float3 ray_origin;
@@ -176,8 +176,7 @@ struct PathBounceState {
 	float3 position;
 	uint instance_primitive_index;
 	float2 bary;
-	uint vol_index;
-	float dir_pdf;
+	uint vol_stack[2];
 
 #ifdef __HLSL_VERSION
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }

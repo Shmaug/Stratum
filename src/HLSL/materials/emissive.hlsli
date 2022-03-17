@@ -7,17 +7,17 @@ struct Emissive {
     ImageValue3 emission;
     
 #ifdef __HLSL_VERSION
-    template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
-        BSDFEvalRecord<Real3> r;
+    template<bool TransportToLight>
+    inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
+        BSDFEvalRecord r;
         r.f = 0;
         r.pdfW = 0;
         return r;
     }
 
-    template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
-        BSDFSampleRecord<Real3> r;
+    template<bool TransportToLight>
+    inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
+        BSDFSampleRecord r;
         r.dir_out = 0,
         r.eta = 0;
         r.eval.f = 0;
@@ -25,8 +25,8 @@ struct Emissive {
         return r;
     }
 
-    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return 0; }
-    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
+    inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return 0; }
+    inline Spectrum eval_emission(const PathVertexGeometry vertex) { return vertex.eval(emission); }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         emission.load(bytes, address);

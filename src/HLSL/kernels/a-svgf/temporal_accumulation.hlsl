@@ -29,10 +29,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
-[[vk::constant_id(1)]] const uint gGradientDownsample = 3u;
-[[vk::constant_id(2)]] const int gGradientFilterRadius = 0;
-[[vk::constant_id(3)]] const bool gAntilag = true;
-[[vk::constant_id(4)]] const float gDisableRejection = false;
+[[vk::constant_id(0)]] const uint gGradientFilterRadius = 0;
+[[vk::constant_id(1)]] const bool gUseVisibility = true;
 
 RWTexture2D<float4> gAccumColor;
 RWTexture2D<float2> gAccumMoments;
@@ -54,6 +52,7 @@ SamplerState gSampler;
 	uint gViewCount;
 	float gHistoryLimit;
 	float gAntilagScale;
+	uint gGradientDownsample;
 } gPushConstants;
 
 [numthreads(8,8,1)]
@@ -65,62 +64,71 @@ void main(uint3 index : SV_DispatchThreadId) {
   const uint2 ipos = index.xy;
 	const VisibilityInfo vis_curr = load_visibility(ipos);
 
-	const float2 pos_prev = view.image_min + vis_curr.prev_uv() * float2(view.image_max - view.image_min) - 0.5;
-
-	const int2 p = pos_prev;
-	const float2 w = frac(pos_prev);
+	const float2 pos_prev = view.image_min + vis_curr.prev_uv() * float2(view.image_max - view.image_min);
+	
+	const int2 p = pos_prev - 0.5;
+	const float2 w = frac(pos_prev - 0.5);
 
 	float4 color_prev   = 0;
 	float2 moments_prev = 0;
 	float sum_w         = 0;
-	// bilinear interpolation, check each tap individually, renormalize afterwards
-	for (int yy = 0; yy <= 1; yy++)
-		for (int xx = 0; xx <= 1; xx++) {
-			const int2 ipos_prev = p + int2(xx, yy);
-			if (!test_inside_screen(ipos_prev, view)) continue;
+	if (gUseVisibility) {
+		// bilinear interpolation, check each tap individually, renormalize afterwards
+		for (int yy = 0; yy <= 1; yy++) {
+			for (int xx = 0; xx <= 1; xx++) {
+				const int2 ipos_prev = p + int2(xx, yy);
+				if (!test_inside_screen(ipos_prev, view)) continue;
 
-			const float4 c = gHistory[ipos_prev];
-
-			if (!gDisableRejection) {
 				const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
 				if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
 				if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
 				if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
+
+				const float4 c = gHistory[ipos_prev];
+
+				if (c.a <= 0 || any(isnan(c))) continue;	
+
+				const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
+				color_prev   += c * wc;
+				moments_prev += gPrevMoments[ipos_prev] * wc;
+				sum_w        += wc;
 			}
-
-			if (c.a <= 0 || any(isnan(c))) continue;	
-
-			const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
-			color_prev   += c * wc;
-			moments_prev += gPrevMoments[ipos_prev] * wc;
-			sum_w        += wc;
 		}
+	} else if (all(vis_curr.prev_uv() >= 0) && all(vis_curr.prev_uv() <= 1)) {
+		float2 extent;
+		gAccumColor.GetDimensions(extent.x, extent.y);
+		color_prev = gHistory.SampleLevel(gSampler, vis_curr.prev_uv(), 0);
+		if (any(isnan(color_prev.rgb)) || any(isinf(color_prev.rgb)))
+			color_prev = 0;
+		moments_prev = gPrevMoments.SampleLevel(gSampler, vis_curr.prev_uv(), 0);
+		sum_w = 1;
+	}
 
 	float4 color_curr = gSamples[ipos];
-
+	if (any(isnan(color_curr.rgb)) || any(isinf(color_curr.rgb)))
+		color_curr = 0;
 	const float l = luminance(color_curr.rgb);
 	const float2 moments_curr = float2(l, l*l);
 
-	if (sum_w > 1e-4 && color_prev.a > 0) { // found sufficiently reliable history information
+	if (gPushConstants.gHistoryLimit > 0 && sum_w > 0 && color_prev.a > 0) {
 		const float invSum = 1/sum_w;
 		color_prev   *= invSum;
 		moments_prev *= invSum;
 
 		float n = min(gPushConstants.gHistoryLimit, color_prev.a + color_curr.a);
 
-		if (gAntilag) {
+		if (gPushConstants.gAntilagScale > 0) {
 			float antilag_alpha = 0;
-
 			if (gGradientFilterRadius == 0) {
-				uint w,h;
-				gSamples.GetDimensions(w,h);
-				const float2 v = gDiff.SampleLevel(gSampler, (ipos + 0.5) / float2(w,h), 0);
+				float2 extent;
+				gSamples.GetDimensions(extent.x, extent.y);
+				const float2 v = gDiff.SampleLevel(gSampler, (ipos + 0.5) / extent, 0);
 				antilag_alpha = saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0);
 			} else {
 				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)
 					for (int xx = -gGradientFilterRadius; xx <= gGradientFilterRadius; xx++) {
-						const int2 p = int2(ipos/gGradientDownsample) + int2(xx, yy);
-						if (!test_inside_screen(p*gGradientDownsample, view)) continue;
+						const int2 p = int2(ipos/gPushConstants.gGradientDownsample) + int2(xx, yy);
+						if (!test_inside_screen(p*gPushConstants.gGradientDownsample, view)) continue;
 						const float2 v = gDiff[p];
 						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
 					}

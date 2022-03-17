@@ -45,6 +45,8 @@ void load_vdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename
 
   nanovdb::GridHandle<nanovdb::HostBuffer> handle = nanovdb::openToNanoVDB(vdbgrid);
   if (handle) {
+    if (!fs::exists(filename.string() + ".nvdb"))
+      nanovdb::io::writeGrid(filename.string() + ".nvdb", handle);
     HeterogeneousVolume& v = *root.make_component<HeterogeneousVolume>( upload_grid(commandBuffer, filename.stem().string(), root.make_component<nanovdb::GridHandle<nanovdb::HostBuffer>>(move(handle))) );
     if (!root.find<TransformData>()) {
       const nanovdb::Vec3R bbox_max = v.handle->grid<float>()->worldBBox().max();
@@ -63,8 +65,20 @@ void load_vdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename
 
 void load_nvdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
   nanovdb::GridHandle<nanovdb::HostBuffer> handle = nanovdb::io::readGrid(filename.string().c_str());
-  if (handle)
-    root.make_component<HeterogeneousVolume>( upload_grid(commandBuffer, filename.stem().string(), root.make_component<nanovdb::GridHandle<nanovdb::HostBuffer>>(move(handle))) );
+  if (handle) {
+    HeterogeneousVolume& v = *root.make_component<HeterogeneousVolume>( upload_grid(commandBuffer, filename.stem().string(), root.make_component<nanovdb::GridHandle<nanovdb::HostBuffer>>(move(handle))) );
+    if (!root.find<TransformData>()) {
+      const nanovdb::Vec3R bbox_max = v.handle->grid<float>()->worldBBox().max();
+      const nanovdb::Vec3R bbox_min = v.handle->grid<float>()->worldBBox().min();
+      const nanovdb::Vec3R center = (bbox_max + bbox_min)/2;
+      const nanovdb::Vec3R extent = bbox_max - bbox_min;
+      const float scale = 1 / (float)(bbox_max - bbox_min).max();
+      root.make_component<TransformData>( make_transform(
+        -MatrixType<nanovdb::Vec3R::ValueType,3,1>::Map(&center[0]).cast<float>() * scale,
+        quatf_identity(),
+        float3::Constant(scale)) );
+    }
+  }
 }
 
 }

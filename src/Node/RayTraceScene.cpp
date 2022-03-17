@@ -113,6 +113,7 @@ void RayTraceScene::create_pipelines() {
 	mTemporalAccumulationPipeline = n.make_child("temporal_accumulation").make_component<ComputePipelineState>("temporal_accumulation", shaders.at("temporal_accumulation"));
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 128;
 	mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") = 1.f;
+	mTemporalAccumulationPipeline->push_constant<uint32_t>("gGradientDownsample") = 3;
 	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
 	mEstimateVariancePipeline = n.make_child("estimate_variance").make_component<ComputePipelineState>("estimate_variance", shaders.at("estimate_variance"));
 	mAtrousPipeline = n.make_child("atrous").make_component<ComputePipelineState>("atrous", shaders.at("atrous"));
@@ -129,8 +130,8 @@ void RayTraceScene::on_inspector_gui() {
 		ImGui::DragScalar("Max Depth", ImGuiDataType_U32, &mMaxDepth, 1);
 		ImGui::DragScalar("Min Depth", ImGuiDataType_U32, &mMinDepth, 1);
 		ImGui::DragScalar("Direct Light Sampling Depth", ImGuiDataType_U32, &mDirectLightDepth, 1);
-		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gMaxNullCollisions"), 1);
 		ImGui::DragScalar("Reservoir Samples", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples"), 1);
+		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mTraceBouncePipeline->push_constant<uint32_t>("gMaxNullCollisions"), 1);
 
 		ImGui::PopItemWidth();
 
@@ -151,8 +152,12 @@ void RayTraceScene::on_inspector_gui() {
 	if (ImGui::CollapsingHeader("Denoising")) {
 		ImGui::Checkbox("Reprojection", &mReprojection);
 		if (mReprojection) {
+			if (ImGui::Checkbox("Use Visibility", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gUseVisibility")))) {
+				mEstimateVariancePipeline->specialization_constant("gUseVisibility") = mTemporalAccumulationPipeline->specialization_constant("gUseVisibility");
+				mAtrousPipeline->specialization_constant("gUseVisibility") = mTemporalAccumulationPipeline->specialization_constant("gUseVisibility");
+			}
 			ImGui::PushItemWidth(40);
-			ImGui::Checkbox("Disable Sample Rejection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gDisableRejection")));
+			//ImGui::Checkbox("Disable Sample Rejection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gDisableReprojection")));
 			ImGui::DragFloat("Target Sample Count", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
 			ImGui::DragScalar("Filter Iterations", ImGuiDataType_U32, &mAtrousIterations, 0.1f);
 			if (mAtrousIterations > 0) {
@@ -171,18 +176,17 @@ void RayTraceScene::on_inspector_gui() {
 				ImGui::Unindent();
 			}
 			
-			ImGui::PopItemWidth();
-
-			ImGui::Checkbox("Enable Antilag", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gAntilag")));
-			if (mTemporalAccumulationPipeline->specialization_constant("gAntilag")) {
+			if (ImGui::DragFloat("Antilag Scale", &mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"), .01f, 0, 0, "%.1f"))
+					mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") = max(mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"), 0.f);
+			if (mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {
 				ImGui::Indent();
-				ImGui::PushItemWidth(40);
+				ImGui::InputScalar("Antilag Radius", ImGuiDataType_U32, &mTemporalAccumulationPipeline->specialization_constant("gGradientFilterRadius"));		
 				if (ImGui::DragScalar("Gradient Downsample", ImGuiDataType_U32, &mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample"), 0.1f)) {
 					const uint32_t& gGradientDownsample = max(1u, min(7u, mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample")));
-					mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
 					mGradientForwardProjectPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
+					mTemporalAccumulationPipeline->push_constant<uint32_t>("gGradientDownsample") = gGradientDownsample;
 					mAtrousGradientPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
-					mTemporalAccumulationPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
 					mTonemapPipeline->specialization_constant("gGradientDownsample") = gGradientDownsample;
 				}
 				ImGui::DragScalar("Gradient Filter Iterations", ImGuiDataType_U32, &mDiffAtrousIterations, 0.1f);
@@ -198,11 +202,10 @@ void RayTraceScene::on_inspector_gui() {
 					}
 					ImGui::PushItemWidth(40);
 				}
-				ImGui::DragFloat("Antilag Scale", &mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale"), .01f, 0, 0, "%.1f");
-				ImGui::InputScalar("Antilag Radius", ImGuiDataType_U32, &mTemporalAccumulationPipeline->specialization_constant("gGradientFilterRadius"));				
-				ImGui::PopItemWidth();
+		
 				ImGui::Unindent();
 			}
+			ImGui::PopItemWidth();
 		}
 	}
 	
@@ -456,7 +459,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		mTransformHistory = transformHistory;
 	}
 	
-	{ // heterogeneous volumes
+	{ // volumes
 		ProfilerRegion s("Process heterogeneous volumes", commandBuffer);
 		mNode.for_each_descendant<HeterogeneousVolume>([&](const component_ptr<HeterogeneousVolume>& vol) {
 			auto materialMap_it = materialMap.find(reinterpret_cast<Material*>(vol.get()));
@@ -466,20 +469,18 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			}
 
 			auto grid = vol->handle->grid<float>();
-			const nanovdb::Coord& b0 = grid->indexToWorld( grid->tree().root().bbox().min() );
-			const nanovdb::Coord& b1 = grid->indexToWorld( grid->tree().root().bbox().max() );
-			const float3 mn(min(b0[0], b1[0]), min(b0[1], b1[1]), min(b0[2], b1[2]));
-			const float3 mx(max(b0[0], b1[0]), max(b0[1], b1[1]), max(b0[2], b1[2]));
-			const size_t key = hash_args(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+			const nanovdb::Vec3R& mn = grid->worldBBox().min();
+			const nanovdb::Vec3R& mx = grid->worldBBox().max();
+			const size_t key = hash_args((float)mn[0], (float)mn[1], (float)mn[2], (float)mx[0], (float)mx[1], (float)mx[2]);
 			auto aabb_it = mAABBs.find(key);
 			if (aabb_it == mAABBs.end()) {
 				Buffer::View<vk::AabbPositionsKHR> aabb = make_shared<Buffer>(commandBuffer.mDevice, "aabb data", sizeof(vk::AabbPositionsKHR), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_CPU_TO_GPU);
-				aabb[0].minX = mn[0];
-				aabb[0].minY = mn[1];
-				aabb[0].minZ = mn[2];
-				aabb[0].maxX = mx[0];
-				aabb[0].maxY = mx[1];
-				aabb[0].maxZ = mx[2];
+				aabb[0].minX = (float)mn[0];
+				aabb[0].minY = (float)mn[1];
+				aabb[0].minZ = (float)mn[2];
+				aabb[0].maxX = (float)mx[0];
+				aabb[0].maxY = (float)mx[1];
+				aabb[0].maxZ = (float)mx[2];
 				vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
 				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, vk::GeometryFlagBitsKHR::eOpaque);
 				vk::AccelerationStructureBuildRangeInfoKHR range(1);
@@ -672,14 +673,10 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	memset(mCurFrame->mViewVolumeIndices.data(), INVALID_INSTANCE, mCurFrame->mViewVolumeIndices.size_bytes());
 	mNode.for_each_descendant<HeterogeneousVolume>([&](const component_ptr<HeterogeneousVolume>& vol) {
 		for (uint32_t i = 0; i < views.size(); i++) {
-			const float3 view_pos = node_to_world(vol.node()).inverse().transform_point( views[i].camera_to_world.transform_point(float3::Zero()) );
-			auto grid = vol->handle->grid<float>();
-			const nanovdb::Coord& b0 = grid->indexToWorld( grid->tree().root().bbox().min() );
-			const nanovdb::Coord& b1 = grid->indexToWorld( grid->tree().root().bbox().max() );
-			const float3 mn(min(b0[0], b1[0]), min(b0[1], b1[1]), min(b0[2], b1[2]));
-			const float3 mx(max(b0[0], b1[0]), max(b0[1], b1[1]), max(b0[2], b1[2]));
-			if ((view_pos >= mn && view_pos <= mx).all())
-				mCurFrame->mViewVolumeIndices[i] = mCurFrame->mResources.get_index(vol->buffer);
+			const float3 view_pos = views[i].camera_to_world.transform_point(float3::Zero());
+			const float3 local_view_pos = node_to_world(vol.node()).inverse().transform_point(view_pos);
+			if (vol->handle->grid<float>()->worldBBox().isInside(nanovdb::Vec3R(local_view_pos[0], local_view_pos[1], local_view_pos[2])))
+				mCurFrame->mViewVolumeIndices[i] = mCurFrame->mResources.volume_data_map.at(vol->buffer);
 		}
 	});
 	
@@ -727,7 +724,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 
 	commandBuffer.clear_color_image(mCurFrame->mGradientSamples, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
 
-	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->specialization_constant("gAntilag")) {
+	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {
 		// forward project
 		ProfilerRegion ps("Forward projection", commandBuffer);
 		mGradientForwardProjectPipeline->descriptor("gViews") = mCurFrame->mViews;
@@ -788,7 +785,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	Image::View tonemap_out = mCurFrame->mTemp[0];
 
 	if (hasHistory && mReprojection) {
-		if (mTemporalAccumulationPipeline->specialization_constant("gAntilag")) {
+		if (mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {
 			{ // create diff image
 				ProfilerRegion ps("Create diff image", commandBuffer);
 				mCreateGradientSamplesPipeline->descriptor("gViews")   = mCurFrame->mViews;
@@ -849,6 +846,9 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 			commandBuffer.bind_pipeline(mTemporalAccumulationPipeline->get_pipeline());
 			mTemporalAccumulationPipeline->bind_descriptor_sets(commandBuffer);
 			mTemporalAccumulationPipeline->push_constants(commandBuffer);
+			if (!mTemporalAccumulationPipeline->specialization_constant("gUseVisibility"))
+				if ((mCurFrame->mViews[0].camera_to_world.transform_point(float3::Zero()) != mPrevFrame->mViews[0].camera_to_world.transform_point(float3::Zero())).any())
+					commandBuffer.push_constant<uint32_t>("gHistoryLimit", 0);
 			commandBuffer.dispatch_over(extent);	
 		}
 

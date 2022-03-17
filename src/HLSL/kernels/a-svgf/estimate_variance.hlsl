@@ -27,6 +27,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
+[[vk::constant_id(0)]] const bool gUseVisibility = true;
+
 #include "svgf_shared.hlsli"
 
 RWTexture2D<float4> gOutput;
@@ -71,8 +73,8 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	}
 	GroupMemoryBarrierWithGroupSync();
 	
-	min16float4 c = load(index.xy, group_index.xy);
-	min16float2 m = load_moment(index.xy, group_index.xy);
+	float4 c = load(index.xy, group_index.xy);
+	float2 m = load_moment(index.xy, group_index.xy);
 
 	const VisibilityInfo v = load_visibility(index.xy);
 
@@ -82,7 +84,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 		return;
 	}
 
-	min16float sum_w = 1;
+	float sum_w = 1;
 
 	const int r = histlen > 1 ? RADIUS_0 : RADIUS_1;
 	for (int yy = -r; yy <= r; yy++)
@@ -92,11 +94,11 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			const int2 p = int2(index.xy) + int2(xx, yy);
 			if (!test_inside_screen(p, view)) continue;
 			const VisibilityInfo v_p = load_visibility(p);
-			if (v.instance_index() != v_p.instance_index()) continue;
+			if (gUseVisibility && v.instance_index() != v_p.instance_index()) continue;
 
 			const float w_z = abs(v_p.z() - v.z()) / (length(v.dz_dxy() * float2(xx, yy)) + 1e-2);
 			const float w_n = pow(saturate(dot(v_p.normal(), v.normal())), 128); 
-			const min16float w = (min16float)(exp(-w_z) * w_n);
+			const float w = gUseVisibility ? exp(-w_z) * w_n : 1;
 
 			if (isnan(w) || isinf(w)) continue;
 			

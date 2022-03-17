@@ -7,10 +7,10 @@ struct Lambertian {
     ImageValue3 reflectance;
     
 #ifdef __HLSL_VERSION
-	template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFEvalRecord<Real3> eval(const Real3 dir_in, const Real3 dir_out, const PathVertexGeometry vertex) {
+	template<bool TransportToLight>
+    inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
         const Real ndotwo = max(0, dot(vertex.shading_normal, dir_out));
-        BSDFEvalRecord<Real3> r;
+        BSDFEvalRecord r;
         if (dot(vertex.shading_normal, dir_in) < 0) {
             r.f = 0;
             r.pdfW = 0;
@@ -21,16 +21,16 @@ struct Lambertian {
         return r;
     }
 
-	template<bool TransportToLight, typename Real, typename Real3>
-    inline BSDFSampleRecord<Real3> sample(const Real3 rnd, const Real3 dir_in, const PathVertexGeometry vertex) {
-        BSDFSampleRecord<Real3> r;
+	template<bool TransportToLight>
+    inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
+        BSDFSampleRecord r;
         if (dot(dir_in, vertex.shading_normal) < 0) {
             r.eval.f = 0;
             r.eval.pdfW = 0;
             return r;
         }
 
-        const Real3 local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
+        const Vector3 local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
         r.dir_out = vertex.shading_frame().to_world(local_dir_out);
         r.eta = 0;
         r.roughness = 1;
@@ -39,8 +39,8 @@ struct Lambertian {
         return r;
     }
 
-    template<typename Real3> inline Real3 eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(reflectance); }
-    template<typename Real3> inline Real3 eval_emission(const PathVertexGeometry vertex) { return 0; }
+    inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return vertex.eval(reflectance); }
+    inline Spectrum eval_emission(const PathVertexGeometry vertex) { return 0; }
 
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         reflectance.load(bytes, address);
