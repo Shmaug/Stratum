@@ -477,6 +477,7 @@ Gui::Gui(Node& node) : mNode(node) {
     eGLTFScene,
     eMitsubaScene,
     eEnvironmentMap,
+    eVolume,
     eNVDBVolume,
     #ifdef STRATUM_ENABLE_OPENVDB
     eVDBVolume
@@ -487,6 +488,7 @@ Gui::Gui(Node& node) : mNode(node) {
     { ".xml", eMitsubaScene },
     { ".hdr", eEnvironmentMap },
     { ".exr", eEnvironmentMap },
+    { ".vol", eVolume },
     { ".nvdb", eNVDBVolume },
     #ifdef STRATUM_ENABLE_OPENVDB
     { ".vdb", eVDBVolume },
@@ -537,6 +539,9 @@ Gui::Gui(Node& node) : mNode(node) {
 							case AssetType::eMitsubaScene:
 								load_mitsuba(app->node().make_child(name), commandBuffer, filepath);
 								break;
+              case AssetType::eVolume:
+                load_vol(app->node().make_child(name), commandBuffer, filepath);
+                break;
 							case AssetType::eNVDBVolume:
                 load_nvdb(app->node().make_child(name), commandBuffer, filepath);
 								break;

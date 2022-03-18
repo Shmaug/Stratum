@@ -239,14 +239,14 @@ inline void image_value_field(const char* label, ImageValue2& v) {
 	}
 }
 inline void image_value_field(const char* label, ImageValue3& v) {
-	ImGui::DragFloat3(label, v.value.data(), .01f);
+	ImGui::ColorEdit3(label, v.value.data(), ImGuiColorEditFlags_Float);
 	if (v.image) {
 		const uint32_t w = ImGui::GetWindowSize().x;
 		ImGui::Image(&v.image, ImVec2(w, w*(float)v.image.extent().height/(float)v.image.extent().width));
 	}
 }
 inline void image_value_field(const char* label, ImageValue4& v) {
-	ImGui::DragFloat4(label, v.value.data(), .01f);
+	ImGui::ColorEdit4(label, v.value.data(), ImGuiColorEditFlags_Float);
 	if (v.image) {
 		const uint32_t w = ImGui::GetWindowSize().x;
 		ImGui::Image(&v.image, ImVec2(w, w*(float)v.image.extent().height/(float)v.image.extent().width));

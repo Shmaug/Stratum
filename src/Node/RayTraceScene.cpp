@@ -266,6 +266,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 
 	vector<vk::BufferMemoryBarrier> blasBarriers;
 
+	mCurFrame->mResources = {};
 	mCurFrame->mResources.distribution_data_size = 0;
 
 	uint32_t totalVertexCount = 0;
@@ -456,7 +457,6 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			//} else
 			//	BF_SET(instanceDatas.back().v[1], ~0u, 0, 12);
 		});
-		mTransformHistory = transformHistory;
 	}
 	
 	{ // volumes
@@ -468,9 +468,9 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 				store_material(materialData, mCurFrame->mResources, *vol);
 			}
 
-			auto grid = vol->handle->grid<float>();
-			const nanovdb::Vec3R& mn = grid->worldBBox().min();
-			const nanovdb::Vec3R& mx = grid->worldBBox().max();
+			auto density_grid = vol->density_grid->grid<float>();
+			const nanovdb::Vec3R& mn = density_grid->worldBBox().min();
+			const nanovdb::Vec3R& mx = density_grid->worldBBox().max();
 			const size_t key = hash_args((float)mn[0], (float)mn[1], (float)mn[2], (float)mx[0], (float)mx[1], (float)mx[2]);
 			auto aabb_it = mAABBs.find(key);
 			if (aabb_it == mAABBs.end()) {
@@ -506,11 +506,13 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			instance.instanceCustomIndex = (uint32_t)instanceDatas.size();
 			instance.mask = BVH_FLAG_VOLUME;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
-
+			
 			transformHistory.emplace(vol.get(), make_pair(transform, (uint32_t)instanceDatas.size()));
-			instanceDatas.emplace_back( make_instance_volume(transform, prevTransform, materialMap_it->second, mCurFrame->mResources.volume_data_map.at(vol->buffer)) );
+			instanceDatas.emplace_back( make_instance_volume(transform, prevTransform, materialMap_it->second, mCurFrame->mResources.volume_data_map.at(vol->density_buffer)) );
 		});
 	}
+	
+	mTransformHistory = transformHistory;
 
 	{ // Build TLAS
 		ProfilerRegion s("Build TLAS", commandBuffer);
@@ -669,14 +671,14 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	
 	mTraceBouncePipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 
-	mCurFrame->mViewVolumeIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewVolumeIndices", views.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
-	memset(mCurFrame->mViewVolumeIndices.data(), INVALID_INSTANCE, mCurFrame->mViewVolumeIndices.size_bytes());
+	mCurFrame->mViewVolumeIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewVolumeInstances", views.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);	
+	ranges::fill(mCurFrame->mViewVolumeIndices, INVALID_INSTANCE);
 	mNode.for_each_descendant<HeterogeneousVolume>([&](const component_ptr<HeterogeneousVolume>& vol) {
 		for (uint32_t i = 0; i < views.size(); i++) {
 			const float3 view_pos = views[i].camera_to_world.transform_point(float3::Zero());
 			const float3 local_view_pos = node_to_world(vol.node()).inverse().transform_point(view_pos);
-			if (vol->handle->grid<float>()->worldBBox().isInside(nanovdb::Vec3R(local_view_pos[0], local_view_pos[1], local_view_pos[2])))
-				mCurFrame->mViewVolumeIndices[i] = mCurFrame->mResources.volume_data_map.at(vol->buffer);
+			if (vol->density_grid->grid<float>()->worldBBox().isInside(nanovdb::Vec3R(local_view_pos[0], local_view_pos[1], local_view_pos[2])))
+				mCurFrame->mViewVolumeIndices[i] = mTransformHistory.at(vol.get()).second;
 		}
 	});
 	
@@ -684,7 +686,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		ProfilerRegion ps("Visibility", commandBuffer);
 		mTraceVisibilityPipeline->descriptor("gViews") = mCurFrame->mViews;
 		mTraceVisibilityPipeline->descriptor("gPrevViews") = hasHistory ? mPrevFrame->mViews : mCurFrame->mViews;
-		mTraceVisibilityPipeline->descriptor("gViewVolumeIndices") = mCurFrame->mViewVolumeIndices;
+		mTraceVisibilityPipeline->descriptor("gViewVolumeInstances") = mCurFrame->mViewVolumeIndices;
 		for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
 			mTraceVisibilityPipeline->descriptor("gVisibility", i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mTraceVisibilityPipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);

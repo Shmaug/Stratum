@@ -37,6 +37,7 @@ STRATUM_API Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& f
 STRATUM_API Mesh load_obj(CommandBuffer& commandBuffer, const fs::path& filename);
 STRATUM_API void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);
 STRATUM_API void load_mitsuba(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);
+STRATUM_API void load_vol(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);
 STRATUM_API void load_vdb(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);
 STRATUM_API void load_nvdb(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);
 

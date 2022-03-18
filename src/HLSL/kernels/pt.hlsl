@@ -17,7 +17,7 @@ StructuredBuffer<uint> gLightInstances;
 
 StructuredBuffer<ViewData> gViews;
 StructuredBuffer<ViewData> gPrevViews;
-StructuredBuffer<uint> gViewVolumeIndices;
+StructuredBuffer<uint> gViewVolumeInstances;
 
 #include "../visibility_buffer.hlsli"
 RWStructuredBuffer<Reservoir> gReservoirs;
@@ -80,8 +80,8 @@ struct rng_t {
 #include "../material.hlsli"
 #include "../light.hlsli"
 
-inline bool is_volume(const uint instance_index) {
-	const uint material_address = instance_index == INVALID_INSTANCE ? gPushConstants.gEnvironmentMaterialAddress : gInstances[instance_index].material_address();
+inline bool is_volume(const uint vol_index) {
+	const uint material_address = vol_index == INVALID_INSTANCE ? gPushConstants.gEnvironmentMaterialAddress : gInstances[vol_index].material_address();
 	if (material_address == -1) return false;
 	const uint type = gMaterialData.Load(material_address);
 	return type == BSDFType::eHeterogeneousVolume;
@@ -112,10 +112,9 @@ inline bool do_ray_query(inout ray_query_t rayQuery, const RayDifferential ray, 
 					}
 					case INSTANCE_TYPE_VOLUME: {
 						pnanovdb_buf_t buf = gVolumes[instance.volume_index()];
-						pnanovdb_grid_handle_t grid = pnanovdb_grid_handle_t(0);
-						pnanovdb_root_handle_t root = pnanovdb_tree_get_root(buf, pnanovdb_grid_get_tree(buf, grid));
-						const float3 origin    = pnanovdb_grid_world_to_indexf(buf, grid, rayQuery.CandidateObjectRayOrigin());
-						const float3 direction = pnanovdb_grid_world_to_index_dirf(buf, grid, rayQuery.CandidateObjectRayDirection());
+						pnanovdb_root_handle_t root = pnanovdb_tree_get_root(buf, pnanovdb_grid_get_tree(buf, pnanovdb_grid_handle_t(0)));
+						const float3 origin    = pnanovdb_grid_world_to_indexf(buf, pnanovdb_grid_handle_t(0), rayQuery.CandidateObjectRayOrigin());
+						const float3 direction = pnanovdb_grid_world_to_index_dirf(buf, pnanovdb_grid_handle_t(0), rayQuery.CandidateObjectRayDirection());
 						const pnanovdb_coord_t bbox_min = pnanovdb_root_get_bbox_min(buf, root);
 						const pnanovdb_coord_t bbox_max = pnanovdb_root_get_bbox_max(buf, root) + 1;
 						const float3 t0 = (bbox_min - origin) / direction;
@@ -127,7 +126,7 @@ inline bool do_ray_query(inout ray_query_t rayQuery, const RayDifferential ray, 
 						if (t < rayQuery.CommittedRayT() && t > rayQuery.RayTMin()) {
 							rayQuery.CommitProceduralPrimitiveHit(t);
 							vol_normal = -(t == t0) + (t == t1);
-							vol_normal = normalize(instance.transform.transform_vector(pnanovdb_grid_index_to_world_dirf(buf, grid, vol_normal)));
+							vol_normal = normalize(instance.transform.transform_vector(pnanovdb_grid_index_to_world_dirf(buf, pnanovdb_grid_handle_t(0), vol_normal)));
 						}
 						break;
 					}
@@ -189,43 +188,46 @@ inline void intersect(inout ray_query_t rayQuery, const RayDifferential ray, ino
 	}
 	v.g.uv_screen_size = v.ray_radius / v.g.inv_uv_size;
 }
-inline void intersect_and_scatter(inout ray_query_t rayQuery, const RayDifferential ray, inout PathVertex v, inout uint cur_vol, inout rng_t rng, inout float3 throughput, out float transmit_pdf) {
-	transmit_pdf = 1;
+inline void intersect_and_scatter(inout ray_query_t rayQuery, const RayDifferential ray, inout PathVertex v, inout uint cur_vol_instance, inout rng_t rng, inout float3 throughput, out float transmit_dir_pdf, out float transmit_nee_pdf) {
+	transmit_dir_pdf = 1;
+	transmit_nee_pdf = 1;
 	RayDifferential tmp_ray = ray;
 	for (uint steps = 0; steps < 64; steps++) {
 		intersect(rayQuery, tmp_ray, v);
 		
-		if (is_volume(cur_vol)) {
+		if (is_volume(cur_vol_instance)) {
 			// interact with volume
+			uint tmp = gInstances[cur_vol_instance].material_address() + 4;
 			HeterogeneousVolume vol;
-			uint tmp = gInstances[cur_vol].material_address() + 4;
 			vol.load(gMaterialData, tmp);
 			const HeterogeneousVolume::DeltaTrackResult tr = vol.delta_track(
-				gInstances[cur_vol].inv_transform.transform_point(tmp_ray.origin),
-				gInstances[cur_vol].inv_transform.transform_vector(tmp_ray.direction),
+				gInstances[cur_vol_instance].inv_transform.transform_point(tmp_ray.origin),
+				gInstances[cur_vol_instance].inv_transform.transform_vector(tmp_ray.direction),
 				rayQuery.CommittedRayT(), rng);
-			throughput *= tr.transmittance / average(tr.pdf);
+			throughput *= tr.transmittance / average(tr.dir_pdf);
+			transmit_dir_pdf *= average(tr.dir_pdf);
+			transmit_nee_pdf *= average(tr.nee_pdf);
 			if (all(isfinite(tr.scatter_p))) {
-				BF_SET(v.instance_primitive_index, cur_vol, 0, 16);
+				BF_SET(v.instance_primitive_index, cur_vol_instance, 0, 16);
 				BF_SET(v.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
-				v.material_address = gInstances[cur_vol].material_address();
-				v.g = instance_volume_geometry(gInstances[cur_vol], tr.scatter_p);
+				v.material_address = gInstances[cur_vol_instance].material_address();
+				v.g = instance_volume_geometry(gInstances[cur_vol_instance], tr.scatter_p);
 				v.ray_radius = ray.differential_transfer(length(ray.origin - v.g.position));
 				return;
-			} else
-				transmit_pdf *= average(tr.pdf);
+			}
 		}
 
 		if (v.instance_index() != INVALID_INSTANCE && is_volume(v.instance_index())) {
-			cur_vol = v.g.front_face ? v.instance_index() : INVALID_INSTANCE;
+			cur_vol_instance = v.g.front_face ? v.instance_index() : INVALID_INSTANCE;
 			tmp_ray.origin = ray_offset(v.g.position, v.g.front_face ? -v.g.geometry_normal : v.g.geometry_normal);
 		} else
 			return;
 	}
 }
-inline float3 transmittance_along_ray(inout ray_query_t rayQuery, inout rng_t rng, const float3 origin, const float3 direction, const float t_max, uint cur_vol, out float pdf) {
+inline float3 transmittance_along_ray(inout ray_query_t rayQuery, inout rng_t rng, const float3 origin, const float3 direction, const float t_max, uint cur_vol_instance, out float dir_pdf, out float nee_pdf) {
 	float3 transmittance = 1;
-	pdf = 1;
+	dir_pdf = 1;
+	nee_pdf = 1;
 
 	RayDifferential ray;
 	ray.origin = origin;
@@ -237,38 +239,40 @@ inline float3 transmittance_along_ray(inout ray_query_t rayQuery, inout rng_t rn
 		intersect(rayQuery, ray, v);
 		const float dt = (v.instance_index() == INVALID_INSTANCE) ? ray.t_max : length(ray.origin - v.g.position);
 
-		if (is_volume(cur_vol)) {
+		if (is_volume(cur_vol_instance)) {
 			// interact with volume
+			uint tmp = gInstances[cur_vol_instance].material_address() + 4;
 			HeterogeneousVolume vol;
-			uint tmp = gInstances[cur_vol].material_address() + 4;
 			vol.load(gMaterialData, tmp);
 			const HeterogeneousVolume::DeltaTrackResult vt = vol.delta_track(
-				gInstances[cur_vol].inv_transform.transform_point(ray.origin),
-				gInstances[cur_vol].inv_transform.transform_vector(ray.direction),
+				gInstances[cur_vol_instance].inv_transform.transform_point(ray.origin),
+				gInstances[cur_vol_instance].inv_transform.transform_vector(ray.direction),
 				dt, rng, false);
 			transmittance *= vt.transmittance;
-			pdf *= average(vt.pdf);
+			dir_pdf *= average(vt.dir_pdf);
+			nee_pdf *= average(vt.nee_pdf);
 		}
 
 		if (v.instance_index() == INVALID_INSTANCE) break;
 		
 		if (is_volume(v.instance_index())) {
 			// hit a volume
-			cur_vol = v.g.front_face ? v.instance_index() : INVALID_INSTANCE;
+			cur_vol_instance = v.g.front_face ? v.instance_index() : INVALID_INSTANCE;
 			ray.origin = ray_offset(v.g.position, v.g.front_face ? -v.g.geometry_normal : v.g.geometry_normal);
 			ray.t_max = isinf(t_max) ? t_max : length(ray_offset(origin+direction*t_max, -direction) - ray.origin);
 			continue;
 		} else {
 			// hit a surface
 			transmittance = 0;
-			pdf = 0;
+			dir_pdf = 0;
+			nee_pdf = 0;
 			break;
 		}
 	}
 	return transmittance;
 }
 
-inline float3 sample_direct_light(const PathVertex vertex, const float3 dir_in, inout ray_query_t rayQuery, inout rng_t rng, const uint cur_vol) {
+inline float3 sample_direct_light(const PathVertex vertex, const float3 dir_in, inout ray_query_t rayQuery, inout rng_t rng, const uint cur_vol_instance) {
 	const LightSampleRecord light_sample = sample_light_or_environment(float4(rng.next(), rng.next(), rng.next(), rng.next()), vertex.g, dir_in);
 	if (light_sample.pdf.pdf <= 0) return 0;
 
@@ -281,17 +285,17 @@ inline float3 sample_direct_light(const PathVertex vertex, const float3 dir_in, 
 	
 	const bool inside = dot(light_sample.to_light, vertex.g.geometry_normal) < 0;
 	const float3 origin = vertex.g.shape_area == 0 ? vertex.g.position : ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
-	float T_pdf;
-	const float3 T = transmittance_along_ray(rayQuery, rng, origin, light_sample.to_light, light_sample.dist, (vertex.g.shape_area && inside) ? vertex.instance_index() : cur_vol, T_pdf);
+	float T_dir_pdf, T_nee_pdf;
+	const float3 T = transmittance_along_ray(rayQuery, rng, origin, light_sample.to_light, light_sample.dist, (vertex.g.shape_area && inside) ? vertex.instance_index() : cur_vol_instance, T_dir_pdf, T_nee_pdf);
 	if (all(T <= 0)) return 0;
 
-	C1 *= T / T_pdf;
+	C1 *= T / T_nee_pdf;
 
 	const float w = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) ?
-		mis_heuristic(light_sample.pdf.solid_angle(), f.pdfW*T_pdf) : 0.5;
+		mis_heuristic(light_sample.pdf.solid_angle()*T_nee_pdf, f.pdfW*T_dir_pdf) : 0.5;
 	return C1 * w;
 }
-inline float3 sample_reservoir(const PathVertex vertex, const float3 dir_in, inout ray_query_t rayQuery, inout rng_t rng, const uint cur_vol, const Reservoir r) {
+inline float3 sample_reservoir(const PathVertex vertex, const float3 dir_in, inout ray_query_t rayQuery, inout rng_t rng, const uint cur_vol_instance, const Reservoir r) {
 	const PathVertexGeometry light_vertex = instance_geometry(r.light_sample.instance_primitive_index, r.light_sample.position_or_bary, r.light_sample.position_or_bary.xy);
 
 	float3 to_light = light_vertex.position - vertex.g.position;
@@ -305,8 +309,8 @@ inline float3 sample_reservoir(const PathVertex vertex, const float3 dir_in, ino
 	const bool inside = dot(to_light, vertex.g.geometry_normal) < 0;
 
 	const float3 origin = vertex.g.shape_area == 0 ? vertex.g.position : ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
-	float T_pdf;
-	const float3 T = transmittance_along_ray(rayQuery, rng, origin, to_light, dist, (vertex.g.shape_area && inside) ? vertex.instance_index() : cur_vol, T_pdf);
+	float T_dir_pdf, T_nee_pdf;
+	const float3 T = transmittance_along_ray(rayQuery, rng, origin, to_light, dist, (vertex.g.shape_area && inside) ? vertex.instance_index() : cur_vol_instance, T_dir_pdf, T_nee_pdf);
 	if (all(T <= 0)) return 0;
 
 	const uint light_material_address = r.light_sample.instance_index() == INVALID_INSTANCE ?
@@ -320,11 +324,11 @@ inline float3 sample_reservoir(const PathVertex vertex, const float3 dir_in, ino
 		lv.material_address = light_material_address;
 		lv.g = light_vertex;
 		const PDFMeasure pdf = light_sample_pdf(lv, vertex.g.position);
-		w = mis_heuristic(pdf.solid_angle(), f.pdfW*T_pdf);
+		w = mis_heuristic(pdf.solid_angle()*T_nee_pdf, f.pdfW*T_dir_pdf);
 	} else
 		w = 0.5;
 
-	return T/T_pdf * f.f * L * G * r.W() * w;
+	return T/T_nee_pdf * f.f * L * G * r.W() * w;
 }
 inline float3 sample_indirect_light(inout PathVertex vertex, inout RayDifferential ray, inout ray_query_t rayQuery, inout rng_t rng, const uint index_1d) {
 	const float3 dir_in = -ray.direction;
@@ -347,8 +351,8 @@ inline float3 sample_indirect_light(inout PathVertex vertex, inout RayDifferenti
 	const bool inside = dot(bsdf_sample.dir_out, vertex.g.geometry_normal) < 0;
 	ray.origin = vertex.g.shape_area == 0 ? vertex.g.position : ray_offset(vertex.g.position, inside ? -vertex.g.geometry_normal : vertex.g.geometry_normal);
 	
-	float transmit_pdf;
-	intersect_and_scatter(rayQuery, ray, vertex, gPathStates[index_1d].vol_stack[0], rng, gPathStates[index_1d].throughput, transmit_pdf);
+	float transmit_dir_pdf, transmit_nee_pdf;
+	intersect_and_scatter(rayQuery, ray, vertex, gPathStates[index_1d].vol_stack[0], rng, gPathStates[index_1d].throughput, transmit_dir_pdf, transmit_nee_pdf);
 
 	gPathStates[index_1d].position = vertex.g.position;
 	gPathStates[index_1d].ray_origin = ray.origin;
@@ -366,7 +370,7 @@ inline float3 sample_indirect_light(inout PathVertex vertex, inout RayDifferenti
 			if (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) {
 				const PDFMeasure pdf = light_sample_pdf(vertex, ray.origin);
 				if (pdf.pdf > 0)
-					w = mis_heuristic(bsdf_sample.eval.pdfW * transmit_pdf, pdf.solid_angle());
+					w = mis_heuristic(bsdf_sample.eval.pdfW * transmit_dir_pdf, pdf.solid_angle() * transmit_nee_pdf);
 			}
 		}
 		return gPathStates[index_1d].throughput * L * w;
@@ -386,7 +390,7 @@ void trace_visibility(uint3 index : SV_DispatchThreadID) {
 	gRadiance.GetDimensions(w,h);
 	const uint index_1d = index.y*w + index.x;
 
-	rng_t rng = { index.xy, gPushConstants.gRandomSeed, index.x + index.y };
+	rng_t rng = { index.xy, gPushConstants.gRandomSeed, 0 };
 
 	const float2 view_size = float2(gViews[view_index].image_max - gViews[view_index].image_min);
 	const float2 uv = (index.xy + 0.5 - gViews[view_index].image_min)/view_size;
@@ -394,14 +398,14 @@ void trace_visibility(uint3 index : SV_DispatchThreadID) {
 
 	gPathStates[index_1d].eta_scale = 1;
 	gPathStates[index_1d].ray_origin = view_ray.origin;
+	gPathStates[index_1d].vol_stack[0] = gViewVolumeInstances[view_index];
+	gPathStates[index_1d].vol_stack[1] = INVALID_INSTANCE;
 
 	ray_query_t rayQuery;
   PathVertex primary_vertex;
-	gPathStates[index_1d].vol_stack[0] = gViewVolumeIndices[view_index];
-	gPathStates[index_1d].vol_stack[1] = INVALID_INSTANCE;
 	gPathStates[index_1d].throughput = 1;
-	float pdf;
-	intersect_and_scatter(rayQuery, view_ray, primary_vertex, gPathStates[index_1d].vol_stack[0], rng, gPathStates[index_1d].throughput, pdf);
+	float dir_pdf, nee_pdf;
+	intersect_and_scatter(rayQuery, view_ray, primary_vertex, gPathStates[index_1d].vol_stack[0], rng, gPathStates[index_1d].throughput, dir_pdf, nee_pdf);
 
 	gRadiance[index.xy] = float4(gPathStates[index_1d].throughput * eval_material_emission(gMaterialData, primary_vertex.material_address, primary_vertex.g), 1);
 	gAlbedo  [index.xy] = float4(gPathStates[index_1d].throughput *   eval_material_albedo(gMaterialData, primary_vertex.material_address, primary_vertex.g), 1);
