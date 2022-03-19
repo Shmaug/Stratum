@@ -70,3 +70,11 @@ void DescriptorSet::flush_writes() {
   mDevice->updateDescriptorSets(writes, {});
   mPendingWrites.clear();
 }
+
+void DescriptorSet::transition_images(CommandBuffer& commandBuffer, const vk::PipelineStageFlags& dstStage) const {
+  for (auto& [arrayIndex, d] : mDescriptors)
+    if (d.index() == 0) {
+      const Image::View img = get<Image::View>(d);
+      if (img) img.transition_barrier(commandBuffer, dstStage, get<vk::ImageLayout>(d), get<vk::AccessFlags>(d));
+    }
+}

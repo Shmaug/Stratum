@@ -74,6 +74,9 @@ private:
 	component_ptr<ComputePipelineState> mAtrousGradientPipeline;
 	component_ptr<ComputePipelineState> mCopyRGBPipeline;
 
+	array<unordered_map<string, uint32_t>, 2> mPathTraceDescriptorMap;
+	array<shared_ptr<DescriptorSetLayout>, 2> mPathTraceDescriptorSetLayouts;
+
 	bool mRandomPerFrame = true;
 	bool mReprojection = true;
 	bool mDemodulateAlbedo = true;
@@ -85,31 +88,30 @@ private:
 	uint32_t mMaxDepth = 5;
 	uint32_t mDirectLightDepth = 4;
 
-	struct FrameData {
+	struct FrameResources {
+		hlsl::ResourcePool mResources;
+
 		Buffer::View<hlsl::PackedVertexData> mVertices;
 		Buffer::View<byte> mIndices;
 		Buffer::View<byte> mMaterialData;
 		Buffer::View<hlsl::InstanceData> mInstances;
 		Buffer::View<uint32_t> mLightInstances;
 		Buffer::View<float> mDistributionData;
-		Buffer::View<hlsl::Reservoir> mReservoirs;
-		Buffer::View<hlsl::PathBounceState> mPathBounceData;
-
+		shared_ptr<DescriptorSet> mPathTraceDescriptorSet;
+		
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
-		
+		Buffer::View<hlsl::PathBounceState> mPathBounceData;
+		Buffer::View<hlsl::Reservoir> mReservoirs;
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
 		Image::View mRadiance;
 		Image::View mAlbedo;
 
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
-		
 		Image::View mGradientSamples;
 		array<Image::View, 2> mTemp;
 		array<array<Image::View, 2>, 2> mDiffTemp;
-
-		hlsl::ResourcePool mResources;
 
 		uint32_t mFrameId;
 	};
@@ -119,7 +121,7 @@ private:
 	float mRaysPerSecond;
 	float mRaysPerSecondTimer;
 
-	unique_ptr<FrameData> mCurFrame, mPrevFrame;
+	unique_ptr<FrameResources> mCurFrame, mPrevFrame;
 };
 
 }

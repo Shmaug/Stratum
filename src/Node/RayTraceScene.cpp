@@ -41,7 +41,7 @@ namespace hlsl {
 
 void inspector_gui_fn(RayTraceScene* v) { v->on_inspector_gui(); }
 
-RayTraceScene::RayTraceScene(Node& node) : mNode(node), mCurFrame(make_unique<FrameData>()), mPrevFrame(make_unique<FrameData>()) {
+RayTraceScene::RayTraceScene(Node& node) : mNode(node), mCurFrame(make_unique<FrameResources>()), mPrevFrame(make_unique<FrameResources>()) {
 	auto app = mNode.find_in_ancestor<Application>();
 	app.node().find_in_descendants<Gui>()->register_inspector_gui_fn(&inspector_gui_fn);
 
@@ -74,31 +74,43 @@ void RayTraceScene::create_pipelines() {
 	
 	mCopyVerticesPipeline = n.make_child("copy_vertices").make_component<ComputePipelineState>("copy_vertices", shaders.at("copy_vertices"));
 	
-	mTraceVisibilityPipeline = n.make_child("pt_trace_visibility").make_component<ComputePipelineState>("pt_trace_visibility", shaders.at("pt_trace_visibility"));
-	mTraceVisibilityPipeline->set_immutable_sampler("gSampler", samplerRepeat);
-	mTraceVisibilityPipeline->descriptor_binding_flag("gVolumes", vk::DescriptorBindingFlagBits::ePartiallyBound);
-	mTraceVisibilityPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
-	mTraceVisibilityPipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+	unordered_map<uint32_t, DescriptorSetLayout::Binding> bindings[2];
+	auto make_binding_fn = [&](const string& name, const ShaderModule::DescriptorBinding& binding) {
+		DescriptorSetLayout::Binding b;
+		b.mDescriptorType = binding.mDescriptorType;
+		b.mDescriptorCount = 1;
+		for (const auto& s : binding.mArraySize) {
+			if (s.index() == 0)
+				b.mDescriptorCount *= get<0>(s);
+			else
+				printf_color(ConsoleColor::eYellow, "Warning: variable descriptor set size not supported yet\n");
+ 		}
+		if (name == "gSampler") b.mImmutableSamplers = { samplerRepeat };
+		if (name == "gVolumes" || name == "gImages" || name == "g3DImages") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
+		b.mStageFlags = vk::ShaderStageFlagBits::eCompute;
+		bindings[binding.mSet].emplace(binding.mBinding, b);
+		mPathTraceDescriptorMap[binding.mSet].emplace(name, binding.mBinding);
+	};
+	for (const auto[name,binding] : shaders.at("pt_trace_visibility")->descriptors())
+		make_binding_fn(name, binding);
+	for (const auto[name,binding] : shaders.at("pt_trace_path_bounce")->descriptors())
+		make_binding_fn(name, binding);
+	for (uint32_t i = 0; i < 2; i++)
+		mPathTraceDescriptorSetLayouts[i] = make_shared<DescriptorSetLayout>(instance->device(), "path_trace_descriptor_set_layout" + to_string(i), bindings[i]);
 	
+	mTraceVisibilityPipeline = n.make_child("pt_trace_visibility").make_component<ComputePipelineState>("pt_trace_visibility", shaders.at("pt_trace_visibility"));
 	mTraceBouncePipeline = n.make_child("pt_trace_path_bounce").make_component<ComputePipelineState>("pt_trace_path_bounce", shaders.at("pt_trace_path_bounce"));
-	mTraceBouncePipeline->set_immutable_sampler("gSampler", samplerRepeat);
-	mTraceBouncePipeline->descriptor_binding_flag("gVolumes", vk::DescriptorBindingFlagBits::ePartiallyBound);
-	mTraceBouncePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
-	mTraceBouncePipeline->descriptor_binding_flag("g3DImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+
 	mTraceBouncePipeline->push_constant<uint32_t>("gReservoirSamples") = 0;
 	mTraceBouncePipeline->push_constant<uint32_t>("gMaxNullCollisions") = 64;
 	mTraceBouncePipeline->push_constant<uint32_t>("gSamplingFlags") = SAMPLE_FLAG_BG_IS | SAMPLE_FLAG_LIGHT_IS | SAMPLE_FLAG_MIS | SAMPLE_FLAG_RAY_CONE_LOD;
 	
 	mCounterValues = make_shared<Buffer>(instance->device(), "gCounters", sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
 	memset(mCounterValues.data(), 0, mCounterValues.size_bytes());
-	mTraceVisibilityPipeline->descriptor("gCounters") = mCounterValues;
-	mTraceBouncePipeline->descriptor("gCounters") = mCounterValues;
 	mRaysPerSecond = 0;
 	mRaysPerSecondTimer = 0;
 
 	//mSpatialReusePipeline = n.make_child("pathtrace_spatial_reuse").make_component<ComputePipelineState>("pathtrace_spatial_reuse", shaders.at("pathtrace_spatial_reuse"));
-	//mSpatialReusePipeline->set_immutable_sampler("gSampler", samplerRepeat);
-	//mSpatialReusePipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 
 	mDemodulateAlbedoPipeline = n.make_child("tonemap_demodulate_albedo").make_component<ComputePipelineState>("tonemap_demodulate_albedo", shaders.at("tonemap_demodulate_albedo"));
 	
@@ -586,31 +598,23 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 		vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite,
 		vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead );
 
-	mTraceVisibilityPipeline->descriptor("gScene") = **mTopLevel;
-	mTraceVisibilityPipeline->descriptor("gVertices") = mCurFrame->mVertices;
-	mTraceVisibilityPipeline->descriptor("gIndices") = mCurFrame->mIndices;
-	mTraceVisibilityPipeline->descriptor("gInstances") = mCurFrame->mInstances;
-	mTraceVisibilityPipeline->descriptor("gMaterialData") = mCurFrame->mMaterialData;
-	mTraceVisibilityPipeline->descriptor("gDistributions") = mCurFrame->mDistributionData;
-	mTraceVisibilityPipeline->descriptor("gLightInstances") = mCurFrame->mLightInstances;
+	commandBuffer.hold_resource(mCurFrame->mDistributionData);
+	
+	mCurFrame->mPathTraceDescriptorSet = make_shared<DescriptorSet>(mPathTraceDescriptorSetLayouts[0], "path_trace_scene_descriptorset");
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gScene"), **mTopLevel);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gVertices"), mCurFrame->mVertices);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gIndices"), mCurFrame->mIndices);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gInstances"), mCurFrame->mInstances);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gMaterialData"), mCurFrame->mMaterialData);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gDistributions"), mCurFrame->mDistributionData);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gLightInstances"), mCurFrame->mLightInstances);
+	mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gCounters"), mCounterValues);
+	for (const auto&[image, index] : mCurFrame->mResources.images)
+		mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+	for (const auto&[vol, index] : mCurFrame->mResources.volume_data_map)
+		mCurFrame->mPathTraceDescriptorSet->insert_or_assign(mPathTraceDescriptorMap[0].at("gVolumes"), index, vol);
 
-	mTraceBouncePipeline->descriptor("gScene") = **mTopLevel;
-	mTraceBouncePipeline->descriptor("gVertices") = mCurFrame->mVertices;
-	mTraceBouncePipeline->descriptor("gIndices") = mCurFrame->mIndices;
-	mTraceBouncePipeline->descriptor("gInstances") = mCurFrame->mInstances;
-	mTraceBouncePipeline->descriptor("gMaterialData") = mCurFrame->mMaterialData;
-	mTraceBouncePipeline->descriptor("gDistributions") = mCurFrame->mDistributionData;
-	mTraceBouncePipeline->descriptor("gLightInstances") = mCurFrame->mLightInstances;
 	mTraceBouncePipeline->push_constant<uint32_t>("gLightCount") = (uint32_t)lightInstances.size();
-
-	for (const auto&[image, index] : mCurFrame->mResources.images) {
-		mTraceVisibilityPipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mTraceBouncePipeline->descriptor("gImages", index) = image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	}
-	for (const auto&[vol, index] : mCurFrame->mResources.volume_data_map) {
-		mTraceVisibilityPipeline->descriptor("gVolumes", index) = vol;
-		mTraceBouncePipeline->descriptor("gVolumes", index) = vol;
-	}
 
 	mGradientForwardProjectPipeline->descriptor("gVertices") = mCurFrame->mVertices;
 	mGradientForwardProjectPipeline->descriptor("gIndices") = mCurFrame->mIndices;
@@ -630,27 +634,29 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 }
 
 void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<hlsl::ViewData>& views) {
+	if (!mCurFrame->mPathTraceDescriptorSet) return;
 	ProfilerRegion ps("RayTraceScene::render", commandBuffer);
 
 	const vk::Extent3D extent = renderTarget.extent();
 	if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != extent) {
-		mCurFrame = make_unique<FrameData>();
+		mCurFrame->mFrameId = 0;
+		mCurFrame->mGradientSamples.reset();
+
 		for (Image::View& v : mCurFrame->mVisibility)
 			v = make_shared<Image>(commandBuffer.mDevice, "gVisibility", extent, vk::Format::eR32G32B32A32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		
+		mCurFrame->mReservoirs = make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", extent.width*extent.height*sizeof(Reservoir), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+		mCurFrame->mPathBounceData = make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", extent.width*extent.height*sizeof(PathBounceState), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+
 		mCurFrame->mRadiance = make_shared<Image>(commandBuffer.mDevice, "gRadiance", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc);
 		mCurFrame->mAlbedo   = make_shared<Image>(commandBuffer.mDevice, "gAlbedo"  , extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		
 		mCurFrame->mAccumColor   = make_shared<Image>(commandBuffer.mDevice, "gAccumColor", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		mCurFrame->mAccumMoments = make_shared<Image>(commandBuffer.mDevice, "gAccumMoments", extent, vk::Format::eR16G16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled);
 		
-		mCurFrame->mReservoirs = make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", extent.width*extent.height*sizeof(Reservoir), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
-		mCurFrame->mPathBounceData = make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", extent.width*extent.height*sizeof(PathBounceState), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
-
 		for (Image::View& v : mCurFrame->mTemp)
 			v = make_shared<Image>(commandBuffer.mDevice, "pingpong", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 		
-		mCurFrame->mFrameId = 0;
 		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
 	}
 	
@@ -682,19 +688,24 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		}
 	});
 	
+	shared_ptr<DescriptorSet> descriptor_set_1 = make_shared<DescriptorSet>(mPathTraceDescriptorSetLayouts[1], "path_trace_descriptorset 1");
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gViews"), mCurFrame->mViews);
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPrevViews"), hasHistory ? mPrevFrame->mViews : mCurFrame->mViews);
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gViewVolumeInstances"), mCurFrame->mViewVolumeIndices);
+	for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gVisibility"), i, image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gRadiance"), image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gAlbedo"), image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathStates"), mCurFrame->mPathBounceData);
+	descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gReservoirs"), mCurFrame->mReservoirs);
+
 	{ // Visibility
 		ProfilerRegion ps("Visibility", commandBuffer);
-		mTraceVisibilityPipeline->descriptor("gViews") = mCurFrame->mViews;
-		mTraceVisibilityPipeline->descriptor("gPrevViews") = hasHistory ? mPrevFrame->mViews : mCurFrame->mViews;
-		mTraceVisibilityPipeline->descriptor("gViewVolumeInstances") = mCurFrame->mViewVolumeIndices;
-		for (uint32_t i = 0; i < mCurFrame->mVisibility.size(); i++)
-			mTraceVisibilityPipeline->descriptor("gVisibility", i) = image_descriptor(mCurFrame->mVisibility[i], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mTraceVisibilityPipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mTraceVisibilityPipeline->descriptor("gAlbedo")   = image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mTraceVisibilityPipeline->descriptor("gPathStates") = mCurFrame->mPathBounceData;
-		mTraceVisibilityPipeline->descriptor("gReservoirs") = mCurFrame->mReservoirs;
-		commandBuffer.bind_pipeline(mTraceVisibilityPipeline->get_pipeline());
-		mTraceVisibilityPipeline->bind_descriptor_sets(commandBuffer);
+		mCurFrame->mPathTraceDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		commandBuffer.bind_pipeline(mTraceVisibilityPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
+		commandBuffer.bind_descriptor_set(0, mCurFrame->mPathTraceDescriptorSet);
+		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
 		mTraceBouncePipeline->push_constants(commandBuffer);
 		commandBuffer.push_constant<uint32_t>("gDebugMode", mTonemapPipeline->specialization_constant("gDebugMode"));
 		if (mRandomPerFrame) commandBuffer.push_constant<uint32_t>("gRandomSeed", rand());
@@ -750,12 +761,11 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	{ // Indirect
 		ProfilerRegion ps("Indirect", commandBuffer);
 		commandBuffer.barrier(mCurFrame->mReservoirs, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-		mTraceBouncePipeline->descriptor("gViews") = mCurFrame->mViews;
-		mTraceBouncePipeline->descriptor("gRadiance") = image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		mTraceBouncePipeline->descriptor("gPathStates") = mCurFrame->mPathBounceData;
-		mTraceBouncePipeline->descriptor("gReservoirs") = mCurFrame->mReservoirs;
-		commandBuffer.bind_pipeline(mTraceBouncePipeline->get_pipeline());
-		mTraceBouncePipeline->bind_descriptor_sets(commandBuffer);
+		mCurFrame->mPathTraceDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		commandBuffer.bind_pipeline(mTraceBouncePipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
+		commandBuffer.bind_descriptor_set(0, mCurFrame->mPathTraceDescriptorSet);
+		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
 		mTraceBouncePipeline->push_constants(commandBuffer);
 		const uint32_t flag = mTraceBouncePipeline->push_constant<uint32_t>("gSamplingFlags");
  		for (uint32_t i = 0; i < mMaxDepth; i++) {

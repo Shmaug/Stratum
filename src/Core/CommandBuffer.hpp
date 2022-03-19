@@ -197,6 +197,7 @@ public:
 		mCommandBuffer.bindPipeline(pipeline->bind_point(), **pipeline);
 		mBoundPipeline = pipeline;
 		hold_resource(pipeline);
+		mBoundDescriptorSets.clear();
 		return true;
 	}
 	

@@ -79,7 +79,7 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 			if (pipelineStage < firstStage && spirv->descriptors().find(name) != spirv->descriptors().end())
 				firstStage = pipelineStage;
 		}
-
+		
 		for (auto& [arrayIndex, d] : p)
 			if (d.index() == 0) {
 				const Image::View img = get<Image::View>(d);
@@ -185,6 +185,25 @@ shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline() {
 	auto pipeline = find_pipeline(key);
 	if (!pipeline) {
 		pipeline = make_shared<ComputePipeline>(mName, shader, mImmutableSamplers);
+		add_pipeline(key, pipeline);
+	}
+	return static_pointer_cast<ComputePipeline>(pipeline);
+}
+
+shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline(const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts) {
+	ProfilerRegion ps("PipelineState::get_pipeline");
+
+	Pipeline::ShaderSpecialization shader = { mShaders.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants, {} };
+	size_t key = 0;
+	{
+		ProfilerRegion ps("hash_args");
+		key = hash_args(shader);
+		for (const auto& l : descriptorSetLayouts) key = hash_args(key, l);
+	}
+	
+	auto pipeline = find_pipeline(key);
+	if (!pipeline) {
+		pipeline = make_shared<ComputePipeline>(mName, shader, descriptorSetLayouts);
 		add_pipeline(key, pipeline);
 	}
 	return static_pointer_cast<ComputePipeline>(pipeline);

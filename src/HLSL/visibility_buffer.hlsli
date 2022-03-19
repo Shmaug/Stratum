@@ -5,8 +5,12 @@
 
 #ifdef __HLSL_VERSION
 
+#ifdef DECLARE_VISIBILITY_BUFFERS
+DECLARE_VISIBILITY_BUFFERS
+#else
 RWTexture2D<uint4> gVisibility[VISIBILITY_BUFFER_COUNT];
 RWTexture2D<uint4> gPrevVisibility[VISIBILITY_BUFFER_COUNT];
+#endif
 
 struct VisibilityInfo {
 	uint4 data[VISIBILITY_BUFFER_COUNT];

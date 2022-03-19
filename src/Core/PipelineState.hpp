@@ -125,6 +125,7 @@ class ComputePipelineState : public PipelineState {
 public:
 	inline ComputePipelineState(const string& name, const shared_ptr<ShaderModule>& module) : PipelineState(name, { module }) {}
 	STRATUM_API shared_ptr<ComputePipeline> get_pipeline();
+	STRATUM_API shared_ptr<ComputePipeline> get_pipeline(const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts);
 };
 
 class GraphicsPipelineState : public PipelineState {

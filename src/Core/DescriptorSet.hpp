@@ -71,7 +71,7 @@ public:
 
 	inline const unordered_map<uint32_t, Binding>& bindings() const { return mBindings; }
 	inline const unordered_set<uint32_t>& dynamic_bindings() const { return mDynamicBindings; }
-
+	
 private:
 	vk::DescriptorSetLayout mLayout;
 	vk::DescriptorSetLayoutCreateFlags mFlags;
@@ -141,6 +141,7 @@ public:
 	inline void insert_or_assign(uint32_t binding, const Descriptor& entry) { insert_or_assign(binding, 0, entry); }
 
 	STRATUM_API void flush_writes();
+	STRATUM_API void transition_images(CommandBuffer& commandBuffer, const vk::PipelineStageFlags& dstStage) const;
 };
 
 }

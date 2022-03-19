@@ -71,12 +71,13 @@ protected:
 	unordered_multimap<string, vk::PushConstantRange> mPushConstants;
 
 	STRATUM_API Pipeline(const string& name, const vk::ArrayProxy<const ShaderSpecialization>& shaders, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
-
+	STRATUM_API Pipeline(const string& name, const vk::ArrayProxy<const ShaderSpecialization>& shaders, const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts);
 };
 
 class ComputePipeline : public Pipeline {
 public:
 	STRATUM_API ComputePipeline(const string& name, const ShaderSpecialization& shader, const unordered_map<string, shared_ptr<Sampler>>& immutableSamplers = {});
+	STRATUM_API ComputePipeline(const string& name, const ShaderSpecialization& shader, const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts = {});
 	inline vk::PipelineBindPoint bind_point() const override { return vk::PipelineBindPoint::eCompute; }
 	inline const auto& workgroup_size() const { return shaders().front().mShader->workgroup_size(); }
 };
