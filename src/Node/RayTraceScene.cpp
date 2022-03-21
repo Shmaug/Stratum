@@ -556,7 +556,7 @@ void RayTraceScene::update(CommandBuffer& commandBuffer, float deltaTime) {
 			mTraceBouncePipeline->push_constant<uint32_t>("gEnvironmentMaterialAddress") = address;
 			mTraceBouncePipeline->push_constant<float>("gEnvironmentSampleProbability") = 0.5f;
 		} else {
-			mTraceBouncePipeline->push_constant<uint32_t>("gEnvironmentMaterialAddress") = -1;
+			mTraceBouncePipeline->push_constant<uint32_t>("gEnvironmentMaterialAddress") = INVALID_MATERIAL;
 			mTraceBouncePipeline->push_constant<float>("gEnvironmentSampleProbability") = 0;
 		}
 	}

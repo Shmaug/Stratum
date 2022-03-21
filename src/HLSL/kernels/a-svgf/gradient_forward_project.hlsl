@@ -39,6 +39,7 @@ StructuredBuffer<InstanceData> gInstances;
 StructuredBuffer<uint> gInstanceIndexMap;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
+#include "../../path_state.hlsli"
 RWStructuredBuffer<PathBounceState> gPathStates;
 RWStructuredBuffer<Reservoir> gReservoirs;
 StructuredBuffer<Reservoir> gPrevReservoirs;
@@ -118,9 +119,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 			gVisibility[i][idx_curr] = v_prev.data[i];
 		
 		gPathStates[index_1d].rng_state = v_prev.rng_seed();
-		gPathStates[index_1d].position = instance.transform.transform_point(pos_obj);
 		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
-		gPathStates[index_1d].bary = v_prev.bary();
+		gPathStates[index_1d].g = instance_geometry(gPathStates[index_1d].instance_primitive_index, instance.transform.transform_point(pos_obj), v_prev.bary());
 		
 		gReservoirs[index_1d] = gPrevReservoirs[index_1d];
 	}

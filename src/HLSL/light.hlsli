@@ -46,10 +46,7 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 		BF_SET(ls.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 		BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 		ls.material_address = gPushConstants.gEnvironmentMaterialAddress;
-		Environment env;
-		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
-		env.load(gMaterialData, tmp);
-		const BSDFSampleRecord s = env.sample<true>(rnd.xyz, dir_in, v);
+		const BSDFSampleRecord s = sample_material(load_material<Environment>(gMaterialData, gPushConstants.gEnvironmentMaterialAddress+4), rnd.xyz, dir_in, v, TRANSPORT_TO_LIGHT);
 		ls.radiance = s.eval.f;
 		ls.to_light = s.dir_out;
 		ls.dist = 1.#INF;
@@ -109,7 +106,7 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 				break;
 			}
 		}
-		ls.radiance = eval_material_emission(gMaterialData, ls.material_address, g);
+		ls.radiance = load_and_eval_material_emission(gMaterialData, ls.material_address, g);
 		ls.pdf.pdf /= (float)gPushConstants.gLightCount;
 	}
 	if (gSampleBG && gSampleLights)
@@ -117,33 +114,30 @@ inline LightSampleRecord sample_light_or_environment(const float4 rnd, const Pat
 	return ls;
 }
 
-inline PDFMeasure light_sample_pdf(const PathVertex light_vertex, const float3 ref_pos) {
+inline PDFMeasure light_sample_pdf(const uint light_instance, const PathVertexGeometry light_vertex, const float3 ref_pos) {
 	PDFMeasure pdf;
 
-	if (light_vertex.instance_index() == INVALID_INSTANCE) {
+	if (light_instance == INVALID_INSTANCE) {
 		if (!gSampleBG) return make_area_pdf(0, 1, 1);
-		Environment env;
-		uint tmp = gPushConstants.gEnvironmentMaterialAddress+4;
-		env.load(gMaterialData, tmp);
-		return make_solid_angle_pdf(env.eval_pdfW(light_vertex.g.position)*gPushConstants.gEnvironmentSampleProbability, 1, 1);
+		return make_solid_angle_pdf(load_material<Environment>(gMaterialData, gPushConstants.gEnvironmentMaterialAddress+4).eval_pdfW(light_vertex.position)*gPushConstants.gEnvironmentSampleProbability, 1, 1);
 	} else {
 		if (!gSampleLights) return make_area_pdf(0, 1, 1);
-		float3 dir = normalize(ref_pos - light_vertex.g.position);
+		float3 dir = normalize(ref_pos - light_vertex.position);
 		const float dist = length(dir);
 		dir /= dist;
-		const InstanceData instance = gInstances[light_vertex.instance_index()];
+		const InstanceData instance = gInstances[light_instance];
 		switch (instance.type()) {
 			case INSTANCE_TYPE_SPHERE: {
 				const float3 center = instance.transform.transform_point(0);
 				const float3 to_center = center - ref_pos;
 				const float sinThetaMax2 = instance.radius()*instance.radius() / dot(to_center, to_center);
 				const float cosThetaMax = sqrt(max(0, 1 - sinThetaMax2));
-				pdf = make_solid_angle_pdf(1 / (2 * M_PI * (1 - cosThetaMax)), abs(dot(dir, light_vertex.g.geometry_normal)), dist);
+				pdf = make_solid_angle_pdf(1 / (2 * M_PI * (1 - cosThetaMax)), abs(dot(dir, light_vertex.geometry_normal)), dist);
 				break;
 			}
 			
 			case INSTANCE_TYPE_TRIANGLES: {
-				pdf = make_area_pdf(1 / ((float)light_vertex.g.shape_area * instance.prim_count()), abs(dot(dir, light_vertex.g.geometry_normal)), dist);
+				pdf = make_area_pdf(1 / ((float)light_vertex.shape_area * instance.prim_count()), abs(dot(dir, light_vertex.geometry_normal)), dist);
 				break;
 			}
 		}

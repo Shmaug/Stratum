@@ -1,7 +1,18 @@
 #ifndef PATH_VERTEX_H
 #define PATH_VERTEX_H
 
-#include "image_value.hlsli"
+#include "scene.hlsli"
+
+struct ShadingFrame {
+	float3 t, b, n;
+	inline void flip() {
+		t = -t;
+		b = -b;
+		n = -n;
+	}
+	inline float3 to_world(const float3 v_l) { return v_l[0]*t + v_l[1]*b + v_l[2]*n; }
+	inline float3 to_local(const float3 v_w) { return float3(dot(v_w, t), dot(v_w, b), dot(v_w, n)); }
+};
 
 struct PathVertexGeometry {
 	float3 position;
@@ -15,6 +26,7 @@ struct PathVertexGeometry {
 	float inv_uv_size;
 	float uv_screen_size;
 	
+#ifdef __HLSL_VERSION
 	inline ShadingFrame shading_frame() {
 		ShadingFrame frame;
 		frame.n = shading_normal;
@@ -22,32 +34,10 @@ struct PathVertexGeometry {
     frame.b = normalize(cross(frame.n, frame.t))*tangent.w;
 		return frame;
 	}
-
-	inline float4 sample_image(Texture2D<float4> img) {
-		float w,h;
-		img.GetDimensions(w,h);
-		return img.SampleLevel(gSampler, uv, (gPushConstants.gSamplingFlags & SAMPLE_FLAG_RAY_CONE_LOD) ? log2(max(uv_screen_size*min(w,h), 1e-8f)) : 0);
-	}
-	
-	inline float  eval(const ImageValue1 v) {
-		if (!v.has_image()) return v.value;
-		return v.value * sample_image(v.image())[v.channel()];
-	}
-	inline float2 eval(const ImageValue2 v) {
-		if (!v.has_image()) return v.value;
-		const float4 s = sample_image(v.image());
-		return v.value * float2(s[v.channels()[0]], s[v.channels()[1]]);
-	}
-	inline float3 eval(const ImageValue3 v) {
-		if (!v.has_image()) return v.value;
-		const float4 s = sample_image(v.image());
-		return v.value * float3(s[v.channels()[0]], s[v.channels()[1]], s[v.channels()[2]]);
-	}
-	inline float4 eval(const ImageValue4 v) {
-		if (!v.has_image()) return v.value;
-		return v.value * sample_image(v.image());
-	}
+#endif
 };
+
+#ifdef __HLSL_VERSION
 inline PathVertexGeometry instance_triangle_geometry(const InstanceData instance, const uint3 tri, const float2 bary) {
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
@@ -163,27 +153,36 @@ inline PathVertexGeometry instance_geometry(const uint instance_primitive_index,
 		}
 	}
 }
+#endif
 
-struct PathVertex {
+struct PathBounceState {
+	uint4 rng_state;
+	float3 throughput;
+	float eta_scale;
+	float3 ray_origin;
+	uint radius_spread;
+	uint pixel_index;
 	uint instance_primitive_index;
-	uint material_address;
-	float ray_radius;
+	uint vol_index;
+	uint pad;
 	PathVertexGeometry g;
-	
+
+#ifdef __HLSL_VERSION
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-};
-inline void make_vertex(out PathVertex r, const uint instance_primitive_index, const float3 position, const float2 bary, const RayDifferential ray) {
-	r.instance_primitive_index = instance_primitive_index;
-	r.g = instance_geometry(instance_primitive_index, position, bary);
-	if (r.instance_index() == INVALID_INSTANCE) {
-		r.material_address = gPushConstants.gEnvironmentMaterialAddress;
-		r.ray_radius = ray.radius;
-	} else {
-		r.material_address = gInstances[r.instance_index()].material_address();
-		r.ray_radius = ray.differential_transfer(length(r.g.position - ray.origin));
+	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
+	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
+	inline RayDifferential ray() {
+		RayDifferential r;
+		r.origin    = ray_origin;
+		r.direction = normalize(g.position - ray_origin);
+		r.t_min = 0;
+		r.t_max = 1.#INF;
+		r.radius = radius();
+		r.spread = spread();
+		return r;
 	}
-	r.g.uv_screen_size = r.ray_radius / r.g.inv_uv_size;
-}
+#endif
+};
 
 #endif

@@ -20,6 +20,7 @@ enum DebugMode {
 	eRayRadius,
 	eUVScreenSize,
 	ePrevUV,
+	eMaterialID,
 	eAlbedo,
 	eDemodulatedRadiance,
 	eAccumLength,
@@ -52,6 +53,7 @@ inline string to_string(const DebugMode& m) {
 		case DebugMode::eRayRadius: return "Ray Radius";
 		case DebugMode::eUVScreenSize: return "UV Screen Size";
 		case DebugMode::ePrevUV: return "PrevUV";
+		case DebugMode::eMaterialID: return "Material ID";
 		case DebugMode::eAlbedo: return "Albedo";
 		case DebugMode::eDemodulatedRadiance: return "Demodulated Radiance";
 		case DebugMode::eAccumLength: return "Accum Length";

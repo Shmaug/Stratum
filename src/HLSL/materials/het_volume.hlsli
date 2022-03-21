@@ -9,9 +9,37 @@ struct HeterogeneousVolume {
 	float3 albedo_scale;
 	float attenuation_unit;
 	
+#ifdef __cplusplus
+	component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>> density_grid, albedo_grid;
+	Buffer::View<byte> density_buffer, albedo_buffer;
+
+	inline void store(ByteAppendBuffer& bytes, ResourcePool& pool) const {
+		bytes.AppendN(density_scale);
+		bytes.Appendf(anisotropy);
+		bytes.AppendN(albedo_scale);
+		bytes.Appendf(attenuation_unit);
+		bytes.Append(pool.get_index(density_buffer));
+		bytes.Append(pool.get_index(albedo_buffer));
+	}
+	inline void inspector_gui() {
+		ImGui::ColorEdit3("Density", density_scale.data(), ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float);
+		ImGui::ColorEdit3("Albedo", albedo_scale.data(), ImGuiColorEditFlags_Float);
+		ImGui::SliderFloat("Anisotropy", &anisotropy, -.999f, .999f);
+		ImGui::SliderFloat("Attenuation Unit", &attenuation_unit, 0, 1);
+	}
+#endif
 #ifdef __HLSL_VERSION
 	uint density_volume_index;
 	uint albedo_volume_index;
+
+	inline void load(ByteAddressBuffer bytes, inout uint address) {
+		density_scale 			 = bytes.Load<float3>(address); address += 12;
+		anisotropy       		 = bytes.Load<float>(address); address += 4;
+		albedo_scale         = bytes.Load<float3>(address); address += 12;
+		attenuation_unit 		 = bytes.Load<float>(address); address += 4;
+		density_volume_index = bytes.Load(address); address += 4;
+		albedo_volume_index  = bytes.Load(address); address += 4;
+	}
 
 	inline float3 read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
 		return pnanovdb_read_float(gVolumes[density_volume_index], address);
@@ -89,72 +117,40 @@ struct HeterogeneousVolume {
 		}
 		return r;
 	}
-
-	template<bool TransportToLight>
-	inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
-		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
-		BSDFEvalRecord r;
-		r.f = v;
-		r.pdfW = v;
-		return r;
-	}
-
-	template<bool TransportToLight>
-	inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex) {
-		BSDFSampleRecord r;
-		if (abs(anisotropy) < 1e-3) {
-			const Real z = 1 - 2 * rnd.x;
-			const Real phi = 2 * M_PI * rnd.y;
-			r.dir_out = Vector3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
-    } else {
-			const Real tmp = (anisotropy * anisotropy - 1) / (2 * rnd.x * anisotropy - (anisotropy + 1));
-			const Real cos_elevation = (tmp * tmp - (1 + anisotropy * anisotropy)) / (2 * anisotropy);
-			const Real sin_elevation = sqrt(max(1 - cos_elevation * cos_elevation, 0));
-			const Real azimuth = 2 * M_PI * rnd.y;
-			ShadingFrame frame;
-			frame.n = dir_in;
-			make_orthonormal(frame.n, frame.t, frame.b);
-			r.dir_out = frame.to_world(float3(sin_elevation * cos(azimuth), sin_elevation * sin(azimuth), cos_elevation));
-    }
-		r.eta = -1;
-		r.eval = eval<TransportToLight>(dir_in, r.dir_out, vertex);
-		return r;
-	}
-
-	inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return albedo_scale; }
-	inline Spectrum eval_emission(const PathVertexGeometry vertex) { return 0; }
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		density_scale 			 = bytes.Load<float3>(address); address += 12;
-		anisotropy       		 = bytes.Load<float>(address); address += 4;
-		albedo_scale         = bytes.Load<float3>(address); address += 12;
-		attenuation_unit 		 = bytes.Load<float>(address); address += 4;
-		density_volume_index = bytes.Load(address); address += 4;
-		albedo_volume_index  = bytes.Load(address); address += 4;
-	}
-
 #endif // __HLSL_VERSION
-
-#ifdef __cplusplus
-	component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>> density_grid, albedo_grid;
-	Buffer::View<byte> density_buffer, albedo_buffer;
-
-	inline void store(ByteAppendBuffer& bytes, ResourcePool& pool) const {
-		bytes.AppendN(density_scale);
-		bytes.Appendf(anisotropy);
-		bytes.AppendN(albedo_scale);
-		bytes.Appendf(attenuation_unit);
-		bytes.Append(pool.get_index(density_buffer));
-		bytes.Append(pool.get_index(albedo_buffer));
-	}
-	inline void inspector_gui() {
-		ImGui::ColorEdit3("Density", density_scale.data(), ImGuiColorEditFlags_HDR|ImGuiColorEditFlags_Float);
-		ImGui::ColorEdit3("Albedo", albedo_scale.data(), ImGuiColorEditFlags_Float);
-		ImGui::SliderFloat("Anisotropy", &anisotropy, -.999f, .999f);
-		ImGui::SliderFloat("Attenuation Unit", &attenuation_unit, 0, 1);
-	}
-
-#endif
 };
+
+#ifdef __HLSL_VERSION
+template<> inline BSDFEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
+	const Real v = 1/(4*M_PI) * (1 - material.anisotropy * material.anisotropy) / pow(1 + material.anisotropy * material.anisotropy + 2 * material.anisotropy * dot(dir_in, dir_out), 1.5);
+	BSDFEvalRecord r;
+	r.f = v;
+	r.pdfW = v;
+	return r;
+}
+
+template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+	BSDFSampleRecord r;
+	if (abs(material.anisotropy) < 1e-3) {
+		const Real z = 1 - 2 * rnd.x;
+		const Real phi = 2 * M_PI * rnd.y;
+		r.dir_out = Vector3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
+	} else {
+		const Real tmp = (material.anisotropy * material.anisotropy - 1) / (2 * rnd.x * material.anisotropy - (material.anisotropy + 1));
+		const Real cos_elevation = (tmp * tmp - (1 + material.anisotropy * material.anisotropy)) / (2 * material.anisotropy);
+		const Real sin_elevation = sqrt(max(1 - cos_elevation * cos_elevation, 0));
+		const Real azimuth = 2 * M_PI * rnd.y;
+		ShadingFrame frame;
+		frame.n = dir_in;
+		make_orthonormal(frame.n, frame.t, frame.b);
+		r.dir_out = frame.to_world(float3(sin_elevation * cos(azimuth), sin_elevation * sin(azimuth), cos_elevation));
+	}
+	r.eta = -1;
+	r.eval = eval_material(material, dir_in, r.dir_out, vertex, dir);
+	return r;
+}
+
+template<> inline Spectrum eval_material_albedo(const HeterogeneousVolume material, const PathVertexGeometry vertex) { return material.albedo_scale; }
+#endif
 
 #endif

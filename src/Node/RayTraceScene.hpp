@@ -10,6 +10,7 @@ namespace stm {
 #pragma pack(1)
 namespace hlsl {
 #include <HLSL/visibility_buffer.hlsli>
+#include <HLSL/path_state.hlsli>
 #include <HLSL/reservoir.hlsli>
 }
 #pragma pack(pop)

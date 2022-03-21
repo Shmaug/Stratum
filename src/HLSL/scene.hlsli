@@ -22,6 +22,7 @@
 
 #define INVALID_INSTANCE 0xFFFF
 #define INVALID_PRIMITIVE 0xFFFF
+#define INVALID_MATERIAL 0xFFFFFFF
 
 #define COUNTER_ADDRESS_RAY_COUNT 0
 
@@ -103,7 +104,6 @@ struct PackedVertexData {
 	inline float2 uv() { return float2(u, v); }
 };
 
-#ifdef __HLSL_VERSION
 struct RayDifferential {
   float3 origin;
   float t_min;
@@ -112,22 +112,21 @@ struct RayDifferential {
 
   float radius;
   float spread;
-    
+	
   inline float differential_transfer(const float t) {
     return radius + spread*t;
   }
-  inline void differential_reflect(const float mean_curvature, const float roughness) {
+  inline float differential_reflect(const float mean_curvature, const float roughness) {
     const float spec_spread = spread + 2 * mean_curvature * radius;
     const float diff_spread = 0.2;
-    spread = max(0, lerp(spec_spread, diff_spread, roughness));
+    return max(0.f, lerp(spec_spread, diff_spread, roughness));
   }
-  inline void differential_refract(const float mean_curvature, const float roughness, const float eta) {
+  inline float differential_refract(const float mean_curvature, const float roughness, const float eta) {
     const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
     const float diff_spread = 0.2;
-    spread = max(0, lerp(spec_spread, diff_spread, roughness));
+    return max(0.f, lerp(spec_spread, diff_spread, roughness));
   }
 };
-#endif
 
 struct ViewData {
 	TransformData camera_to_world;
@@ -152,46 +151,6 @@ struct ViewData {
 		ray.radius = 0;
 		ray.spread = 1 / min(size.x, size.y);
 		return ray;
-	}
-#endif
-};
-
-struct ShadingFrame {
-    float3 t, b, n;
-		inline void flip() {
-			t = -t;
-			b = -b;
-			n = -n;
-		}
-    inline float3 to_world(const float3 v_l) { return v_l[0]*t + v_l[1]*b + v_l[2]*n; }
-    inline float3 to_local(const float3 v_w) { return float3(dot(v_w, t), dot(v_w, b), dot(v_w, n)); }
-};
-
-struct PathBounceState {
-	uint4 rng_state;
-	float3 throughput;
-	float eta_scale;
-	float3 ray_origin;
-	uint radius_spread;
-	float3 position;
-	uint instance_primitive_index;
-	float2 bary;
-	uint vol_stack[2];
-
-#ifdef __HLSL_VERSION
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
-	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
-	inline RayDifferential ray() {
-		RayDifferential r;
-		r.origin    = ray_origin;
-		r.direction = normalize(position - ray_origin);
-		r.t_min = 0;
-		r.t_max = 1.#INF;
-		r.radius = radius();
-		r.spread = spread();
-		return r;
 	}
 #endif
 };
