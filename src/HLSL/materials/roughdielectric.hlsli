@@ -28,52 +28,6 @@ struct RoughDielectric {
 #endif
 
 #ifdef __HLSL_VERSION
-    inline Real eval_pdfW(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex) {
-        const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
-
-        // Flip the shading frame if it is inconsistent with the geometry normal
-        ShadingFrame frame = vertex.shading_frame();
-        if (dot(frame.n, dir_in) * ng_dot_in < 0)
-            frame.flip();
-            
-        const bool reflect = ng_dot_in * dot(vertex.geometry_normal, dir_out) > 0;
-        
-        // If we are going into the surface, then we use normal eta
-        // (internal/external), otherwise we use external/internal.
-        const Real local_eta = dot(vertex.geometry_normal, dir_in) > 0 ? eta : 1 / eta;
-
-        Vector3 half_vector;
-        if (reflect) {
-            half_vector = normalize(dir_in + dir_out);
-        } else {
-            // "Generalized half-vector" from Walter et al.
-            // See "Microfacet Models for Refraction through Rough Surfaces"
-            half_vector = normalize(dir_in + dir_out * local_eta);
-        }
-
-        // Flip half-vector if it's below surface
-        if (dot(half_vector, frame.n) < 0)
-            half_vector = -half_vector;
-
-        // Clamp roughness to avoid numerical issues.
-        const Real rgh = clamp(sample_image(vertex, roughness), gMinRoughness, 1);
-
-        // We sample the visible normals, also we use F to determine
-        // whether to sample reflection or refraction
-        // so PDF ~ F * D * G_in for reflection, PDF ~ (1 - F) * D * G_in for refraction.
-        const Real h_dot_in = dot(half_vector, dir_in);
-        const Real F = fresnel_dielectric(h_dot_in, local_eta);
-        const Real D = GTR2(dot(half_vector, frame.n), rgh);
-        const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
-        if (reflect) {
-            return (F * D * G_in) / (4 * abs(dot(frame.n, dir_in)));
-        } else {
-            const Real h_dot_out = dot(half_vector, dir_out);
-            const Real sqrt_denom = h_dot_in + local_eta * h_dot_out;
-            const Real dh_dout = (local_eta * local_eta) * h_dot_out / (sqrt_denom * sqrt_denom);
-            return ((1 - F) * D * G_in) * abs(dh_dout * h_dot_in / dot(frame.n, dir_in));
-        }
-    }
     inline void load(ByteAddressBuffer bytes, inout uint address) {
         specular_reflectance.load(bytes, address);
         specular_transmittance.load(bytes, address);
@@ -84,19 +38,16 @@ struct RoughDielectric {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFEvalRecord eval_material(const RoughDielectric material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
-    const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
-
-    // Flip the shading frame if it is inconsistent with the geometry normal
-    ShadingFrame frame = vertex.shading_frame();
-    if (dot(frame.n, dir_in) * ng_dot_in < 0)
+template<> inline BSDFEvalRecord eval_material(const RoughDielectric material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+    ShadingFrame frame = gPathVertices[vertex].shading_frame();
+    if (dot(frame.n, dir_in) < 0)
         frame.flip();
 
-    const bool reflect = ng_dot_in * dot(vertex.geometry_normal, dir_out) > 0;
+    const bool reflect = dot(frame.n, dir_in) * dot(frame.n, dir_out) > 0;
 
     // If we are going into the surface, then we use normal eta
     // (internal/external), otherwise we use external/internal.
-    const Real local_eta = ng_dot_in > 0 ? material.eta : 1 / material.eta;
+    const Real local_eta = dot(gPathVertices[vertex].geometry_normal, dir_in) > 0 ? material.eta : 1 / material.eta;
 
     const Spectrum Ks = sample_image(vertex, material.specular_reflectance);
     const Spectrum Kt = sample_image(vertex, material.specular_transmittance);
@@ -129,10 +80,12 @@ template<> inline BSDFEvalRecord eval_material(const RoughDielectric material, c
     const Real h_dot_in = dot(half_vector, dir_in);
     const Real F = fresnel_dielectric(h_dot_in, local_eta);
     const Real D = GTR2(h_dot_n, rgh);
-    const Real G = smith_masking_gtr2(frame.to_local(dir_in), rgh) * smith_masking_gtr2(frame.to_local(dir_out), rgh);
+    const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
+    const Real G_out = smith_masking_gtr2(frame.to_local(dir_out), rgh);
     BSDFEvalRecord r;
     if (reflect) {
-        r.f = Ks * (F * D * G) / (4 * abs(dot(frame.n, dir_in)));
+        r.f = Ks * (F * D * (G_in * G_out)) / (4 * abs(dot(frame.n, dir_in)));
+        r.pdfW = (F * D * G_in) / (4 * abs(dot(frame.n, dir_in)));
     } else {
         // Snell-Descartes law predicts that the light will contract/expand 
         // due to the different index of refraction. So the normal BSDF needs
@@ -149,22 +102,17 @@ template<> inline BSDFEvalRecord eval_material(const RoughDielectric material, c
         const Real sqrt_denom = h_dot_in + local_eta * h_dot_out;
         // Very complicated BSDF. See Walter et al.'s paper for more details.
         // "Microfacet Models for Refraction through Rough Surfaces"
-        r.f = Kt * (eta_factor * (1 - F) * D * G * local_eta * local_eta * abs(h_dot_out * h_dot_in)) / (abs(dot(frame.n, dir_in)) * sqrt_denom * sqrt_denom);
+        r.f = Kt * (eta_factor * (1 - F) * D * (G_in * G_out) * local_eta * local_eta * abs(h_dot_out * h_dot_in)) / (abs(dot(frame.n, dir_in)) * sqrt_denom * sqrt_denom);
+        const Real dh_dout = (local_eta * local_eta) * h_dot_out / (sqrt_denom * sqrt_denom);
+        r.pdfW = ((1 - F) * D * G_in) * abs(dh_dout * h_dot_in / dot(frame.n, dir_in));
     }
-    r.pdfW = material.eval_pdfW(dir_in, dir_out, vertex);
     return r;
 }
 
-template<> inline BSDFSampleRecord sample_material(const RoughDielectric material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
-    const Real ng_dot_in = dot(vertex.geometry_normal, dir_in);
-
-    // If we are going into the surface, then we use normal eta
-    // (internal/external), otherwise we use external/internal.
-    const Real local_eta = dot(vertex.geometry_normal, dir_in) > 0 ? material.eta : 1 / material.eta;
-
+template<> inline BSDFSampleRecord sample_material(const RoughDielectric material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
     // Flip the shading frame if it is inconsistent with the geometry normal
-    ShadingFrame frame = vertex.shading_frame();
-    if (dot(frame.n, dir_in) * ng_dot_in < 0)
+    ShadingFrame frame = gPathVertices[vertex].shading_frame();
+    if (dot(frame.n, dir_in) < 0)
         frame.flip();
 
     // Clamp roughness to avoid numerical issues.
@@ -175,22 +123,32 @@ template<> inline BSDFSampleRecord sample_material(const RoughDielectric materia
     const Vector3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
 
     Vector3 half_vector = frame.to_world(local_micro_normal);
-    // Flip half-vector if it's below surface
-    if (dot(half_vector, frame.n) < 0)
+    Real h_dot_n = dot(half_vector, frame.n);
+    if (h_dot_n < 0) {
         half_vector = -half_vector;
+        h_dot_n = -h_dot_n;
+    }
 
-    // Now we need to decide whether to reflect or refract.
-    // We do this using the Fresnel term.
+    // If we are going into the surface, then we use normal eta
+    // (internal/external), otherwise we use external/internal.
+    const Real local_eta = dot(gPathVertices[vertex].geometry_normal, dir_in) > 0 ? material.eta : 1 / material.eta;
+
     const Real h_dot_in = dot(half_vector, dir_in);
     const Real F = fresnel_dielectric(h_dot_in, local_eta);
-
+    const Real D = GTR2(h_dot_n, rgh);
+    
     if (rnd.z <= F) {
+        const Spectrum Ks = sample_image(vertex, material.specular_reflectance);
+
         // Reflection
         BSDFSampleRecord r;
         r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
         r.eta = 0;
-        r.roughness = (min16float)rgh;
-        r.eval = eval_material(material, dir_in, r.dir_out, vertex, dir);
+        r.roughness = rgh;
+        const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
+        const Real G_out = smith_masking_gtr2(frame.to_local(r.dir_out), rgh);
+        r.eval.f = Ks * (F * D * (G_in * G_out)) / (4 * abs(dot(frame.n, dir_in)));
+        r.eval.pdfW = (F * D * G_in) / (4 * abs(dot(frame.n, dir_in)));
         return r;
     } else {
         // Refraction
@@ -210,18 +168,26 @@ template<> inline BSDFSampleRecord sample_material(const RoughDielectric materia
         // flip half_vector if needed
         if (h_dot_in < 0)
             half_vector = -half_vector;
+
+        const Spectrum Kt = sample_image(vertex, material.specular_transmittance);
         
         const Real h_dot_out = sqrt(h_dot_out_sq);
         BSDFSampleRecord r;
         r.dir_out = normalize(-dir_in / local_eta + (abs(h_dot_in) / local_eta - h_dot_out) * half_vector);
         r.eta = (min16float)local_eta;
         r.roughness = (min16float)rgh;
-        r.eval = eval_material(material, dir_in, r.dir_out, vertex, dir);
+        const Real eta_factor = dir == TRANSPORT_TO_LIGHT ? (1 / (local_eta * local_eta)) : 1;
+        const Real sqrt_denom = h_dot_in + local_eta * h_dot_out;
+        const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
+        const Real G_out = smith_masking_gtr2(frame.to_local(r.dir_out), rgh);
+        r.eval.f = Kt * (eta_factor * (1 - F) * D * (G_in * G_out) * local_eta * local_eta * abs(h_dot_out * h_dot_in)) / (abs(dot(frame.n, dir_in)) * sqrt_denom * sqrt_denom);
+        const Real dh_dout = (local_eta * local_eta) * h_dot_out / (sqrt_denom * sqrt_denom);
+        r.eval.pdfW = ((1 - F) * D * G_in) * abs(dh_dout * h_dot_in / dot(frame.n, dir_in));
         return r;
     }
 }
 
-template<> inline Spectrum eval_material_albedo(const RoughDielectric material, const PathVertexGeometry vertex) { return sample_image(vertex, material.specular_reflectance); }
+template<> inline Spectrum eval_material_albedo(const RoughDielectric material, const uint vertex) { return sample_image(vertex, material.specular_reflectance); }
 #endif
 
 #endif

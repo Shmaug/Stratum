@@ -53,11 +53,12 @@ inline Reservoir init_reservoir() {
 }
 
 inline Reservoir merge(const float rnd1, const float rnd2, const Reservoir r1, const Reservoir r2) {
-	Reservoir merged;
+	Reservoir merged = init_reservoir();
 	merged.update(rnd1, r1);
 	merged.update(rnd2, r2);
 	merged.M = r1.M + r2.M;
 	return merged;
 }
+
 
 #endif

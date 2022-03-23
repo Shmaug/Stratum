@@ -135,6 +135,7 @@ struct ViewData {
 	uint2 image_min;
 	uint2 image_max;
 #ifdef __HLSL_VERSION
+	inline int2 extent() { return (int2)image_max - (int2)image_min; }
 	inline RayDifferential create_ray(const float2 uv, const float2 size) {
 		float2 clipPos = 2*uv - 1;
 		clipPos.y = -clipPos.y;
@@ -152,6 +153,35 @@ struct ViewData {
 		ray.spread = 1 / min(size.x, size.y);
 		return ray;
 	}
+#endif
+};
+
+struct PathTracePushConstants {
+	uint gRandomSeed;
+	uint gLightCount;
+	uint gViewCount;
+	uint gEnvironmentMaterialAddress;
+	float gEnvironmentSampleProbability;	
+	uint gReservoirSamples;
+	uint gSamplingFlags;
+	uint gMaxNullCollisions;
+	uint gDebugMode;
+};
+
+struct LightSampleRecord {
+	float3 position_or_bary;
+	uint instance_primitive_index;
+	float3 radiance;
+	uint vertex;
+	float3 to_light;
+	float dist;
+	float G;
+	float pdf;
+	float pdfA;
+	uint pad;
+#ifdef __HLSL_VERSION
+	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 #endif
 };
 

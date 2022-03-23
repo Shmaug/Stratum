@@ -16,10 +16,14 @@ struct Lambertian {
 #endif
 
 #ifdef __HLSL_VERSION
-    inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
-        const Real ndotwo = max(0, dot(vertex.shading_normal, dir_out));
+    inline void load(ByteAddressBuffer bytes, inout uint address) {
+        reflectance.load(bytes, address);
+    }
+
+    inline BSDFEvalRecord eval(const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+        const Real ndotwo = max(0, dot(gPathVertices[vertex].shading_normal, dir_out));
         BSDFEvalRecord r;
-        if (dot(vertex.shading_normal, dir_in) < 0) {
+        if (dot(gPathVertices[vertex].shading_normal, dir_in) < 0) {
             r.f = 0;
             r.pdfW = 0;
         } else {
@@ -29,16 +33,16 @@ struct Lambertian {
         return r;
     }
 
-    inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+    inline BSDFSampleRecord sample(const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
         BSDFSampleRecord r;
-        if (dot(dir_in, vertex.shading_normal) < 0) {
+        if (dot(dir_in, gPathVertices[vertex].shading_normal) < 0) {
             r.eval.f = 0;
             r.eval.pdfW = 0;
             return r;
         }
 
         const Vector3 local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
-        r.dir_out = vertex.shading_frame().to_world(local_dir_out);
+        r.dir_out = gPathVertices[vertex].shading_frame().to_world(local_dir_out);
         r.eta = 0;
         r.roughness = 1;
         r.eval.f = local_dir_out.z * sample_image(vertex, reflectance) / M_PI;
@@ -46,19 +50,15 @@ struct Lambertian {
         return r;
     }
 
-    inline Spectrum eval_albedo  (const PathVertexGeometry vertex) { return sample_image(vertex, reflectance); }
-
-    inline void load(ByteAddressBuffer bytes, inout uint address) {
-        reflectance.load(bytes, address);
-    }
+    inline Spectrum eval_albedo  (const uint vertex) { return sample_image(vertex, reflectance); }
 #endif // __HLSL_VERSION
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFEvalRecord eval_material(const Lambertian material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
-    const Real ndotwo = max(0, dot(vertex.shading_normal, dir_out));
+template<> inline BSDFEvalRecord eval_material(const Lambertian material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+    const Real ndotwo = max(0, dot(gPathVertices[vertex].shading_normal, dir_out));
     BSDFEvalRecord r;
-    if (dot(vertex.shading_normal, dir_in) < 0) {
+    if (dot(gPathVertices[vertex].shading_normal, dir_in) < 0) {
         r.f = 0;
         r.pdfW = 0;
     } else {
@@ -68,16 +68,16 @@ template<> inline BSDFEvalRecord eval_material(const Lambertian material, const 
     return r;
 }
 
-template<> inline BSDFSampleRecord sample_material(const Lambertian material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+template<> inline BSDFSampleRecord sample_material(const Lambertian material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
     BSDFSampleRecord r;
-    if (dot(dir_in, vertex.shading_normal) < 0) {
+    if (dot(dir_in, gPathVertices[vertex].shading_normal) < 0) {
         r.eval.f = 0;
         r.eval.pdfW = 0;
         return r;
     }
 
     const Vector3 local_dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
-    r.dir_out = vertex.shading_frame().to_world(local_dir_out);
+    r.dir_out = gPathVertices[vertex].shading_frame().to_world(local_dir_out);
     r.eta = 0;
     r.roughness = 1;
     r.eval.f = local_dir_out.z * sample_image(vertex, material.reflectance) / M_PI;
@@ -85,7 +85,7 @@ template<> inline BSDFSampleRecord sample_material(const Lambertian material, co
     return r;
 }
 
-template<> inline Spectrum eval_material_albedo(const Lambertian material, const PathVertexGeometry vertex) { return sample_image(vertex, material.reflectance); }
+template<> inline Spectrum eval_material_albedo(const Lambertian material, const uint vertex) { return sample_image(vertex, material.reflectance); }
 #endif
 
 #endif

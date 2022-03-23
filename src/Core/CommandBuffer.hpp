@@ -77,8 +77,12 @@ public:
 		mCommandBuffer.pipelineBarrier(srcStage, dstStage, {}, {}, {}, b);
 	}
 	template<typename T = byte>
-	inline void barrier(const Buffer::View<T>& buffer, vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask) {
-		barrier(vk::BufferMemoryBarrier(srcAccessMask, dstAccessMask, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **buffer.buffer(), buffer.offset(), buffer.size_bytes()), srcStage, dstStage);
+	inline void barrier(const vk::ArrayProxy<const Buffer::View<T>>& buffers, vk::PipelineStageFlags srcStage, vk::AccessFlags srcAccessMask, vk::PipelineStageFlags dstStage, vk::AccessFlags dstAccessMask) {
+		vector<vk::BufferMemoryBarrier> barriers(buffers.size());
+		ranges::transform(buffers, barriers.begin(), [=](const Buffer::View<T>& buffer) {
+			return vk::BufferMemoryBarrier(srcAccessMask, dstAccessMask, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, **buffer.buffer(), buffer.offset(), buffer.size_bytes());
+		});
+		barrier(barriers, srcStage, dstStage);
 	}
 
 	template<typename T = byte, typename S = T>
@@ -86,18 +90,6 @@ public:
 		if (src.size_bytes() > dst.size_bytes()) throw invalid_argument("src size must be less than or equal to dst size");
 		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst.buffer()), { vk::BufferCopy(src.offset(), dst.offset(), src.size_bytes()) });
 		return dst;
-	}
-	template<typename T = byte>
-	inline Buffer::View<T> copy_buffer(const Buffer::View<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
-		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer()->name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
-		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst), { vk::BufferCopy(src.offset(), 0, src.size_bytes()) });
-		return Buffer::View<T>(dst);
-	}
-	template<typename T = byte>
-	inline Buffer::View<T> copy_buffer(const buffer_vector<T>& src, vk::BufferUsageFlagBits bufferUsage, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY) {
-		shared_ptr<Buffer> dst = make_shared<Buffer>(mDevice, src.buffer()->name(), src.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eTransferDst, memoryUsage);
-		mCommandBuffer.copyBuffer(*hold_resource(src.buffer()), *hold_resource(dst), { vk::BufferCopy(0, 0, src.size_bytes()) });
-		return Buffer::View<T>(dst);
 	}
 
 	template<typename T = byte>

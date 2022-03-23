@@ -40,7 +40,8 @@ StructuredBuffer<uint> gInstanceIndexMap;
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
 #include "../../path_state.hlsli"
-RWStructuredBuffer<PathBounceState> gPathStates;
+RWStructuredBuffer<PathState> gPathStates;
+RWStructuredBuffer<PathVertexGeometry> gPathVertices;
 RWStructuredBuffer<Reservoir> gReservoirs;
 StructuredBuffer<Reservoir> gPrevReservoirs;
 
@@ -54,14 +55,12 @@ RWTexture2D<uint> gGradientSamples;
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	int2 idx_prev = index.xy*gGradientDownsample;
-	const uint viewIndex = get_view_index(idx_prev, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
-	const ViewData view = gViews[viewIndex];
-	const int2 view_size = view.image_max - view.image_min;
+	const uint view_index = get_view_index(idx_prev, gViews, gPushConstants.gViewCount);
+	if (view_index == -1) return;
 
 	{
-		const int2 idx_view_prev = idx_prev - view.image_min;
-		uint2 arg = uint2(idx_view_prev.x + idx_view_prev.y*view_size.x, gPushConstants.gFrameNumber);
+		const int2 idx_view_prev = idx_prev - gViews[view_index].image_min;
+		uint2 arg = uint2(idx_view_prev.x + idx_view_prev.y*gViews[view_index].extent().x, gPushConstants.gFrameNumber);
 		uint sum = 0;
 		for (uint i = 0; i < 16; i++) { // XXX rounds reduced, carefully check if good
 			//for(int i = 0; i < 32; i++) {
@@ -71,36 +70,33 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 		idx_prev += arg%gGradientDownsample;
 	}
-	if (!test_inside_screen(idx_prev, view)) return;
+	if (!test_inside_screen(idx_prev, gViews[view_index])) return;
 
- 	VisibilityInfo v_prev = load_prev_visibility(idx_prev, gInstanceIndexMap);
+ 	const VisibilityInfo v_prev = load_prev_visibility(idx_prev, gInstanceIndexMap);
 	if (v_prev.instance_index() == INVALID_INSTANCE) return;
 
 	// encode position in previous frame
-	const int2 idx_view_prev = idx_prev - view.image_min;
-	uint gradient_idx_curr = (idx_view_prev.x + idx_view_prev.y * view_size.x) << (2 * TILE_OFFSET_SHIFT);
+	const int2 idx_view_prev = idx_prev - gViews[view_index].image_min;
+	uint gradient_idx_curr = (idx_view_prev.x + idx_view_prev.y * gViews[view_index].extent().x) << (2 * TILE_OFFSET_SHIFT);
 
-	const InstanceData instance = gInstances[v_prev.instance_index()];
 	float3 pos_obj;
-	if (instance.type() == INSTANCE_TYPE_SPHERE) {
+	if (gInstances[v_prev.instance_index()].type() == INSTANCE_TYPE_SPHERE) {
 		// sphere
-		pos_obj = spherical_uv_to_cartesian(v_prev.bary())*instance.radius();
+		pos_obj = spherical_uv_to_cartesian(v_prev.bary())*gInstances[v_prev.instance_index()].radius();
 	} else {
 		// triangles
-		const uint3 tri = load_tri(gIndices, instance, v_prev.primitive_index());
+		const uint3 tri = load_tri(gIndices, gInstances[v_prev.instance_index()], v_prev.primitive_index());
 		const float3 p0 = gVertices[tri.x].position;
 		pos_obj = p0 + (gVertices[tri.y].position - p0) * v_prev.bary().x + (gVertices[tri.z].position - p0) * v_prev.bary().y;
 	}
 
-	const float3 pos_cam_curr = tmul(view.world_to_camera, instance.transform).transform_point(pos_obj);
-	float4 pos_cs_curr = view.projection.project_point(pos_cam_curr);
+	float4 pos_cs_curr = gViews[view_index].projection.project_point( tmul(gViews[view_index].world_to_camera, gInstances[v_prev.instance_index()].transform).transform_point(pos_obj) );
 	pos_cs_curr.y = -pos_cs_curr.y;
 	const float2 uv = (pos_cs_curr.xy/pos_cs_curr.w)*.5 + .5;
-	const int2 idx_curr = view.image_min + int2(uv * view_size);
-	if (!test_inside_screen(idx_curr, view)) return;
+	const int2 idx_curr = gViews[view_index].image_min + int2(uv * gViews[view_index].extent());
+	if (!test_inside_screen(idx_curr, gViews[view_index])) return;
 
 	const VisibilityInfo v_curr = load_visibility(idx_curr);
-
 	if (v_curr.instance_index() != v_prev.instance_index()) return;
 	if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), gGradientDownsample, v_prev.dz_dxy())) return;
 	if (!test_reprojected_normal(v_curr.normal(), v_prev.normal())) return;
@@ -111,16 +107,17 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint res;
 	InterlockedCompareExchange(gGradientSamples[tile_pos_curr], 0u, gradient_idx_curr, res);
 	if (res == 0) {
+		gVisibility[0][idx_curr] = v_prev.data[0];
+		gVisibility[1][idx_curr] = v_prev.data[1];
+		gVisibility[2][idx_curr] = uint4(v_prev.data[2].xy, asuint( (idx_view_prev + 0.5) / gViews[view_index].extent() ));
+		
 		uint w,h;
 		gVisibility[0].GetDimensions(w,h);
 		const uint index_1d = idx_curr.y*w + idx_curr.x;
-		v_prev.data[2].zw = asuint( (idx_view_prev + 0.5) / float2(view_size) );
-		for (uint i = 0; i < VISIBILITY_BUFFER_COUNT; i++)
-			gVisibility[i][idx_curr] = v_prev.data[i];
-		
-		gPathStates[index_1d].rng_state = v_prev.rng_seed();
+
+		gPathStates[index_1d].rng_state = v_prev.data[0];
 		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
-		gPathStates[index_1d].g = instance_geometry(gPathStates[index_1d].instance_primitive_index, instance.transform.transform_point(pos_obj), v_prev.bary());
+		instance_geometry(gPathVertices[index_1d], gPathStates[index_1d].instance_primitive_index, gInstances[v_prev.instance_index()].transform.transform_point(pos_obj), v_prev.bary());
 		
 		gReservoirs[index_1d] = gPrevReservoirs[index_1d];
 	}

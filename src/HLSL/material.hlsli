@@ -19,8 +19,8 @@ struct BSDFSampleRecord {
 	BSDFEvalRecord eval;
 	Vector3 dir_out;
 	// The index of refraction ratio. Set to 0 if it's not a transmission event.
-	min16float eta;
-	min16float roughness;
+	float eta;
+	float roughness;
 };
 
 #define TransportDirection bool
@@ -30,7 +30,7 @@ struct BSDFSampleRecord {
 // outputs the BSDF times the cosine between outgoing direction and the shading normal, evaluated at a point.
 // When the transport direction is towards the lights, dir_in is the view direction, and dir_out is the light direction.
 template<typename Material>
-inline BSDFEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
+inline BSDFEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
 	BSDFEvalRecord e;
 	e.f = Spectrum(1,0,1);
 	e.pdfW = 0;
@@ -41,7 +41,7 @@ inline BSDFEvalRecord eval_material(const Material material, const Vector3 dir_i
 // Returns 0 if the sampling failed (e.g., if the incoming direction is invalid).
 // If dir == TO_LIGHT, incoming direction is the view direction and we're sampling for the light direction.
 template<typename Material>
-inline BSDFSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+inline BSDFSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
 	BSDFSampleRecord s;
 	s.dir_out = 0;
 	s.eta = 0;
@@ -50,8 +50,8 @@ inline BSDFSampleRecord sample_material(const Material material, const Vector3 r
 	return s;
 }
 
-template<typename Material> inline Spectrum eval_material_albedo  (const Material material, const PathVertexGeometry vertex) { return 0; }
-template<typename Material> inline Spectrum eval_material_emission(const Material material, const PathVertexGeometry vertex) { return 0; }
+template<typename Material> inline Spectrum eval_material_albedo  (const Material material, const uint vertex) { return 0; }
+template<typename Material> inline Spectrum eval_material_emission(const Material material, const uint vertex) { return 0; }
 
 
 #endif
@@ -64,10 +64,10 @@ template<typename Material> inline Spectrum eval_material_emission(const Materia
 #include "materials/het_volume.hlsli"
 
 #define FOR_EACH_BSDF_TYPE(FN) \
-	FN( Lambertian ) 						 \
 	FN( Emissive )        			 \
 	FN( Environment )     			 \
 	FN( HeterogeneousVolume )		 \
+	FN( Lambertian ) 						 \
 	FN( RoughPlastic )					 \
 	FN( RoughDielectric )
 	/* Append BSDF types here */
@@ -85,7 +85,7 @@ inline Material load_material(ByteAddressBuffer data, uint address) {
 	return material;
 }
 
-inline BSDFSampleRecord load_and_sample_material(ByteAddressBuffer data, uint address, const float3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+inline BSDFSampleRecord load_and_sample_material(ByteAddressBuffer data, uint address, const float3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
 	const uint type = data.Load(address); address += 4;
 	switch (type) {
 	default:
@@ -94,7 +94,7 @@ inline BSDFSampleRecord load_and_sample_material(ByteAddressBuffer data, uint ad
 	#undef CASE_FN
 	}
 }
-inline BSDFEvalRecord load_and_eval_material(ByteAddressBuffer data, uint address, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
+inline BSDFEvalRecord load_and_eval_material(ByteAddressBuffer data, uint address, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
 	const uint type = data.Load(address);
 	address += 4;
 	switch (type) {
@@ -105,7 +105,7 @@ inline BSDFEvalRecord load_and_eval_material(ByteAddressBuffer data, uint addres
 	}
 }
 
-inline Spectrum load_and_eval_material_albedo(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
+inline Spectrum load_and_eval_material_albedo(ByteAddressBuffer data, uint address, const uint vertex) {
 	const uint type = data.Load(address); address += 4;
 	switch (type) {
 	default:
@@ -114,7 +114,7 @@ inline Spectrum load_and_eval_material_albedo(ByteAddressBuffer data, uint addre
 	#undef CASE_FN
 	}
 }
-inline Spectrum load_and_eval_material_emission(ByteAddressBuffer data, uint address, const PathVertexGeometry vertex) {
+inline Spectrum load_and_eval_material_emission(ByteAddressBuffer data, uint address, const uint vertex) {
 	const uint type = data.Load(address); address += 4;
 	if (type == BSDFType::eEmissive)
 		return eval_material_emission(load_material<Emissive>(data, address), vertex);

@@ -60,7 +60,9 @@ private:
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	
 	component_ptr<ComputePipelineState> mTraceVisibilityPipeline;
-	component_ptr<ComputePipelineState> mTraceBouncePipeline;
+	component_ptr<ComputePipelineState> mStoreVisibilityPipeline;
+	component_ptr<ComputePipelineState> mSampleAlbedoAndReservoirsPipeline;
+	component_ptr<ComputePipelineState> mSamplePathBouncePipeline;
 	component_ptr<ComputePipelineState> mDemodulateAlbedoPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 	
@@ -77,6 +79,7 @@ private:
 
 	array<unordered_map<string, uint32_t>, 2> mPathTraceDescriptorMap;
 	array<shared_ptr<DescriptorSetLayout>, 2> mPathTraceDescriptorSetLayouts;
+	hlsl::PathTracePushConstants mPathTracePushConstants;
 
 	bool mRandomPerFrame = true;
 	bool mReprojection = true;
@@ -102,7 +105,9 @@ private:
 		
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
-		Buffer::View<hlsl::PathBounceState> mPathBounceData;
+		Buffer::View<hlsl::PathState> mPathStates;
+		Buffer::View<hlsl::PathVertexGeometry> mPathVertices;
+		Buffer::View<hlsl::LightSampleRecord> mLightSamples;
 		Buffer::View<hlsl::Reservoir> mReservoirs;
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
 		Image::View mRadiance;

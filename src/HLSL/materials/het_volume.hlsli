@@ -63,7 +63,7 @@ struct HeterogeneousVolume {
 		float3 nee_pdf;
 		float3 scatter_p;
 	};
-	inline DeltaTrackResult delta_track(float3 origin, float3 direction, float t_max, inout rng_t rng, const bool can_scatter = true) {
+	inline DeltaTrackResult delta_track(float3 origin, float3 direction, float t_max, const uint index_1d, const bool can_scatter = true) {
 		DeltaTrackResult r;
 		r.transmittance = 1;
 		r.dir_pdf = 1;
@@ -76,14 +76,15 @@ struct HeterogeneousVolume {
 			pnanovdb_readaccessor_init(albedo_accessor, pnanovdb_tree_get_root(gVolumes[albedo_volume_index], pnanovdb_grid_get_tree(gVolumes[albedo_volume_index], pnanovdb_grid_handle_t(0))));
 	
 		const float3 majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor.root));
-		const uint channel = rng.nexti()%3;
+		const uint channel = rng_next_uint(index_1d)%3;
 		if (majorant[channel] == 0) return r;
 
 		origin    = pnanovdb_grid_world_to_indexf(gVolumes[density_volume_index], pnanovdb_grid_handle_t(0), origin);
 		direction = pnanovdb_grid_world_to_index_dirf(gVolumes[density_volume_index], pnanovdb_grid_handle_t(0), direction);
 
 		for (uint iteration = 0; iteration < gPushConstants.gMaxNullCollisions && any(r.transmittance > 0); iteration++) {
-			const float t = attenuation_unit * -log(1 - rng.next()) / majorant[channel];
+			const float2 rnd = float2(rng_next_float(index_1d), rng_next_float(index_1d));
+			const float t = attenuation_unit * -log(1 - rnd.x) / majorant[channel];
 			if (t < t_max) {
 				origin += direction*t;
 				t_max -= t;
@@ -94,7 +95,7 @@ struct HeterogeneousVolume {
 				const float3 local_sigma_t = local_sigma_s + local_sigma_a;
 				const float3 real_prob = local_sigma_t / majorant;
 				const float3 tr = exp(-majorant * t) / max3(majorant);
-				if (can_scatter && rng.next() < real_prob[channel]) {
+				if (can_scatter && rnd.y < real_prob[channel]) {
 					// real particle
 					r.transmittance *= tr * local_sigma_s;
 					r.dir_pdf *= tr * majorant * real_prob;
@@ -121,7 +122,7 @@ struct HeterogeneousVolume {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
+template<> inline BSDFEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
 	const Real v = 1/(4*M_PI) * (1 - material.anisotropy * material.anisotropy) / pow(1 + material.anisotropy * material.anisotropy + 2 * material.anisotropy * dot(dir_in, dir_out), 1.5);
 	BSDFEvalRecord r;
 	r.f = v;
@@ -129,7 +130,7 @@ template<> inline BSDFEvalRecord eval_material(const HeterogeneousVolume materia
 	return r;
 }
 
-template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
 	BSDFSampleRecord r;
 	if (abs(material.anisotropy) < 1e-3) {
 		const Real z = 1 - 2 * rnd.x;
@@ -150,7 +151,7 @@ template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume mat
 	return r;
 }
 
-template<> inline Spectrum eval_material_albedo(const HeterogeneousVolume material, const PathVertexGeometry vertex) { return material.albedo_scale; }
+template<> inline Spectrum eval_material_albedo(const HeterogeneousVolume material, const uint vertex) { return material.albedo_scale; }
 #endif
 
 #endif

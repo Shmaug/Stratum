@@ -37,8 +37,27 @@ struct PathVertexGeometry {
 #endif
 };
 
+struct PathState {
+	uint4 rng_state;
+	float3 throughput;
+	float eta_scale;
+	float3 ray_origin;
+	uint radius_spread;
+	uint instance_primitive_index;
+	uint vol_index;
+	uint pad0;
+	uint pad1;
+
 #ifdef __HLSL_VERSION
-inline PathVertexGeometry instance_triangle_geometry(const InstanceData instance, const uint3 tri, const float2 bary) {
+	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
+	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
+#endif
+};
+
+#ifdef __HLSL_VERSION
+inline void instance_triangle_geometry(out PathVertexGeometry r, const uint instance_index, const uint3 tri, const float2 bary) {
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
 	const PackedVertexData v2 = gVertices[tri.z];
@@ -46,11 +65,10 @@ inline PathVertexGeometry instance_triangle_geometry(const InstanceData instance
 	const float3 v1v0 = v1.position - v0.position;
 	const float3 v2v0 = v2.position - v0.position;
 
-	PathVertexGeometry r;
-	r.position = instance.transform.transform_point(v0.position + v1v0*bary.x + v2v0*bary.y);
+	r.position = gInstances[instance_index].transform.transform_point(v0.position + v1v0*bary.x + v2v0*bary.y);
 
-	const float3 dPds = instance.transform.transform_vector(-v2v0);
-	const float3 dPdt = instance.transform.transform_vector(v1.position - v2.position);
+	const float3 dPds = gInstances[instance_index].transform.transform_vector(-v2v0);
+	const float3 dPdt = gInstances[instance_index].transform.transform_vector(v1.position - v2.position);
 	const float3 ng = cross(dPds, dPdt);
 	const float area2 = length(ng);
 	r.geometry_normal = ng/area2;
@@ -87,7 +105,7 @@ inline PathVertexGeometry instance_triangle_geometry(const InstanceData instance
 		r.tangent = float4(dPdu, 1);
 		r.mean_curvature = 0;
 	} else {
-		r.shading_normal = normalize(instance.transform.transform_vector(r.shading_normal));
+		r.shading_normal = normalize(gInstances[instance_index].transform.transform_vector(r.shading_normal));
 		if (dot(r.shading_normal, r.geometry_normal) < 0) r.geometry_normal = -r.geometry_normal;
 		r.tangent = float4(normalize(dPdu - r.shading_normal*dot(r.shading_normal, dPdu)), 1);
 		const float3 dNds = v2.normal - v0.normal;
@@ -99,25 +117,21 @@ inline PathVertexGeometry instance_triangle_geometry(const InstanceData instance
 	}
 		
 	//if (dot(bitangent, dPdv) < 0) r.tangent.xyz = -r.tangent.xyz;
-	return r;
 }
-inline PathVertexGeometry instance_sphere_geometry(const InstanceData instance, const float3 local_position) {
-	PathVertexGeometry r;
-	r.position = instance.transform.transform_point(local_position);
-	r.geometry_normal = r.shading_normal = normalize(instance.transform.transform_vector(local_position));
+inline void instance_sphere_geometry(out PathVertexGeometry r, const uint instance_index, const float3 local_position) {
+	r.position = gInstances[instance_index].transform.transform_point(local_position);
+	r.geometry_normal = r.shading_normal = normalize(gInstances[instance_index].transform.transform_vector(local_position));
 	r.uv = cartesian_to_spherical_uv(normalize(local_position));
 
-	const float3 dpdu = instance.transform.transform_vector(float3(-sin(r.uv[0]) * sin(r.uv[1]), 0            , cos(r.uv[0]) * sin(r.uv[1])));
-	const float3 dpdv = instance.transform.transform_vector(float3( cos(r.uv[0]) * cos(r.uv[1]), -sin(r.uv[1]), sin(r.uv[0]) * cos(r.uv[1])));
+	const float3 dpdu = gInstances[instance_index].transform.transform_vector(float3(-sin(r.uv[0]) * sin(r.uv[1]), 0            , cos(r.uv[0]) * sin(r.uv[1])));
+	const float3 dpdv = gInstances[instance_index].transform.transform_vector(float3( cos(r.uv[0]) * cos(r.uv[1]), -sin(r.uv[1]), sin(r.uv[0]) * cos(r.uv[1])));
 	r.tangent = float4(dpdu - r.geometry_normal*dot(r.geometry_normal, dpdu), 1);
-	r.shape_area = 4*M_PI*instance.radius()*instance.radius();
-	r.mean_curvature = 1/instance.radius();
+	r.shape_area = 4*M_PI*gInstances[instance_index].radius()*gInstances[instance_index].radius();
+	r.mean_curvature = 1/gInstances[instance_index].radius();
 	r.inv_uv_size = (length(dpdu) + length(dpdv)) / 2;
-	return r;
 }
-inline PathVertexGeometry instance_volume_geometry(const InstanceData instance, const float3 local_position) {
-	PathVertexGeometry r;
-	r.position = instance.transform.transform_point(local_position);
+inline void instance_volume_geometry(out PathVertexGeometry r, const uint instance_index, const float3 local_position) {
+	r.position = gInstances[instance_index].transform.transform_point(local_position);
 	r.shape_area = 0;
 	r.geometry_normal = r.shading_normal = 0;
 	r.mean_curvature = 0;
@@ -125,11 +139,9 @@ inline PathVertexGeometry instance_volume_geometry(const InstanceData instance, 
 	r.uv = 0;
 	r.inv_uv_size = 0;
 	r.uv_screen_size = 0;
-	return r;
 }
-inline PathVertexGeometry instance_geometry(const uint instance_primitive_index, const float3 position, const float2 bary) {
+inline void instance_geometry(out PathVertexGeometry r, const uint instance_primitive_index, const float3 position, const float2 bary) {
 	if (BF_GET(instance_primitive_index, 0, 16) == INVALID_INSTANCE) {
-		PathVertexGeometry r;
 		r.position = position;
 		r.shape_area = 0;
 		r.geometry_normal = 0;
@@ -138,51 +150,28 @@ inline PathVertexGeometry instance_geometry(const uint instance_primitive_index,
 		r.tangent = 0;
 		r.uv = cartesian_to_spherical_uv(position);
 		r.inv_uv_size = 1;
-		return r;
 	} else {
-		const InstanceData instance = gInstances[BF_GET(instance_primitive_index, 0, 16)];
-		const float3 local_pos = instance.inv_transform.transform_point(position);
-		switch (instance.type()) {
+		switch (gInstances[BF_GET(instance_primitive_index, 0, 16)].type()) {
 		default:
 		case INSTANCE_TYPE_SPHERE:
-			return instance_sphere_geometry(instance, local_pos);
-		case INSTANCE_TYPE_TRIANGLES:
-			return instance_triangle_geometry(instance, load_tri(gIndices, instance, BF_GET(instance_primitive_index, 16, 16)), bary);
+			instance_sphere_geometry(r, BF_GET(instance_primitive_index, 0, 16), gInstances[BF_GET(instance_primitive_index, 0, 16)].inv_transform.transform_point(position));
+			break;
 		case INSTANCE_TYPE_VOLUME:
-			return instance_volume_geometry(instance, local_pos);
+			r.position = position;
+			r.shape_area = 0;
+			r.geometry_normal = r.shading_normal = 0;
+			r.mean_curvature = 0;
+			r.tangent = 0;
+			r.uv = 0;
+			r.inv_uv_size = 0;
+			r.uv_screen_size = 0;
+			break;
+		case INSTANCE_TYPE_TRIANGLES:
+			instance_triangle_geometry(r, BF_GET(instance_primitive_index, 0, 16), load_tri(gIndices, gInstances[BF_GET(instance_primitive_index, 0, 16)], BF_GET(instance_primitive_index, 16, 16)), bary);
+			break;
 		}
 	}
 }
 #endif
-
-struct PathBounceState {
-	uint4 rng_state;
-	float3 throughput;
-	float eta_scale;
-	float3 ray_origin;
-	uint radius_spread;
-	uint pixel_index;
-	uint instance_primitive_index;
-	uint vol_index;
-	uint pad;
-	PathVertexGeometry g;
-
-#ifdef __HLSL_VERSION
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-	inline min16float radius() { return (min16float)f16tof32(radius_spread); }
-	inline min16float spread() { return (min16float)f16tof32(radius_spread>>16); }
-	inline RayDifferential ray() {
-		RayDifferential r;
-		r.origin    = ray_origin;
-		r.direction = normalize(g.position - ray_origin);
-		r.t_min = 0;
-		r.t_max = 1.#INF;
-		r.radius = radius();
-		r.spread = spread();
-		return r;
-	}
-#endif
-};
 
 #endif

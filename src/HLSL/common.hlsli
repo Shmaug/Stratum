@@ -165,6 +165,13 @@ inline float average(const float2 x) { return (x[0] + x[1])/2; }
 inline float average(const float3 x) { return (x[0] + x[1] + x[2])/3; }
 inline float average(const float4 x) { return (x[0] + x[1] + x[2] + x[3])/4; }
 
+inline float pdfWtoA(const float pdfW, const float G) {
+	return pdfW * G; // G = cos_theta / pow2(dist);
+}
+inline float pdfAtoW(const float pdfW, const float G) {
+	return pdfW / G; // G = cos_theta / pow2(dist);
+}
+
 #ifdef __cplusplus
 
 // To support spectral data, we need to convert spectral measurements (how much energy at each wavelength) to

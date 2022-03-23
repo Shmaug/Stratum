@@ -22,7 +22,7 @@ struct Emissive {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline Spectrum eval_material_emission(const Emissive material, const PathVertexGeometry vertex) { return sample_image(vertex, material.emission); }
+template<> inline Spectrum eval_material_emission(const Emissive material, const uint vertex) { return sample_image(vertex, material.emission); }
 
 #endif // __HLSL_VERSION
 #endif

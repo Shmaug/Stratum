@@ -54,7 +54,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			fmt = formatMap.at(image.pixel_type).at(image.component - 1);
 		}
 
-		commandBuffer.barrier(pixels, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
+		commandBuffer.barrier({pixels}, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
 		auto img = make_shared<Image>(device, image.name, vk::Extent3D(image.width, image.height, 1), fmt, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 		commandBuffer.copy_buffer_to_image(pixels, Image::View(img, 0, 1));
 		img->generate_mip_maps(commandBuffer);
@@ -72,8 +72,8 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		ranges::copy(buffer.data, tmp.begin());
 		Buffer::View<unsigned char> dst = make_shared<Buffer>(device, buffer.name, buffer.data.size(), bufferUsage, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 		commandBuffer.copy_buffer(tmp, dst);
-		commandBuffer.barrier(dst, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eVertexInput, vk::AccessFlagBits::eVertexAttributeRead|vk::AccessFlagBits::eIndexRead);
-		commandBuffer.barrier(dst, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		commandBuffer.barrier({dst}, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eVertexInput, vk::AccessFlagBits::eVertexAttributeRead|vk::AccessFlagBits::eIndexRead);
+		commandBuffer.barrier({dst}, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 		return dst.buffer();
 	});
 	Node& materialsNode = root.make_child("materials");

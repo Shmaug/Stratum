@@ -82,7 +82,7 @@ struct Environment {
 		marginal_cdf = bytes.Load(address); address += 4;
 		row_cdf = bytes.Load(address); address += 4;
 	}
-	inline Real eval_pdfW(const Vector3 dir_out) {
+	inline Real eval_pdf(const Vector3 dir_out) {
 		const float2 uv = cartesian_to_spherical_uv(dir_out);
 		uint w, h;
 		emission.image().GetDimensions(w, h);
@@ -92,7 +92,7 @@ struct Environment {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFSampleRecord sample_material(const Environment material, const Vector3 rnd, const Vector3 dir_in, const PathVertexGeometry vertex, const TransportDirection dir) {
+template<> inline BSDFSampleRecord sample_material(const Environment material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
 	uint w, h;
 	material.emission.image().GetDimensions(w, h);
 	const float2 uv = sample_dist2d(gDistributions, material.marginal_cdf, material.row_cdf, w, h, rnd.xy);
@@ -107,7 +107,7 @@ template<> inline BSDFSampleRecord sample_material(const Environment material, c
 	return r;
 }
 
-template<> inline BSDFEvalRecord eval_material(const Environment material, const Vector3 dir_in, const Vector3 dir_out, const PathVertexGeometry vertex, const TransportDirection dir) {
+template<> inline BSDFEvalRecord eval_material(const Environment material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
 	BSDFEvalRecord r;
 	r.f = 0;
 	uint w, h;
@@ -117,7 +117,7 @@ template<> inline BSDFEvalRecord eval_material(const Environment material, const
 	return r;
 }
 
-template<> inline Spectrum eval_material_emission(const Environment material, const PathVertexGeometry vertex) { return sample_image(vertex, material.emission); }
+template<> inline Spectrum eval_material_emission(const Environment material, const uint vertex) { return sample_image(vertex, material.emission); }
 #endif // __HLSL_VERSION
 
 #ifdef __cplusplus
@@ -240,10 +240,7 @@ inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path
 		file.write(reinterpret_cast<char*>(rowCDF.data()), rowCDF.size_bytes());
 	}
 
-	commandBuffer.barrier(marginalPDF, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
-	commandBuffer.barrier(rowPDF, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
-	commandBuffer.barrier(marginalCDF, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
-	commandBuffer.barrier(rowCDF, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
+	commandBuffer.barrier({ marginalPDF, rowPDF, marginalCDF, rowCDF }, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
 
 	e.marginal_pdf = make_shared<Buffer>(commandBuffer.mDevice, "marginal_PDF", marginalPDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	e.row_pdf = make_shared<Buffer>(commandBuffer.mDevice, "row_pdf", rowPDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
