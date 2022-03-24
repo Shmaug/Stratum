@@ -168,23 +168,6 @@ struct PathTracePushConstants {
 	uint gDebugMode;
 };
 
-struct LightSampleRecord {
-	float3 position_or_bary;
-	uint instance_primitive_index;
-	float3 radiance;
-	uint vertex;
-	float3 to_light;
-	float dist;
-	float G;
-	float pdf;
-	float pdfA;
-	uint pad;
-#ifdef __HLSL_VERSION
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-#endif
-};
-
 #ifdef __HLSL_VERSION
 
 inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, const uint viewCount) {

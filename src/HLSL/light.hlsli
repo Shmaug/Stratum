@@ -5,9 +5,6 @@
 
 inline void sample_light_or_environment(out LightSampleRecord ls, const float4 rnd, const uint v, const float3 dir_in) {
 	ls.pdf = 0;
-	uint2 extent;
-	gRadiance.GetDimensions(extent.x,extent.y);
-	ls.vertex = extent.x*extent.y + v;
 	if (gSampleBG && (!gSampleLights || rnd.w <= gPushConstants.gEnvironmentSampleProbability)) {
 		// sample environment
 		const BSDFSampleRecord s = sample_material(load_material<Environment>(gMaterialData, gPushConstants.gEnvironmentMaterialAddress+4), rnd.xyz, dir_in, v, TRANSPORT_TO_LIGHT);
@@ -25,6 +22,9 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 		const uint light_instance_index = gLightInstances[min(uint(rnd.z * gPushConstants.gLightCount), gPushConstants.gLightCount-1)];
 		BF_SET(ls.instance_primitive_index, light_instance_index, 0, 16);
 
+		const ImageValue3 emissive = load_material<Emissive>(gMaterialData, gInstances[ls.instance_index()].material_address() + 4).emission;
+		ls.radiance = emissive.value;
+		
 		switch (gInstances[light_instance_index].type()) {
 			case INSTANCE_TYPE_SPHERE: {
 				BF_SET(ls.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
@@ -48,9 +48,7 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 				ls.dist = ray_sphere(gPathVertices[v].position, ls.to_light, center, gInstances[light_instance_index].radius()).x;
 				ls.position_or_bary = gPathVertices[v].position + ls.to_light*ls.dist;
 				
-				instance_sphere_geometry(gPathVertices[ls.vertex], light_instance_index, gInstances[light_instance_index].inv_transform.transform_point(ls.position_or_bary));
-
-				ls.G = abs(dot(ls.to_light, gPathVertices[ls.vertex].geometry_normal)) / pow2(ls.dist);
+				ls.G = abs(dot(ls.to_light, normalize(ls.position_or_bary - center))) / pow2(ls.dist);
 				ls.pdf = 1 / (2 * M_PI * (1 - cosThetaMax));
 				ls.pdfA = pdfWtoA(ls.pdf, ls.G);
 				break;
@@ -62,19 +60,21 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 				const float a = sqrt(rnd.x);
 				ls.position_or_bary = float3(1 - a, a*rnd.y, 0);
 				const uint3 tri = load_tri(gIndices, gInstances[light_instance_index], ls.primitive_index());
-				instance_triangle_geometry(gPathVertices[ls.vertex], light_instance_index, tri, ls.position_or_bary.xy);
+				PathVertexGeometry g;
+				instance_triangle_geometry(g, light_instance_index, tri, ls.position_or_bary.xy);
+				
+				if (emissive.has_image()) ls.radiance *= sample_image(emissive.image(), g.uv, g.uv_screen_size).rgb;
 
-				ls.to_light = gPathVertices[ls.vertex].position - gPathVertices[v].position;
+				ls.to_light = g.position - gPathVertices[v].position;
 				ls.dist = length(ls.to_light);
 				ls.to_light /= ls.dist;
 
-				ls.G = abs(dot(ls.to_light, gPathVertices[ls.vertex].geometry_normal)) / pow2(ls.dist);
-				ls.pdf = 1 / (gPathVertices[ls.vertex].shape_area * (float)gInstances[light_instance_index].prim_count());
+				ls.G = abs(dot(ls.to_light, g.geometry_normal)) / pow2(ls.dist);
+				ls.pdf = 1 / (g.shape_area * (float)gInstances[light_instance_index].prim_count());
 				ls.pdfA = ls.pdf;
 				break;
 			}
 		}
-		ls.radiance = load_and_eval_material_emission(gMaterialData, ls.instance_index() == INVALID_INSTANCE ? gPushConstants.gEnvironmentMaterialAddress : gInstances[ls.instance_index()].material_address(), ls.vertex);
 		const float inv_light_count = 1 / (float)gPushConstants.gLightCount;
 		ls.pdf *= inv_light_count;
 		ls.pdfA *= inv_light_count;

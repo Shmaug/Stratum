@@ -107,7 +107,6 @@ private:
 		Buffer::View<uint32_t> mViewVolumeIndices;
 		Buffer::View<hlsl::PathState> mPathStates;
 		Buffer::View<hlsl::PathVertexGeometry> mPathVertices;
-		Buffer::View<hlsl::LightSampleRecord> mLightSamples;
 		Buffer::View<hlsl::Reservoir> mReservoirs;
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
 		Image::View mRadiance;

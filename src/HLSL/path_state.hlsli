@@ -56,6 +56,22 @@ struct PathState {
 #endif
 };
 
+struct LightSampleRecord {
+	float3 position_or_bary;
+	uint instance_primitive_index;
+	float3 radiance;
+	float dist;
+	float3 to_light;
+	float G;
+	float pdf;
+	float pdfA;
+	uint pad[2];
+#ifdef __HLSL_VERSION
+	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+#endif
+};
+
 #ifdef __HLSL_VERSION
 inline void instance_triangle_geometry(out PathVertexGeometry r, const uint instance_index, const uint3 tri, const float2 bary) {
 	const PackedVertexData v0 = gVertices[tri.x];
@@ -121,13 +137,13 @@ inline void instance_triangle_geometry(out PathVertexGeometry r, const uint inst
 inline void instance_sphere_geometry(out PathVertexGeometry r, const uint instance_index, const float3 local_position) {
 	r.position = gInstances[instance_index].transform.transform_point(local_position);
 	r.geometry_normal = r.shading_normal = normalize(gInstances[instance_index].transform.transform_vector(local_position));
+	const float radius = gInstances[instance_index].radius();
+	r.shape_area = 4*M_PI*radius*radius;
+	r.mean_curvature = 1/radius;
 	r.uv = cartesian_to_spherical_uv(normalize(local_position));
-
 	const float3 dpdu = gInstances[instance_index].transform.transform_vector(float3(-sin(r.uv[0]) * sin(r.uv[1]), 0            , cos(r.uv[0]) * sin(r.uv[1])));
 	const float3 dpdv = gInstances[instance_index].transform.transform_vector(float3( cos(r.uv[0]) * cos(r.uv[1]), -sin(r.uv[1]), sin(r.uv[0]) * cos(r.uv[1])));
 	r.tangent = float4(dpdu - r.geometry_normal*dot(r.geometry_normal, dpdu), 1);
-	r.shape_area = 4*M_PI*gInstances[instance_index].radius()*gInstances[instance_index].radius();
-	r.mean_curvature = 1/gInstances[instance_index].radius();
 	r.inv_uv_size = (length(dpdu) + length(dpdv)) / 2;
 }
 inline void instance_volume_geometry(out PathVertexGeometry r, const uint instance_index, const float3 local_position) {

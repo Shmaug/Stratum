@@ -46,28 +46,26 @@ static const bool gSampleLights = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_L
 
 #include "../image_value.hlsli"
 
-inline float4 sample_image(const uint vertex, Texture2D<float4> img) {
+inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
 	float w,h;
 	img.GetDimensions(w,h);
-	return img.SampleLevel(gSampler, gPathVertices[vertex].uv, (gPushConstants.gSamplingFlags & SAMPLE_FLAG_RAY_CONE_LOD) ? log2(max(gPathVertices[vertex].uv_screen_size*min(w,h), 1e-8f)) : 0);
+	return img.SampleLevel(gSampler, uv, (gPushConstants.gSamplingFlags & SAMPLE_FLAG_RAY_CONE_LOD) ? log2(max(uv_screen_size*min(w,h), 1e-8f)) : 0);
 }
 inline float  sample_image(const uint vertex, const ImageValue1 img) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(vertex, img.image())[img.channel()];
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size)[img.channel()];
 }
 inline float2 sample_image(const uint vertex, const ImageValue2 img) {
 	if (!img.has_image()) return img.value;
-	const float4 s = sample_image(vertex, img.image());
-	return img.value * float2(s[img.channels()[0]], s[img.channels()[1]]);
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rg;
 }
 inline float3 sample_image(const uint vertex, const ImageValue3 img) {
 	if (!img.has_image()) return img.value;
-	const float4 s = sample_image(vertex, img.image());
-	return img.value * float3(s[img.channels()[0]], s[img.channels()[1]], s[img.channels()[2]]);
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rgb;
 }
 inline float4 sample_image(const uint vertex, const ImageValue4 img) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(vertex, img.image());
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size);
 }
 
 inline uint4 pcg4d(uint4 v) {
@@ -301,22 +299,23 @@ inline float3 eval_transmittance(inout ray_query_t rayQuery, const uint index_1d
 
 inline float3 sample_light(inout ray_query_t rayQuery, const uint index_1d) {
 	const float3 dir_in = -path_ray(index_1d).direction;
-	sample_light_or_environment(gLightSamples[index_1d], float4(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d)), index_1d, dir_in);
-	if (gLightSamples[index_1d].pdf <= 0) return 0;
+	LightSampleRecord ls;
+	sample_light_or_environment(ls, float4(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d)), index_1d, dir_in);
+	if (ls.pdf <= 0) return 0;
 
 	float T_dir_pdf, T_nee_pdf;
-	const float3 T = eval_transmittance(rayQuery, index_1d, gLightSamples[index_1d].to_light, gLightSamples[index_1d].dist, T_dir_pdf, T_nee_pdf);
+	const float3 T = eval_transmittance(rayQuery, index_1d, ls.to_light, ls.dist, T_dir_pdf, T_nee_pdf);
 	if (all(T <= 0)) return 0;
 	
-	const BSDFEvalRecord f = load_and_eval_material(gMaterialData, path_material_address(index_1d), dir_in, gLightSamples[index_1d].to_light, index_1d, TRANSPORT_TO_LIGHT);
+	const BSDFEvalRecord f = load_and_eval_material(gMaterialData, path_material_address(index_1d), dir_in, ls.to_light, index_1d, TRANSPORT_TO_LIGHT);
 	if (f.pdfW <= 0) return 0;
 
-	float3 C1 = f.f * gLightSamples[index_1d].G * gLightSamples[index_1d].radiance / gLightSamples[index_1d].pdfA;
+	float3 C1 = f.f * ls.G * ls.radiance / ls.pdfA;
 
 	C1 *= T / T_nee_pdf;
 
 	const float w = (gPushConstants.gSamplingFlags & SAMPLE_FLAG_MIS) ?
-		mis_heuristic(gLightSamples[index_1d].pdfA*T_nee_pdf, pdfWtoA(f.pdfW, gLightSamples[index_1d].G)*T_dir_pdf) : 0.5;
+		mis_heuristic(ls.pdfA*T_nee_pdf, pdfWtoA(f.pdfW, ls.G)*T_dir_pdf) : 0.5;
 	return C1 * w;
 }
 inline float3 sample_reservoir(inout ray_query_t rayQuery, const uint index_1d) {
@@ -402,21 +401,22 @@ inline float3 sample_bounce(inout ray_query_t rayQuery, const uint index_1d) {
 	return 0;
 }
 
+#define GROUP_SIZE 8
+
 template<typename Material>
-inline void reservoir_ris(const Material material, const uint index_1d) {
+inline void material_reservoir_ris(const Material material, const uint index_1d) {
 	gReservoirs[index_1d] = init_reservoir();
 	const float3 dir_in = -path_ray(index_1d).direction;
 	for (uint i = 0; i < gPushConstants.gReservoirSamples; i++) {
-		sample_light_or_environment(gLightSamples[index_1d], float4(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d)), index_1d, dir_in);
-		if (gLightSamples[index_1d].pdf <= 0) continue;
-		const BSDFEvalRecord f = eval_material(material, dir_in, gLightSamples[index_1d].to_light, index_1d, TRANSPORT_TO_LIGHT);
+		LightSampleRecord ls;
+		sample_light_or_environment(ls, float4(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d)), index_1d, dir_in);
+		if (ls.pdf <= 0) continue;
+		const BSDFEvalRecord f = eval_material(material, dir_in, ls.to_light, index_1d, TRANSPORT_TO_LIGHT);
 		if (f.pdfW <= 0) continue;
-		const ReservoirLightSample s = { gLightSamples[index_1d].position_or_bary, gLightSamples[index_1d].instance_primitive_index };
-		gReservoirs[index_1d].update(rng_next_float(index_1d), s, gLightSamples[index_1d].pdfA, luminance(f.f * gLightSamples[index_1d].radiance) * gLightSamples[index_1d].G);
+		const ReservoirLightSample s = { ls.position_or_bary, ls.instance_primitive_index };
+		gReservoirs[index_1d].update(rng_next_float(index_1d), s, ls.pdfA, luminance(f.f * ls.radiance) * ls.G);
 	}
 }
-
-#define GROUP_SIZE 8
 
 [numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
 void trace_visibility(uint3 index : SV_DispatchThreadID) {
@@ -572,7 +572,7 @@ void store_albedo_and_reservoirs(uint3 index : SV_DispatchThreadID) {
 			gRadiance[index.xy] = float4(gPathStates[index_1d].throughput * eval_material_emission(material, index_1d), 1); \
 			gAlbedo  [index.xy] = float4(gPathStates[index_1d].throughput *   eval_material_albedo(material, index_1d), 1); \
 			if ((gSampleLights || gSampleBG) && gPushConstants.gReservoirSamples > 0 && gPathStates[index_1d].instance_index() != INVALID_INSTANCE) \
-				reservoir_ris(material, index_1d); \
+				material_reservoir_ris(material, index_1d); \
 			break; \
 		}
 		FOR_EACH_BSDF_TYPE(CASE_FN);
