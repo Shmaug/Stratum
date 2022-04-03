@@ -31,11 +31,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "svgf_shared.hlsli"
 
+StructuredBuffer<ViewData> gViews;
+#include "../../visibility_buffer.hlsli"
+
 RWTexture2D<float4> gOutput;
 Texture2D<float4> gInput;
 Texture2D<float2> gMoments;
-StructuredBuffer<ViewData> gViews;
-#include "../../visibility_buffer.hlsli"
 
 [[vk::push_constant]] struct {
 	uint gViewCount;
