@@ -27,14 +27,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
-#include "svgf_shared.hlsli"
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
 [[vk::constant_id(1)]] const uint gFilterKernelType = 0u;
-
-RWTexture2D<float2> gImage1[2];
-RWTexture2D<float4> gImage2[2];
-StructuredBuffer<ViewData> gViews;
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
@@ -43,10 +41,10 @@ StructuredBuffer<ViewData> gViews;
 	uint gStepSize;
 } gPushConstants;
 
-#define gInput1 gImage1[gPushConstants.gIteration%2]
-#define gInput2 gImage2[gPushConstants.gIteration%2]
-#define gOutput1 gImage1[(gPushConstants.gIteration%2) ^ 1]
-#define gOutput2 gImage2[(gPushConstants.gIteration%2) ^ 1]
+#define gInput1 gDiffImage1[gPushConstants.gIteration%2]
+#define gInput2 gDiffImage2[gPushConstants.gIteration%2]
+#define gOutput1 gDiffImage1[(gPushConstants.gIteration%2) ^ 1]
+#define gOutput2 gDiffImage2[(gPushConstants.gIteration%2) ^ 1]
 
 static const float gaussian_kernel[2][2] = {
 	{ 1.0 / 4.0, 1.0 / 8.0  },

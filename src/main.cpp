@@ -50,13 +50,6 @@ void make_scene(const component_ptr<Application>& app) {
   }
 }
 
-void make_gui(const component_ptr<Application>& app) {
-  auto gui = app.node().make_child("ImGui").make_component<Gui>();
-  app->OnRenderWindow.listen(gui.node(), [=](CommandBuffer& commandBuffer) {
-    gui->render(commandBuffer, app->window().back_buffer());
-  }, EventPriority::eLast);
-}
-
 void load_plugins(const string& plugin_info, Node& dst) {
   // load plugins
   size_t s0 = plugin_info.find(';');
@@ -106,7 +99,7 @@ int main(int argc, char** argv) {
 
   auto app = app_node.make_component<Application>(instance->window());
 
-  make_gui(app);
+  auto gui = app.node().make_child("ImGui").make_component<Gui>();
 
   app->PreFrame.listen(instance.node(), bind(&Instance::poll_events, instance.get()));
 

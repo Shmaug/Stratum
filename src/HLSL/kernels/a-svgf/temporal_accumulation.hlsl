@@ -27,33 +27,22 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
-#include "svgf_shared.hlsli"
-
 [[vk::constant_id(0)]] const uint gGradientFilterRadius = 0;
 [[vk::constant_id(1)]] const bool gUseVisibility = true;
 
-RWTexture2D<float4> gAccumColor;
-RWTexture2D<float2> gAccumMoments;
-
-Texture2D<float2> gPrevMoments;
-Texture2D<float2> gDiff;
-
-Texture2D<float4> gSamples;
-Texture2D<float4> gHistory;
-
-StructuredBuffer<ViewData> gViews;
-StructuredBuffer<uint> gInstanceIndexMap;
-
-SamplerState gSampler;
-
-#include "../../visibility_buffer.hlsli"
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
 	float gHistoryLimit;
 	float gAntilagScale;
 	uint gGradientDownsample;
+	uint gAtrousGradientIterations;
 } gPushConstants;
+
+#define gDiffImage gDiffImage1[gPushConstants.gAtrousGradientIterations%2]
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
@@ -84,27 +73,27 @@ void main(uint3 index : SV_DispatchThreadId) {
 				if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
 				if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
 
-				const float4 c = gHistory[ipos_prev];
+				const float4 c = gPrevAccumColor[ipos_prev];
 
 				if (c.a <= 0 || any(isnan(c))) continue;	
 
 				const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
 				color_prev   += c * wc;
-				moments_prev += gPrevMoments[ipos_prev] * wc;
+				moments_prev += gPrevAccumMoments[ipos_prev] * wc;
 				sum_w        += wc;
 			}
 		}
 	} else if (all(vis_curr.prev_uv() >= 0) && all(vis_curr.prev_uv() <= 1)) {
 		float2 extent;
 		gAccumColor.GetDimensions(extent.x, extent.y);
-		color_prev = gHistory.SampleLevel(gSampler, vis_curr.prev_uv(), 0);
+		color_prev = gPrevAccumColor.SampleLevel(gSampler1, vis_curr.prev_uv(), 0);
 		if (any(isnan(color_prev.rgb)) || any(isinf(color_prev.rgb)))
 			color_prev = 0;
-		moments_prev = gPrevMoments.SampleLevel(gSampler, vis_curr.prev_uv(), 0);
+		moments_prev = gPrevAccumMoments.SampleLevel(gSampler1, vis_curr.prev_uv(), 0);
 		sum_w = 1;
 	}
 
-	float4 color_curr = gSamples[ipos];
+	float4 color_curr = gRadiance[ipos];
 	if (any(isnan(color_curr.rgb)) || any(isinf(color_curr.rgb)))
 		color_curr = 0;
 	const float l = luminance(color_curr.rgb);
@@ -120,16 +109,14 @@ void main(uint3 index : SV_DispatchThreadId) {
 		if (gPushConstants.gAntilagScale > 0) {
 			float antilag_alpha = 0;
 			if (gGradientFilterRadius == 0) {
-				float2 extent;
-				gSamples.GetDimensions(extent.x, extent.y);
-				const float2 v = gDiff.SampleLevel(gSampler, (ipos + 0.5) / extent, 0);
+				const float2 v = gDiffImage[ipos];
 				antilag_alpha = saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0);
 			} else {
 				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)
 					for (int xx = -gGradientFilterRadius; xx <= gGradientFilterRadius; xx++) {
 						const int2 p = int2(ipos/gPushConstants.gGradientDownsample) + int2(xx, yy);
 						if (!test_inside_screen(p*gPushConstants.gGradientDownsample, view)) continue;
-						const float2 v = gDiff[p];
+						const float2 v = gDiffImage[p];
 						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
 					}
 			}

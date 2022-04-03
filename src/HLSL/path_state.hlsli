@@ -104,6 +104,7 @@ struct PathTracePushConstants {
 };
 
 #ifdef __HLSL_VERSION
+#ifdef PT_DESCRIPTOR_SET_0
 inline void instance_triangle_geometry(out PathVertexGeometry r, const uint instance_index, const uint3 tri, const float2 bary) {
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
@@ -219,6 +220,7 @@ inline void instance_geometry(out PathVertexGeometry r, const uint instance_prim
 		}
 	}
 }
+#endif
 #endif
 
 #endif

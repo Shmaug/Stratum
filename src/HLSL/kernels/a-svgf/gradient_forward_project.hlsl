@@ -29,24 +29,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
 
-#include "svgf_shared.hlsli"
-#include "../../scene.hlsli"
-#include "../../reservoir.hlsli"
-
-StructuredBuffer<PackedVertexData> gVertices;
-ByteAddressBuffer gIndices;
-StructuredBuffer<InstanceData> gInstances;
-StructuredBuffer<uint> gInstanceIndexMap;
-
-StructuredBuffer<ViewData> gViews;
-#include "../../visibility_buffer.hlsli"
-#include "../../path_state.hlsli"
-RWStructuredBuffer<PathState> gPathStates;
-RWStructuredBuffer<PathVertexGeometry> gPathVertices;
-RWStructuredBuffer<Reservoir> gReservoirs;
-StructuredBuffer<Reservoir> gPrevReservoirs;
-
-RWTexture2D<uint> gGradientSamples;
+#define PT_DESCRIPTOR_SET_0
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;

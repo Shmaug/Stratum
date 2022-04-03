@@ -29,14 +29,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [[vk::constant_id(0)]] const bool gUseVisibility = true;
 
-#include "svgf_shared.hlsli"
-
-StructuredBuffer<ViewData> gViews;
-#include "../../visibility_buffer.hlsli"
-
-RWTexture2D<float4> gOutput;
-Texture2D<float4> gInput;
-Texture2D<float2> gMoments;
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::push_constant]] struct {
 	uint gViewCount;
@@ -50,11 +45,11 @@ Texture2D<float2> gMoments;
 groupshared uint3 s_mem[TILE_SIZE*TILE_SIZE];
 
 inline min16float4 load(const uint2 index, const int2 tile_pos) {
-	//return gInput[index];
+	//return gAccumColor[index];
 	return (min16float4)unpack_f16_4(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].xy);
 }
 inline min16float2 load_moment(const uint2 index, const int2 tile_pos) {
-	//return gMoments[index];
+	//return gAccumMoments[index];
 	return (min16float2)unpack_f16_2(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].z);
 }
 
@@ -69,7 +64,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			for (uint i = 0; i < TILE_SIZE; i++) {
 				const int2 p = int2(index.xy) + int2(i,j) - RADIUS_1;
 				if (!test_inside_screen(p, view)) continue;
-				s_mem[j*TILE_SIZE + i] = uint3(pack_f16_4(gInput[p]), pack_f16_2(gMoments[p]));
+				s_mem[j*TILE_SIZE + i] = uint3(pack_f16_4(gAccumColor[p]), pack_f16_2(gAccumMoments[p]));
 			}
 	}
 	GroupMemoryBarrierWithGroupSync();
@@ -81,7 +76,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 
 	const float histlen = c.a;
 	if (v.instance_index() == INVALID_INSTANCE || histlen >= gPushConstants.gHistoryLimit) {
-		gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
+		gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
 		return;
 	}
 
@@ -112,5 +107,5 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	m *= sum_w;
 	c.rgb *= sum_w;
 	
-	gOutput[index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gPushConstants.gHistoryLimit)));
+	gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gPushConstants.gHistoryLimit)));
 }

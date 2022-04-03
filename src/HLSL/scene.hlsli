@@ -1,6 +1,8 @@
 #ifndef SCENE_H
 #define SCENE_H
 
+#include "common.hlsli"
+
 #include "bitfield.hlsli"
 #include "transform.hlsli"
 

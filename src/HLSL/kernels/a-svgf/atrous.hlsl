@@ -28,14 +28,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma compile dxc -spirv -T cs_6_7 -E main
 #pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
 
-#include "svgf_shared.hlsli"
-#include "../../visibility_buffer.hlsli"
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
 [[vk::constant_id(1)]] const bool gUseVisibility = true;
-
-RWTexture2D<float4> gImage[2];
-StructuredBuffer<ViewData> gViews;
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
@@ -44,8 +42,8 @@ StructuredBuffer<ViewData> gViews;
 	uint gStepSize;
 } gPushConstants;
 
-#define gInput gImage[gPushConstants.gIteration%2]
-#define gOutput gImage[(gPushConstants.gIteration+1)%2]
+#define gInput gFilterImages[gPushConstants.gIteration%2]
+#define gOutput gFilterImages[(gPushConstants.gIteration+1)%2]
 
 struct TapData {
 	ViewData view;
@@ -242,7 +240,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 [numthreads(8,8,1)]
 void copy_rgb(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;
-	gImage[0].GetDimensions(resolution.x, resolution.y);
+	gAccumColor.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
-	gImage[1][index.xy] = float4(gImage[0][index.xy].rgb, gImage[1][index.xy].w);
+	gAccumColor[index.xy] = float4(gFilterImages[0][index.xy].rgb, gAccumColor[index.xy].w);
 }

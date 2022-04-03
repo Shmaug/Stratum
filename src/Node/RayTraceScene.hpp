@@ -88,6 +88,7 @@ private:
 		Buffer::View<float> mDistributionData;
 		shared_ptr<DescriptorSet> mPathTraceDescriptorSet;
 		
+		Buffer::View<uint32_t> mInstanceIndexMap;
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
 		Buffer::View<hlsl::Reservoir> mReservoirs;

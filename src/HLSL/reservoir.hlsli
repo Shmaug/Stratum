@@ -1,7 +1,7 @@
 #ifndef RESERVOIR_H
 #define RESERVOIR_H
 
-#include "bitfield.hlsli"
+#include "scene.hlsli"
 
 struct ReservoirLightSample {
 	float3 position_or_bary;

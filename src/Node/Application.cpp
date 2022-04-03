@@ -13,6 +13,7 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
 	
   if (!mNode.find_in_ancestor<Instance>()->find_argument("--xr"))
     OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
+      ProfilerRegion ps("Camera Controls");
       Window& window = commandBuffer.mDevice.mInstance.window();
       const MouseKeyboardState& input = window.input_state();
       auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();

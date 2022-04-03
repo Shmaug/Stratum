@@ -1,10 +1,10 @@
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_light_paths
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_visibility
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E integrate_indirect
+#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E demodulate_albedo
 
-#define gVolumeCount 8
-#define gImageCount 1024
-
+#define PT_DESCRIPTOR_SET_0
+#define PT_DESCRIPTOR_SET_1
 #include "pt_descriptors.hlsli"
 
 [[vk::constant_id(0)]] const uint gDebugMode = 0;
@@ -683,4 +683,17 @@ void integrate_indirect(uint3 index : SV_DispatchThreadID) {
 				gPathState.throughput /= l;
 		}
 	}
+}
+
+[numthreads(8,8,1)]
+void demodulate_albedo(uint3 index : SV_DispatchThreadID) {
+	uint2 resolution;
+	gRadiance.GetDimensions(resolution.x, resolution.y);
+	if (any(index.xy >= resolution)) return;
+	const float3 albedo = gAlbedo[index.xy].rgb;
+	float4 radiance = gRadiance[index.xy];
+	if (albedo.r > 0) radiance.r /= albedo.r;
+	if (albedo.g > 0) radiance.g /= albedo.g;
+	if (albedo.b > 0) radiance.b /= albedo.b;
+	gRadiance[index.xy] = radiance;
 }

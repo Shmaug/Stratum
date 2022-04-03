@@ -30,17 +30,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
 [[vk::constant_id(1)]] const bool gModulateAlbedo = true;
 
-#include "svgf_shared.hlsli"
-
-RWTexture2D<float2> gOutput1;
-RWTexture2D<float4> gOutput2;
-RWTexture2D<float4> gRadiance;
-Texture2D<float4> gAlbedo;
-Texture2D<float4> gPrevRadiance;
-Texture2D<float4> gPrevAlbedo;
-Texture2D<uint> gGradientSamples;
-StructuredBuffer<ViewData> gViews;
-#include "../../visibility_buffer.hlsli"
+#define PT_DESCRIPTOR_SET_1
+#include "../pt_descriptors.hlsli"
+#include "svgf_common.hlsli"
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
@@ -79,9 +71,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 		const uint2 view_size = view.image_max - view.image_min;
 		uint2 ipos_prev = view.image_min + uint2(idx_prev % view_size.x, idx_prev / view_size.x);
 		const float l_prev = get_prev_luminance(ipos_prev);
-		gOutput1[index.xy] = (isinf(l_prev) || isnan(l_prev)) ? l_curr : float2(max(l_curr, l_prev), l_curr - l_prev);
+		gDiffImage1[0][index.xy] = (isinf(l_prev) || isnan(l_prev)) ? l_curr : float2(max(l_curr, l_prev), l_curr - l_prev);
 	} else {
-		gOutput1[index.xy] = 0;
+		gDiffImage1[0][index.xy] = 0;
 	}
 
 	float2 moments = float2(l_curr, l_curr*l_curr);
@@ -101,6 +93,6 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 	moments /= sum_w;
 
-	gOutput2[index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(v.dz_dxy()));
+	gDiffImage2[0][index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(v.dz_dxy()));
 	gRadiance[ipos] = float4(gRadiance[ipos].rgb, 0 /* set N to zero, to avoid contributing to temporal accumulation */);
 }

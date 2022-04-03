@@ -56,7 +56,7 @@ string GetSystemFontFile(const string &faceName) {
 #endif
 
 #pragma region inspector gui
-#include "RayTraceScene.hpp"
+#include "RayTraceScene.hpp" // for create_pipelines
 inline void inspector_gui_fn(Application* app) {
 	if (ImGui::Button("Reload Shaders")) {
 	  app->window().mInstance.device()->waitIdle();
@@ -145,10 +145,7 @@ inline void node_graph_gui_fn(Node& n, Node*& selected) {
 #pragma endregion
 
 #pragma region profiler
-
-template<typename T>
-struct Range2 { T min, max; };
-
+template<typename T> struct Range2 { T min, max; };
 using Range2f = Range2<float>;
 using Range2t = Range2<chrono::steady_clock::time_point>;
 using frame_time_unit = chrono::duration<float, milli>;
@@ -392,36 +389,38 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 
 void Profiler::on_gui() {
   if (mFrameHistory.size() < 2) return;
-  if (ImGui::BeginChild("Profiler", ImVec2(0, 100))) {
-    vector<float> frameTimings(mFrameHistory.size());
-    ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
-      return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();
-    });
+  
+  vector<float> frameTimings(mFrameHistory.size());
+  ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
+    return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();
+  });
 
-    float timeAccum = 0; 
-    uint32_t frameCount = 0;
-    for (frameCount = 0; frameCount < frameTimings.size(); frameCount++) {
-      timeAccum += frameTimings[frameCount];
-      if (timeAccum > 1000.f) break;
-    }
-    ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
-
-    const float graphScale = 2;
-    
-    float width = ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x;
-    mFrameHistoryCount = size_t(width / graphScale);
-    
-    const float height = ImGui::GetWindowContentRegionMax().y - ImGui::GetWindowContentRegionMin().y;
-
-    DrawPlot(frameTimings, min(width, graphScale*frameTimings.size()), height, [&](const size_t idx) { mTimelineSample = *next(mFrameHistory.begin(), idx+1); });
-    DrawTimeline(mTimelineSample ? *mTimelineSample : **mFrameHistory.begin(), width);
-
+  float timeAccum = 0; 
+  uint32_t frameCount = 0;
+  for (frameCount = 0; frameCount < frameTimings.size(); frameCount++) {
+    timeAccum += frameTimings[frameCount];
+    if (timeAccum > 1000.f) break;
   }
-	ImGui::EndChild();
+  ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
+
+  const float graphScale = 2;
+  
+  float width = ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x;
+  mFrameHistoryCount = size_t(width / graphScale);
+  
+  const float height = ImGui::GetWindowContentRegionMax().y - ImGui::GetWindowContentRegionMin().y;
+
+  DrawPlot(frameTimings, min(width, graphScale*frameTimings.size()), 80, [&](const size_t idx) { mTimelineSample = *next(mFrameHistory.begin(), idx+1); });
+  DrawTimeline(mTimelineSample ? *mTimelineSample : **mFrameHistory.begin(), width);
 }
 #pragma endregion
 
 Gui::Gui(Node& node) : mNode(node) {
+	auto app = mNode.find_in_ancestor<Application>();
+	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
+	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
+  app->OnRenderWindow.listen(mNode, [=](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, EventPriority::eLast);
+
 	mContext = ImGui::CreateContext();
 
 	ImGuiIO& io = ImGui::GetIO();
@@ -460,10 +459,6 @@ Gui::Gui(Node& node) : mNode(node) {
 	attributes[VertexArrayObject::AttributeType::eColor   ].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
 	mMesh.vertices() = make_shared<VertexArrayObject>(attributes);
 
-	auto app = mNode.find_in_ancestor<Application>();
-	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
-	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
-	
 	#pragma region Inspector gui
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
 	register_inspector_gui_fn<ShaderDatabase>(&inspector_gui_fn);
@@ -506,15 +501,20 @@ Gui::Gui(Node& node) : mNode(node) {
 	create_pipelines();
 
   app->OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
+    ProfilerRegion ps("Inspector GUI");
 		auto gui = app.node().find_in_descendants<Gui>();
 		if (!gui) return;
 		gui->set_context();
 		
+		if (ImGui::Begin("Profiler")) {
+      ProfilerRegion ps("Profiler::on_gui");
+      Profiler::on_gui();
+    }
+
 		if (ImGui::Begin("Inspector")) {
 			static int tab = 0;
 			static Node* selected = nullptr;
 
-    	Profiler::on_gui();
 
 			if (ImGui::Button("Assets")) tab = 0;
 			ImGui::SameLine();
@@ -632,7 +632,7 @@ void Gui::create_font_image(CommandBuffer& commandBuffer) {
 }
 
 void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
-	ProfilerRegion ps("Update Gui");
+	ProfilerRegion ps("Gui::new_frame");
 
 	set_context();
 	ImGuiIO& io = ImGui::GetIO();
@@ -667,7 +667,7 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 }
 
 void Gui::make_geometry(CommandBuffer& commandBuffer) {
-	ProfilerRegion ps("Render Gui");
+	ProfilerRegion ps("Gui::make_geometry");
 	set_context();
 	ImGui::Render();
 
@@ -709,7 +709,7 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 	if (!mDrawData || mDrawData->CmdListsCount <= 0 || mDrawData->DisplaySize.x == 0 || mDrawData->DisplaySize.y == 0) return;
 
-	ProfilerRegion ps("Draw Gui", commandBuffer);
+	ProfilerRegion ps("Gui::render", commandBuffer);
 
 	RenderPass::SubpassDescription subpass {
 		{ "colorBuffer", {
