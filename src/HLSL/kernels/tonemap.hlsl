@@ -1,8 +1,9 @@
 #pragma compile dxc -spirv -T cs_6_7 -E demodulate_albedo
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
+#include "../common.hlsli"
 #include "../tonemap.hlsli"
-#include "a-svgf/svgf_shared.hlsli"
+#include "a-svgf/filter_type.hlsli"
 
 float3 tonemap_reinhard(const float3 color) {
 	return color/(1+color);

@@ -19,7 +19,9 @@ public:
 	inline const vk::CommandBuffer& operator*() const { return mCommandBuffer; }
 	inline const vk::CommandBuffer* operator->() const { return &mCommandBuffer; }
 
-	inline Fence& completion_fence() const { return *mCompletionFence; }
+	inline void wait_for(const shared_ptr<Semaphore>& semaphore, vk::PipelineStageFlags stage) { hold_resource(semaphore); mWaitSemaphores.emplace(semaphore, stage); }
+	inline void signal_when_done(const shared_ptr<Semaphore>& semaphore) { hold_resource(semaphore); mSignalSemaphores.emplace(semaphore); }
+	inline const shared_ptr<Fence>& fence() const { return mFence; }
 	inline Device::QueueFamily& queue_family() const { return mQueueFamily; }
 	
 	inline const shared_ptr<Framebuffer>& bound_framebuffer() const { return mBoundFramebuffer; }
@@ -35,7 +37,7 @@ public:
 
 	inline bool clear_if_done() {
 		if (mState == CommandBufferState::eInFlight)
-			if (mCompletionFence->status() == vk::Result::eSuccess) {
+			if (mFence->status() == vk::Result::eSuccess) {
 				mState = CommandBufferState::eDone;
 				clear();
 				return true;
@@ -260,8 +262,6 @@ public:
 	}
 	inline const Buffer::StrideView& current_index_buffer() { return mBoundIndexBuffer; }
 
-	size_t mPrimitiveCount;
-
 private:
 	friend class Device;
 
@@ -275,7 +275,9 @@ private:
 	vk::CommandPool mCommandPool;
 	CommandBufferState mState;
 	
-	unique_ptr<Fence> mCompletionFence;
+	shared_ptr<Fence> mFence;
+	unordered_set<shared_ptr<Semaphore>> mSignalSemaphores;
+	unordered_map<shared_ptr<Semaphore>, vk::PipelineStageFlags> mWaitSemaphores;
 
 	unordered_set<shared_ptr<DeviceResource>> mHeldResources;
 

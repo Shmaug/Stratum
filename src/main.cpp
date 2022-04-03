@@ -55,7 +55,6 @@ void make_gui(const component_ptr<Application>& app) {
   app->OnRenderWindow.listen(gui.node(), [=](CommandBuffer& commandBuffer) {
     gui->render(commandBuffer, app->window().back_buffer());
   }, EventPriority::eLast);
-  
 }
 
 void load_plugins(const string& plugin_info, Node& dst) {
@@ -103,7 +102,7 @@ int main(int argc, char** argv) {
     instance->create_device(xrnode->get_vulkan_device(*instance));
   else
 #endif
-    instance->create_device();
+  instance->create_device();
 
   auto app = app_node.make_component<Application>(instance->window());
 

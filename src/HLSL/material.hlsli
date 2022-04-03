@@ -11,64 +11,65 @@
 #define Spectrum float3
 #endif
 
-struct BSDFEvalRecord {
-	Spectrum f;
-	float pdfW;
-};
-struct BSDFSampleRecord {
-	BSDFEvalRecord eval;
-	Vector3 dir_out;
-	// The index of refraction ratio. Set to 0 if it's not a transmission event.
-	float eta;
-	float roughness;
-};
-
+// When TransportDirection is TRANSPORT_TO_LIGHT, dir_in is the view direction, and dir_out is the light direction
 #define TransportDirection bool
 #define TRANSPORT_TO_LIGHT true
-#define TRANSPORT_TO_VIEW false
+#define TRANSPORT_FROM_LIGHT false
 
-// outputs the BSDF times the cosine between outgoing direction and the shading normal, evaluated at a point.
-// When the transport direction is towards the lights, dir_in is the view direction, and dir_out is the light direction.
 template<typename Material>
-inline BSDFEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
-	BSDFEvalRecord e;
-	e.f = Spectrum(1,0,1);
+inline Material load_material(uint address, const uint vertex) {
+	Material material;
+	return material;
+}
+
+// returns BSDF * cosine term
+template<typename Material>
+inline MaterialEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+	MaterialEvalRecord e;
+	e.f = 0;
 	e.pdfW = 0;
 	return e;
 }
 
-// samples an outgoing direction. Also returns the index of refraction
-// Returns 0 if the sampling failed (e.g., if the incoming direction is invalid).
-// If dir == TO_LIGHT, incoming direction is the view direction and we're sampling for the light direction.
 template<typename Material>
-inline BSDFSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
-	BSDFSampleRecord s;
+inline MaterialSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+	MaterialSampleRecord s;
 	s.dir_out = 0;
-	s.eta = 0;
-	s.roughness = 0;
+	s.eta_roughness = 0;
 	s.eval = eval_material(material, dir_in, s.dir_out, vertex, dir);
 	return s;
 }
 
 template<typename Material> inline Spectrum eval_material_albedo  (const Material material, const uint vertex) { return 0; }
-template<typename Material> inline Spectrum eval_material_emission(const Material material, const uint vertex) { return 0; }
-
+template<typename Material> inline MaterialEvalRecord eval_material_emission(const Material material, const Vector3 dir_out, const uint vertex) {
+	MaterialEvalRecord e;
+	e.f = 0;
+	e.pdfW = 0;
+	return e;
+}
+template<typename Material> inline MaterialSampleRecord sample_material_emission(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex) {
+	MaterialSampleRecord s;
+	s.dir_out = 0;
+	s.eta_roughness = 0;
+	s.eval = eval_material_emission(material, dir_in, s.dir_out, vertex);
+	return s;
+}
 
 #endif
 
-#include "materials/lambertian.hlsli"
 #include "materials/emissive.hlsli"
 #include "materials/environment.hlsli"
+#include "materials/het_volume.hlsli"
+#include "materials/lambertian.hlsli"
 #include "materials/roughplastic.hlsli"
 #include "materials/roughdielectric.hlsli"
-#include "materials/het_volume.hlsli"
 
-#define FOR_EACH_BSDF_TYPE(FN) \
-	FN( Emissive )        			 \
-	FN( Environment )     			 \
-	FN( HeterogeneousVolume )		 \
-	FN( Lambertian ) 						 \
-	FN( RoughPlastic )					 \
+#define FOR_EACH_BSDF_TYPE(FN) 	\
+	FN( Emissive )        		\
+	FN( Environment )     		\
+	FN( HeterogeneousVolume )	\
+	FN( Lambertian ) 			\
+	FN( RoughPlastic )			\
 	FN( RoughDielectric )
 	/* Append BSDF types here */
 
@@ -78,50 +79,18 @@ enum BSDFType : uint { FOR_EACH_BSDF_TYPE( ENUMIFY ) eBSDFTypeCount };
 
 #ifdef __HLSL_VERSION
 
-template<typename Material>
-inline Material load_material(ByteAddressBuffer data, uint address) {
-	Material material;
-	material.load(data, address);
-	return material;
-}
-
-inline BSDFSampleRecord load_and_sample_material(ByteAddressBuffer data, uint address, const float3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
-	const uint type = data.Load(address); address += 4;
-	switch (type) {
-	default:
-	#define CASE_FN(BSDF_T) case e##BSDF_T: return sample_material(load_material<BSDF_T>(data, address), rnd, dir_in, vertex, dir);
-	FOR_EACH_BSDF_TYPE( CASE_FN )
-	#undef CASE_FN
-	}
-}
-inline BSDFEvalRecord load_and_eval_material(ByteAddressBuffer data, uint address, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
-	const uint type = data.Load(address);
-	address += 4;
-	switch (type) {
-	default:
-	#define CASE_FN(BSDF_T) case e##BSDF_T: return eval_material(load_material<BSDF_T>(data, address), dir_in, dir_out, vertex, dir);
-	FOR_EACH_BSDF_TYPE( CASE_FN )
-	#undef CASE_FN
-	}
-}
-
-inline Spectrum load_and_eval_material_albedo(ByteAddressBuffer data, uint address, const uint vertex) {
-	const uint type = data.Load(address); address += 4;
-	switch (type) {
-	default:
-	#define CASE_FN(BSDF_T) case e##BSDF_T: return eval_material_albedo(load_material<BSDF_T>(data,address), vertex);
-	FOR_EACH_BSDF_TYPE( CASE_FN )
-	#undef CASE_FN
-	}
-}
-inline Spectrum load_and_eval_material_emission(ByteAddressBuffer data, uint address, const uint vertex) {
-	const uint type = data.Load(address); address += 4;
+inline MaterialEvalRecord load_material_and_eval_emission(const uint address, const float3 dir_out, const uint vertex) {
+	const uint type = gMaterialData.Load(address);
 	if (type == BSDFType::eEmissive)
-		return eval_material_emission(load_material<Emissive>(data, address), vertex);
+		return eval_material_emission(load_material<Emissive>(address + 4, vertex), dir_out, vertex);
 	else if (type == BSDFType::eEnvironment)
-		return eval_material_emission(load_material<Environment>(data, address), vertex);
-	else
-		return 0;
+		return eval_material_emission(load_material<Environment>(address + 4, vertex), dir_out, vertex);
+	else {
+		MaterialEvalRecord r;
+		r.f = 0;
+		r.pdfW = 0;
+		return r;
+	}
 }
 
 #endif // __HLSL_VERSION

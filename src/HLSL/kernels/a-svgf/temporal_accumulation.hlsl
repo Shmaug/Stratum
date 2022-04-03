@@ -61,7 +61,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (viewIndex == -1) return;
 	const ViewData view = gViews[viewIndex];
 
-  const uint2 ipos = index.xy;
+  	const uint2 ipos = index.xy;
 	const VisibilityInfo vis_curr = load_visibility(ipos);
 
 	const float2 pos_prev = view.image_min + vis_curr.prev_uv() * float2(view.image_max - view.image_min);

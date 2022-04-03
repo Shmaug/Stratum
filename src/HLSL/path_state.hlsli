@@ -17,11 +17,11 @@ struct ShadingFrame {
 struct PathVertexGeometry {
 	float3 position;
 	float shape_area;
-  float3 geometry_normal;
+  	float3 geometry_normal;
 	float mean_curvature;
-  float3 shading_normal;
+  	float3 shading_normal;
 	uint front_face;
-  float4 tangent;
+  	float4 tangent;
 	float2 uv;
 	float inv_uv_size;
 	float uv_screen_size;
@@ -31,7 +31,7 @@ struct PathVertexGeometry {
 		ShadingFrame frame;
 		frame.n = shading_normal;
 		frame.t = tangent.xyz;
-    frame.b = normalize(cross(frame.n, frame.t))*tangent.w;
+    	frame.b = normalize(cross(frame.n, frame.t))*tangent.w;
 		return frame;
 	}
 #endif
@@ -45,7 +45,7 @@ struct PathState {
 	uint radius_spread;
 	uint instance_primitive_index;
 	uint vol_index;
-	uint pad0;
+	float pdfA;
 	uint pad1;
 
 #ifdef __HLSL_VERSION
@@ -56,20 +56,51 @@ struct PathState {
 #endif
 };
 
-struct LightSampleRecord {
-	float3 position_or_bary;
-	uint instance_primitive_index;
+struct DirectLightSample {
 	float3 radiance;
-	float dist;
-	float3 to_light;
 	float G;
-	float pdf;
-	float pdfA;
-	uint pad[2];
+	float3 to_light;
+	uint pdfs;
+
 #ifdef __HLSL_VERSION
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+	inline float pdfA() { return f16tof32(pdfs); }
+	inline float T_dir_pdf() { return f16tof32(pdfs>>16); }
 #endif
+};
+
+struct LightPathVertex {
+	float3 throughput;
+	float pdfA;
+	uint instance_primitive_index;
+	uint vertex;
+	uint pad[2];
+};
+
+struct MaterialEvalRecord {
+	float3 f;
+	float pdfW;
+};
+struct MaterialSampleRecord {
+	MaterialEvalRecord eval;
+	float3 dir_out;
+	// The index of refraction ratio. Set to 0 if it's not a transmission event.
+	uint eta_roughness;
+#ifdef __HLSL_VERSION
+	inline float eta() { return f16tof32(eta_roughness); }
+	inline float roughness() { return f16tof32(eta_roughness >> 16); }
+#endif
+};
+
+struct PathTracePushConstants {
+	uint gViewCount;
+	uint gLightCount;
+	uint gEnvironmentMaterialAddress;
+	float gEnvironmentSampleProbability;	
+	uint gRandomSeed;
+	uint gReservoirSamples;
+	uint gMaxNullCollisions;
+	uint gMaxDepth;
+	uint gMinDepth;
 };
 
 #ifdef __HLSL_VERSION
@@ -170,7 +201,7 @@ inline void instance_geometry(out PathVertexGeometry r, const uint instance_prim
 		switch (gInstances[BF_GET(instance_primitive_index, 0, 16)].type()) {
 		default:
 		case INSTANCE_TYPE_SPHERE:
-			instance_sphere_geometry(r, BF_GET(instance_primitive_index, 0, 16), gInstances[BF_GET(instance_primitive_index, 0, 16)].inv_transform.transform_point(position));
+			instance_sphere_geometry(r, BF_GET(instance_primitive_index, 0, 16), position);
 			break;
 		case INSTANCE_TYPE_VOLUME:
 			r.position = position;

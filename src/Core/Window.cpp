@@ -118,7 +118,6 @@ bool stm::Window::acquire_image() {
 	} else if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
 
-	//cout << "acquire_image signalling " << image_available_semaphore()->name() << endl;
 	return true;
 }
 void stm::Window::resolve(CommandBuffer& commandBuffer) {

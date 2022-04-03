@@ -28,18 +28,10 @@ struct HeterogeneousVolume {
 		ImGui::SliderFloat("Attenuation Unit", &attenuation_unit, 0, 1);
 	}
 #endif
+
 #ifdef __HLSL_VERSION
 	uint density_volume_index;
 	uint albedo_volume_index;
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		density_scale 			 = bytes.Load<float3>(address); address += 12;
-		anisotropy       		 = bytes.Load<float>(address); address += 4;
-		albedo_scale         = bytes.Load<float3>(address); address += 12;
-		attenuation_unit 		 = bytes.Load<float>(address); address += 4;
-		density_volume_index = bytes.Load(address); address += 4;
-		albedo_volume_index  = bytes.Load(address); address += 4;
-	}
 
 	inline float3 read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
 		return pnanovdb_read_float(gVolumes[density_volume_index], address);
@@ -122,16 +114,28 @@ struct HeterogeneousVolume {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+
+template<> inline HeterogeneousVolume load_material(uint address, const uint vertex) {
+	HeterogeneousVolume material;
+	material.density_scale			= gMaterialData.Load<float3>(address); address += 12;
+	material.anisotropy       	 	= gMaterialData.Load<float>(address); address += 4;
+	material.albedo_scale         	= gMaterialData.Load<float3>(address); address += 12;
+	material.attenuation_unit 	 	= gMaterialData.Load<float>(address); address += 4;
+	material.density_volume_index 	= gMaterialData.Load(address); address += 4;
+	material.albedo_volume_index  	= gMaterialData.Load(address); address += 4;
+	return material;
+}
+
+template<> inline MaterialEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
 	const Real v = 1/(4*M_PI) * (1 - material.anisotropy * material.anisotropy) / pow(1 + material.anisotropy * material.anisotropy + 2 * material.anisotropy * dot(dir_in, dir_out), 1.5);
-	BSDFEvalRecord r;
+	MaterialEvalRecord r;
 	r.f = v;
 	r.pdfW = v;
 	return r;
 }
 
-template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
-	BSDFSampleRecord r;
+template<> inline MaterialSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+	MaterialSampleRecord r;
 	if (abs(material.anisotropy) < 1e-3) {
 		const Real z = 1 - 2 * rnd.x;
 		const Real phi = 2 * M_PI * rnd.y;
@@ -146,7 +150,7 @@ template<> inline BSDFSampleRecord sample_material(const HeterogeneousVolume mat
 		make_orthonormal(frame.n, frame.t, frame.b);
 		r.dir_out = frame.to_world(float3(sin_elevation * cos(azimuth), sin_elevation * sin(azimuth), cos_elevation));
 	}
-	r.eta = -1;
+	r.eta_roughness = pack_f16_2(float2(-1,1));
 	r.eval = eval_material(material, dir_in, r.dir_out, vertex, dir);
 	return r;
 }

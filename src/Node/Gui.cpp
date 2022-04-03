@@ -510,7 +510,7 @@ Gui::Gui(Node& node) : mNode(node) {
 		if (!gui) return;
 		gui->set_context();
 		
-		if (ImGui::Begin("Utilities")) {
+		if (ImGui::Begin("Inspector")) {
 			static int tab = 0;
 			static Node* selected = nullptr;
 
@@ -593,7 +593,7 @@ Gui::Gui(Node& node) : mNode(node) {
 			}
     }
 		ImGui::End();
-  });
+  }, EventPriority::eAlmostFirst);
 	#pragma endregion
 }
 Gui::~Gui() {

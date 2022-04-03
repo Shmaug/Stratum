@@ -203,22 +203,24 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 	} else
 		return make_shared<CommandBuffer>(*queueFamily, name, level);
 }
-void Device::submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProxy<pair<shared_ptr<Semaphore>, vk::PipelineStageFlags>>& waitSemaphores, const vk::ArrayProxy<shared_ptr<Semaphore>>& signalSemaphores) {
+void Device::submit(const shared_ptr<CommandBuffer>& commandBuffer) {
 	ProfilerRegion ps("CommandBuffer::submit");
 
-	vector<vk::Semaphore> waits(waitSemaphores.size());
-	vector<vk::PipelineStageFlags> waitStages(waitSemaphores.size());
-	vector<vk::Semaphore> signals(signalSemaphores.size());
-
-	ranges::transform(views::elements<0>(waitSemaphores), waits.begin(), [](const shared_ptr<Semaphore>& s) { return **s; });
-	ranges::copy(views::elements<1>(waitSemaphores), waitStages.begin());
-	ranges::transform(signalSemaphores, signals.begin(), [](const shared_ptr<Semaphore>& s) { return **s; });
-
-	for(const auto&[s, stage] : waitSemaphores) commandBuffer->hold_resource(s);
-	for(const auto& s : signalSemaphores) commandBuffer->hold_resource(s);
-
 	(*commandBuffer)->end();
-	commandBuffer->mQueueFamily.mQueues[0].submit(vk::SubmitInfo(waits, waitStages, **commandBuffer, signals), **commandBuffer->mCompletionFence);
+	
+	vector<vk::Semaphore> waitSemaphores;
+	vector<vk::PipelineStageFlags> waitStages;
+	waitSemaphores.reserve(commandBuffer->mWaitSemaphores.size());
+	waitStages.reserve(commandBuffer->mWaitSemaphores.size());
+	for (auto&[semaphore, stage] : commandBuffer->mWaitSemaphores) {
+		waitSemaphores.push_back(**semaphore);
+		waitStages.push_back(stage);
+	}
+
+	vector<vk::Semaphore> signalSemaphores(commandBuffer->mSignalSemaphores.size());
+	ranges::transform(commandBuffer->mSignalSemaphores, signalSemaphores.begin(), [](const shared_ptr<Semaphore>& s) { return **s; });
+
+	commandBuffer->mQueueFamily.mQueues[0].submit(vk::SubmitInfo(waitSemaphores, waitStages, **commandBuffer, signalSemaphores), **commandBuffer->mFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
 	
 	scoped_lock l(mQueueFamilies.m());

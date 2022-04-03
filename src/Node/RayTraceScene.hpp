@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Core/PipelineState.hpp>
-
+#include "AccelerationStructure.hpp"
 #include "Scene.hpp"
 
 namespace stm {
@@ -14,21 +14,6 @@ namespace hlsl {
 #include <HLSL/reservoir.hlsli>
 }
 #pragma pack(pop)
-
-class AccelerationStructure : public DeviceResource {
-public:
-	AccelerationStructure() = delete;
-	AccelerationStructure(const AccelerationStructure&) = delete;
-	AccelerationStructure(AccelerationStructure&&) = delete;
-	STRATUM_API AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureGeometryKHR>& geometries, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges);
-	STRATUM_API ~AccelerationStructure();
-	inline const Buffer::View<byte>& buffer() const { return mBuffer; }
-	inline const vk::AccelerationStructureKHR* operator->() const { return &mAccelerationStructure; }
-	inline const vk::AccelerationStructureKHR& operator*() const { return mAccelerationStructure; }
-private:
-	vk::AccelerationStructureKHR mAccelerationStructure;
-	Buffer::View<byte> mBuffer;
-};
 
 class RayTraceScene {
 public:
@@ -49,20 +34,18 @@ private:
 	};
 
 	Node& mNode;
-	shared_ptr<AccelerationStructure> mTopLevel;
 	
 	unordered_map<size_t, shared_ptr<AccelerationStructure>> mAABBs;
 
 	unordered_map<Mesh*, Buffer::View<hlsl::PackedVertexData>> mMeshVertices;
 	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
-	unordered_map<void*, pair<hlsl::TransformData, uint32_t>> mTransformHistory;
 	
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	
-	component_ptr<ComputePipelineState> mTraceVisibilityPipeline;
-	component_ptr<ComputePipelineState> mStoreVisibilityPipeline;
-	component_ptr<ComputePipelineState> mSampleAlbedoAndReservoirsPipeline;
-	component_ptr<ComputePipelineState> mSamplePathBouncePipeline;
+	component_ptr<ComputePipelineState> mSampleLightPathsPipeline;
+	component_ptr<ComputePipelineState> mSampleVisibilityPipeline;
+	component_ptr<ComputePipelineState> mIntegratePipeline;
+
 	component_ptr<ComputePipelineState> mDemodulateAlbedoPipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 	
@@ -88,12 +71,14 @@ private:
 	uint32_t mAtrousIterations = 0;
 	uint32_t mSpatialReservoirIterations = 0;
 	uint32_t mHistoryTap = 0;
-	uint32_t mMinDepth = 2;
-	uint32_t mMaxDepth = 5;
-	uint32_t mDirectLightDepth = 4;
 
 	struct FrameResources {
+		shared_ptr<Fence> mFence;
+
 		hlsl::ResourcePool mResources;
+
+		shared_ptr<AccelerationStructure> mScene;
+		unordered_map<void* /* geometry component */, pair<hlsl::TransformData, uint32_t /* instance index */ >> mInstanceTransformMap;
 
 		Buffer::View<hlsl::PackedVertexData> mVertices;
 		Buffer::View<byte> mIndices;
@@ -105,20 +90,21 @@ private:
 		
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
+		Buffer::View<hlsl::Reservoir> mReservoirs;
 		Buffer::View<hlsl::PathState> mPathStates;
 		Buffer::View<hlsl::PathVertexGeometry> mPathVertices;
-		Buffer::View<hlsl::Reservoir> mReservoirs;
+		Buffer::View<hlsl::MaterialSampleRecord> mMaterialSamples;
 		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
+
 		Image::View mRadiance;
 		Image::View mAlbedo;
-
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
 		Image::View mGradientSamples;
 		array<Image::View, 2> mTemp;
 		array<array<Image::View, 2>, 2> mDiffTemp;
 
-		uint32_t mFrameId;
+		uint32_t mFrameNumber;
 	};
 
 	Buffer::View<uint32_t> mCounterValues;
@@ -126,7 +112,9 @@ private:
 	float mRaysPerSecond;
 	float mRaysPerSecondTimer;
 
-	unique_ptr<FrameResources> mCurFrame, mPrevFrame;
+	vector<shared_ptr<FrameResources>> mFrameResources;
+	shared_ptr<FrameResources> mPrevFrame;
+	shared_ptr<FrameResources> mCurFrame;
 };
 
 }

@@ -165,11 +165,13 @@ inline float average(const float2 x) { return (x[0] + x[1])/2; }
 inline float average(const float3 x) { return (x[0] + x[1] + x[2])/3; }
 inline float average(const float4 x) { return (x[0] + x[1] + x[2] + x[3])/4; }
 
+// G = cos_theta / pow2(dist);
 inline float pdfWtoA(const float pdfW, const float G) {
-	return pdfW * G; // G = cos_theta / pow2(dist);
+	return pdfW * G;
 }
-inline float pdfAtoW(const float pdfW, const float G) {
-	return pdfW / G; // G = cos_theta / pow2(dist);
+// G = cos_theta / pow2(dist);
+inline float pdfAtoW(const float pdfA, const float G) {
+	return pdfA / G;
 }
 
 #ifdef __cplusplus

@@ -37,6 +37,7 @@ StructuredBuffer<PackedVertexData> gVertices;
 ByteAddressBuffer gIndices;
 StructuredBuffer<InstanceData> gInstances;
 StructuredBuffer<uint> gInstanceIndexMap;
+
 StructuredBuffer<ViewData> gViews;
 #include "../../visibility_buffer.hlsli"
 #include "../../path_state.hlsli"
@@ -117,7 +118,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 		gPathStates[index_1d].rng_state = v_prev.data[0];
 		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
-		instance_geometry(gPathVertices[index_1d], gPathStates[index_1d].instance_primitive_index, gInstances[v_prev.instance_index()].transform.transform_point(pos_obj), v_prev.bary());
+		if (gInstances[v_prev.instance_index()].type() != INSTANCE_TYPE_SPHERE)
+			pos_obj = gInstances[v_prev.instance_index()].transform.transform_point(pos_obj);
+		instance_geometry(gPathVertices[index_1d], gPathStates[index_1d].instance_primitive_index, pos_obj, v_prev.bary());
 		
 		gReservoirs[index_1d] = gPrevReservoirs[index_1d];
 	}

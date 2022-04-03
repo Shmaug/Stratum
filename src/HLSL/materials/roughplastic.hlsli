@@ -7,12 +7,18 @@
 #endif
 
 struct RoughPlastic {
+#ifdef __HLSL_VERSION
+    float3 diffuse_reflectance;
+    float roughness;
+    float3 specular_reflectance;
+    float eta;
+#endif
+
+#ifdef __cplusplus
     ImageValue3 diffuse_reflectance;
     ImageValue3 specular_reflectance;
     ImageValue1 roughness;
     float eta;
-
-#ifdef __cplusplus
     inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
         diffuse_reflectance.store(bytes, resources);
         specular_reflectance.store(bytes, resources);
@@ -26,24 +32,26 @@ struct RoughPlastic {
         ImGui::InputFloat("eta", &eta);
     }
 #endif
-#ifdef __HLSL_VERSION
-    inline void load(ByteAddressBuffer bytes, inout uint address) {
-        diffuse_reflectance.load(bytes, address);
-        specular_reflectance.load(bytes, address);
-        roughness.load(bytes, address);
-        eta = bytes.Load<float>(address); address += 4;
-    }
-#endif // __HLSL_VERSION
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFEvalRecord eval_material(const RoughPlastic material, Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+
+template<> inline RoughPlastic load_material(uint address, const uint vertex) {
+    RoughPlastic material;
+    material.diffuse_reflectance = sample_image(load_image_value3(address), vertex);
+    material.specular_reflectance = sample_image(load_image_value3(address), vertex);
+    material.roughness = sample_image(load_image_value1(address), vertex);
+    material.eta = gMaterialData.Load<float>(address); address += 4;
+    return material;
+}
+
+template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
     const ShadingFrame frame = gPathVertices[vertex].shading_frame();
     const Real n_dot_in = dot(frame.n, dir_in);
     const Real n_dot_out = dot(frame.n, dir_out);
     if (n_dot_out <= 0 || n_dot_in <= 0) {
         // No light below the surface
-        BSDFEvalRecord r;
+        MaterialEvalRecord r;
         r.f = 0;
         r.pdfW = 0;
         return r;
@@ -59,7 +67,7 @@ template<> inline BSDFEvalRecord eval_material(const RoughPlastic material, Vect
     const Real n_dot_h = dot(frame.n, half_vector);
 
     // Clamp roughness to avoid numerical issues.
-    const Real rgh = clamp(sample_image(vertex, material.roughness), gMinRoughness, 1);
+    const Real rgh = clamp(material.roughness, gMinRoughness, 1);
 
     // If we are going into the surface, then we use normal eta
     // (internal/external), otherwise we use external/internal.
@@ -79,8 +87,8 @@ template<> inline BSDFEvalRecord eval_material(const RoughPlastic material, Vect
     const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
     const Real G_out = smith_masking_gtr2(frame.to_local(dir_out), rgh);
 
-    const Spectrum Ks = sample_image(vertex, material.specular_reflectance);
-    const Spectrum Kd = sample_image(vertex, material.diffuse_reflectance);
+    const Spectrum Ks = material.specular_reflectance;
+    const Spectrum Kd = material.diffuse_reflectance;
 
     const Spectrum spec_contrib = Ks * ((G_in * G_out) * F_o * D) / (4 * n_dot_in * n_dot_out);
 
@@ -90,7 +98,7 @@ template<> inline BSDFEvalRecord eval_material(const RoughPlastic material, Vect
     // The transmittance is computed by 1 - fresnel.
     const Spectrum diffuse_contrib = Kd * (1 - F_o) * (1 - F_i) / M_PI;
 
-    BSDFEvalRecord r;
+    MaterialEvalRecord r;
     r.f = (spec_contrib + diffuse_contrib) * n_dot_out;
 
     const Real lS = luminance(Ks);
@@ -112,37 +120,37 @@ template<> inline BSDFEvalRecord eval_material(const RoughPlastic material, Vect
     return r;
 }
 
-template<> inline BSDFSampleRecord sample_material(const RoughPlastic material, Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+template<> inline MaterialSampleRecord sample_material(const RoughPlastic material, Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
     const ShadingFrame frame = gPathVertices[vertex].shading_frame();
     const Real n_dot_in = dot(frame.n, dir_in);
     if (n_dot_in < 0) {
         // No light below the surface
-        BSDFSampleRecord r;
-        r.dir_out = 0;
-        r.eta = 0;
+        MaterialSampleRecord r;
         r.eval.f = 0;
         r.eval.pdfW = 0;
+        r.dir_out = 0;
+        r.eta_roughness = 0;
         return r;
     }
 
     // We use the reflectance to choose between sampling the dielectric or diffuse layer.
-    const Spectrum Ks = sample_image(vertex, material.specular_reflectance);
-    const Spectrum Kd = sample_image(vertex, material.diffuse_reflectance);
+    const Spectrum Ks = material.specular_reflectance;
+    const Spectrum Kd = material.diffuse_reflectance;
     const Real lS = luminance(Ks), lR = luminance(Kd);
     if (lS + lR <= 0) {
-        BSDFSampleRecord r;
-        r.dir_out = 0;
-        r.eta = 0;
+        MaterialSampleRecord r;
         r.eval.f = 0;
         r.eval.pdfW = 0;
+        r.dir_out = 0;
+        r.eta_roughness = 0;
         return r;
     }
 
     // Clamp roughness to avoid numerical issues.
-    const Real rgh = clamp(sample_image(vertex, material.roughness), gMinRoughness, 1);
+    const Real rgh = clamp(material.roughness, gMinRoughness, 1);
 
     const Real spec_prob = lS / (lS + lR);
-    BSDFSampleRecord r;
+    MaterialSampleRecord r;
     Vector3 half_vector;
     if (rnd.z < spec_prob) {
         // Sample from the specular lobe.
@@ -156,12 +164,10 @@ template<> inline BSDFSampleRecord sample_material(const RoughPlastic material, 
         half_vector = frame.to_world(local_micro_normal);
         // Reflect over the world space normal
         r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-        r.eta = 0;
-        r.roughness = rgh;
+        r.eta_roughness = pack_f16_2(float2(0,rgh));;
     } else {
         r.dir_out = frame.to_world(sample_cos_hemisphere(rnd.x, rnd.y));
-        r.eta = 0;
-        r.roughness = 1;
+        r.eta_roughness = pack_f16_2(float2(0,1));
         half_vector = normalize(dir_in + r.dir_out);
     }
     
@@ -178,7 +184,7 @@ template<> inline BSDFSampleRecord sample_material(const RoughPlastic material, 
     return r;
 }
 
-template<> inline Spectrum eval_material_albedo(const RoughPlastic material, const uint vertex) { return sample_image(vertex, material.diffuse_reflectance); }
+template<> inline Spectrum eval_material_albedo(const RoughPlastic material, const uint vertex) { return material.diffuse_reflectance; }
 #endif
 
 #endif

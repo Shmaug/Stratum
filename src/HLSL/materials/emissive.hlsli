@@ -5,7 +5,7 @@
 
 struct Emissive {
     ImageValue3 emission;
-    
+
 #ifdef __cplusplus
     inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
         emission.store(bytes, resources);
@@ -14,15 +14,20 @@ struct Emissive {
         image_value_field("Emission", emission);
     }
 #endif
-#ifdef __HLSL_VERSION
-    inline void load(ByteAddressBuffer bytes, inout uint address) {
-        emission.load(bytes, address);
-    }
-#endif
 };
 
 #ifdef __HLSL_VERSION
-template<> inline Spectrum eval_material_emission(const Emissive material, const uint vertex) { return sample_image(vertex, material.emission); }
+template<> inline Emissive load_material(uint address, const uint vertex) {
+    Emissive material;
+    material.emission = load_image_value3(address);
+    return material;
+}
+template<> inline MaterialEvalRecord eval_material_emission(const Emissive material, const Vector3 dir_out, const uint vertex) {
+    MaterialEvalRecord r;
+    r.f = sample_image(material.emission, vertex);
+    r.pdfW = 1;
+    return r;
+}
 
 #endif // __HLSL_VERSION
 #endif

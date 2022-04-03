@@ -119,7 +119,7 @@ public:
 	}
 	
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
-	STRATUM_API void submit(shared_ptr<CommandBuffer> commandBuffer, const vk::ArrayProxy<pair<shared_ptr<Semaphore>, vk::PipelineStageFlags>>& waitSemaphores = {}, const vk::ArrayProxy<shared_ptr<Semaphore>>& signalSemaphores = {});
+	STRATUM_API void submit(const shared_ptr<CommandBuffer>& commandBuffer);
 	STRATUM_API void flush();
 
 private:

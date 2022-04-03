@@ -44,4 +44,23 @@ public:
 	inline const vk::Semaphore* operator->() const { return &mSemaphore; }
 };
 
+class Event : public DeviceResource {
+private:
+	vk::Event mEvent;
+public:
+	inline Event() = delete;
+	inline Event(Event&& v) : DeviceResource(v.mDevice, v.name()), mEvent(v.mEvent) { v.mEvent = nullptr; }
+	inline Event(const Event&) = delete;
+	inline Event(Device& device, const string& name) : DeviceResource(device,name) {
+		mEvent = mDevice->createEvent({});
+		mDevice.set_debug_name(mEvent, name);
+	}
+	inline ~Event() { mDevice->destroyEvent(mEvent); }
+	inline vk::Event& operator*() { return mEvent; }
+	inline vk::Event* operator->() { return &mEvent; }
+	inline const vk::Event& operator*() const { return mEvent; }
+	inline const vk::Event* operator->() const { return &mEvent; }
+	inline bool signalled() { return mDevice->getEventStatus(mEvent) == vk::Result::eEventSet; }
+};
+
 }

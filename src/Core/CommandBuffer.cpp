@@ -4,7 +4,7 @@ using namespace stm;
 
 CommandBuffer::CommandBuffer(Device::QueueFamily& queueFamily, const string& name, vk::CommandBufferLevel level)
 	: DeviceResource(queueFamily.mDevice, name), mQueueFamily(queueFamily) {
-	mCompletionFence = make_unique<Fence>(mDevice, name + "/CompletionFence");
+	mFence = make_shared<Fence>(mDevice, name + "/fence");
 	mCommandPool = mQueueFamily.mCommandBuffers.at(this_thread::get_id()).first;
 
 	vk::CommandBufferAllocateInfo allocInfo;
@@ -39,19 +39,21 @@ void CommandBuffer::clear() {
 	for (const auto& resource : mHeldResources)
 		resource->mTracking.erase(this); 
 	mHeldResources.clear();
-	mPrimitiveCount = 0;
 	mBoundFramebuffer.reset();
 	mSubpassIndex = 0;
 	mBoundPipeline.reset();
 	mBoundVertexBuffers.clear();
 	mBoundIndexBuffer = {};
 	mBoundDescriptorSets.clear();
+	mSignalSemaphores.clear();
+	mWaitSemaphores.clear();
 }
 void CommandBuffer::reset(const string& name) {
 	clear();
 	
 	mCommandBuffer.reset({});
-	mDevice->resetFences({ **mCompletionFence });
+
+	mFence = make_shared<Fence>(mDevice, name + "/fence");
 	mDevice.set_debug_name(mCommandBuffer, name);
 
 	mCommandBuffer.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });

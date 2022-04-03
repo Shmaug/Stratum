@@ -96,17 +96,20 @@ void Application::run() {
     }
     
     if (mWindow.acquire_image()) {
+      commandBuffer->wait_for(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
+
       {
         ProfilerRegion ps("Application::OnRenderWindow");
         OnRenderWindow(*commandBuffer);
         mWindow.resolve(*commandBuffer);
       }
 
-      auto renderFinishSemaphore = make_shared<Semaphore>(commandBuffer->mDevice, "RenderSemaphore");
-      pair<shared_ptr<Semaphore>, vk::PipelineStageFlags> imageAvailableSemaphore(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
-      commandBuffer->mDevice.submit(commandBuffer, imageAvailableSemaphore, renderFinishSemaphore);
+      auto present_semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "present semaphore");
+      commandBuffer->signal_when_done(present_semaphore);
+
+      commandBuffer->mDevice.submit(commandBuffer);
       
-      mWindow.present(**renderFinishSemaphore);
+      mWindow.present(**present_semaphore);
     } else
       commandBuffer->mDevice.submit(commandBuffer);
 

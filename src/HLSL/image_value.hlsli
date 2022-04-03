@@ -68,24 +68,15 @@ inline uint4 channel_mapping_swizzle(vk::ComponentMapping m) {
 #endif // __cplusplus
 
 struct ImageValue1 {
-
 	#ifdef __HLSL_VERSION
-
 	min16float value;
 	uint image_index_and_channel;
 	inline bool has_image() { return BF_GET(image_index_and_channel, 0, 30) < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channel, 0, 30))]; }
 	inline uint channel() { return BF_GET(image_index_and_channel, 30, 2); }
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		image_index_and_channel = bytes.Load(address); address += 4;
-		value = (min16float)bytes.Load<float>(address); address += 4;
-	}
-
 	#endif
 	
 	#ifdef __cplusplus
-
 	float value;
 	Image::View image;
 	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
@@ -97,103 +88,63 @@ struct ImageValue1 {
 		bytes.Append(image_index_and_channel);
 		bytes.Appendf(value);
 	}
-
 	#endif
 };
 struct ImageValue2 {
-
 	#ifdef __HLSL_VERSION
-
 	min16float2 value;
-	uint image_index_and_channels;
-	inline bool has_image() { return BF_GET(image_index_and_channels, 0, 28) < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channels, 0, 28))]; }
-	inline uint2 channels() { return uint2(BF_GET(image_index_and_channels, 28, 2), BF_GET(image_index_and_channels, 30, 2)); }
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		image_index_and_channels = bytes.Load(address); address += 4;
-		value = (min16float2)bytes.Load<float2>(address); address += 8;
-	}
-
+	uint image_index_and_channel;
+	inline bool has_image() { return BF_GET(image_index_and_channel, 0, 30) < gImageCount; }
+	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channel, 0, 30))]; }
+	inline uint channel() { return BF_GET(image_index_and_channel, 30, 2); }
 	#endif
 
 	#ifdef __cplusplus
-
 	float2 value;
 	Image::View image;
 	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
 		const uint image_index = resources.get_index(image);
-		const uint4 c = channel_mapping_swizzle(image.components());
-	 	uint image_index_and_channels = 0;
-		BF_SET(image_index_and_channels, image_index, 0, 28);
-		BF_SET(image_index_and_channels, c[0], 28, 2);
-		BF_SET(image_index_and_channels, c[1], 30, 2);
-		bytes.Append(image_index_and_channels);
+		const uint32_t channel = channel_mapping_swizzle(image.components())[0];
+		uint image_index_and_channel = 0;
+		BF_SET(image_index_and_channel, image_index, 0, 30);
+		BF_SET(image_index_and_channel, channel, 30, 2);
+		bytes.Append(image_index_and_channel);
 		bytes.AppendN(value);
 	}
-
 	#endif
 };
 struct ImageValue3 {
-
 	#ifdef __HLSL_VERSION
-
 	min16float3 value;
-	uint image_index_and_channels;
-	inline bool has_image() { return BF_GET(image_index_and_channels, 0, 26) < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channels, 0, 26))]; }
-	inline uint3 channels() { return uint3(BF_GET(image_index_and_channels, 26, 2), BF_GET(image_index_and_channels, 28, 2), BF_GET(image_index_and_channels, 30, 2)); }
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		image_index_and_channels = bytes.Load(address); address += 4;
-		value = (min16float3)bytes.Load<float3>(address); address += 12;
-	}
-
-	#endif
-
-	#ifdef __cplusplus
-
-	float3 value;
-	Image::View image;
-	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
-		const uint image_index = resources.get_index(image);
-		const uint4 c = channel_mapping_swizzle(image.components());
-		uint image_index_and_channels = 0;
-		BF_SET(image_index_and_channels, image_index, 0, 26);
-		BF_SET(image_index_and_channels, c[0], 26, 2);
-		BF_SET(image_index_and_channels, c[1], 28, 2);
-		BF_SET(image_index_and_channels, c[2], 30, 2);
-		bytes.Append(image_index_and_channels);
-		bytes.AppendN(value);
-	}
-
-	#endif
-};
-struct ImageValue4 {
-
-	#ifdef __HLSL_VERSION
-
-	min16float4 value;
 	uint image_index;
 	inline bool has_image() { return image_index < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
-
-	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		image_index = bytes.Load(address); address += 4;
-		value = (min16float4)bytes.Load<float4>(address); address += 16;
-	}
-
 	#endif
 
 	#ifdef __cplusplus
-
-	float4 value;
 	Image::View image;
+	float3 value;
 	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
 		bytes.Append(resources.get_index(image));
 		bytes.AppendN(value);
 	}
-	
+	#endif
+};
+struct ImageValue4 {
+	#ifdef __HLSL_VERSION
+	min16float4 value;
+	uint image_index;
+	inline bool has_image() { return image_index < gImageCount; }
+	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	#endif
+
+	#ifdef __cplusplus
+	Image::View image;
+	float4 value;
+	inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
+		bytes.Append(resources.get_index(image));
+		bytes.AppendN(value);
+	}
 	#endif
 };
 
@@ -252,6 +203,57 @@ inline void image_value_field(const char* label, ImageValue4& v) {
 		ImGui::Image(&v.image, ImVec2(w, w*(float)v.image.extent().height/(float)v.image.extent().width));
 	}
 }
-#endif
+#endif // __cplusplus
+
+#ifdef __HLSL_VERSION
+
+inline ImageValue1 load_image_value1(inout uint address) {
+	ImageValue1 r;
+	r.image_index_and_channel = gMaterialData.Load(address); address += 4;
+	r.value = (min16float)gMaterialData.Load<float>(address); address += 4;
+	return r;
+}
+inline ImageValue2 load_image_value2(inout uint address) {
+	ImageValue2 r;
+	r.image_index_and_channel = gMaterialData.Load(address); address += 4;
+	r.value = (min16float2)gMaterialData.Load<float2>(address); address += 8;
+	return r;
+}
+inline ImageValue3 load_image_value3(inout uint address) {
+	ImageValue3 r;
+	r.image_index = gMaterialData.Load(address); address += 4;
+	r.value = (min16float3)gMaterialData.Load<float3>(address); address += 12;
+	return r;
+}
+inline ImageValue4 load_image_value4(inout uint address) {
+	ImageValue4 r;
+	r.image_index = gMaterialData.Load(address); address += 4;
+	r.value = (min16float4)gMaterialData.Load<float4>(address); address += 16;
+	return r;
+}
+
+inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
+	float w,h;
+	img.GetDimensions(w,h);
+	return img.SampleLevel(gSampler, uv, (gUseRayCones && uv_screen_size > 0) ? log2(max(uv_screen_size*min(w,h), 1e-8f)) : 0);
+}
+inline float  sample_image(const ImageValue1 img, const uint vertex) {
+	if (!img.has_image()) return img.value;
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size)[img.channel()];
+}
+inline float2 sample_image(const ImageValue2 img, const uint vertex) {
+	if (!img.has_image()) return img.value;
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rg;
+}
+inline float3 sample_image(const ImageValue3 img, const uint vertex) {
+	if (!img.has_image()) return img.value;
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rgb;
+}
+inline float4 sample_image(const ImageValue4 img, const uint vertex) {
+	if (!img.has_image()) return img.value;
+	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size);
+}
+
+#endif // __HLSL_VERSION
 
 #endif

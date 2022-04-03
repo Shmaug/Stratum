@@ -4,11 +4,16 @@
 #include "bitfield.hlsli"
 #include "transform.hlsli"
 
-#define SAMPLE_FLAG_RR BIT(0)
-#define SAMPLE_FLAG_BG_IS BIT(1)
-#define SAMPLE_FLAG_LIGHT_IS BIT(2)
-#define SAMPLE_FLAG_MIS BIT(3)
-#define SAMPLE_FLAG_RAY_CONE_LOD BIT(4)
+#define SAMPLE_FLAG_SAMPLE_ENVIRONMENT 		BIT(0)
+#define SAMPLE_FLAG_SAMPLE_EMISSIVE 		BIT(1)
+#define SAMPLE_FLAG_TRACE_LIGHT_PATHS		BIT(2)
+#define SAMPLE_FLAG_SAMPLE_LIGHT_PATHS		BIT(3)
+#define SAMPLE_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(4)
+#define SAMPLE_FLAG_SAMPLE_RESERVOIRS		BIT(5)
+#define SAMPLE_FLAG_MIS 					BIT(6)
+#define SAMPLE_FLAG_RAY_CONE_LOD 			BIT(7)
+#define SAMPLE_FLAG_ENABLE_VOLUMES 			BIT(8)
+#define SAMPLE_FLAG_DIRECT_ONLY				BIT(9)
 
 #define INSTANCE_TYPE_TRIANGLES 0
 #define INSTANCE_TYPE_SPHERE 1
@@ -34,22 +39,22 @@ struct InstanceData {
 	// cur instance -> prev world
 	TransformData prev_transform;
 
-	uint4 v;
+	uint4 packed;
 
-	inline uint type() CONST_CPP { return BF_GET(v[0], 0, 4); }
-	inline uint material_address() CONST_CPP { return BF_GET(v[0], 4, 28); }
+	inline uint type() CONST_CPP { return BF_GET(packed[0], 0, 4); }
+	inline uint material_address() CONST_CPP { return BF_GET(packed[0], 4, 28); }
 
 	// mesh
-	inline uint prim_count() CONST_CPP { return BF_GET(v[1], 0, 16); }
-	inline uint index_stride() CONST_CPP { return BF_GET(v[1], 16, 4); }
-	inline uint first_vertex() CONST_CPP { return v[2]; }
-	inline uint indices_byte_offset() CONST_CPP { return v[3]; }
+	inline uint prim_count() CONST_CPP { return BF_GET(packed[1], 0, 16); }
+	inline uint index_stride() CONST_CPP { return BF_GET(packed[1], 16, 4); }
+	inline uint first_vertex() CONST_CPP { return packed[2]; }
+	inline uint indices_byte_offset() CONST_CPP { return packed[3]; }
 
 	// sphere
-	inline float radius() CONST_CPP { return asfloat(v[1]); }
+	inline float radius() CONST_CPP { return asfloat(packed[1]); }
 
 	// volume
-	inline uint volume_index() CONST_CPP { return v[1]; }
+	inline uint volume_index() CONST_CPP { return packed[1]; }
 };
 inline InstanceData make_instance_triangles(const TransformData objectToWorld,
 																						const TransformData prevObjectToWorld,
@@ -62,13 +67,13 @@ inline InstanceData make_instance_triangles(const TransformData objectToWorld,
 	r.transform = objectToWorld;
 	r.inv_transform = objectToWorld.inverse();
 	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
-	r.v = 0;
-	BF_SET(r.v[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
-	BF_SET(r.v[0], materialAddress, 4, 28);
-	BF_SET(r.v[1], primCount, 0, 16);
-	BF_SET(r.v[1], indexStride, 16, 4);
-	r.v[2] = firstVertex;
-	r.v[3] = indexByteOffset;
+	r.packed = 0;
+	BF_SET(r.packed[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
+	BF_SET(r.packed[0], materialAddress, 4, 28);
+	BF_SET(r.packed[1], primCount, 0, 16);
+	BF_SET(r.packed[1], indexStride, 16, 4);
+	r.packed[2] = firstVertex;
+	r.packed[3] = indexByteOffset;
 	return r;
 }
 inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const float radius) {
@@ -76,10 +81,10 @@ inline InstanceData make_instance_sphere(const TransformData objectToWorld, cons
 	r.transform = objectToWorld;
 	r.inv_transform = objectToWorld.inverse();
 	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
-	r.v = 0;
-	BF_SET(r.v[0], INSTANCE_TYPE_SPHERE, 0, 4);
-	BF_SET(r.v[0], materialAddress, 4, 28);
-	r.v[1] = asuint(radius);
+	r.packed = 0;
+	BF_SET(r.packed[0], INSTANCE_TYPE_SPHERE, 0, 4);
+	BF_SET(r.packed[0], materialAddress, 4, 28);
+	r.packed[1] = asuint(radius);
 	return r;
 }
 inline InstanceData make_instance_volume(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const uint volume_index) {
@@ -87,10 +92,10 @@ inline InstanceData make_instance_volume(const TransformData objectToWorld, cons
 	r.transform = objectToWorld;
 	r.inv_transform = objectToWorld.inverse();
 	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
-	r.v = 0;
-	BF_SET(r.v[0], INSTANCE_TYPE_VOLUME, 0, 4);
-	BF_SET(r.v[0], materialAddress, 4, 28);
-	r.v[1] = volume_index;
+	r.packed = 0;
+	BF_SET(r.packed[0], INSTANCE_TYPE_VOLUME, 0, 4);
+	BF_SET(r.packed[0], materialAddress, 4, 28);
+	r.packed[1] = volume_index;
 	return r;
 }
 
@@ -154,18 +159,6 @@ struct ViewData {
 		return ray;
 	}
 #endif
-};
-
-struct PathTracePushConstants {
-	uint gRandomSeed;
-	uint gLightCount;
-	uint gViewCount;
-	uint gEnvironmentMaterialAddress;
-	float gEnvironmentSampleProbability;	
-	uint gReservoirSamples;
-	uint gSamplingFlags;
-	uint gMaxNullCollisions;
-	uint gDebugMode;
 };
 
 #ifdef __HLSL_VERSION

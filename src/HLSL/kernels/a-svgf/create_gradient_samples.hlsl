@@ -35,8 +35,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 RWTexture2D<float2> gOutput1;
 RWTexture2D<float4> gOutput2;
 RWTexture2D<float4> gRadiance;
-Texture2D<float4> gPrevRadiance;
 Texture2D<float4> gAlbedo;
+Texture2D<float4> gPrevRadiance;
 Texture2D<float4> gPrevAlbedo;
 Texture2D<uint> gGradientSamples;
 StructuredBuffer<ViewData> gViews;

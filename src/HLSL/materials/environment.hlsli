@@ -76,11 +76,6 @@ struct Environment {
 	uint row_cdf;
 
 	inline void load(ByteAddressBuffer bytes, inout uint address) {
-		emission.load(bytes, address);
-		marginal_pdf = bytes.Load(address); address += 4;
-		row_pdf = bytes.Load(address); address += 4;
-		marginal_cdf = bytes.Load(address); address += 4;
-		row_cdf = bytes.Load(address); address += 4;
 	}
 	inline Real eval_pdf(const Vector3 dir_out) {
 		const float2 uv = cartesian_to_spherical_uv(dir_out);
@@ -92,32 +87,42 @@ struct Environment {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline BSDFSampleRecord sample_material(const Environment material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+template<>
+inline Environment load_material<Environment>(uint address, const uint vertex) {
+    Environment material;
+	material.emission		= load_image_value3(address);
+	material.marginal_pdf 	= gMaterialData.Load(address); address += 4;
+	material.row_pdf 		= gMaterialData.Load(address); address += 4;
+	material.marginal_cdf 	= gMaterialData.Load(address); address += 4;
+	material.row_cdf 	  	= gMaterialData.Load(address); address += 4;
+    return material;
+}
+
+template<> inline MaterialSampleRecord sample_material_emission(const Environment material, const Vector3 rnd, const Vector3 dir_in, const uint vertex) {
 	uint w, h;
 	material.emission.image().GetDimensions(w, h);
 	const float2 uv = sample_dist2d(gDistributions, material.marginal_cdf, material.row_cdf, w, h, rnd.xy);
-	BSDFSampleRecord r;
+	MaterialSampleRecord r;
 	r.dir_out = spherical_uv_to_cartesian(uv);
 	if (material.emission.has_image())
 		r.eval.f = material.emission.value*material.emission.image().SampleLevel(gSampler, uv, 0).rgb;
 	else
 		r.eval.f = material.emission.value;
 	r.eval.pdfW = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - r.dir_out.y*r.dir_out.y));
-	r.eta = 0;
+	r.eta_roughness = 0;
 	return r;
 }
-
-template<> inline BSDFEvalRecord eval_material(const Environment material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
-	BSDFEvalRecord r;
-	r.f = 0;
+template<> inline MaterialEvalRecord eval_material_emission(const Environment material, const Vector3 dir_out, const uint vertex) {
 	uint w, h;
 	material.emission.image().GetDimensions(w, h);
-	const float2 uv = cartesian_to_spherical_uv(dir_out);
+	const float2 uv = cartesian_to_spherical_uv(-dir_out);
+	MaterialEvalRecord r;
+	float uv_screen_size = 0;
+	if (vertex != -1) uv_screen_size = gPathVertices[vertex].uv_screen_size;
+	r.f = sample_image(material.emission.image(), uv, uv_screen_size).rgb * material.emission.value;
 	r.pdfW = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	return r;
 }
-
-template<> inline Spectrum eval_material_emission(const Environment material, const uint vertex) { return sample_image(vertex, material.emission); }
 #endif // __HLSL_VERSION
 
 #ifdef __cplusplus

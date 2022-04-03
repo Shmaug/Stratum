@@ -14,16 +14,16 @@ struct ReservoirLightSample {
 struct Reservoir {
 	ReservoirLightSample light_sample;
 	uint M;
-	float sample_target_pdf; // p_q_hat
 	float total_weight;
-	uint pad;
+	float sample_target_pdf; // p_q_hat
+	float sample_source_pdf;
 	
 	inline float W() CONST_CPP { return (M == 0 || sample_target_pdf == 0) ? 0 : (total_weight / M) / sample_target_pdf; }
 
 	inline bool update(const float rnd, const ReservoirLightSample candidate_sample, const float source_pdf, const float target_pdf) {
 		const float ris_weight = target_pdf / source_pdf;
-		total_weight += ris_weight;
 		M++;
+		total_weight += ris_weight;
 		if (rnd < ris_weight/total_weight) {
 			light_sample = candidate_sample;
 			sample_target_pdf = target_pdf;
@@ -44,21 +44,23 @@ struct Reservoir {
 	}
 };
 
-inline Reservoir init_reservoir() {
-	Reservoir r;
+#ifdef __HLSL_VERSION
+inline void init_reservoir(out Reservoir r) {
+	BF_SET(r.light_sample.instance_primitive_index, INVALID_INSTANCE, 0, 16);
+	BF_SET(r.light_sample.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
 	r.M = 0;
 	r.sample_target_pdf = 0;
 	r.total_weight = 0;
-	return r;
 }
 
 inline Reservoir merge(const float rnd1, const float rnd2, const Reservoir r1, const Reservoir r2) {
-	Reservoir merged = init_reservoir();
+	Reservoir merged;
+	init_reservoir(merged);
 	merged.update(rnd1, r1);
 	merged.update(rnd2, r2);
 	merged.M = r1.M + r2.M;
 	return merged;
 }
-
+#endif
 
 #endif
