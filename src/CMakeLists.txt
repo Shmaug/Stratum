@@ -47,6 +47,12 @@ if (OpenVDB_FOUND)
     message(STATUS "OpenVDB enabled")
 endif()
 
+if (assimp_FOUND)
+    target_link_libraries(Stratum PRIVATE assimp::assimp)
+    target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_ASSIMP)
+    message(STATUS "Assimp enabled")
+endif()
+
 # Shaders
 
 file(GLOB_RECURSE STRATUM_SHADERS "**.[gh]lsl")

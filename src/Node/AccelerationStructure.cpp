@@ -6,10 +6,14 @@ AccelerationStructure::AccelerationStructure(CommandBuffer& commandBuffer, const
 	vk::AccelerationStructureBuildGeometryInfoKHR buildGeometry(type,vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace, vk::BuildAccelerationStructureModeKHR::eBuild);
 	buildGeometry.setGeometries(geometries);
 
-	vector<uint32_t> counts((uint32_t)geometries.size());
-	for (uint32_t i = 0; i < geometries.size(); i++)
-		counts[i] = (buildRanges.data() + i)->primitiveCount;
-	vk::AccelerationStructureBuildSizesInfoKHR buildSizes = commandBuffer.mDevice->getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometry, counts);
+	vk::AccelerationStructureBuildSizesInfoKHR buildSizes;
+	if (buildRanges.size() > 0 && buildRanges.front().primitiveCount > 0) {
+		vector<uint32_t> counts((uint32_t)geometries.size());
+		for (uint32_t i = 0; i < geometries.size(); i++)
+			counts[i] = (buildRanges.data() + i)->primitiveCount;
+		buildSizes = commandBuffer.mDevice->getAccelerationStructureBuildSizesKHR(vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometry, counts);
+	} else
+		buildSizes.accelerationStructureSize = buildSizes.buildScratchSize = 4;
 
 	mBuffer = make_shared<Buffer>(commandBuffer.mDevice, name, buildSizes.accelerationStructureSize, vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress);
 	Buffer::View<byte> scratchBuf = make_shared<Buffer>(commandBuffer.mDevice, name + "/ScratchBuffer", buildSizes.buildScratchSize, vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR|vk::BufferUsageFlagBits::eShaderDeviceAddress|vk::BufferUsageFlagBits::eStorageBuffer);

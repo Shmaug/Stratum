@@ -8,9 +8,6 @@ using namespace std;
 using namespace Eigen;
 namespace fs = std::filesystem;
 
-using fRay = ParametrizedLine<float,3>;
-using dRay = ParametrizedLine<double,3>;
-
 #pragma region misc concepts
 template<typename T>
 struct remove_const_tuple { using type = remove_const_t<T>; };
@@ -70,19 +67,19 @@ constexpr unsigned long long operator"" _mB(unsigned long long x) { return x*102
 constexpr unsigned long long operator"" _gB(unsigned long long x) { return x*1024*1024*1024; }
 
 enum class ConsoleColor {
-	eBlack	= 0,
+	eBlack		= 0,
 	eRed		= 1,
-	eGreen	= 2,
+	eGreen		= 2,
 	eBlue		= 4,
-	eBold 	= 8,
-	eYellow   = eRed | eGreen,
-	eCyan		  = eGreen | eBlue,
-	eMagenta  = eRed | eBlue,
-	eWhite 		= eRed | eGreen | eBlue,
+	eBold		= 8,
+	eYellow		= eRed | eGreen,
+	eCyan		= eGreen | eBlue,
+	eMagenta	= eRed | eBlue,
+	eWhite		= eRed | eGreen | eBlue,
 };
 template<typename... Args>
 inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Args&&... a) {
-	#ifdef WIN32
+	#ifdef _WIN32
 	int c = 0;
 	if ((int)color & (int)ConsoleColor::eRed) 	c |= FOREGROUND_RED;
 	if ((int)color & (int)ConsoleColor::eGreen) c |= FOREGROUND_GREEN;
@@ -106,7 +103,7 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 	
 	fprintf(str, format, forward<Args>(a)...);
 
-	#ifdef WIN32
+	#ifdef _WIN32
 	if      (str == stdin)  SetConsoleTextAttribute(GetStdHandle(STD_INPUT_HANDLE) , FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 	else if (str == stdout) SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 	else if (str == stderr) SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE) , FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
@@ -120,7 +117,7 @@ template<typename... Args> inline void printf_color(ConsoleColor color, const ch
 
 inline wstring s2ws(const string &str) {
 	 if (str.empty()) return wstring();
-	#ifdef WIN32
+	#ifdef _WIN32
 	 int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
 	 wstring wstr(size_needed, 0);
 	 MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstr[0], size_needed);
@@ -133,7 +130,7 @@ inline wstring s2ws(const string &str) {
 }
 inline string ws2s(const wstring &wstr) {
 	if (wstr.empty()) return string();
-	#ifdef WIN32
+	#ifdef _WIN32
 	int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
 	string str(size_needed, 0);
 	WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &str[0], size_needed, NULL, NULL);

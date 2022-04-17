@@ -36,7 +36,7 @@
 
 #include <math.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -45,9 +45,6 @@
 #ifdef _DEBUG
 #include <crtdbg.h>
 #endif
-#undef near
-#undef far
-#undef free
 
 #ifdef STRATUM_EXPORTS
 #define STRATUM_API __declspec(dllexport)
@@ -61,7 +58,7 @@
 #define PLUGIN_API __declspec(dllimport)
 #endif
 
-#endif // #ifdef WIN32
+#endif // #ifdef _WIN32
 
 #ifdef __linux
 #include <sys/types.h>

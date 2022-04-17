@@ -6,16 +6,20 @@
 #include "bitfield.hlsli"
 #include "transform.hlsli"
 
-#define SAMPLE_FLAG_SAMPLE_ENVIRONMENT 		BIT(0)
-#define SAMPLE_FLAG_SAMPLE_EMISSIVE 		BIT(1)
-#define SAMPLE_FLAG_TRACE_LIGHT_PATHS		BIT(2)
-#define SAMPLE_FLAG_SAMPLE_LIGHT_PATHS		BIT(3)
-#define SAMPLE_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(4)
-#define SAMPLE_FLAG_SAMPLE_RESERVOIRS		BIT(5)
-#define SAMPLE_FLAG_MIS 					BIT(6)
-#define SAMPLE_FLAG_RAY_CONE_LOD 			BIT(7)
-#define SAMPLE_FLAG_ENABLE_VOLUMES 			BIT(8)
-#define SAMPLE_FLAG_DIRECT_ONLY				BIT(9)
+#define SAMPLE_FLAG_DEMODULATE_ALBEDO		BIT(0)
+#define SAMPLE_FLAG_SAMPLE_PIXEL_AREA 		BIT(1)
+#define SAMPLE_FLAG_SAMPLE_ENVIRONMENT 		BIT(2)
+#define SAMPLE_FLAG_SAMPLE_EMISSIVE 		BIT(3)
+#define SAMPLE_FLAG_MIS 					BIT(4)
+#define SAMPLE_FLAG_STORE_PATH_VERTICES		BIT(5)
+#define SAMPLE_FLAG_TRACE_LIGHT_PATHS		BIT(6)
+#define SAMPLE_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(7)
+#define SAMPLE_FLAG_SAMPLE_RESERVOIRS		BIT(8)
+#define SAMPLE_FLAG_RAY_CONE_LOD 			BIT(9)
+#define SAMPLE_FLAG_ENABLE_VOLUMES 			BIT(10)
+#define SAMPLE_FLAG_DIRECT_ONLY				BIT(11)
+#define SAMPLE_FLAG_LIGHT_PATHS_ONLY		BIT(12)
+#define SAMPLE_FLAG_CONNECT_TO_VIEWS		BIT(13)
 
 #define INSTANCE_TYPE_TRIANGLES 0
 #define INSTANCE_TYPE_SPHERE 1
@@ -38,8 +42,10 @@ struct InstanceData {
 	TransformData transform;
 	// world -> instance
 	TransformData inv_transform;
-	// cur instance -> prev world
-	TransformData prev_transform;
+	// cur world -> prev world
+	TransformData motion_transform;
+	// prev world -> cur world
+	TransformData inv_motion_transform;
 
 	uint4 packed;
 
@@ -58,17 +64,16 @@ struct InstanceData {
 	// volume
 	inline uint volume_index() CONST_CPP { return packed[1]; }
 };
-inline InstanceData make_instance_triangles(const TransformData objectToWorld,
-																						const TransformData prevObjectToWorld,
-																						const uint materialAddress,
-																						const uint primCount,
-																						const uint firstVertex,
-																						const uint indexByteOffset,
-																						const uint indexStride) {
+inline InstanceData make_instance_transform(const TransformData objectToWorld, const TransformData prevObjectToWorld) {
 	InstanceData r;
 	r.transform = objectToWorld;
 	r.inv_transform = objectToWorld.inverse();
-	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
+	r.motion_transform = tmul(prevObjectToWorld, r.inv_transform);
+	r.inv_motion_transform = r.motion_transform.inverse();
+	return r;
+}
+inline InstanceData make_instance_triangles(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const uint primCount, const uint firstVertex, const uint indexByteOffset, const uint indexStride) {
+	InstanceData r = make_instance_transform(objectToWorld, prevObjectToWorld);
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
@@ -79,10 +84,7 @@ inline InstanceData make_instance_triangles(const TransformData objectToWorld,
 	return r;
 }
 inline InstanceData make_instance_sphere(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const float radius) {
-	InstanceData r;
-	r.transform = objectToWorld;
-	r.inv_transform = objectToWorld.inverse();
-	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
+	InstanceData r = make_instance_transform(objectToWorld, prevObjectToWorld);
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_SPHERE, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
@@ -90,10 +92,7 @@ inline InstanceData make_instance_sphere(const TransformData objectToWorld, cons
 	return r;
 }
 inline InstanceData make_instance_volume(const TransformData objectToWorld, const TransformData prevObjectToWorld, const uint materialAddress, const uint volume_index) {
-	InstanceData r;
-	r.transform = objectToWorld;
-	r.inv_transform = objectToWorld.inverse();
-	r.prev_transform = tmul(prevObjectToWorld, r.inv_transform);
+	InstanceData r = make_instance_transform(objectToWorld, prevObjectToWorld);
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_VOLUME, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
@@ -111,30 +110,6 @@ struct PackedVertexData {
 	inline float2 uv() { return float2(u, v); }
 };
 
-struct RayDifferential {
-  float3 origin;
-  float t_min;
-  float3 direction;
-  float t_max;
-
-  float radius;
-  float spread;
-	
-  inline float differential_transfer(const float t) {
-    return radius + spread*t;
-  }
-  inline float differential_reflect(const float mean_curvature, const float roughness) {
-    const float spec_spread = spread + 2 * mean_curvature * radius;
-    const float diff_spread = 0.2;
-    return max(0.f, lerp(spec_spread, diff_spread, roughness));
-  }
-  inline float differential_refract(const float mean_curvature, const float roughness, const float eta) {
-    const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
-    const float diff_spread = 0.2;
-    return max(0.f, lerp(spec_spread, diff_spread, roughness));
-  }
-};
-
 struct ViewData {
 	TransformData camera_to_world;
 	TransformData world_to_camera;
@@ -143,24 +118,43 @@ struct ViewData {
 	uint2 image_max;
 #ifdef __HLSL_VERSION
 	inline int2 extent() { return (int2)image_max - (int2)image_min; }
-	inline RayDifferential create_ray(const float2 uv, const float2 size) {
-		float2 clipPos = 2*uv - 1;
-		clipPos.y = -clipPos.y;
+#endif
+};
 
-		RayDifferential ray;
-		#ifdef TRANSFORM_UNIFORM_SCALING
-		ray.origin = gCameraToWorld.mTranslation;
-		#else
-		ray.origin = float3(camera_to_world.m[0][3], camera_to_world.m[1][3], camera_to_world.m[2][3]);
-		#endif
-		ray.direction = normalize(camera_to_world.transform_vector(projection.back_project(clipPos)));
-		ray.t_min = 0;
-		ray.t_max = 1.#INF;
-		ray.radius = 0;
-		ray.spread = 1 / min(size.x, size.y);
-		return ray;
+struct VisibilityInfo {
+	uint4 rng_state;
+	uint3 position;
+	uint instance_primitive_index;
+	uint4 nz;
+	float2 prev_uv;
+	uint pad[2];
+#ifdef __HLSL_VERSION
+	
+	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+
+	inline float3 normal()        { return unpack_normal_octahedron2(asfloat(nz.xy)); }
+	inline min16float z()         { return (min16float)f16tof32(nz.z); }
+	inline min16float prev_z()    { return (min16float)f16tof32(nz.z>>16); }
+	inline min16float2 dz_dxy()   { return unpack_f16_2(nz.w); }
+
+	inline void store_nz(const float3 n, const float z, const float prev_z, const float2 dz) {
+		nz = uint4(asuint(pack_normal_octahedron2(n)), pack_f16_2(float2(z,prev_z)), pack_f16_2(dz));
 	}
 #endif
+};
+
+struct PathTracePushConstants {
+	uint gViewCount;
+	uint gLightCount;
+	uint gEnvironmentMaterialAddress;
+	float gEnvironmentSampleProbability;	
+	uint gRandomSeed;
+	uint gReservoirSamples;
+	uint gMaxNullCollisions;
+	uint gMinDepth;
+	uint gMaxEyeDepth;
+	uint gMaxLightDepth;
 };
 
 #ifdef __HLSL_VERSION

@@ -115,7 +115,7 @@ struct HeterogeneousVolume {
 
 #ifdef __HLSL_VERSION
 
-template<> inline HeterogeneousVolume load_material(uint address, const uint vertex) {
+template<> inline HeterogeneousVolume load_material(uint address, const ShadingData shading_data) {
 	HeterogeneousVolume material;
 	material.density_scale			= gMaterialData.Load<float3>(address); address += 12;
 	material.anisotropy       	 	= gMaterialData.Load<float>(address); address += 4;
@@ -126,15 +126,18 @@ template<> inline HeterogeneousVolume load_material(uint address, const uint ver
 	return material;
 }
 
-template<> inline MaterialEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+template<> inline bool material_has_bsdf<HeterogeneousVolume>() { return true; }
+
+template<> inline MaterialEvalRecord eval_material(const HeterogeneousVolume material, const Vector3 dir_in, const Vector3 dir_out, const ShadingData shading_data, const bool adjoint) {
 	const Real v = 1/(4*M_PI) * (1 - material.anisotropy * material.anisotropy) / pow(1 + material.anisotropy * material.anisotropy + 2 * material.anisotropy * dot(dir_in, dir_out), 1.5);
 	MaterialEvalRecord r;
 	r.f = v;
-	r.pdfW = v;
+	r.pdf_fwd = v;
+	r.pdf_rev = v;
 	return r;
 }
 
-template<> inline MaterialSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+template<> inline MaterialSampleRecord sample_material(const HeterogeneousVolume material, const Vector3 rnd, const Vector3 dir_in, const ShadingData shading_data, const bool adjoint) {
 	MaterialSampleRecord r;
 	if (abs(material.anisotropy) < 1e-3) {
 		const Real z = 1 - 2 * rnd.x;
@@ -145,17 +148,20 @@ template<> inline MaterialSampleRecord sample_material(const HeterogeneousVolume
 		const Real cos_elevation = (tmp * tmp - (1 + material.anisotropy * material.anisotropy)) / (2 * material.anisotropy);
 		const Real sin_elevation = sqrt(max(1 - cos_elevation * cos_elevation, 0));
 		const Real azimuth = 2 * M_PI * rnd.y;
-		ShadingFrame frame;
-		frame.n = dir_in;
-		make_orthonormal(frame.n, frame.t, frame.b);
-		r.dir_out = frame.to_world(float3(sin_elevation * cos(azimuth), sin_elevation * sin(azimuth), cos_elevation));
+		float3 t, b;
+		make_orthonormal(dir_in, t, b);
+		r.dir_out = sin_elevation * cos(azimuth) * t + sin_elevation * sin(azimuth) * b + cos_elevation * dir_in;
 	}
-	r.eta_roughness = pack_f16_2(float2(-1,1));
-	r.eval = eval_material(material, dir_in, r.dir_out, vertex, dir);
+	const MaterialEvalRecord eval = eval_material(material, dir_in, r.dir_out, shading_data, adjoint);
+	r.f = eval.f;
+	r.pdf_fwd = eval.pdf_fwd;
+	r.pdf_rev = eval.pdf_rev;
+	r.eta = -1;
+	r.roughness = 1 - abs(material.anisotropy);
 	return r;
 }
 
-template<> inline Spectrum eval_material_albedo(const HeterogeneousVolume material, const uint vertex) { return material.albedo_scale; }
+template<> inline Spectrum eval_material_albedo(const HeterogeneousVolume material, const ShadingData shading_data) { return material.albedo_scale; }
 #endif
 
 #endif

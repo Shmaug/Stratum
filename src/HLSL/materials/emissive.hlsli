@@ -17,15 +17,16 @@ struct Emissive {
 };
 
 #ifdef __HLSL_VERSION
-template<> inline Emissive load_material(uint address, const uint vertex) {
+template<> inline Emissive load_material(uint address, const ShadingData shading_data) {
     Emissive material;
     material.emission = load_image_value3(address);
     return material;
 }
-template<> inline MaterialEvalRecord eval_material_emission(const Emissive material, const Vector3 dir_out, const uint vertex) {
-    MaterialEvalRecord r;
-    r.f = sample_image(material.emission, vertex);
-    r.pdfW = 1;
+
+template<> inline EmissionEvalRecord eval_material_emission(const Emissive material, const Vector3 dir_out, const ShadingData shading_data) {
+    EmissionEvalRecord r;
+    r.f = sample_image(material.emission, shading_data);
+    r.pdf = 1;
     return r;
 }
 

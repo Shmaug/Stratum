@@ -60,7 +60,7 @@ public:
 		vmaBindImageMemory(mDevice.allocator(), mMemory->allocation(), mImage);
 	}
 
-	// If mipLevels = 0, will auto-determine according to extent
+	// If mipLevels = 0, will auto-determine according to extent. always generates mipmaps.
 	STRATUM_API Image(CommandBuffer& commandBuffer, const string& name, const ImageData& pixels, uint32_t levelCount = 0, vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, VmaMemoryUsage memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY, vk::ImageTiling tiling = vk::ImageTiling::eOptimal);
 
 	// If mipLevels = 0, will auto-determine according to extent

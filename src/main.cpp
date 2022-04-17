@@ -1,5 +1,5 @@
 #include "Node/Application.hpp"
-#include "Node/Gui.hpp"
+#include "Node/Inspector.hpp"
 #include "Node/RayTraceScene.hpp"
 #include "Node/XR.hpp"
 
@@ -19,14 +19,8 @@ void make_scene(const component_ptr<Application>& app) {
     xrnode->OnRender.listen(scene.node(), [=](CommandBuffer& commandBuffer) {
       vector<ViewData> views;
       views.reserve(xrnode->views().size());
-      for (const XR::View& v : xrnode->views()) {
-        ViewData& view = views.emplace_back();
-        view.camera_to_world = node_to_world(v.mCamera.node());
-        view.world_to_camera = view.camera_to_world.inverse();
-        view.projection = v.mCamera->mProjection;
-        view.image_min = { v.mCamera->mImageRect.offset.x, v.mCamera->mImageRect.offset.y };
-        view.image_max = { v.mCamera->mImageRect.offset.x + v.mCamera->mImageRect.extent.width, v.mCamera->mImageRect.offset.y + v.mCamera->mImageRect.extent.height };
-      }
+      for (const XR::View& v : xrnode->views())
+        views.emplace_back( v.mCamera.view(node_to_world(v.mCamera.node())) );
       scene->render(commandBuffer, xrnode->back_buffer(), views);
       xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
     });
@@ -39,13 +33,7 @@ void make_scene(const component_ptr<Application>& app) {
 #endif
   {
     app->OnRenderWindow.listen(scene.node(), [=](CommandBuffer& commandBuffer) {
-      ViewData view;
-      view.camera_to_world = node_to_world(app->mMainCamera.node());
-      view.world_to_camera = view.camera_to_world.inverse();
-      view.projection = app->mMainCamera->mProjection;
-      view.image_min = { app->mMainCamera->mImageRect.offset.x, app->mMainCamera->mImageRect.offset.y };
-      view.image_max = { app->mMainCamera->mImageRect.offset.x + app->mMainCamera->mImageRect.extent.width, app->mMainCamera->mImageRect.offset.y + app->mMainCamera->mImageRect.extent.height };
-      scene->render(commandBuffer, app->window().back_buffer(), { view });
+      scene->render(commandBuffer, app->window().back_buffer(), { app->mMainCamera->view(node_to_world(app->mMainCamera.node())) });
     });
   }
 }
@@ -66,6 +54,8 @@ void load_plugins(const string& plugin_info, Node& dst) {
 }
 
 int main(int argc, char** argv) {
+  cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
+  
   vector<string> args;
   for (int i = 0; i < argc; i++)
     args.emplace_back(argv[i]);
@@ -100,6 +90,7 @@ int main(int argc, char** argv) {
   auto app = app_node.make_component<Application>(instance->window());
 
   auto gui = app.node().make_child("ImGui").make_component<Gui>();
+  auto inspector = app.node().make_child("Inspector").make_component<Inspector>();
 
   app->PreFrame.listen(instance.node(), bind(&Instance::poll_events, instance.get()));
 

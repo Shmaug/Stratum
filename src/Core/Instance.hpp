@@ -2,7 +2,7 @@
 
 #include <Common/hash.hpp>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <vulkan/vulkan_win32.h>
 #endif
 #ifdef __linux
@@ -50,7 +50,7 @@ public:
 		return ranges::subrange(first,last) | views::values;
 	}
 
-	#ifdef WIN32
+	#ifdef _WIN32
 	inline HINSTANCE hInstance() const { return mHInstance; }
 	#endif
 	#ifdef __linux
@@ -78,7 +78,7 @@ private:
 
 	bool mDestroyPending = false;
 
-	#ifdef WIN32
+	#ifdef _WIN32
 	friend class stm::Window;
 	static LRESULT CALLBACK window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 	HINSTANCE mHInstance;

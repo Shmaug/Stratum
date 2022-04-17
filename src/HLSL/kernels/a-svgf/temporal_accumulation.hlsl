@@ -46,14 +46,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
-	const uint viewIndex = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
-	const ViewData view = gViews[viewIndex];
+	const uint view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
+	if (view_index == -1) return;
+
+	float2 extent;
+	gAccumColor.GetDimensions(extent.x, extent.y);
 
   	const uint2 ipos = index.xy;
-	const VisibilityInfo vis_curr = load_visibility(ipos);
-
-	const float2 pos_prev = view.image_min + vis_curr.prev_uv() * float2(view.image_max - view.image_min);
+	const uint ipos_1d = ipos.y*extent.x + ipos.x;
+	const float2 pos_prev = gViews[view_index].image_min + gVisibility[ipos_1d].prev_uv * float2(gViews[view_index].image_max - gViews[view_index].image_min);
 	
 	const int2 p = pos_prev - 0.5;
 	const float2 w = frac(pos_prev - 0.5);
@@ -66,12 +67,12 @@ void main(uint3 index : SV_DispatchThreadId) {
 		for (int yy = 0; yy <= 1; yy++) {
 			for (int xx = 0; xx <= 1; xx++) {
 				const int2 ipos_prev = p + int2(xx, yy);
-				if (!test_inside_screen(ipos_prev, view)) continue;
+				if (!test_inside_screen(ipos_prev, gViews[view_index])) continue;
+				const uint ipos_prev_1d = ipos_prev.y*extent.x + ipos_prev.x;
 
-				const VisibilityInfo vis_prev = load_prev_visibility(ipos_prev, gInstanceIndexMap);
-				if (vis_prev.instance_index() != vis_curr.instance_index()) continue;
-				if (!test_reprojected_normal(vis_curr.normal(), vis_prev.normal())) continue;
-				if (!test_reprojected_depth(vis_curr.prev_z(), vis_prev.z(), 1, vis_prev.dz_dxy())) continue;
+				if (gInstanceIndexMap[gPrevVisibility[ipos_prev_1d].instance_index()] != gVisibility[ipos_1d].instance_index()) continue;
+				if (!test_reprojected_normal(gVisibility[ipos_1d].normal(), gPrevVisibility[ipos_prev_1d].normal())) continue;
+				if (!test_reprojected_depth(gVisibility[ipos_1d].prev_z(), gPrevVisibility[ipos_prev_1d].z(), 1, gPrevVisibility[ipos_prev_1d].dz_dxy())) continue;
 
 				const float4 c = gPrevAccumColor[ipos_prev];
 
@@ -83,13 +84,11 @@ void main(uint3 index : SV_DispatchThreadId) {
 				sum_w        += wc;
 			}
 		}
-	} else if (all(vis_curr.prev_uv() >= 0) && all(vis_curr.prev_uv() <= 1)) {
-		float2 extent;
-		gAccumColor.GetDimensions(extent.x, extent.y);
-		color_prev = gPrevAccumColor.SampleLevel(gSampler1, vis_curr.prev_uv(), 0);
+	} else if (all(gVisibility[ipos_1d].prev_uv >= 0) && all(gVisibility[ipos_1d].prev_uv < 1) && !isinf(gVisibility[ipos_1d].z())) {
+		color_prev = gPrevAccumColor[pos_prev];
 		if (any(isnan(color_prev.rgb)) || any(isinf(color_prev.rgb)))
 			color_prev = 0;
-		moments_prev = gPrevAccumMoments.SampleLevel(gSampler1, vis_curr.prev_uv(), 0);
+		moments_prev = gPrevAccumMoments[pos_prev];
 		sum_w = 1;
 	}
 
@@ -109,23 +108,23 @@ void main(uint3 index : SV_DispatchThreadId) {
 		if (gPushConstants.gAntilagScale > 0) {
 			float antilag_alpha = 0;
 			if (gGradientFilterRadius == 0) {
-				const float2 v = gDiffImage[ipos];
+				const float2 v = gDiffImage[ipos/gPushConstants.gGradientDownsample];
 				antilag_alpha = saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0);
 			} else {
 				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)
 					for (int xx = -gGradientFilterRadius; xx <= gGradientFilterRadius; xx++) {
 						const int2 p = int2(ipos/gPushConstants.gGradientDownsample) + int2(xx, yy);
-						if (!test_inside_screen(p*gPushConstants.gGradientDownsample, view)) continue;
+						if (!test_inside_screen(p*gPushConstants.gGradientDownsample, gViews[view_index])) continue;
 						const float2 v = gDiffImage[p];
 						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
 					}
 			}
 			antilag_alpha = saturate(antilag_alpha*gPushConstants.gAntilagScale);
-			if (!isnan(antilag_alpha) && !isinf(antilag_alpha))		
+			if (!isnan(antilag_alpha) && !isinf(antilag_alpha))
 				n = lerp(n, color_curr.a, antilag_alpha);
 		}
 
-		const float alpha = color_curr.a / n;
+		const float alpha = saturate(color_curr.a / n);
 
 		gAccumColor[ipos] = float4(lerp(color_prev.rgb, color_curr.rgb, alpha), n);
 		gAccumMoments[ipos] = lerp(moments_prev, moments_curr, max(0.6, alpha));

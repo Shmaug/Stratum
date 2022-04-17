@@ -1,5 +1,6 @@
 #include "Application.hpp"
 #include "Scene.hpp"
+#include "Inspector.hpp"
 
 using namespace stm::hlsl;
 
@@ -18,21 +19,21 @@ STRATUM_API void animate(CommandBuffer& commandBuffer, float deltaTime) {
 }
 
 inline void inspector_gui_fn(Camera* cam) {
-  ImGui::DragFloat("Near Plane", &cam->mProjection.mNear, 0.01f, -1, 1);
-	if (cam->mProjection.mOrthographic) {
-  	ImGui::DragFloat("Far Plane", &cam->mProjection.mFar, 0.01f, -1, 1);
+  ImGui::DragFloat("Near Plane", &cam->mProjection.near_plane, 0.01f, -1, 1);
+	if (cam->mProjection.orthographic) {
+  	ImGui::DragFloat("Far Plane", &cam->mProjection.far_plane, 0.01f, -1, 1);
 
-		ImGui::DragFloat2("Scale", cam->mProjection.mScale.data(), 0.01f, -1, 1);
+		ImGui::DragFloat2("Scale", cam->mProjection.scale.data(), 0.01f, -1, 1);
 	} else {
-		float fovy = degrees(2*atan(1/cam->mProjection.mScale[1]));
+		float fovy = degrees(2*atan(1/cam->mProjection.scale[1]));
 		if (ImGui::DragFloat("Vertical FoV", &fovy, 0.01f, 1, 179)) {
-			const float aspect = cam->mProjection.mScale[0]/cam->mProjection.mScale[1];
-			cam->mProjection.mScale[1] = 1/tan(radians(fovy/2));
-			cam->mProjection.mScale[0] = cam->mProjection.mScale[1]*aspect;
+			const float aspect = cam->mProjection.scale[0]/cam->mProjection.scale[1];
+			cam->mProjection.scale[1] = 1/tan(radians(fovy/2));
+			cam->mProjection.scale[0] = cam->mProjection.scale[1]*aspect;
 		}
 	}
-	ImGui::DragFloat2("Projection Offset", cam->mProjection.mOffset.data(), 0.01f, -1, 1);
-  ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&cam->mProjection.mOrthographic));
+	ImGui::DragFloat2("Projection Offset", cam->mProjection.offset.data(), 0.01f, -1, 1);
+  ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&cam->mProjection.orthographic));
   ImGui::InputInt2("ImageRect Offset", &cam->mImageRect.offset.x);
   ImGui::InputInt2("ImageRect Extent", reinterpret_cast<int32_t*>(&cam->mImageRect.extent.width));
 }
@@ -86,12 +87,11 @@ TransformData node_to_world(const Node& node) {
 	if (!registered) {
 		registered = true;
 
-		component_ptr<Gui> gui = node.node_graph().find_components<Gui>().front();
+		component_ptr<Inspector> gui = node.node_graph().find_components<Inspector>().front();
 		gui->register_inspector_gui_fn<TransformData>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<Camera>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<MeshPrimitive>(&inspector_gui_fn);
 		gui->register_inspector_gui_fn<SpherePrimitive>(&inspector_gui_fn);
-
 		gui->register_inspector_gui_fn<Material>([](Material* material) { material_inspector_gui_fn(*material); });
 
 		#define REGISTER_BSDF_GUI_FN(BSDF_T) gui->register_inspector_gui_fn<BSDF_T>([](BSDF_T* bsdf){ bsdf->inspector_gui(); });

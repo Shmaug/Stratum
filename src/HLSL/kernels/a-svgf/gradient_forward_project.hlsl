@@ -41,16 +41,20 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
+	uint2 extent_curr;
+	gRadiance.GetDimensions(extent_curr.x,extent_curr.y);
+	uint2 extent_prev;
+	gPrevRadiance.GetDimensions(extent_prev.x,extent_prev.y);
+
 	int2 idx_prev = index.xy*gGradientDownsample;
 	const uint view_index = get_view_index(idx_prev, gViews, gPushConstants.gViewCount);
 	if (view_index == -1) return;
-
+	
 	{
 		const int2 idx_view_prev = idx_prev - gViews[view_index].image_min;
-		uint2 arg = uint2(idx_view_prev.x + idx_view_prev.y*gViews[view_index].extent().x, gPushConstants.gFrameNumber);
+		uint2 arg = uint2(idx_prev.y*extent_prev.x + idx_prev.x, gPushConstants.gFrameNumber);
 		uint sum = 0;
-		for (uint i = 0; i < 16; i++) { // XXX rounds reduced, carefully check if good
-			//for(int i = 0; i < 32; i++) {
+		for (uint i = 0; i < 32; i++) {
 			sum += 0x9e3779b9;
 			arg.x += ((arg.y << 4) + 0xa341316c) ^ (arg.y + sum) ^ ((arg.y >> 5) + 0xc8013ea4);
 			arg.y += ((arg.x << 4) + 0xad90777d) ^ (arg.x + sum) ^ ((arg.x >> 5) + 0x7e95761e);
@@ -59,34 +63,26 @@ void main(uint3 index : SV_DispatchThreadId) {
 	}
 	if (!test_inside_screen(idx_prev, gViews[view_index])) return;
 
- 	const VisibilityInfo v_prev = load_prev_visibility(idx_prev, gInstanceIndexMap);
-	if (v_prev.instance_index() == INVALID_INSTANCE) return;
+	const uint idx_prev_1d = idx_prev.y*extent_prev.x + idx_prev.x;
+	const uint mapped_instance = gInstanceIndexMap[gPrevVisibility[idx_prev_1d].instance_index()];
+
+	if (mapped_instance == INVALID_INSTANCE) return;
 
 	// encode position in previous frame
 	const int2 idx_view_prev = idx_prev - gViews[view_index].image_min;
 	uint gradient_idx_curr = (idx_view_prev.x + idx_view_prev.y * gViews[view_index].extent().x) << (2 * TILE_OFFSET_SHIFT);
 
-	float3 pos_obj;
-	if (gInstances[v_prev.instance_index()].type() == INSTANCE_TYPE_SPHERE) {
-		// sphere
-		pos_obj = spherical_uv_to_cartesian(v_prev.bary())*gInstances[v_prev.instance_index()].radius();
-	} else {
-		// triangles
-		const uint3 tri = load_tri(gIndices, gInstances[v_prev.instance_index()], v_prev.primitive_index());
-		const float3 p0 = gVertices[tri.x].position;
-		pos_obj = p0 + (gVertices[tri.y].position - p0) * v_prev.bary().x + (gVertices[tri.z].position - p0) * v_prev.bary().y;
-	}
-
-	float4 pos_cs_curr = gViews[view_index].projection.project_point( tmul(gViews[view_index].world_to_camera, gInstances[v_prev.instance_index()].transform).transform_point(pos_obj) );
-	pos_cs_curr.y = -pos_cs_curr.y;
-	const float2 uv = (pos_cs_curr.xy/pos_cs_curr.w)*.5 + .5;
+	const float3 position_curr = gInstances[mapped_instance].inv_motion_transform.transform_point(gPrevVisibility[idx_prev_1d].position);
+	float4 screen_pos_curr = gViews[view_index].projection.project_point( gViews[view_index].world_to_camera.transform_point(position_curr) );
+	screen_pos_curr.y = -screen_pos_curr.y;
+	const float2 uv = (screen_pos_curr.xy/screen_pos_curr.w)*.5 + .5;
 	const int2 idx_curr = gViews[view_index].image_min + int2(uv * gViews[view_index].extent());
 	if (!test_inside_screen(idx_curr, gViews[view_index])) return;
+	const uint idx_curr_1d = idx_curr.y*extent_curr.x + idx_curr.x;
 
-	const VisibilityInfo v_curr = load_visibility(idx_curr);
-	if (v_curr.instance_index() != v_prev.instance_index()) return;
-	if (!test_reprojected_depth(v_curr.prev_z(), v_prev.z(), gGradientDownsample, v_prev.dz_dxy())) return;
-	if (!test_reprojected_normal(v_curr.normal(), v_prev.normal())) return;
+	//if (gVisibility[idx_curr_1d].instance_index() != mapped_instance) return;
+	//if (!test_reprojected_depth(gVisibility[idx_curr_1d].prev_z(), gPrevVisibility[idx_prev_1d].z(), gGradientDownsample, gPrevVisibility[idx_prev_1d].dz_dxy())) return;
+	//if (!test_reprojected_normal(gVisibility[idx_curr_1d].normal(), gPrevVisibility[idx_prev_1d].normal())) return;
 
 	const uint2 tile_pos_curr = idx_curr / gGradientDownsample;
 	gradient_idx_curr |= get_gradient_idx_from_tile_pos(idx_curr % gGradientDownsample);
@@ -94,20 +90,16 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint res;
 	InterlockedCompareExchange(gGradientSamples[tile_pos_curr], 0u, gradient_idx_curr, res);
 	if (res == 0) {
-		gVisibility[0][idx_curr] = v_prev.data[0];
-		gVisibility[1][idx_curr] = v_prev.data[1];
-		gVisibility[2][idx_curr] = uint4(v_prev.data[2].xy, asuint( (idx_view_prev + 0.5) / gViews[view_index].extent() ));
-		
-		uint w,h;
-		gVisibility[0].GetDimensions(w,h);
-		const uint index_1d = idx_curr.y*w + idx_curr.x;
+		gPathStates[idx_curr_1d].rng_state = gPrevVisibility[idx_prev_1d].rng_state;
+		const uint instance_primitive_index = mapped_instance | (gPrevVisibility[idx_prev_1d].primitive_index()<<16);
+		make_shading_data(gPathStates[idx_curr_1d].vertex.shading_data, instance_primitive_index, gInstances[mapped_instance].inv_transform.transform_point(position_curr));
 
-		gPathStates[index_1d].rng_state = v_prev.data[0];
-		gPathStates[index_1d].instance_primitive_index = v_prev.instance_index() | (v_prev.primitive_index()<<16);
-		if (gInstances[v_prev.instance_index()].type() != INSTANCE_TYPE_SPHERE)
-			pos_obj = gInstances[v_prev.instance_index()].transform.transform_point(pos_obj);
-		instance_geometry(gPathVertices[index_1d], gPathStates[index_1d].instance_primitive_index, pos_obj, v_prev.bary());
+		gVisibility[idx_curr_1d].rng_state = gPrevVisibility[idx_prev_1d].rng_state;
+		gVisibility[idx_curr_1d].position = position_curr;
+		gVisibility[idx_curr_1d].instance_primitive_index =  instance_primitive_index;
+		gVisibility[idx_curr_1d].nz = gPrevVisibility[idx_prev_1d].nz;
+		gVisibility[idx_curr_1d].prev_uv = (idx_view_prev + 0.5) / gViews[view_index].extent();
 		
-		gReservoirs[index_1d] = gPrevReservoirs[index_1d];
+		gReservoirs[idx_curr_1d] = gPrevReservoirs[idx_prev_1d];
 	}
 }

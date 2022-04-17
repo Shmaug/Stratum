@@ -6,7 +6,7 @@ namespace stm {
 
 struct dynamic_library {
 private:
-#ifdef WIN32
+#ifdef _WIN32
   using handle_t = HMODULE;
 #elif defined(__linux)
   using handle_t = void*; 
@@ -17,7 +17,7 @@ private:
 
 public:
   inline dynamic_library(const fs::path& filename) {
-#ifdef WIN32
+#ifdef _WIN32
     char* msgBuf;
     mHandle = LoadLibraryW(filename.c_str());
     if (mHandle == NULL) {
@@ -29,7 +29,7 @@ public:
 #endif
   }
   inline ~dynamic_library() {
-#ifdef WIN32
+#ifdef _WIN32
     FreeLibrary(mHandle);
 #endif
   };
@@ -38,7 +38,7 @@ public:
   inline return_t invoke(const string& name, Args&&... args) {
     auto it = mFunctionPtrs.find(name);
     if (it == mFunctionPtrs.end()) {
-#ifdef WIN32
+#ifdef _WIN32
       it = mFunctionPtrs.emplace(name, GetProcAddress(mHandle, name.c_str())).first;
 #elif defined(__linux)
       it = mFunctionPtrs.emplace(name, dlsym(mHandle, name.c_str())).first;

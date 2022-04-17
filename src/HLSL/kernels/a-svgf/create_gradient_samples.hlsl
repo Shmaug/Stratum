@@ -53,23 +53,24 @@ inline float get_prev_luminance(const int2 p) {
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
-	const uint viewIndex = get_view_index(index.xy*gGradientDownsample, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
-	const ViewData view = gViews[viewIndex];
+	const uint view_index = get_view_index(index.xy*gGradientDownsample, gViews, gPushConstants.gViewCount);
+	if (view_index == -1) return;
 
 	const uint2 gradPos = index.xy;
 	const uint u = gGradientSamples[gradPos];
 	const uint2 tile_pos = uint2((u & TILE_OFFSET_MASK), (u >> TILE_OFFSET_SHIFT) & TILE_OFFSET_MASK);
 	const uint2 ipos = gradPos*gGradientDownsample + tile_pos;
-	if (!test_inside_screen(ipos, view)) return;
+	if (!test_inside_screen(ipos, gViews[view_index])) return;
 	
-	const VisibilityInfo v = load_visibility(ipos);
+	uint w,h;
+	gRadiance.GetDimensions(w,h);
+	const uint ipos_1d = ipos.y*w + ipos.x;
 
 	const float l_curr = get_luminance(ipos);
 	if (u >= (1u << 31u)) {
 		const uint idx_prev = (u >> (2u * TILE_OFFSET_SHIFT)) & ((1u << (31u - 2u * TILE_OFFSET_SHIFT)) - 1u);
-		const uint2 view_size = view.image_max - view.image_min;
-		uint2 ipos_prev = view.image_min + uint2(idx_prev % view_size.x, idx_prev / view_size.x);
+		const uint2 view_size = gViews[view_index].image_max - gViews[view_index].image_min;
+		uint2 ipos_prev = gViews[view_index].image_min + uint2(idx_prev % view_size.x, idx_prev / view_size.x);
 		const float l_prev = get_prev_luminance(ipos_prev);
 		gDiffImage1[0][index.xy] = (isinf(l_prev) || isnan(l_prev)) ? l_curr : float2(max(l_curr, l_prev), l_curr - l_prev);
 	} else {
@@ -78,13 +79,13 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 	float2 moments = float2(l_curr, l_curr*l_curr);
 	float sum_w = 1;
-	if (v.instance_index() != INVALID_INSTANCE)
+	if (gVisibility[ipos_1d].instance_index() != INVALID_INSTANCE)
 		for (int yy = 0; yy < gGradientDownsample; yy++) {
 			for (int xx = 0; xx < gGradientDownsample; xx++) {
 				const int2 p = index.xy*gGradientDownsample + int2(xx, yy);
 				if (all(ipos == p)) continue;
-				if (!test_inside_screen(p, view)) continue;
-				if (v.instance_index() != load_visibility(p).instance_index()) continue;
+				if (!test_inside_screen(p, gViews[view_index])) continue;
+				if (gVisibility[ipos_1d].instance_index() != gVisibility[ipos_1d + yy*w + xx].instance_index()) continue;
 				const float l = get_luminance(p);
 				if (isinf(l) || isnan(l)) continue;
 				moments += float2(l, l*l);
@@ -93,6 +94,6 @@ void main(uint3 index : SV_DispatchThreadId) {
 		}
 	moments /= sum_w;
 
-	gDiffImage2[0][index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), v.z(), length(v.dz_dxy()));
+	gDiffImage2[0][index.xy] = float4(moments[0], max(0, moments[1] - moments[0]*moments[0]), gVisibility[ipos_1d].z(), length(gVisibility[ipos_1d].dz_dxy()));
 	gRadiance[ipos] = float4(gRadiance[ipos].rgb, 0 /* set N to zero, to avoid contributing to temporal accumulation */);
 }

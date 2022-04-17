@@ -52,15 +52,10 @@ inline Real fresnel_dielectric(const Real n_dot_i, const Real eta) {
     return fresnel_dielectric(abs(n_dot_i), n_dot_t, eta);
 }
 
-inline Real GTR2(const Real n_dot_h, const Real roughness) {
-    const Real alpha = roughness * roughness;
+inline Real GTR2(const Real n_dot_h, const Real alpha) {
     const Real a2 = alpha * alpha;
     const Real t = 1 + (a2 - 1) * n_dot_h * n_dot_h;
     return a2 / (M_PI * t*t);
-}
-
-inline Real GGX(const Real n_dot_h, const Real roughness) {
-    return GTR2(n_dot_h, roughness);
 }
 
 /// The masking term models the occlusion between the small mirrors of the microfacet models.
@@ -69,10 +64,9 @@ inline Real GGX(const Real n_dot_h, const Real roughness) {
 /// https://jcgt.org/published/0003/02/03/paper.pdf
 /// The derivation is based on Smith's paper "Geometrical shadowing of a random rough surface".
 /// Note that different microfacet distributions have different masking terms.
-inline Real smith_masking_gtr2(const Vector3 v_local, Real roughness) {
-    const Real alpha = roughness * roughness;
+inline Real smith_masking_gtr2(const Vector3 w, const Real alpha) {
     const Real a2 = alpha * alpha;
-    const Vector3 v2 = v_local * v_local;
+    const Vector3 v2 = w * w;
     const Real Lambda = (-1 + sqrt(1 + (v2[0] * a2 + v2[1] * a2) / v2[2])) / 2;
     return 1 / (1 + Lambda);
 }

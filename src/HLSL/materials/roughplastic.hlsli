@@ -7,18 +7,12 @@
 #endif
 
 struct RoughPlastic {
-#ifdef __HLSL_VERSION
-    float3 diffuse_reflectance;
-    float roughness;
-    float3 specular_reflectance;
-    float eta;
-#endif
-
 #ifdef __cplusplus
     ImageValue3 diffuse_reflectance;
     ImageValue3 specular_reflectance;
     ImageValue1 roughness;
     float eta;
+    
     inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
         diffuse_reflectance.store(bytes, resources);
         specular_reflectance.store(bytes, resources);
@@ -32,28 +26,37 @@ struct RoughPlastic {
         ImGui::InputFloat("eta", &eta);
     }
 #endif
+
+#ifdef __HLSL_VERSION
+    float3 diffuse_reflectance;
+    float roughness;
+    float3 specular_reflectance;
+    float eta;
+#endif
 };
 
 #ifdef __HLSL_VERSION
 
-template<> inline RoughPlastic load_material(uint address, const uint vertex) {
+template<> inline RoughPlastic load_material(uint address, const ShadingData shading_data) {
     RoughPlastic material;
-    material.diffuse_reflectance = sample_image(load_image_value3(address), vertex);
-    material.specular_reflectance = sample_image(load_image_value3(address), vertex);
-    material.roughness = sample_image(load_image_value1(address), vertex);
+    material.diffuse_reflectance = sample_image(load_image_value3(address), shading_data);
+    material.specular_reflectance = sample_image(load_image_value3(address), shading_data);
+    material.roughness = sample_image(load_image_value1(address), shading_data);
     material.eta = gMaterialData.Load<float>(address); address += 4;
     return material;
 }
 
-template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
-    const ShadingFrame frame = gPathVertices[vertex].shading_frame();
-    const Real n_dot_in = dot(frame.n, dir_in);
-    const Real n_dot_out = dot(frame.n, dir_out);
+template<> inline bool material_has_bsdf<RoughPlastic>() { return true; }
+
+template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, const Vector3 dir_in, const Vector3 dir_out, const ShadingData shading_data, const bool adjoint) {
+    const Real n_dot_in  = dot(shading_data.shading_normal(), dir_in);
+    const Real n_dot_out = dot(shading_data.shading_normal(), dir_out);
     if (n_dot_out <= 0 || n_dot_in <= 0) {
         // No light below the surface
         MaterialEvalRecord r;
         r.f = 0;
-        r.pdfW = 0;
+        r.pdf_fwd = 0;
+        r.pdf_rev = 0;
         return r;
     }
 
@@ -64,14 +67,15 @@ template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, 
     // gives us dir_out). Microfacet models build all sorts of quantities based on the
     // half vector. It's also called the "micro normal".
     const Vector3 half_vector = normalize(dir_in + dir_out);
-    const Real n_dot_h = dot(frame.n, half_vector);
+    const Real n_dot_h = dot(shading_data.shading_normal(), half_vector);
 
     // Clamp roughness to avoid numerical issues.
     const Real rgh = clamp(material.roughness, gMinRoughness, 1);
+    const Real alpha = pow2(rgh);
 
     // If we are going into the surface, then we use normal eta
     // (internal/external), otherwise we use external/internal.
-    const Real local_eta = dot(gPathVertices[vertex].geometry_normal, dir_in) > 0 ? material.eta : 1 / material.eta;
+    const Real local_eta = n_dot_in > 0 ? material.eta : 1 / material.eta;
 
     // We first account for the dielectric layer.
 
@@ -81,11 +85,11 @@ template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, 
     // both incoming and outgoing directions (dir_out & dir_in).
     // However, since they are related through the Snell-Descartes law,
     // we only need one of them.
-    const Real F_i = fresnel_dielectric(dot(half_vector, dir_in), local_eta);
+    const Real F_i = fresnel_dielectric(dot(half_vector, dir_in ), local_eta);
     const Real F_o = fresnel_dielectric(dot(half_vector, dir_out), local_eta); // F_o is the reflection percentage.
-    const Real D = GTR2(n_dot_h, rgh); // "Generalized Trowbridge Reitz", GTR2 is equivalent to GGX.
-    const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
-    const Real G_out = smith_masking_gtr2(frame.to_local(dir_out), rgh);
+    const Real D = GTR2(n_dot_h, alpha); // "Generalized Trowbridge Reitz", GTR2 is equivalent to GGX.
+    const Real G_in  = smith_masking_gtr2(shading_data.to_local(dir_in), alpha);
+    const Real G_out = smith_masking_gtr2(shading_data.to_local(dir_out), alpha);
 
     const Spectrum Ks = material.specular_reflectance;
     const Spectrum Kd = material.diffuse_reflectance;
@@ -104,32 +108,34 @@ template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, 
     const Real lS = luminance(Ks);
     const Real lR = luminance(Kd);
     if (lS + lR <= 0) {
-        r.pdfW = 0;
+        r.pdf_fwd = 0;
+        r.pdf_rev = 0;
     } else {
         // We use the reflectance to determine whether to choose specular sampling lobe or diffuse.
         const Real spec_prob = lS / (lS + lR);
-        const Real diff_prob = 1 - spec_prob;
         // For the specular lobe, we use the ellipsoidal sampling from Heitz 2018
         // "Sampling the GGX Distribution of Visible Normals"
         // https://jcgt.org/published/0007/04/01/
-        // this importance samples smith_masking(cos_theta_in) * GTR2(cos_theta_h, roughness) * cos_theta_out
+        // this importance samples smith_masking(cos_theta_in) * GTR2(cos_theta_h, alpha) * cos_theta_out
         // (4 * cos_theta_v) is the Jacobian of the reflectiokn
         // For the diffuse lobe, we importance sample cos_theta_out
-        r.pdfW = spec_prob * (G_in * D) / (4 * n_dot_in) + diff_prob * (n_dot_out / M_PI);
+        r.pdf_fwd = spec_prob * (G_in  * D) / (4 * n_dot_in ) + (1 - spec_prob) * (n_dot_out / M_PI);
+        r.pdf_rev = spec_prob * (G_out * D) / (4 * n_dot_out) + (1 - spec_prob) * (n_dot_in  / M_PI);
     }
     return r;
 }
 
-template<> inline MaterialSampleRecord sample_material(const RoughPlastic material, Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
-    const ShadingFrame frame = gPathVertices[vertex].shading_frame();
-    const Real n_dot_in = dot(frame.n, dir_in);
+template<> inline MaterialSampleRecord sample_material(const RoughPlastic material, Vector3 rnd, const Vector3 dir_in, const ShadingData shading_data, const bool adjoint) {
+    const Real n_dot_in = dot(shading_data.shading_normal(), dir_in);
     if (n_dot_in < 0) {
         // No light below the surface
         MaterialSampleRecord r;
-        r.eval.f = 0;
-        r.eval.pdfW = 0;
         r.dir_out = 0;
-        r.eta_roughness = 0;
+        r.f = 0;
+        r.pdf_fwd = 0;
+        r.pdf_rev = 0;
+        r.eta = 0;
+        r.roughness = 0;
         return r;
     }
 
@@ -139,52 +145,53 @@ template<> inline MaterialSampleRecord sample_material(const RoughPlastic materi
     const Real lS = luminance(Ks), lR = luminance(Kd);
     if (lS + lR <= 0) {
         MaterialSampleRecord r;
-        r.eval.f = 0;
-        r.eval.pdfW = 0;
         r.dir_out = 0;
-        r.eta_roughness = 0;
+        r.f = 0;
+        r.pdf_fwd = 0;
+        r.pdf_rev = 0;
+        r.eta = 0;
+        r.roughness = 0;
         return r;
     }
 
     // Clamp roughness to avoid numerical issues.
     const Real rgh = clamp(material.roughness, gMinRoughness, 1);
+    const Real alpha = pow2(rgh);
+
+    const Vector3 local_dir_in = shading_data.to_local(dir_in);
 
     const Real spec_prob = lS / (lS + lR);
     MaterialSampleRecord r;
     Vector3 half_vector;
     if (rnd.z < spec_prob) {
         // Sample from the specular lobe.
-
-        // Convert the incoming direction to local coordinates
-        const Vector3 local_dir_in = frame.to_local(dir_in);
-        const Real alpha = rgh * rgh;
         const Vector3 local_micro_normal = sample_visible_normals(local_dir_in, alpha, rnd.xy);
-        
-        // Transform the micro normal to world space
-        half_vector = frame.to_world(local_micro_normal);
-        // Reflect over the world space normal
+        half_vector = shading_data.to_world(local_micro_normal);
         r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-        r.eta_roughness = pack_f16_2(float2(0,rgh));;
+        r.eta = 0;
+        r.roughness = rgh;
     } else {
-        r.dir_out = frame.to_world(sample_cos_hemisphere(rnd.x, rnd.y));
-        r.eta_roughness = pack_f16_2(float2(0,1));
+        r.dir_out = shading_data.to_world(sample_cos_hemisphere(rnd.x, rnd.y));
+        r.eta = 0;
+        r.roughness = 1;
         half_vector = normalize(dir_in + r.dir_out);
     }
     
-    const Real n_dot_out = dot(frame.n, r.dir_out);
+    const Real n_dot_out = dot(shading_data.shading_normal(), r.dir_out);
     const Real F_i = fresnel_dielectric(dot(half_vector, dir_in), material.eta);
     const Real F_o = fresnel_dielectric(dot(half_vector, r.dir_out), material.eta);
-    const Real D = GTR2(dot(half_vector, frame.n), rgh);
-    const Real G_in = smith_masking_gtr2(frame.to_local(dir_in), rgh);
-    const Real G_out = smith_masking_gtr2(frame.to_local(r.dir_out), rgh);
-    const Spectrum spec_contrib = Ks * ((G_in * G_out) * F_o * D) / (4 * n_dot_in * n_dot_out);
+    const Real D = GTR2(dot(half_vector, shading_data.shading_normal()), alpha);
+    const Real G_in  = smith_masking_gtr2(local_dir_in, alpha);
+    const Real G_out = smith_masking_gtr2(shading_data.to_local(r.dir_out), alpha);
+    const Spectrum spec_contrib    = Ks * ((G_in * G_out) * F_o * D) / (4 * n_dot_in * n_dot_out);
     const Spectrum diffuse_contrib = Kd * (1 - F_o) * (1 - F_i) / M_PI;
-    r.eval.f = (spec_contrib + diffuse_contrib) * n_dot_out;
-    r.eval.pdfW = spec_prob*(G_in * D) / (4 * n_dot_in) + (1 - spec_prob)*n_dot_out / M_PI;
+    r.f = (spec_contrib + diffuse_contrib) * n_dot_out;
+    r.pdf_fwd = spec_prob * (G_in  * D) / (4 * n_dot_in ) + (1 - spec_prob) * n_dot_out / M_PI;
+    r.pdf_rev = spec_prob * (G_out * D) / (4 * n_dot_out) + (1 - spec_prob) * n_dot_in  / M_PI;
     return r;
 }
 
-template<> inline Spectrum eval_material_albedo(const RoughPlastic material, const uint vertex) { return material.diffuse_reflectance; }
+template<> inline Spectrum eval_material_albedo(const RoughPlastic material, const ShadingData shading_data) { return material.diffuse_reflectance; }
 #endif
 
 #endif

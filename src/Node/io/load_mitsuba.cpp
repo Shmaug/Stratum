@@ -1,4 +1,5 @@
 #include "../Scene.hpp"
+#include <Core/PipelineState.hpp>
 
 #include <pugixml.hpp>
 #include <regex>
@@ -692,6 +693,8 @@ void parse_scene(Node& root, CommandBuffer& commandBuffer, pugi::xml_node node) 
 }
 
 void load_mitsuba(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
+	ProfilerRegion ps("load_mitsuba", commandBuffer);
+	
 	pugi::xml_document doc;
 	pugi::xml_parse_result result = doc.load_file(filename.c_str());
 	if (!result) {

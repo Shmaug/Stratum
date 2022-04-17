@@ -235,23 +235,26 @@ inline ImageValue4 load_image_value4(inout uint address) {
 inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
 	float w,h;
 	img.GetDimensions(w,h);
-	return img.SampleLevel(gSampler, uv, (gUseRayCones && uv_screen_size > 0) ? log2(max(uv_screen_size*min(w,h), 1e-8f)) : 0);
+	float lod = 0;
+	if (gUseRayCones && uv_screen_size > 0)
+		lod = log2(max(uv_screen_size*min(w,h), 1e-8f));
+	return img.SampleLevel(gSampler, uv, lod);
 }
-inline float  sample_image(const ImageValue1 img, const uint vertex) {
+inline float  sample_image(const ImageValue1 img, const ShadingData shading_data) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size)[img.channel()];
+	return img.value * sample_image(img.image(), shading_data.uv, shading_data.uv_screen_size)[img.channel()];
 }
-inline float2 sample_image(const ImageValue2 img, const uint vertex) {
+inline float2 sample_image(const ImageValue2 img, const ShadingData shading_data) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rg;
+	return img.value * sample_image(img.image(), shading_data.uv, shading_data.uv_screen_size).rg;
 }
-inline float3 sample_image(const ImageValue3 img, const uint vertex) {
+inline float3 sample_image(const ImageValue3 img, const ShadingData shading_data) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size).rgb;
+	return img.value * sample_image(img.image(), shading_data.uv, shading_data.uv_screen_size).rgb;
 }
-inline float4 sample_image(const ImageValue4 img, const uint vertex) {
+inline float4 sample_image(const ImageValue4 img, const ShadingData shading_data) {
 	if (!img.has_image()) return img.value;
-	return img.value * sample_image(img.image(), gPathVertices[vertex].uv, gPathVertices[vertex].uv_screen_size);
+	return img.value * sample_image(img.image(), shading_data.uv, shading_data.uv_screen_size);
 }
 
 #endif // __HLSL_VERSION

@@ -4,9 +4,8 @@
 #include "scene.hlsli"
 
 struct ReservoirLightSample {
-	float3 position_or_bary;
+	float3 local_position;
 	uint instance_primitive_index;
-
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 };

@@ -3,7 +3,7 @@
 using namespace stm;
 
 stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
-	#ifdef WIN32
+	#ifdef _WIN32
 
 	mWindowedRect = {};
 
@@ -87,7 +87,7 @@ stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position
 stm::Window::~Window() {
 	destroy_swapchain();
 	mInstance->destroySurfaceKHR(mSurface);
-#ifdef WIN32
+#ifdef _WIN32
 	if (mHwnd) DestroyWindow(mHwnd);
 #endif
 #ifdef __linux
@@ -131,7 +131,7 @@ void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>
 }
 
 void stm::Window::resize(uint32_t w, uint32_t h) {
-#ifdef WIN32
+#ifdef _WIN32
 	RECT r;
 	GetWindowRect(mHwnd, &r);
 	int x = r.left, y = r.top;
@@ -144,7 +144,7 @@ void stm::Window::resize(uint32_t w, uint32_t h) {
 }
 
 void stm::Window::fullscreen(bool fs) {
-	#ifdef WIN32
+	#ifdef _WIN32
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
 
@@ -277,7 +277,7 @@ void stm::Window::destroy_swapchain() {
 	mSwapchain = nullptr;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 	vector<byte> lpb;
 	switch (message) {
@@ -295,6 +295,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 	}
 	case WM_CHAR:
 		mInputState.add_input_character(wParam);
+		break;
 	case WM_INPUT: {
 		uint32_t dwSize = 0;
 		GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
@@ -303,23 +304,22 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		const RAWINPUT& raw = *reinterpret_cast<const RAWINPUT*>(lpb.data());
 		if (raw.header.dwType == RIM_TYPEMOUSE) {
 			mInputState.add_cursor_delta(Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY));
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 		mInputState.set_button  (KeyCode::eMouse1);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  		mInputState.unset_button(KeyCode::eMouse1);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  	mInputState.set_button  (KeyCode::eMouse2);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  		mInputState.unset_button(KeyCode::eMouse2);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 		mInputState.set_button  (KeyCode::eMouse3);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 			mInputState.unset_button(KeyCode::eMouse3);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 		mInputState.set_button  (KeyCode::eMouse4);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 			mInputState.unset_button(KeyCode::eMouse4);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 		mInputState.set_button  (KeyCode::eMouse5);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 			mInputState.unset_button(KeyCode::eMouse5);
-			if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 						mInputState.add_scroll_delta((float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA);
-		}
-		if (raw.header.dwType == RIM_TYPEKEYBOARD) {
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 	mInputState.set_button  (KeyCode::eMouse1);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  	mInputState.unset_button(KeyCode::eMouse1);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  mInputState.set_button  (KeyCode::eMouse2);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_UP)  	mInputState.unset_button(KeyCode::eMouse2);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_DOWN) 	mInputState.set_button  (KeyCode::eMouse3);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_3_UP) 	mInputState.unset_button(KeyCode::eMouse3);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) 	mInputState.set_button  (KeyCode::eMouse4);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_4_UP) 	mInputState.unset_button(KeyCode::eMouse4);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) 	mInputState.set_button  (KeyCode::eMouse5);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_5_UP) 	mInputState.unset_button(KeyCode::eMouse5);
+			if (raw.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) 			mInputState.add_scroll_delta((float)bit_cast<SHORT>(raw.data.mouse.usButtonData) / (float)WHEEL_DELTA);
+		} else if (raw.header.dwType == RIM_TYPEKEYBOARD) {
 			USHORT key = raw.data.keyboard.VKey;
-			if      (key == VK_LMENU || key == VK_RMENU) key = VK_MENU;
-			else if (key == VK_LCONTROL || key == VK_RCONTROL) key = VK_CONTROL;
-			else if (key == VK_LSHIFT || key == VK_RSHIFT) key = VK_SHIFT;
+			if      (key == VK_LMENU 	|| key == VK_RMENU) 	key = VK_MENU;
+			else if (key == VK_LCONTROL || key == VK_RCONTROL) 	key = VK_CONTROL;
+			else if (key == VK_LSHIFT 	|| key == VK_RSHIFT) 	key = VK_SHIFT;
 			
 			if (raw.data.keyboard.Flags & RI_KEY_BREAK)
 				mInputState.unset_button((KeyCode)key);

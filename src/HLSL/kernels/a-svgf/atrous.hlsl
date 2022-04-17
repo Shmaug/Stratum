@@ -46,7 +46,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define gOutput gFilterImages[(gPushConstants.gIteration+1)%2]
 
 struct TapData {
-	ViewData view;
+	uint view_index;
+	uint screen_width;
 	int2 index;
 	uint2 s_mem_index;
 	float3 center_normal;
@@ -68,7 +69,7 @@ struct TapData {
 			for (int xx = -1; xx <= 1; xx++) {
 				if (xx == 0 && yy == 0) continue;
 				const int2 p = index + int2(xx, yy);
-				if (!test_inside_screen(p, view)) continue;
+				if (!test_inside_screen(p, gViews[view_index])) continue;
 				s += gInput[p].a * kernel[abs(xx)][abs(yy)];
 			}
 		sigma_l = sqrt(max(s, 0))*gPushConstants.gSigmaLuminanceBoost;
@@ -76,17 +77,16 @@ struct TapData {
 
 	inline void tap(const int2 offset, const float kernel_weight) {
 		const int2 p = index + offset;
-		if (!test_inside_screen(p, view)) return;
+		if (!test_inside_screen(p, gViews[view_index])) return;
 
 		const float4 color_p  = gInput[p];
-
 		const float l_p = luminance(color_p.rgb);
 
-		const VisibilityInfo v_p = load_visibility(p);
+		const uint p_1d = p.y*screen_width + p.x;
 
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10); 
-		const float w_z = gUseVisibility ? 3 * abs(v_p.z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2) : 0;
-		const float w_n = gUseVisibility ? pow(max(0, dot(v_p.normal(), center_normal)), 256) : 1;
+		const float w_z = gUseVisibility ? 3 * abs(gVisibility[p_1d].z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2) : 0;
+		const float w_n = gUseVisibility ? pow(max(0, dot(gVisibility[p_1d].normal(), center_normal)), 256) : 1;
 
 		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
 		if (isinf(w) || isnan(w) || w == 0) return;
@@ -187,16 +187,17 @@ inline void atrous(inout TapData t) {
 
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
-	const uint viewIndex = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
-
 	TapData t;
-	t.view = gViews[viewIndex];
+	t.view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
+	if (t.view_index == -1) return;
+	uint h;
+	gOutput.GetDimensions(t.screen_width, h);
+
+	const uint index_1d = index.y*t.screen_width + index.x;
 	t.index = index.xy;
-	const VisibilityInfo v = load_visibility(t.index);
-	t.center_normal = v.normal();
-	t.z_center = v.z();
-	t.dz_center = v.dz_dxy();
+	t.center_normal = gVisibility[index_1d].normal();
+	t.z_center = gVisibility[index_1d].z();
+	t.dz_center = gVisibility[index_1d].dz_dxy();
 	t.sum_weight = 1;
 	t.sum_color = gInput[index.xy];
 	t.l_center = luminance(t.sum_color.rgb);

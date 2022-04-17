@@ -17,7 +17,7 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
       Window& window = commandBuffer.mDevice.mInstance.window();
       const MouseKeyboardState& input = window.input_state();
       auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();
-      float fwd = (mainCamera->mProjection.mNear < 0) ? -1 : 1;
+      float fwd = (mainCamera->mProjection.near_plane < 0) ? -1 : 1;
       if (!ImGui::GetIO().WantCaptureMouse) {
         if (input.pressed(KeyCode::eMouse2)) {
           static const float gMouseSensitivity = 0.002f;
@@ -48,9 +48,9 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
       
       mainCamera->mImageRect = vk::Rect2D { { 0, 0 }, window.swapchain_extent() };
       const float aspect = window.swapchain_extent().height / (float)window.swapchain_extent().width;
-      if (abs(mainCamera->mProjection.mScale[0] / mainCamera->mProjection.mScale[1] - aspect) > 1e-5) {
-        const float fovy = 2*atan(1/mainCamera->mProjection.mScale[1]);
-        mainCamera->mProjection = make_perspective(fovy, aspect, float2::Zero(), mainCamera->mProjection.mNear);
+      if (abs(mainCamera->mProjection.scale[0] / mainCamera->mProjection.scale[1] - aspect) > 1e-5) {
+        const float fovy = 2*atan(1/mainCamera->mProjection.scale[1]);
+        mainCamera->mProjection = make_perspective(fovy, aspect, float2::Zero(), mainCamera->mProjection.near_plane);
       }
     });
 

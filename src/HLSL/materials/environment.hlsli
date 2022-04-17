@@ -83,12 +83,22 @@ struct Environment {
 		emission.image().GetDimensions(w, h);
 		return dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	}
+	inline Spectrum sample(const float2 rnd, out Vector3 dir_out, out Real pdf) {
+		uint w, h;
+		emission.image().GetDimensions(w, h);
+		const float2 uv = sample_dist2d(gDistributions, marginal_cdf, row_cdf, w, h, rnd);
+		dir_out = spherical_uv_to_cartesian(uv);
+		pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+		if (emission.has_image())
+			return emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
+		else
+			return emission.value;
+	}
 #endif
 };
 
 #ifdef __HLSL_VERSION
-template<>
-inline Environment load_material<Environment>(uint address, const uint vertex) {
+template<> inline Environment load_material<Environment>(uint address, const ShadingData shading_data) {
     Environment material;
 	material.emission		= load_image_value3(address);
 	material.marginal_pdf 	= gMaterialData.Load(address); address += 4;
@@ -98,34 +108,19 @@ inline Environment load_material<Environment>(uint address, const uint vertex) {
     return material;
 }
 
-template<> inline MaterialSampleRecord sample_material_emission(const Environment material, const Vector3 rnd, const Vector3 dir_in, const uint vertex) {
-	uint w, h;
-	material.emission.image().GetDimensions(w, h);
-	const float2 uv = sample_dist2d(gDistributions, material.marginal_cdf, material.row_cdf, w, h, rnd.xy);
-	MaterialSampleRecord r;
-	r.dir_out = spherical_uv_to_cartesian(uv);
-	if (material.emission.has_image())
-		r.eval.f = material.emission.value*material.emission.image().SampleLevel(gSampler, uv, 0).rgb;
-	else
-		r.eval.f = material.emission.value;
-	r.eval.pdfW = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - r.dir_out.y*r.dir_out.y));
-	r.eta_roughness = 0;
-	return r;
-}
-template<> inline MaterialEvalRecord eval_material_emission(const Environment material, const Vector3 dir_out, const uint vertex) {
+template<> inline EmissionEvalRecord eval_material_emission(const Environment material, const Vector3 dir_out, const ShadingData shading_data) {
 	uint w, h;
 	material.emission.image().GetDimensions(w, h);
 	const float2 uv = cartesian_to_spherical_uv(-dir_out);
-	MaterialEvalRecord r;
-	float uv_screen_size = 0;
-	if (vertex != -1) uv_screen_size = gPathVertices[vertex].uv_screen_size;
-	r.f = sample_image(material.emission.image(), uv, uv_screen_size).rgb * material.emission.value;
-	r.pdfW = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+	EmissionEvalRecord r;
+	r.f = sample_image(material.emission.image(), uv, 0).rgb * material.emission.value;
+	r.pdf = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	return r;
 }
 #endif // __HLSL_VERSION
 
 #ifdef __cplusplus
+
 inline void build_distributions(const span<float4>& img, const vk::Extent2D& extent, span<float> pdf_marginals, span<float> pdf_rows, span<float> cdf_marginals, span<float> cdf_rows) {
 	const float invHeight = 1 / (float)extent.height;
 	auto f = [&](uint32_t x, uint32_t y) {

@@ -31,7 +31,7 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBi
 	return VK_FALSE;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 LRESULT CALLBACK Instance::window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	if (gInstance && gInstance->mWindow)
 			gInstance->mWindow->handle_message(message, wParam, lParam);
@@ -79,7 +79,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 	for (const auto& ext : find_arguments("instanceExtension")) instanceExtensions.emplace(ext);
 	
-	#ifdef WIN32
+	#ifdef _WIN32
 	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
 	#ifdef __linux
@@ -131,7 +131,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 
 	// Create window
 
-	#ifdef WIN32
+	#ifdef _WIN32
 	// Create window class
 	mHInstance = GetModuleHandleA(NULL);
 
@@ -200,7 +200,7 @@ Instance::~Instance() {
 
 	mInstance.destroy();
 
-#ifdef WIN32
+#ifdef _WIN32
 	UnregisterClassA("Stratum", GetModuleHandleA(NULL));
 #elif defined(__linux)
 	xcb_key_symbols_free(mXCBKeySymbols);
@@ -250,7 +250,7 @@ void Instance::poll_events() const {
 	mWindow->mInputStateLast = mWindow->mInputState;
 	mWindow->mInputState.clear();
 
-	#ifdef WIN32
+	#ifdef _WIN32
 	MSG msg = {};
 	while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
 		TranslateMessage(&msg);

@@ -206,62 +206,62 @@ inline TransformData from_float3x4(const float3x4 m) {
 }
 
 struct ProjectionData {
-	float2 mScale;
-	float2 mOffset;
-	float mNear;
-	float mFar;
-	uint mOrthographic;
-	uint pad;
+	float2 scale;
+	float2 offset;
+	float near_plane;
+	float far_plane;
+	uint orthographic;
+	float sensor_area;
 
 	// uses reversed z (1 at near plane -> 0 at far plane)
 	inline float4 project_point(float3 v) CONST_CPP {
 		float4 r;
-		if (mOrthographic) {
+		if (orthographic) {
 			// orthographic
-			r[0] = v[0]*mScale[0] + mOffset[0];
-			r[1] = v[1]*mScale[1] + mOffset[1];
-			r[2] = (v[2] - mFar)/(mNear - mFar);
+			r[0] = v[0]*scale[0] + offset[0];
+			r[1] = v[1]*scale[1] + offset[1];
+			r[2] = (v[2] - far_plane)/(near_plane - far_plane);
 			r[3] = 1;
 		} else {
 			// perspective, infinite far plane
-			r[0] = v[0]*mScale[0] + v[2]*mOffset[0];
-			r[1] = v[1]*mScale[1] + v[2]*mOffset[1];
-			r[2] = abs(mNear);
-			r[3] = v[2]*sign(mNear);
+			r[0] = v[0]*scale[0] + v[2]*offset[0];
+			r[1] = v[1]*scale[1] + v[2]*offset[1];
+			r[2] = abs(near_plane);
+			r[3] = v[2]*sign(near_plane);
 		}
 		return r;
 	}
 	inline float3 back_project(float2 v) CONST_CPP {
 		float3 r;
-		if (mOrthographic) {
-			r[0] = (v[0] - mOffset[0])/mScale[0];
-			r[1] = (v[1] - mOffset[1])/mScale[1];
+		if (orthographic) {
+			r[0] = (v[0] - offset[0])/scale[0];
+			r[1] = (v[1] - offset[1])/scale[1];
 		} else {
-			r[0] = mNear*(v[0]*sign(mNear) - mOffset[0])/mScale[0];
-			r[1] = mNear*(v[1]*sign(mNear) - mOffset[1])/mScale[1];
+			r[0] = near_plane*(v[0]*sign(near_plane) - offset[0])/scale[0];
+			r[1] = near_plane*(v[1]*sign(near_plane) - offset[1])/scale[1];
 		}
-		r[2] = mNear;
+		r[2] = near_plane;
 		return r;
 	}
 };
 
 inline ProjectionData make_orthographic(float2 size, float2 offset, float znear, float zfar) {
 	ProjectionData r;
-	r.mScale = 2/size;
-	r.mOffset = offset;
-	r.mNear = znear;
-	r.mFar = zfar;
-	r.mOrthographic = 1;
+	r.scale = 2/size;
+	r.offset = offset;
+	r.near_plane = znear;
+	r.far_plane = zfar;
+	r.orthographic = 1;
 	return r;
 }
 inline ProjectionData make_perspective(float fovy, float aspect, float2 offset, float znear) {
 	ProjectionData r;
-	r.mScale[1] = 1/tan(fovy/2);
-	r.mScale[0] = aspect*r.mScale[1];
-	r.mOffset = offset;
-	r.mNear = znear;
-	r.mFar = 0;
-	r.mOrthographic = 0;
+	r.scale[1] = 1/tan(fovy/2);
+	r.scale[0] = aspect*r.scale[1];
+	r.offset = offset;
+	r.near_plane = znear;
+	r.far_plane = 0;
+	r.orthographic = 0;
 	return r;
 }
 

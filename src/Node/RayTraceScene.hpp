@@ -9,8 +9,7 @@ namespace stm {
 #pragma pack(push)
 #pragma pack(1)
 namespace hlsl {
-#include <HLSL/visibility_buffer.hlsli>
-#include <HLSL/path_state.hlsli>
+#include <HLSL/path_vertex.hlsli>
 #include <HLSL/reservoir.hlsli>
 }
 #pragma pack(pop)
@@ -24,7 +23,7 @@ public:
 	STRATUM_API void create_pipelines();
 	
 	STRATUM_API void on_inspector_gui();
-	STRATUM_API void update(CommandBuffer& commandBuffer, float deltaTime);
+	STRATUM_API void update(CommandBuffer& commandBuffer, const float deltaTime);
 	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<hlsl::ViewData>& views);
 
 private:
@@ -42,11 +41,10 @@ private:
 	
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
 	
-	component_ptr<ComputePipelineState> mSampleLightPathsPipeline;
+	component_ptr<ComputePipelineState> mSamplePhotonsPipeline;
 	component_ptr<ComputePipelineState> mSampleVisibilityPipeline;
-	component_ptr<ComputePipelineState> mIntegratePipeline;
-
-	component_ptr<ComputePipelineState> mDemodulateAlbedoPipeline;
+	component_ptr<ComputePipelineState> mRandomWalkPipeline;
+	component_ptr<ComputePipelineState> mResolvePipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
 	
 	component_ptr<ComputePipelineState> mSpatialReusePipeline;
@@ -66,7 +64,7 @@ private:
 
 	bool mRandomPerFrame = true;
 	bool mReprojection = true;
-	bool mDemodulateAlbedo = true;
+	bool mUpdateSceneEachFrame = true;
 	uint32_t mDiffAtrousIterations = 0;
 	uint32_t mAtrousIterations = 0;
 	uint32_t mSpatialReservoirIterations = 0;
@@ -86,16 +84,15 @@ private:
 		Buffer::View<hlsl::InstanceData> mInstances;
 		Buffer::View<uint32_t> mLightInstances;
 		Buffer::View<float> mDistributionData;
+		Buffer::View<uint32_t> mInstanceIndexMap;
 		shared_ptr<DescriptorSet> mPathTraceDescriptorSet;
 		
-		Buffer::View<uint32_t> mInstanceIndexMap;
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
 		Buffer::View<hlsl::Reservoir> mReservoirs;
 		Buffer::View<hlsl::PathState> mPathStates;
-		Buffer::View<hlsl::PathVertexGeometry> mPathVertices;
-		Buffer::View<hlsl::MaterialSampleRecord> mMaterialSamples;
-		array<Image::View, VISIBILITY_BUFFER_COUNT> mVisibility;
+		Buffer::View<hlsl::PathVertex> mPathVertices;
+		Buffer::View<hlsl::VisibilityInfo> mVisibility;
 
 		Image::View mRadiance;
 		Image::View mAlbedo;
@@ -106,6 +103,7 @@ private:
 		array<array<Image::View, 2>, 2> mDiffTemp;
 
 		uint32_t mFrameNumber;
+		uint32_t mMaterialCount;
 	};
 
 	Buffer::View<uint32_t> mCounterValues;
@@ -116,6 +114,8 @@ private:
 	vector<shared_ptr<FrameResources>> mFrameResources;
 	shared_ptr<FrameResources> mPrevFrame;
 	shared_ptr<FrameResources> mCurFrame;
+	
+	STRATUM_API void update_scene(CommandBuffer& commandBuffer, const float deltaTime);
 };
 
 }

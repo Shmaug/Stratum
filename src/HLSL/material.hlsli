@@ -5,54 +5,70 @@
 
 #ifdef __HLSL_VERSION
 
+#define gCosThetaEpsilon 1e-6
+
 #ifndef Real
 #define Real float
 #define Vector3 float3
 #define Spectrum float3
 #endif
 
-// When TransportDirection is TRANSPORT_TO_LIGHT, dir_in is the view direction, and dir_out is the light direction
-#define TransportDirection bool
-#define TRANSPORT_TO_LIGHT true
-#define TRANSPORT_FROM_LIGHT false
+
 
 template<typename Material>
-inline Material load_material(uint address, const uint vertex) {
+inline Material load_material(uint address, const ShadingData shading_data) {
 	Material material;
 	return material;
 }
 
+template<typename Material> inline bool material_has_bsdf() { return false; }
+
+struct MaterialEvalRecord {
+	float3 f;
+	float pdf_fwd;
+	float pdf_rev;
+};
 // returns BSDF * cosine term
 template<typename Material>
-inline MaterialEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const uint vertex, const TransportDirection dir) {
+inline MaterialEvalRecord eval_material(const Material material, const Vector3 dir_in, const Vector3 dir_out, const ShadingData shading_data, const bool adjoint) {
 	MaterialEvalRecord e;
 	e.f = 0;
-	e.pdfW = 0;
+	e.pdf_fwd = 0;
+	e.pdf_rev = 0;
 	return e;
 }
 
+struct MaterialSampleRecord {
+	float3 dir_out;
+	float3 f;
+	float pdf_fwd;
+	float pdf_rev;
+	float eta; // index of refraction for transmission, otherwise 0
+	float roughness;
+};
 template<typename Material>
-inline MaterialSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex, const TransportDirection dir) {
+inline MaterialSampleRecord sample_material(const Material material, const Vector3 rnd, const Vector3 dir_in, const ShadingData shading_data, const bool adjoint) {
 	MaterialSampleRecord s;
 	s.dir_out = 0;
-	s.eta_roughness = 0;
-	s.eval = eval_material(material, dir_in, s.dir_out, vertex, dir);
+	s.f = 0;
+	s.pdf_fwd = 0;
+	s.pdf_rev = 0;
+	s.eta = 0;
+	s.roughness = 0;
 	return s;
 }
 
-template<typename Material> inline Spectrum eval_material_albedo  (const Material material, const uint vertex) { return 0; }
-template<typename Material> inline MaterialEvalRecord eval_material_emission(const Material material, const Vector3 dir_out, const uint vertex) {
-	MaterialEvalRecord e;
+template<typename Material> inline Spectrum eval_material_albedo(const Material material, const ShadingData shading_data) { return 0; }
+
+struct EmissionEvalRecord {
+	float3 f;
+	float pdf;
+};
+template<typename Material> inline EmissionEvalRecord eval_material_emission(const Material material, const Vector3 dir_out, const ShadingData shading_data) {
+	EmissionEvalRecord e;
 	e.f = 0;
-	e.pdfW = 0;
+	e.pdf = 0;
 	return e;
-}
-template<typename Material> inline MaterialSampleRecord sample_material_emission(const Material material, const Vector3 rnd, const Vector3 dir_in, const uint vertex) {
-	MaterialSampleRecord s;
-	s.dir_out = 0;
-	s.eta_roughness = 0;
-	s.eval = eval_material_emission(material, dir_in, s.dir_out, vertex);
-	return s;
 }
 
 #endif
@@ -76,24 +92,6 @@ template<typename Material> inline MaterialSampleRecord sample_material_emission
 #define ENUMIFY(T) e ## T ,
 enum BSDFType : uint { FOR_EACH_BSDF_TYPE( ENUMIFY ) eBSDFTypeCount };
 #undef ENUMIFY
-
-#ifdef __HLSL_VERSION
-
-inline MaterialEvalRecord load_material_and_eval_emission(const uint address, const float3 dir_out, const uint vertex) {
-	const uint type = gMaterialData.Load(address);
-	if (type == BSDFType::eEmissive)
-		return eval_material_emission(load_material<Emissive>(address + 4, vertex), dir_out, vertex);
-	else if (type == BSDFType::eEnvironment)
-		return eval_material_emission(load_material<Environment>(address + 4, vertex), dir_out, vertex);
-	else {
-		MaterialEvalRecord r;
-		r.f = 0;
-		r.pdfW = 0;
-		return r;
-	}
-}
-
-#endif // __HLSL_VERSION
 
 #ifdef __cplusplus
 

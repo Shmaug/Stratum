@@ -1,5 +1,5 @@
 #include "XR.hpp"
-#include "Gui.hpp"
+#include "Inspector.hpp"
 
 #include <Core/Window.hpp>
 
@@ -89,8 +89,7 @@ vk::PhysicalDevice XR::get_vulkan_device(Instance& instance) {
 }
 
 void XR::create_session(Instance& instance) {
-	component_ptr<Gui> gui = mNode.node_graph().find_components<Gui>().front();
-	gui->register_inspector_gui_fn<XR>(&inspector_gui_fn);
+	mNode.node_graph().find_components<Inspector>().front()->register_inspector_gui_fn<XR>(&inspector_gui_fn);
 	
 	xr::GraphicsRequirementsVulkanKHR requirements = mInstance.getVulkanGraphicsRequirementsKHR(mSystem, mDispatch);
 	if (VK_VERSION_MAJOR(instance.vulkan_version()) > requirements.maxApiVersionSupported.major() || VK_VERSION_MAJOR(instance.vulkan_version()) < requirements.minApiVersionSupported.major())

@@ -14,7 +14,48 @@
 #define TINYEXR_IMPLEMENTATION
 #include <extern/tiny_exr.h>
 
+#define TINYDDSLOADER_IMPLEMENTATION
+#include <tinyddsloader.h>
+
 namespace stm {
+
+inline vk::Format dxgi_to_vulkan(tinyddsloader::DDSFile::DXGIFormat format, const bool alphaFlag) {
+	switch (format) {
+		case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm: {
+			if (alphaFlag) return vk::Format::eBc1RgbaUnormBlock;
+			else return vk::Format::eBc1RgbUnormBlock;
+		}
+		case tinyddsloader::DDSFile::DXGIFormat::BC1_UNorm_SRGB: {
+			if (alphaFlag) return vk::Format::eBc1RgbaSrgbBlock;
+			else return vk::Format::eBc1RgbSrgbBlock;
+		}
+
+		case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm:       return vk::Format::eBc2UnormBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC2_UNorm_SRGB:  return vk::Format::eBc2SrgbBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm:       return vk::Format::eBc3UnormBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC3_UNorm_SRGB:  return vk::Format::eBc3SrgbBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC4_UNorm:       return vk::Format::eBc4UnormBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC4_SNorm:       return vk::Format::eBc4SnormBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC5_UNorm:       return vk::Format::eBc5UnormBlock;
+		case tinyddsloader::DDSFile::DXGIFormat::BC5_SNorm:       return vk::Format::eBc5SnormBlock;
+
+		case tinyddsloader::DDSFile::DXGIFormat::R8G8B8A8_UNorm:      return vk::Format::eR8G8B8A8Unorm;
+		case tinyddsloader::DDSFile::DXGIFormat::R8G8B8A8_UNorm_SRGB: return vk::Format::eR8G8B8A8Srgb;
+		case tinyddsloader::DDSFile::DXGIFormat::R8G8B8A8_UInt:       return vk::Format::eR8G8B8A8Uint;
+		case tinyddsloader::DDSFile::DXGIFormat::R8G8B8A8_SNorm:      return vk::Format::eR8G8B8A8Snorm;
+		case tinyddsloader::DDSFile::DXGIFormat::R8G8B8A8_SInt:       return vk::Format::eR8G8B8A8Sint;
+		case tinyddsloader::DDSFile::DXGIFormat::B8G8R8A8_UNorm:      return vk::Format::eB8G8R8A8Unorm;
+		case tinyddsloader::DDSFile::DXGIFormat::B8G8R8A8_UNorm_SRGB: return vk::Format::eB8G8R8A8Srgb;
+
+		case tinyddsloader::DDSFile::DXGIFormat::R16G16B16A16_Float:  return vk::Format::eR16G16B16A16Sfloat;
+		case tinyddsloader::DDSFile::DXGIFormat::R16G16B16A16_SInt:   return vk::Format::eR16G16B16A16Sint;
+		case tinyddsloader::DDSFile::DXGIFormat::R16G16B16A16_UInt:   return vk::Format::eR16G16B16A16Uint;
+		case tinyddsloader::DDSFile::DXGIFormat::R16G16B16A16_UNorm:  return vk::Format::eR16G16B16A16Unorm;
+		case tinyddsloader::DDSFile::DXGIFormat::R16G16B16A16_SNorm:  return vk::Format::eR16G16B16A16Snorm;
+
+		default: return vk::Format::eUndefined;
+	}
+}
 
 ImageData load_image_data(Device& device, const fs::path& filename, bool srgb, int desiredChannels) {
 	if (!fs::exists(filename)) throw invalid_argument("File does not exist: " + filename.string());
@@ -33,6 +74,20 @@ ImageData load_image_data(Device& device, const fs::path& filename, bool srgb, i
 		memcpy(buf.data(), data, buf.size_bytes());
 		free(data);
 		return ImageData{Buffer::TexelView(buf, vk::Format::eR32G32B32A32Sfloat), vk::Extent3D(width,height,1)};
+	} else if (filename.extension() == ".dds") {
+		using namespace tinyddsloader;
+		DDSFile dds;
+    	auto ret = dds.Load(filename.string().c_str());
+		if (tinyddsloader::Result::Success != ret) throw runtime_error("Failed to load " + filename.string());
+		dds.GetBitsPerPixel(dds.GetFormat());
+
+		dds.Flip();
+
+		const DDSFile::ImageData* img = dds.GetImageData(0, 0);
+
+		Buffer::View<byte> buf = make_shared<Buffer>(device, filename.stem().string(), img->m_memSlicePitch, vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		memcpy(buf.data(), img->m_mem, buf.size_bytes());
+		return ImageData{Buffer::TexelView(buf, dxgi_to_vulkan(dds.GetFormat(), false)), vk::Extent3D(dds.GetWidth(), dds.GetHeight(), dds.GetDepth())};
 	} else {
 		int x,y,channels;
 		stbi_info(filename.string().c_str(), &x, &y, &channels);

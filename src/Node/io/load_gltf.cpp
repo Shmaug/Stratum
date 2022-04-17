@@ -10,7 +10,7 @@ using namespace stm::hlsl;
 namespace stm {
 
 void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
-	ProfilerRegion ps("pbrRenderer::load_gltf", commandBuffer);
+	ProfilerRegion ps("load_gltf", commandBuffer);
 	
 	tinygltf::Model model;
 	tinygltf::TinyGLTF loader;

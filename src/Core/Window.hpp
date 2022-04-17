@@ -5,7 +5,7 @@
 namespace stm {
 
 enum KeyCode {
-#ifdef WIN32
+#ifdef _WIN32
 	eNone = 0x00,
 
 	eMouse1 = VK_LBUTTON,
@@ -294,7 +294,7 @@ public:
 	inline const Image::View& back_buffer() const { return mRenderTargets[back_buffer_index()]; }
 	inline const Image::View& back_buffer(uint32_t i) const { return mRenderTargets[i]; }
 
-#ifdef WIN32
+#ifdef _WIN32
 	inline HWND handle() const { return mHwnd; }
 #endif
 #ifdef __linux
@@ -351,7 +351,7 @@ private:
 	MouseKeyboardState mInputStateLast;
 
 	friend class Instance;
-#ifdef WIN32
+#ifdef _WIN32
 	HWND mHwnd;
 	RECT mWindowedRect;
 	STRATUM_API void handle_message(UINT message, WPARAM wParam, LPARAM lParam);
