@@ -9,7 +9,7 @@ namespace stm {
 static float3 gAnimateTranslate = float3::Zero();
 static float3 gAnimateRotate = float3::Zero();
 static TransformData* gAnimatedTransform = nullptr;
-STRATUM_API void animate(CommandBuffer& commandBuffer, float deltaTime) {
+void animate(CommandBuffer& commandBuffer, float deltaTime) {
 	if (gAnimatedTransform) {
 		*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(gAnimateTranslate*deltaTime, quatf_identity(), float3::Ones()));
 		float r = length(gAnimateRotate);
@@ -110,6 +110,10 @@ TransformData node_to_world(const Node& node) {
 		p = p->parent();
 	}
 	return transform;
+}
+
+void load_environment_map(Node& root, CommandBuffer& commandBuffer, const fs::path& filepath) {
+	root.make_component<Material>(load_environment(commandBuffer, filepath));
 }
 
 }

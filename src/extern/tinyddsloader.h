@@ -12,14 +12,14 @@
 namespace tinyddsloader {
 
 enum Result {
-    Success,
-    ErrorFileOpen,
-    ErrorRead,
-    ErrorMagicWord,
-    ErrorSize,
-    ErrorVerify,
-    ErrorNotSupported,
-    ErrorInvalidData,
+    tinydds_Success,
+    tinydds_ErrorFileOpen,
+    tinydds_ErrorRead,
+    tinydds_ErrorMagicWord,
+    tinydds_ErrorSize,
+    tinydds_ErrorVerify,
+    tinydds_ErrorNotSupported,
+    tinydds_ErrorInvalidData,
 };
 
 class DDSFile {
@@ -729,7 +729,7 @@ uint32_t DDSFile::GetBitsPerPixel(DXGIFormat fmt) {
 Result DDSFile::Load(const char* filepath) {
     std::ifstream ifs(filepath, std::ios_base::binary);
     if (!ifs.is_open()) {
-        return Result::ErrorFileOpen;
+        return Result::tinydds_ErrorFileOpen;
     }
 
     return Load(ifs);
@@ -746,14 +746,14 @@ Result DDSFile::Load(std::istream& input) {
 
     auto fileSize = endPos - begPos;
     if (fileSize == 0) {
-        return Result::ErrorRead;
+        return Result::tinydds_ErrorRead;
     }
     std::vector<uint8_t> dds(fileSize);
 
     input.read(reinterpret_cast<char*>(dds.data()), fileSize);
 
     if (input.bad()) {
-        return Result::ErrorRead;
+        return Result::tinydds_ErrorRead;
     }
 
     return Load(std::move(dds));
@@ -768,24 +768,24 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
     m_dds.clear();
 
     if (dds.size() < 4) {
-        return Result::ErrorSize;
+        return Result::tinydds_ErrorSize;
     }
 
     for (int i = 0; i < 4; i++) {
         if (dds[i] != Magic[i]) {
-            return Result::ErrorMagicWord;
+            return Result::tinydds_ErrorMagicWord;
         }
     }
 
     if ((sizeof(uint32_t) + sizeof(Header)) >= dds.size()) {
-        return Result::ErrorSize;
+        return Result::tinydds_ErrorSize;
     }
     auto header =
         reinterpret_cast<const Header*>(dds.data() + sizeof(uint32_t));
 
     if (header->m_size != sizeof(Header) ||
         header->m_pixelFormat.m_size != sizeof(PixelFormat)) {
-        return Result::ErrorVerify;
+        return Result::tinydds_ErrorVerify;
     }
     bool dxt10Header = false;
     if ((header->m_pixelFormat.m_flags &
@@ -793,7 +793,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
         (MakeFourCC('D', 'X', '1', '0') == header->m_pixelFormat.m_fourCC)) {
         if ((sizeof(uint32_t) + sizeof(Header) + sizeof(HeaderDXT10)) >=
             dds.size()) {
-            return Result::ErrorSize;
+            return Result::tinydds_ErrorSize;
         }
         dxt10Header = true;
     }
@@ -817,7 +817,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
 
         m_arraySize = dxt10Header->m_arraySize;
         if (m_arraySize == 0) {
-            return Result::ErrorInvalidData;
+            return Result::tinydds_ErrorInvalidData;
         }
 
         switch (dxt10Header->m_format) {
@@ -825,10 +825,10 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
             case DXGIFormat::IA44:
             case DXGIFormat::P8:
             case DXGIFormat::A8P8:
-                return Result::ErrorNotSupported;
+                return Result::tinydds_ErrorNotSupported;
             default:
                 if (GetBitsPerPixel(dxt10Header->m_format) == 0) {
-                    return Result::ErrorNotSupported;
+                    return Result::tinydds_ErrorNotSupported;
                 }
         }
 
@@ -838,7 +838,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
             case TextureDimension::Texture1D:
                 if ((header->m_flags & uint32_t(HeaderFlagBits::Height) &&
                      (m_height != 1))) {
-                    return Result::ErrorInvalidData;
+                    return Result::tinydds_ErrorInvalidData;
                 }
                 m_height = m_depth = 1;
                 break;
@@ -852,21 +852,21 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
                 break;
             case TextureDimension::Texture3D:
                 if (!(header->m_flags & uint32_t(HeaderFlagBits::Volume))) {
-                    return Result::ErrorInvalidData;
+                    return Result::tinydds_ErrorInvalidData;
                 }
                 if (m_arraySize > 1) {
-                    return Result::ErrorNotSupported;
+                    return Result::tinydds_ErrorNotSupported;
                 }
                 break;
             default:
-                return Result::ErrorNotSupported;
+                return Result::tinydds_ErrorNotSupported;
         }
 
         m_texDim = dxt10Header->m_resourceDimension;
     } else {
         m_format = GetDXGIFormat(header->m_pixelFormat);
         if (m_format == DXGIFormat::Unknown) {
-            return Result::ErrorNotSupported;
+            return Result::tinydds_ErrorNotSupported;
         }
 
         if (header->m_flags & uint32_t(HeaderFlagBits::Volume)) {
@@ -876,7 +876,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
                          uint32_t(HeaderCaps2FlagBits::CubemapAllFaces);
             if (caps2) {
                 if (caps2 != uint32_t(HeaderCaps2FlagBits::CubemapAllFaces)) {
-                    return Result::ErrorNotSupported;
+                    return Result::tinydds_ErrorNotSupported;
                 }
                 m_arraySize = 6;
                 m_isCubemap = true;
@@ -909,7 +909,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
             idx++;
 
             if (srcBits + (numBytes * d) > endBits) {
-                return Result::ErrorInvalidData;
+                return Result::tinydds_ErrorInvalidData;
             }
             srcBits += numBytes * d;
             w = std::max<uint32_t>(1, w / 2);
@@ -921,7 +921,7 @@ Result DDSFile::Load(std::vector<uint8_t>&& dds) {
     m_dds = std::move(dds);
     m_imageDatas = std::move(imageDatas);
 
-    return Result::Success;
+    return Result::tinydds_Success;
 }
 
 void DDSFile::GetImageInfo(uint32_t w, uint32_t h, DXGIFormat fmt,

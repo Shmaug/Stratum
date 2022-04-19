@@ -48,17 +48,20 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
     else()
       # glsc
       list(APPEND COMPILE_CMD "-g")
-      list(APPEND COMPILE_CMD "-O")
       list(APPEND COMPILE_CMD "-o" "${SPV_PATH}")
     endif()
     foreach (INC_PATH ${PARSED_INCLUDES})
       list(APPEND COMPILE_CMD "-I" "${INC_PATH}")
     endforeach()
 
-    add_custom_command(OUTPUT "${SPV_PATH}" "${SPV_JSON_PATH}"
-      COMMAND ${COMPILE_CMD} ${SRC_PATH} && spirv-cross ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect
+    add_custom_command(OUTPUT "${SPV_PATH}"
+      COMMAND ${COMPILE_CMD} ${SRC_PATH}
       DEPENDS "${SRC_PATH}" IMPLICIT_DEPENDS CXX "${SRC_PATH}")
     
+    add_custom_command(OUTPUT "${SPV_JSON_PATH}"
+      COMMAND spirv-cross ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect
+      DEPENDS "${SPV_PATH}")
+
     add_custom_target(${DST_NAME} ALL DEPENDS "${SPV_PATH}" "${SPV_JSON_PATH}")    
     
     list(APPEND DST_TARGETS ${DST_NAME})
@@ -71,7 +74,7 @@ endfunction()
 
 function(stm_add_shaders)
   cmake_parse_arguments(PARSED "" "" "SOURCES;DEPENDS;INCLUDES" ${ARGN})
-
+  make_directory("${CMAKE_CURRENT_BINARY_DIR}/Shaders")
   foreach(SHADER_FILE ${PARSED_SOURCES})
     stm_compile_shader("${SHADER_FILE}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders" INCLUDES ${PARSED_INCLUDES})
     

@@ -365,10 +365,13 @@ void path_bounce_(inout ray_query_t rayQuery, const uint address, const uint ind
 	const float3 dir_in = -path_dir_in(index_1d);
 
 	if (gTraceLightPaths) {
-		connect_light_paths(material, rayQuery, index_1d, dir_in, depth);
-	} else if ((gSamplingFlags & SAMPLE_FLAG_LIGHT_PATHS_ONLY) == 0) {
-		if (gSampleEmissive || gSampleEnvironment)
-			path_direct_light(material, rayQuery, index_1d, output_index, dir_in, depth);
+		if (gSamplingFlags & SAMPLE_FLAG_CONNECT_TO_VIEWS)
+			connect_light_path_to_view(material, rayQuery, index_1d, dir_in, depth);
+	} else if (gSampleEmissive || gSampleEnvironment) {
+		path_direct_light(material, rayQuery, index_1d, output_index, dir_in, depth);
+
+		if ((gSamplingFlags & SAMPLE_FLAG_SAMPLE_LIGHT_PATHS) && (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY) == 0)
+			connect_to_light_paths(material, rayQuery, index_1d, output_index, dir_in, depth);
 	}
 
 	// sample material & apply contribution
@@ -480,8 +483,9 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	#define CASE_FN(Material) \
 	case e##Material: {\
 		const Material material = load_material<Material>(material_address+4, gPathState.vertex.shading_data); \
-		gRadiance[index.xy] += float4(gPathState.vertex.beta * eval_material_emission(material, -gPathState.dir_out, gPathState.vertex.shading_data).f, 1); \
-		gAlbedo  [index.xy]  = float4(gPathState.vertex.beta *   eval_material_albedo(material, gPathState.vertex.shading_data), 1); \
+		if (gPushConstants.gMaxEyeDepth > 1) \
+			gRadiance[index.xy] += float4(gPathState.vertex.beta * eval_material_emission(material, -gPathState.dir_out, gPathState.vertex.shading_data).f, 1); \
+		gAlbedo[index.xy]  = float4(gPathState.vertex.beta * eval_material_albedo(material, gPathState.vertex.shading_data), 1); \
 		has_bsdf = material_has_bsdf<Material>(); \
 		if (gSampleReservoirs && (gSampleEnvironment || gSampleEmissive) && has_bsdf) \
 			reservoir_ris(material, index_1d); \
@@ -579,6 +583,8 @@ void sample_photons(uint3 index : SV_DispatchThreadID) {
 	gPathState.vertex.pdf_fwd = ls.pdfA;
 	gPathState.vertex.pdf_rev = 0;
 	
+	gPathVertices[index_1d] = gPathState.vertex;
+	
 	// compute dir_out
 	if (ls.instance_index() == INVALID_INSTANCE) {
 		// environment sample
@@ -633,9 +639,9 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 	for (depth = 1; depth < max_depth-1; ) {
 		if (all(gPathState.vertex.beta <= 1e-6)) break;
 		
-		// store path vertices for use during light tracing
-		if (gStorePathVertices) {
-			// convert pdf_fwd (from previous vertex) to area measure
+		// store light path vertices
+		if (gTraceLightPaths) {
+			// convert pdf_fwd (computed at previous vertex) to area measure
 			if (gPathState.vertex.instance_index() != INVALID_INSTANCE) {
 				const float3 dir_in = gPathState.prev_vertex_position - gPathState.vertex.shading_data.position;
 				const float dist2 = dot(dir_in, dir_in);
@@ -645,21 +651,21 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 				gPathState.vertex.pdf_fwd = pdfWtoA(gPathState.vertex.pdf_fwd, G);
 			}
 			gPathState.vertex.pdf_rev = 0; // pdf_rev is assigned next iteration
-			gPathVertices[w*h*(depth-1) + index_1d] = gPathState.vertex;
+			gPathVertices[w*h*depth + index_1d] = gPathState.vertex;
 		}
 		
 		path_bounce(rayQuery, index_1d, index.xy, depth);
-		if (gPathState.dir_out_pdfW <= 0) break;
+		if (gPathState.dir_out_pdfW <= 0) { depth++; break; }
 		
 		// compute reverse probability at previous vertex
-		if (gStorePathVertices && depth > 1) {
+		if (gTraceLightPaths) {
 			if (gPathState.vertex.instance_index() != INVALID_INSTANCE) {
 				const float3 dir = gPathState.vertex.shading_data.position - gPathState.prev_vertex_position;
 				const float dist2 = dot(dir, dir);
 				float G = 1 / dist2;
 				if (gPathState.vertex.shading_data.shape_area != 0)
 					G *= abs(dot(dir/sqrt(dist2), gPathState.prev_vertex_geometry_normal()));
-				gPathVertices[w*h*(depth-2) + index_1d].pdf_rev = pdfWtoA(gPathState.vertex.pdf_rev, G);
+				gPathVertices[w*h*(depth-1) + index_1d].pdf_rev = pdfWtoA(gPathState.vertex.pdf_rev, G);
 			}
 		}
 
@@ -688,7 +694,7 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 		}
 
 		// add emission to pixel
-		if (!gTraceLightPaths && any(L > 0) && (gSamplingFlags & SAMPLE_FLAG_LIGHT_PATHS_ONLY) == 0) {
+		if (!gTraceLightPaths && any(L > 0) && (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY) == 0) {
 			float w = 1;
 			const uint instance_index = gPathState.vertex.instance_index();
 			if ((gSampleEnvironment && instance_index == INVALID_INSTANCE) || (gSampleEmissive && instance_index != INVALID_INSTANCE)) {
@@ -700,8 +706,6 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 					if (pdfA > 0)
 						w = mis_heuristic(pdfWtoA(gPathState.dir_out_pdfW, G) * transmit_dir_pdf, pdfA * transmit_nee_pdf);
 				}
-				if (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY)
-					w = 0;
 			}
 			gRadiance[index.xy].rgb += gPathState.vertex.beta * L * w;
 		}
@@ -717,8 +721,8 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 				gPathState.vertex.beta /= l;
 		}
 	}
-	if (gStorePathVertices) 
-		gPathVertices[w*h*(depth-1) + index_1d].beta = 0;
+	if (gTraceLightPaths) 
+		gPathVertices[w*h*depth + index_1d].beta = 0;
 }
 
 [numthreads(8,8,1)]
@@ -726,21 +730,24 @@ void resolve(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;
 	gRadiance.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
+
 	float4 radiance = gRadiance[index.xy];
-	if (radiance.w > 0)
-		radiance /= radiance.w;
+	if (radiance.w > 0) radiance /= radiance.w;
+
 	if (gPushConstants.gMaxLightDepth > 1) {
-		// average light trace contribtion
 		float4 light_trace_contrib = gFilterImages[0][index.xy];
+		if (light_trace_contrib.w > 0) {
+			light_trace_contrib /= light_trace_contrib.w;
+			gFilterImages[0][index.xy] = light_trace_contrib;
+		}
 		if (all(light_trace_contrib == light_trace_contrib)) {
-			if (light_trace_contrib.w > 0)
-				light_trace_contrib /= light_trace_contrib.w;
-			if (any(radiance.rgb > 0))
-				radiance.rgb = (light_trace_contrib.rgb + radiance.rgb) / 2;
+			if (radiance.w > 0)
+				radiance = (light_trace_contrib + radiance) / 2;
 			else
-				radiance.rgb += light_trace_contrib.rgb;
+				radiance = light_trace_contrib;
 		}
 	}
+
 	if (gSamplingFlags & SAMPLE_FLAG_DEMODULATE_ALBEDO) {
 		const float3 albedo = gAlbedo[index.xy].rgb;
 		if (albedo.r > 0) radiance.r /= albedo.r;

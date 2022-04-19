@@ -40,8 +40,16 @@ struct RoughPlastic {
 template<> inline RoughPlastic load_material(uint address, const ShadingData shading_data) {
     RoughPlastic material;
     material.diffuse_reflectance = sample_image(load_image_value3(address), shading_data);
-    material.specular_reflectance = sample_image(load_image_value3(address), shading_data);
-    material.roughness = sample_image(load_image_value1(address), shading_data);
+
+    const ImageValue3 specular = load_image_value3(address);
+    const ImageValue1 roughness = load_image_value1(address);
+    const float4 s = sample_image(specular.image(), shading_data.uv, shading_data.uv_screen_size);
+    material.specular_reflectance = specular.value * s.rgb;
+    if (roughness.image_index() == specular.image_index)
+        material.roughness = s[roughness.channel()];
+    else
+        material.roughness = sample_image(roughness, shading_data);
+
     material.eta = gMaterialData.Load<float>(address); address += 4;
     return material;
 }

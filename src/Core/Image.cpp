@@ -9,8 +9,8 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-#define TINYEXR_USE_MINIZ 0
-#include <miniz/miniz.h>
+#define TINYEXR_USE_MINIZ 1
+#include <miniz.h>
 #define TINYEXR_IMPLEMENTATION
 #include <extern/tiny_exr.h>
 
@@ -78,7 +78,7 @@ ImageData load_image_data(Device& device, const fs::path& filename, bool srgb, i
 		using namespace tinyddsloader;
 		DDSFile dds;
     	auto ret = dds.Load(filename.string().c_str());
-		if (tinyddsloader::Result::Success != ret) throw runtime_error("Failed to load " + filename.string());
+		if (tinyddsloader::Result::tinydds_Success != ret) throw runtime_error("Failed to load " + filename.string());
 		dds.GetBitsPerPixel(dds.GetFormat());
 
 		dds.Flip();

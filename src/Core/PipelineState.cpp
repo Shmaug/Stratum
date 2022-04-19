@@ -197,8 +197,7 @@ shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline(const vk::ArrayPr
 	size_t key = 0;
 	{
 		ProfilerRegion ps("hash_args");
-		key = hash_args(shader);
-		for (const auto& l : descriptorSetLayouts) key = hash_args(key, l);
+		key = hash_args(shader, descriptorSetLayouts);
 	}
 	
 	auto pipeline = find_pipeline(key);

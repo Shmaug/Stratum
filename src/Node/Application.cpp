@@ -18,10 +18,14 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
       const MouseKeyboardState& input = window.input_state();
       auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();
       float fwd = (mainCamera->mProjection.near_plane < 0) ? -1 : 1;
+      static float speed = 1;
       if (!ImGui::GetIO().WantCaptureMouse) {
+        static float2 euler = float2::Zero();
         if (input.pressed(KeyCode::eMouse2)) {
+          if (input.scroll_delta() != 0)
+            speed *= (1 + input.scroll_delta()/8);
+
           static const float gMouseSensitivity = 0.002f;
-          static float2 euler = float2::Zero();
           euler.y() += input.cursor_delta().x()*fwd * gMouseSensitivity;
           euler.x() = clamp(euler.x() + input.cursor_delta().y() * gMouseSensitivity, -numbers::pi_v<float>/2, numbers::pi_v<float>/2);
           quatf r = angle_axis(euler.x(), float3(fwd,0,0));
@@ -41,9 +45,7 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
         if (input.pressed(KeyCode::eKeyS)) mv += float3(0,0,-fwd);
         if (input.pressed(KeyCode::eKeySpace)) mv += float3(0,1,0);
         if (input.pressed(KeyCode::eKeyControl)) mv += float3(0,-1,0);
-        if (input.pressed(KeyCode::eKeyShift)) mv *= 3;
-        if (input.pressed(KeyCode::eKeyAlt)) mv /= 2;
-        *cameraTransform = tmul(*cameraTransform, make_transform(mv*deltaTime, quatf_identity(), float3::Ones()));
+        *cameraTransform = tmul(*cameraTransform, make_transform(mv*speed*deltaTime, quatf_identity(), float3::Ones()));
       }
       
       mainCamera->mImageRect = vk::Rect2D { { 0, 0 }, window.swapchain_extent() };
@@ -58,18 +60,8 @@ Application::Application(Node& node, Window& window) : mNode(node), mWindow(wind
 }
 
 void Application::load_shaders() {
-  #pragma region load shaders
-  #ifdef _WIN32
-  wchar_t exepath[MAX_PATH];
-  GetModuleFileNameW(NULL, exepath, MAX_PATH);
-  #else
-  char exepath[PATH_MAX];
-  if (readlink("/proc/self/exe", exepath, PATH_MAX) == 0)
-    ranges::uninitialized_fill(exepath, 0);
-  #endif
   mNode.erase_component<ShaderDatabase>();
-  ShaderModule::load_from_dir(*mNode.make_component<ShaderDatabase>(), mWindow.mInstance.device(), fs::path(exepath).parent_path()/"Shaders");
-  #pragma endregion
+  ShaderModule::load_from_dir(*mNode.make_component<ShaderDatabase>(), mWindow.mInstance.device(), fs::current_path()/"Shaders");
 }
 
 void Application::run() {

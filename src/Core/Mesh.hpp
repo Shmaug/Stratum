@@ -119,7 +119,13 @@ struct hash<stm::VertexArrayObject::AttributeDescription> {
 template<>
 struct hash<stm::VertexLayoutDescription> {
 	inline size_t operator()(const stm::VertexLayoutDescription& v) const {
-		return stm::hash_args(v.mAttributes, v.mTopology, v.mIndexType);
+		size_t h = 0;
+		for (const auto[type, attribs] : v.mAttributes) {
+			h = stm::hash_args(h, type);
+			for (const auto&[a,i] : attribs)
+				h = stm::hash_args(h, a, i);
+		}
+		return stm::hash_args(h, v.mTopology, v.mIndexType);
 	}
 };
 

@@ -1,5 +1,10 @@
 #include "Window.hpp"
 
+#ifdef _WIN32
+#pragma comment(lib, "Shell32.lib")
+#include <shellapi.h>
+#endif
+
 using namespace stm;
 
 stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
@@ -25,6 +30,7 @@ stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position
 	if (!mHwnd) throw runtime_error("failed to create window");
 
 	ShowWindow(mHwnd, SW_SHOW);
+	DragAcceptFiles(mHwnd, TRUE);
 	
 	vk::Win32SurfaceCreateInfoKHR info = {};
 	info.hinstance = mInstance.hInstance();
@@ -341,7 +347,19 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		mInputState.cursor_pos() = Vector2f((float)pt.x, (float)pt.y);
 		break;
 	}
+	case WM_DROPFILES: {
+		HDROP hdrop = (HDROP)wParam;
+		const UINT file_count = DragQueryFileA(hdrop, 0xFFFFFFFF, NULL, 0);
+		char pathstr[MAX_PATH];
+		for (uint32_t i = 0; i < file_count; i++) {
+			if (DragQueryFileA(hdrop, i, pathstr, MAX_PATH))
+				mInputState.mInputFiles.emplace_back(pathstr);
+		}
+		DragFinish(hdrop);
+		break;
 	}
+	}
+
 }
 #endif
 
@@ -355,6 +373,7 @@ bool stm::Window::process_event(xcb_generic_event_t* event) {
 	xcb_client_message_event_t* cm = (xcb_client_message_event_t*)event;
 
 	KeyCode kc;
+	xcb_keysym_t xkc;
 
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
@@ -363,13 +382,21 @@ bool stm::Window::process_event(xcb_generic_event_t* event) {
 		break;
 
 	case XCB_KEY_PRESS:
-		kc = (KeyCode)xcb_key_press_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		xkc = xcb_key_press_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		if (kc == XK_Shift_R) 	xkc = XK_Shift_L;
+		if (kc == XK_Control_R) xkc = XK_Control_L;
+		if (kc == XK_Alt_R) 		xkc = XK_Alt_L;
+		kc = (KeyCode)xkc;
 		mInputState.set_button(kc);
-		if (kc == KeyCode::eKeyEnter && (mInputState.pressed(KeyCode::eKeyLAlt) || mInputState.pressed(KeyCode::eKeyRAlt)))
+		if (kc == KeyCode::eKeyEnter && mInputState.pressed(KeyCode::eKeyAlt))
 			fullscreen(!fullscreen());
 		break;
 	case XCB_KEY_RELEASE:
-		kc = (KeyCode)xcb_key_release_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		xkc = xcb_key_release_lookup_keysym(mInstance.xcb_key_symbols(), kp, 0);
+		if (kc == XK_Shift_R) 	xkc = XK_Shift_L;
+		if (kc == XK_Control_R) xkc = XK_Control_L;
+		if (kc == XK_Alt_R) 		xkc = XK_Alt_L;
+		kc = (KeyCode)xkc;
 		mInputState.unset_button(kc);
 		break;
 

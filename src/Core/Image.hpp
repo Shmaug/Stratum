@@ -2,16 +2,6 @@
 
 #include "Buffer.hpp"
 
-namespace std {
-	
-template<>
-struct hash<pair<vk::ImageSubresourceRange, vk::ComponentMapping>> {
-	inline size_t operator()(const pair<vk::ImageSubresourceRange, vk::ComponentMapping>& v) const {
-		return stm::hash_args(v.first, v.second);
-	}
-};
-
-}
 namespace stm {
 
 class Sampler : public DeviceResource {

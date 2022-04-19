@@ -1,7 +1,7 @@
 #include "Gui.hpp"
 #include "Application.hpp"
 
-#include <imgui_internal.h>
+#include <imgui/imgui_internal.h>
 #include <stb_image_write.h>
 
 #include <Core/Window.hpp>
@@ -334,7 +334,7 @@ Gui::Gui(Node& node) : mNode(node) {
 	auto app = mNode.find_in_ancestor<Application>();
 	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
 	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
-	app->OnRenderWindow.listen(mNode, [=](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, EventPriority::eLast);
+	app->OnRenderWindow.listen(mNode, [&,app](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, EventPriority::eLast);
 
 	mContext = ImGui::CreateContext();
 

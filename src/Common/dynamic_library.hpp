@@ -7,12 +7,10 @@ namespace stm {
 struct dynamic_library {
 private:
 #ifdef _WIN32
-  using handle_t = HMODULE;
+  HMODULE mHandle;
 #elif defined(__linux)
-  using handle_t = void*; 
+  void* mHandle;
 #endif
-
-  handle_t mHandle;
   unordered_map<string, void*> mFunctionPtrs;
 
 public:
@@ -25,12 +23,17 @@ public:
       throw runtime_error(msgBuf);
     }
 #elif defined(__linux)
-    mHandle = dlsym(filename.c_str(), RTLD_NOW);
+    mHandle = dlopen(filename.string().c_str(), RTLD_NOW);
+    if (mHandle == NULL)
+      throw runtime_error("Failed to load " + filename.string());
 #endif
   }
+
   inline ~dynamic_library() {
 #ifdef _WIN32
     FreeLibrary(mHandle);
+#elif defined(__linux)
+    dlclose(mHandle);
 #endif
   };
 
@@ -45,7 +48,12 @@ public:
 #endif
     }
     if (it->second == nullptr) throw invalid_argument("Could not find function " + name);
+    
+#ifdef _WIN32
     typedef return_t(__stdcall * fn_t)(Args...);
+#elif defined(__linux)
+    typedef return_t( * fn_t)(Args...);
+#endif
     fn_t fn = (fn_t)it->second;
     return std::invoke(fn, forward<Args>(args)...);
   }

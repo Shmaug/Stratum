@@ -216,15 +216,15 @@ Image::View alpha_to_roughness(Node& n, CommandBuffer& commandBuffer, const Imag
 	Image::View roughness = make_shared<Image>(commandBuffer.mDevice, "roughness", alpha.extent(), alpha.image()->format(), alpha.image()->layer_count(), alpha.image()->level_count(), alpha.image()->sample_count(), vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 
 	const ShaderDatabase& shaders = *n.node_graph().find_components<ShaderDatabase>().front();
-	auto p = make_shared<ComputePipelineState>("alpha_to_roughness", shaders.at("alpha_to_roughness"));
+	auto p = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", shaders.at("material_convert_alpha_to_roughness"));
 
 	p->descriptor("gInput")  = image_descriptor(alpha, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	p->descriptor("gOutput") = image_descriptor(roughness, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	p->descriptor("gRoughness") = image_descriptor(roughness, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 	commandBuffer.bind_pipeline(p->get_pipeline());
 	p->bind_descriptor_sets(commandBuffer);
 	p->push_constants(commandBuffer);
 	commandBuffer.dispatch_over(alpha.extent());
-
+	roughness.image()->generate_mip_maps(commandBuffer);
 	return roughness;
 }
 

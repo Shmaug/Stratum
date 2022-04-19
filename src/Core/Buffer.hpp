@@ -295,11 +295,13 @@ private:
 	vk::SharingMode mSharingMode;
 };
 
+}
+
+namespace std {
 template<typename T>
 struct hash<stm::Buffer::View<T>> {
 	inline size_t operator()(const stm::Buffer::View<T>& v) const {
 		return stm::hash_args(v.buffer().get(), v.offset(), v.size_bytes());
 	}
 };
-
 }

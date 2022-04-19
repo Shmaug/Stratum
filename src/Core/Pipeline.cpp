@@ -159,17 +159,17 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
 
   vk::SampleCountFlagBits sampleCount = vk::SampleCountFlagBits::e1;
   for (const auto& desc : renderPass.subpasses()[subpassIndex] | views::values) {
-    if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil)
-      sampleCount = desc.mDescription.samples;
-    if (blendStates.empty() && desc.mType == AttachmentType::eColor)
-      mBlendStates.emplace_back(desc.mBlendState);
+    if (get<AttachmentType>(desc) == AttachmentType::eColor || get<AttachmentType>(desc) == AttachmentType::eDepthStencil)
+      sampleCount = get<vk::AttachmentDescription>(desc).samples;
+    if (blendStates.empty() && get<AttachmentType>(desc) == AttachmentType::eColor)
+      mBlendStates.emplace_back(get<vk::PipelineColorBlendAttachmentState>(desc));
   }
   if (!blendStates.empty()) mBlendStates = blendStates;
 
   // attachments
   for (auto& [id, desc] : renderPass.subpasses()[subpassIndex])
-    if (desc.mType == AttachmentType::eColor || desc.mType == AttachmentType::eDepthStencil) {
-      mMultisampleState.rasterizationSamples = desc.mDescription.samples;
+    if (get<AttachmentType>(desc) == AttachmentType::eColor || get<AttachmentType>(desc) == AttachmentType::eDepthStencil) {
+      mMultisampleState.rasterizationSamples = get<vk::AttachmentDescription>(desc).samples;
       break;
     }
 

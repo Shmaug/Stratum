@@ -66,7 +66,7 @@ namespace std {
 
 template<> struct hash<stm::ShaderModule> {
 	inline size_t operator()(const stm::ShaderModule& v) const {
-		return stm::hash_args(*v);
+		return hash<vk::ShaderModule>()(*v);
 	}
 };
 

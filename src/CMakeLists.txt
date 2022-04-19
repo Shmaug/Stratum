@@ -5,30 +5,38 @@ include(CompileShader.cmake)
 set(CMAKE_CXX_STANDARD 20)
 set(CXX_STANDARD_REQUIRED TRUE)
 
-file(GLOB_RECURSE STRATUM_CPP "**.cpp")
-add_executable(Stratum "${STRATUM_CPP}" stratum.rc)
-set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Common/**.cpp")
+list(APPEND STRATUM_SOURCE ${TMP_SRC})
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Core/**.cpp")
+list(APPEND STRATUM_SOURCE ${TMP_SRC})
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Node/**.cpp")
+list(APPEND STRATUM_SOURCE ${TMP_SRC})
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/extern/miniz.c")
+list(APPEND STRATUM_SOURCE ${TMP_SRC})
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/extern/imgui/**.cpp")
+list(APPEND STRATUM_SOURCE ${TMP_SRC})
 
+add_executable(Stratum ${STRATUM_SOURCE} main.cpp stratum.rc)
+set_target_properties(Stratum PROPERTIES ENABLE_EXPORTS TRUE)
+set_target_properties(Stratum PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(Stratum PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern>"
     "$<INSTALL_INTERFACE:include>"
     "$<INSTALL_INTERFACE:include/extern>")
 
-target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan imgui::imgui)
-target_link_libraries(Stratum PRIVATE miniz::miniz pugixml pugixml::shared pugixml::pugixml)
-if (UNIX)
-    target_link_libraries(Stratum PUBLIC xcb xcb-keysyms)
-endif()
+target_compile_definitions(Stratum PRIVATE STRATUM_EXPORTS)
+target_compile_definitions(Stratum PUBLIC STRATUM_VERSION_MAJOR=1 STRATUM_VERSION_MINOR=5 _USE_MATH_DEFINES IMGUI_DEFINE_MATH_OPERATORS)
 
 option(STRATUM_ENABLE_DEBUG_LAYERS "Enable debug layers" TRUE)
 if (${STRATUM_ENABLE_DEBUG_LAYERS})
     target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_DEBUG_LAYERS)
 endif()
 
-target_compile_definitions(Stratum PRIVATE STRATUM_EXPORTS)
-target_compile_definitions(Stratum PUBLIC STRATUM_VERSION_MAJOR=1 STRATUM_VERSION_MINOR=5 _USE_MATH_DEFINES IMGUI_DEFINE_MATH_OPERATORS)
+target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan)
+target_link_libraries(Stratum PRIVATE pugixml)
 if (UNIX)
+    target_link_libraries(Stratum PUBLIC xcb xcb-keysyms)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_XCB_KHR)
 elseif(WIN32)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS NOMINMAX)

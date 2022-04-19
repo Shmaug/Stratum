@@ -127,8 +127,8 @@ void RayTraceScene::on_inspector_gui() {
 	const auto[rps, ext] = format_number(mRaysPerSecond);
 	ImGui::Text("%.2f%s Rays/second", rps, ext);
 	if (mCurFrame) {
-		ImGui::Text("%llu instances", mCurFrame->mInstances.size());
-		ImGui::Text("%llu lights", mCurFrame->mLightInstances.size());
+		ImGui::Text("%lu instances", mCurFrame->mInstances.size());
+		ImGui::Text("%lu lights", mCurFrame->mLightInstances.size());
 		ImGui::Text("%u materials", mCurFrame->mMaterialCount);
 	}
 
@@ -164,7 +164,6 @@ void RayTraceScene::on_inspector_gui() {
 			ImGui::PopItemWidth();
 			if (mPathTracePushConstants.gMaxLightDepth > 2){
 				ImGui::CheckboxFlags("Connect light paths to views", &mRandomWalkPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_CONNECT_TO_VIEWS);
-				ImGui::CheckboxFlags("Light path contribution only", &mRandomWalkPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_LIGHT_PATHS_ONLY);
 			}
 			ImGui::CheckboxFlags("Reservoir Sampling", &mRandomWalkPipeline->specialization_constant("gSamplingFlags"), SAMPLE_FLAG_SAMPLE_RESERVOIRS);
 			if (mRandomWalkPipeline->specialization_constant("gSamplingFlags") & SAMPLE_FLAG_SAMPLE_RESERVOIRS) {
@@ -256,7 +255,7 @@ void RayTraceScene::on_inspector_gui() {
 
 	if (mPrevFrame) {
 		static char path[MAX_PATH] { 'i', 'm', 'a', 'g', 'e', '.', 'h', 'd', 'r', '\0' };
-		ImGui::InputText("Output HDR", path, MAX_PATH);
+		ImGui::InputText("Output HDR", path, sizeof(path));
 		ImGui::SameLine();
 		if (ImGui::Button("Save")) {
 			Device& d = mPrevFrame->mRadiance.image()->mDevice;
@@ -618,6 +617,12 @@ void RayTraceScene::update_scene(CommandBuffer& commandBuffer, const float delta
 void RayTraceScene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	ProfilerRegion ps("RayTraceScene::update", commandBuffer);
 
+	for (const string& file : commandBuffer.mDevice.mInstance.window().input_state().files()) {
+		const fs::path filepath = file;
+		const string name = filepath.filename().string();
+		load_scene(mNode.make_child(name), commandBuffer, filepath);
+	}
+
 	{
 		ProfilerRegion ps("Allocate Frame Resources", commandBuffer);
 		if (mCurFrame) {
@@ -763,11 +768,11 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		sampling_flags |= SAMPLE_FLAG_ENABLE_VOLUMES;
 	else
 		sampling_flags &= ~SAMPLE_FLAG_ENABLE_VOLUMES;
-	if (mPathTracePushConstants.gMaxLightDepth > 1)
-		sampling_flags |= SAMPLE_FLAG_STORE_PATH_VERTICES;
+	if (push_constants.gMaxLightDepth > 2)
+		sampling_flags |= SAMPLE_FLAG_SAMPLE_LIGHT_PATHS;
 	else
-		sampling_flags &= ~SAMPLE_FLAG_STORE_PATH_VERTICES;
-	mSamplePhotonsPipeline->specialization_constant("gSamplingFlags") = (sampling_flags & ~SAMPLE_FLAG_STORE_PATH_VERTICES) | SAMPLE_FLAG_TRACE_LIGHT_PATHS | SAMPLE_FLAG_UNIFORM_SPHERE_SAMPLING;
+		sampling_flags &= ~SAMPLE_FLAG_SAMPLE_LIGHT_PATHS;
+	mSamplePhotonsPipeline->specialization_constant("gSamplingFlags") = sampling_flags | SAMPLE_FLAG_TRACE_LIGHT_PATHS | SAMPLE_FLAG_UNIFORM_SPHERE_SAMPLING;
 	mSampleVisibilityPipeline->specialization_constant("gSamplingFlags") = sampling_flags;
 	mRandomWalkPipeline->specialization_constant("gSamplingFlags") = sampling_flags;
 	mResolvePipeline->specialization_constant("gSamplingFlags") = sampling_flags;
@@ -812,49 +817,12 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	};
 
 	commandBuffer.clear_color_image(mCurFrame->mRadiance, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
+	commandBuffer.clear_color_image(mCurFrame->mGradientSamples, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
+	commandBuffer.clear_color_image(mCurFrame->mTemp[0], vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
+	
 	mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 
-	{ // Visibility
-		ProfilerRegion ps("Sample visibility", commandBuffer);
-		if (mPathTracePushConstants.gMaxLightDepth > 1)
-			mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		commandBuffer.barrier({ mCurFrame->mPathStates }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		mCurFrame->mPathTraceDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
-		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
-		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
-		bind_descriptors_and_push_constants();
-		commandBuffer.dispatch_over(extent);
-	}
-
-	commandBuffer.clear_color_image(mCurFrame->mGradientSamples, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
-
-	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {	
-		// forward project
-		ProfilerRegion ps("Forward projection", commandBuffer);
-		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
-		mGradientForwardProjectPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
-		if (mRandomPerFrame) mGradientForwardProjectPipeline->push_constant<uint32_t>("gFrameNumber") = mCurFrame->mFrameNumber;
-		commandBuffer.bind_pipeline(mGradientForwardProjectPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
-		commandBuffer.bind_descriptor_set(0, mCurFrame->mPathTraceDescriptorSet);
-		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
-		mGradientForwardProjectPipeline->push_constants(commandBuffer);
-		commandBuffer.dispatch_over(gradExtent);
-	}
-	
-	if (mPathTracePushConstants.gMaxEyeDepth > 1) { // Eye paths
-		ProfilerRegion ps("Trace eye paths", commandBuffer);
-		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		if (sampling_flags & SAMPLE_FLAG_SAMPLE_RESERVOIRS)
-			commandBuffer.barrier({ mCurFrame->mReservoirs }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		commandBuffer.bind_pipeline(mRandomWalkPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
-		bind_descriptors_and_push_constants();
-		commandBuffer.dispatch_over(extent);
-	}
-
 	if (mPathTracePushConstants.gMaxLightDepth > 1) { // Light paths
-		commandBuffer.clear_color_image(mCurFrame->mTemp[0], vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
 		{
 			ProfilerRegion ps("Sample photons", commandBuffer);
 			commandBuffer.barrier({ mCurFrame->mPathStates }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
@@ -874,17 +842,57 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		}
 	}
 
+	{ // Visibility
+		ProfilerRegion ps("Sample visibility", commandBuffer);
+		commandBuffer.barrier({ mCurFrame->mPathStates }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mCurFrame->mPathTraceDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
+		bind_descriptors_and_push_constants();
+		commandBuffer.dispatch_over(extent);
+	}
+
+	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {	
+		// forward project
+		ProfilerRegion ps("Forward projection", commandBuffer);
+		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+		mGradientForwardProjectPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
+		if (mRandomPerFrame) mGradientForwardProjectPipeline->push_constant<uint32_t>("gFrameNumber") = mCurFrame->mFrameNumber;
+		commandBuffer.bind_pipeline(mGradientForwardProjectPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
+		commandBuffer.bind_descriptor_set(0, mCurFrame->mPathTraceDescriptorSet);
+		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
+		mGradientForwardProjectPipeline->push_constants(commandBuffer);
+		commandBuffer.dispatch_over(gradExtent);
+	}
+
+	if (mPathTracePushConstants.gMaxEyeDepth > 1) { // Eye paths
+		ProfilerRegion ps("Trace eye paths", commandBuffer);
+		mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		if (sampling_flags & SAMPLE_FLAG_SAMPLE_RESERVOIRS)
+			commandBuffer.barrier({ mCurFrame->mReservoirs }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		commandBuffer.bind_pipeline(mRandomWalkPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
+		bind_descriptors_and_push_constants();
+		commandBuffer.dispatch_over(extent);
+	}
+
 	{
 		ProfilerRegion ps("Resolve Samples", commandBuffer);
 		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		if (mPathTracePushConstants.gMaxLightDepth > 1)
-			mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
-		if (sampling_flags & SAMPLE_FLAG_DEMODULATE_ALBEDO)
-			mCurFrame->mAlbedo.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
+		mCurFrame->mAlbedo.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 		commandBuffer.bind_pipeline(mResolvePipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
 		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
 		mResolvePipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(extent);
+	}
+
+	if (mTonemapPipeline->specialization_constant("gDebugMode") == DebugMode::eLightPathContributions) {
+		commandBuffer.copy_image(mCurFrame->mTemp[0], mCurFrame->mRadiance);
+		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 	}
 
 	Image::View tonemap_in = mCurFrame->mRadiance;

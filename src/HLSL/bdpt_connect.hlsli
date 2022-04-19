@@ -28,7 +28,7 @@ void connect_light_path_to_view(const Material material, inout ray_query_t rayQu
         const float lens_radius = 0;
         const float lens_area = lens_radius != 0 ? (M_PI * lens_radius * lens_radius) : 1;
         const float sensor_pdf = pow2(dist) / (sensor_cos_theta * lens_area);
-        const float sensor_importance = 1 / (gViews[i].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
+        const float sensor_importance = 1 / (gViews[i].projection.sensor_area * lens_area * pow3(sensor_cos_theta));
         C *= sensor_importance;// / sensor_pdf;
 
         const uint2 extent = gViews[i].image_max - gViews[i].image_min;
@@ -48,61 +48,57 @@ void connect_light_path_to_view(const Material material, inout ray_query_t rayQu
 }
 
 template<typename Material>
-void connect_light_paths(const Material material, inout ray_query_t rayQuery, const uint index_1d, const float3 dir_in, const uint light_depth) {
+void connect_to_light_paths(const Material material, inout ray_query_t rayQuery, const uint index_1d, const uint2 index_2d, const float3 dir_in, const uint eye_depth) {
     uint2 extent;
     gRadiance.GetDimensions(extent.x,extent.y);
 
-    //if (gSamplingFlags & SAMPLE_FLAG_CONNECT_TO_VIEWS)
-    //    connect_light_path_to_view(material, rayQuery, index_1d, dir_in, light_depth);
+    if (gPushConstants.gMaxLightDepth < 2) return;
 
-    if (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY) return;
-    if (gPushConstants.gMaxEyeDepth == 0) return;
+    float3 last_pos = gPathVertices[index_1d].shading_data.position;
+    for (uint light_depth = 1; light_depth < gPushConstants.gMaxLightDepth-1; light_depth++) {
+        const uint light_vertex_index = extent.x*extent.y*light_depth + index_1d;
+        if (all(gPathVertices[light_vertex_index].beta <= 0)) break;
 
-    const uint2 index_2d = uint2(index_1d%extent.x, index_1d/extent.x);
-	const uint view_index = get_view_index(index_2d, gViews, gPushConstants.gViewCount);
+        const uint material_address = instance_material_address(gPathVertices[light_vertex_index].instance_index());
+        if (material_address == INVALID_MATERIAL) break;
 
-    for (uint view_depth = 1; view_depth < gPushConstants.gMaxEyeDepth-1; view_depth++) {
-        if (all(gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].beta <= 0)) break;
+        const float3 light_vertex_pos = gPathVertices[light_vertex_index].shading_data.position;
+        float3 dir_out = light_vertex_pos - gPathState.vertex.shading_data.position;
+        const float dist = length(dir_out);
+        dir_out /= dist;
 
-        float3 light_to_view = gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].shading_data.position - gPathState.vertex.shading_data.position;
-        const float dist = length(light_to_view);
-        light_to_view /= dist;
+        const float3 light_dir_in = normalize(last_pos - light_vertex_pos);
+        last_pos = light_vertex_pos;
 
-        const MaterialEvalRecord light_f = eval_material(material, dir_in, light_to_view, gPathState.vertex.shading_data, true);
-        float3 C = gPathState.vertex.beta * light_f.f;
+        float dir_pdf = 1;
+        float nee_pdf = 1;
+        float3 C = 1;
+        path_eval_transmittance(rayQuery, index_1d, dir_out, dist, C, dir_pdf, nee_pdf);
+        C /= nee_pdf;
+        
+        // light_vertex not mutually visible
+        if (all(C <= 0)) continue;
 
         C /= pow2(dist); // geometry term; both cosine terms handled inside eval_material (from light and view)
         
-        float dir_pdf = 1;
-        float nee_pdf = 1;
-        path_eval_transmittance(rayQuery, index_1d, light_to_view, dist, C, dir_pdf, nee_pdf);
-        C /= nee_pdf;
-        
-        if (all(C <= 0)) break;
+        // reflect off current vertex
+        const MaterialEvalRecord f = eval_material(material, dir_in, dir_out, gPathState.vertex.shading_data, false);
+        C *= gPathState.vertex.beta * f.f;
 
-        float3 view_dir_in;
-        if (view_depth == 1)
-            view_dir_in = normalize(gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].shading_data.position - gViews[view_index].camera_to_world.transform_point(0));
-        else
-            view_dir_in = normalize(gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].shading_data.position - gPathVertices[extent.x*extent.y*(view_depth-2) + index_1d].shading_data.position);
-
-        const uint material_address = instance_material_address(gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].instance_index());
-        if (material_address == INVALID_MATERIAL) break;
-
-        // compute view_f
-        MaterialEvalRecord view_f;
+        // reflect off stored vertex
+        MaterialEvalRecord light_f;
 		const uint type = gMaterialData.Load(material_address);
 		switch (type) {
-		#define CASE_FN(ViewMaterial) case e##ViewMaterial: {\
-            const ViewMaterial m = load_material<ViewMaterial>(material_address + 4, gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].shading_data); \
-            view_f = eval_material(material, view_dir_in, -light_to_view, gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].shading_data, false); \
+		#define CASE_FN(T) case e##T: {\
+            const T m = load_material<T>(material_address + 4, gPathVertices[light_vertex_index].shading_data); \
+            light_f = eval_material(material, light_dir_in, -dir_out, gPathVertices[light_vertex_index].shading_data, true); \
             break; }
 		FOR_EACH_BSDF_TYPE(CASE_FN);
 		#undef CASE_FN
         }
-        
-        C *= view_f.f * gPathVertices[extent.x*extent.y*(view_depth-1) + index_1d].beta;
-        gRadiance[index_2d] += float4(C, 1);
+        C *= light_f.f * gPathVertices[light_vertex_index].beta;
+
+        gFilterImages[0][index_2d] += float4(C, 1);
     }
 }
 

@@ -48,12 +48,7 @@ enum AttachmentType {
 
 class RenderPass : public DeviceResource {
 public:
-	struct AttachmentInfo {
-		AttachmentType mType;
-		vk::PipelineColorBlendAttachmentState mBlendState;
-		vk::AttachmentDescription mDescription;
-	};
-	using SubpassDescription = unordered_map<RenderAttachmentId, AttachmentInfo>;
+	using SubpassDescription = unordered_map<RenderAttachmentId, tuple<AttachmentType, vk::PipelineColorBlendAttachmentState, vk::AttachmentDescription>>;
 
 	template<range_of<SubpassDescription> R>
 	inline RenderPass(Device& device, const string& name, const R& subpassDescriptions)
@@ -69,15 +64,16 @@ public:
 		vector<vk::AttachmentDescription> attachments;
 
 		mHash = 0;
+		
 		for (uint32_t i = 0; i < mSubpassDescriptions.size(); i++) {
 			auto&[inputAttachments, colorAttachments, resolveAttachments, preserveAttachments, depthAttachment] = subpassData[i];
 
-			mHash = hash_combine(mHash, hash_args(mSubpassDescriptions[i]));
+			mHash = hash_args(mHash, mSubpassDescriptions[i]);
 
 			bool hasDepth = false;
 			for (const auto& [attachmentName,attachment] : mSubpassDescriptions[i]) {
 				uint32_t attachmentIndex;
-				const auto& vkdesc = attachment.mDescription;
+				const auto& vkdesc = get<vk::AttachmentDescription>(attachment);
 				if (auto it = mAttachmentMap.find(attachmentName); it != mAttachmentMap.end()) {
 					attachmentIndex = it->second;
 					// follow final state of attachment through whole renderpass
@@ -91,7 +87,7 @@ public:
 					mAttachmentDescriptions.emplace_back(make_pair(vkdesc, attachmentName));
 					attachments.emplace_back(vkdesc);
 				}
-				switch (attachment.mType) {
+				switch (get<AttachmentType>(attachment)) {
 					case AttachmentType::eColor:
 						colorAttachments.emplace_back(attachmentIndex, vkdesc.initialLayout);
 						break;
@@ -115,17 +111,19 @@ public:
 				for (int32_t srcSubpass = int32_t(i) - 1; srcSubpass >= 0; srcSubpass--) {
 					if (mSubpassDescriptions[srcSubpass].count(attachmentName)) {
 						const auto& srcAttachment = mSubpassDescriptions[srcSubpass].at(attachmentName);
-						if (srcAttachment.mType == AttachmentType::eColor || srcAttachment.mType == AttachmentType::eDepthStencil || srcAttachment.mType == AttachmentType::eResolve) {
+						if (get<AttachmentType>(srcAttachment) == AttachmentType::eColor ||
+							get<AttachmentType>(srcAttachment) == AttachmentType::eDepthStencil ||
+							get<AttachmentType>(srcAttachment) == AttachmentType::eResolve) {
 							vk::SubpassDependency* dep; 
 							if (auto it = tmpdeps.find(srcSubpass); it == tmpdeps.end()) {
 								dep = &tmpdeps.emplace(srcSubpass, vk::SubpassDependency(srcSubpass, i)).first->second;
 								dep->dependencyFlags =  vk::DependencyFlagBits::eByRegion;
 							} else
 								dep = &tmpdeps[srcSubpass];
-							dep->srcStageMask  |= guess_stage(srcAttachment.mDescription.initialLayout);
-							dep->srcAccessMask |= guess_access_flags(srcAttachment.mDescription.initialLayout);
-							dep->dstStageMask  |= guess_stage(attachment.mDescription.initialLayout);
-							dep->dstAccessMask |= guess_access_flags(attachment.mDescription.initialLayout);
+							dep->srcStageMask  |= guess_stage(get<vk::AttachmentDescription>(srcAttachment).initialLayout);
+							dep->srcAccessMask |= guess_access_flags(get<vk::AttachmentDescription>(srcAttachment).initialLayout);
+							dep->dstStageMask  |= guess_stage(get<vk::AttachmentDescription>(attachment).initialLayout);
+							dep->dstAccessMask |= guess_access_flags(get<vk::AttachmentDescription>(attachment).initialLayout);
 						}
 					}
 				}

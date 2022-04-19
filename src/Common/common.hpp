@@ -30,7 +30,6 @@ template<typename T> constexpr bool is_dynamic_span_v<span<T,dynamic_extent>> = 
 
 template<typename R> concept fixed_sized_range = is_specialization_v<R, std::array> || (is_specialization_v<R, span> && !is_dynamic_span_v<R>);
 template<typename R> concept resizable_range = ranges::sized_range<R> && !fixed_sized_range<R> && requires(R r, size_t n) { r.resize(n); };
-
 template<typename R> concept associative_range = ranges::range<R> &&
 	requires { typename R::key_type; typename R::value_type; } &&
 	requires(R r, ranges::range_value_t<R> v) { { r.emplace(v) } -> is_pair; };
@@ -52,14 +51,6 @@ template<integral T> constexpr T align_up_mask(T value, size_t mask) { return (T
 template<integral T> constexpr T align_down_mask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
 template<integral T> constexpr T align_up(T value, size_t alignment) { return align_up_mask(value, alignment - 1); }
 template<integral T> constexpr T align_down(T value, size_t alignment) { return align_down_mask(value, alignment - 1); }
-
-template<typename T>
-inline T signed_distance(const Hyperplane<T,3>& plane, const AlignedBox<T,3>& box) {
-	auto normal = plane.normal();
-	Hyperplane<T,3> dilatatedPlane(normal, plane.offset() - abs(box.sizes().dot(normal)));
-	auto n = lerp(box.max(), box.min(), max(normal.sign(), Matrix<T,3>::Zero()));
-	return dilatatedPlane.signedDistance(n);
-}
 #pragma endregion
 
 constexpr unsigned long long operator"" _kB(unsigned long long x) { return x*1024; }

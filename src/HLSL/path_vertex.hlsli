@@ -84,7 +84,6 @@ struct PathState {
 	RayDifferential ray_differential;
 	float eta_scale;
 	uint radiance_mutex;
-	PathVertex vertex;
 #ifdef __HLSL_VERSION
 	inline float3 prev_vertex_geometry_normal() { return unpack_normal_octahedron(prev_vertex_packed_geometry_normal); }
 #endif

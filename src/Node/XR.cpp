@@ -1,3 +1,5 @@
+#ifdef STRATUM_ENABLE_OPENXR
+
 #include "XR.hpp"
 #include "Inspector.hpp"
 
@@ -374,3 +376,5 @@ void XR::present() {
 	frameEndInfo.layers = compositionLayers.data();
 	mSession.endFrame(frameEndInfo);
 }
+
+#endif

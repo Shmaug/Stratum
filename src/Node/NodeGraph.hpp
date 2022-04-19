@@ -16,44 +16,6 @@ enum EventPriority : uint32_t {
 	eLast        = 0xFFFFFFFF
 };
 
-template<typename... Args>
-class NodeEvent {
-public:
-	using function_t = function<void(Args...)>;
-
-	NodeEvent() = default;
-	NodeEvent(NodeEvent&&) = default;
-	NodeEvent& operator=(NodeEvent&&) = default;
-	
-	NodeEvent(const NodeEvent&) = delete;
-	NodeEvent& operator=(const NodeEvent&) = delete;
-
-	inline void clear() { mListeners.clear(); }
-	inline bool empty() const { return mListeners.empty(); }
-	inline size_t count(const Node& node) const { return mListeners.count(&node); }
-	
-	void listen(const Node& node, function_t&& fn, uint32_t priority = EventPriority::eDefault);
-	inline void erase(const Node& node) {
-		for (auto it = mListeners.begin(); it != mListeners.end();)
-			if (get<const Node*>(*it) == &node)
-				it = mListeners.erase(it);
-			else
-				++it;
-	}
-
-	inline void operator()(Args... args) const {
-		vector<tuple<const Node*, function_t, uint32_t>> tmp(mListeners.size());
-		ranges::copy(mListeners, tmp.begin());
-		for (const auto&[n, fn, p] : tmp)
-			if (mNodeGraph->contains(n))
-				invoke(fn, forward<Args>(args)...);
-	}
-
-private:
-	const NodeGraph* mNodeGraph = nullptr;
-	vector<tuple<const Node*, function_t, uint32_t>> mListeners;
-};
-
 template<typename T>
 class component_ptr {
 public:
@@ -159,6 +121,44 @@ private:
 	unordered_map<const Node*, unique_ptr<Node>> mNodes;
 	unordered_map<type_index, component_map> mComponentMap;
 	unordered_multimap<const Node*, Node*> mEdges;
+};
+
+template<typename... Args>
+class NodeEvent {
+public:
+	using function_t = function<void(Args...)>;
+
+	NodeEvent() = default;
+	NodeEvent(NodeEvent&&) = default;
+	NodeEvent& operator=(NodeEvent&&) = default;
+	
+	NodeEvent(const NodeEvent&) = delete;
+	NodeEvent& operator=(const NodeEvent&) = delete;
+
+	inline void clear() { mListeners.clear(); }
+	inline bool empty() const { return mListeners.empty(); }
+	inline size_t count(const Node& node) const { return mListeners.count(&node); }
+	
+	void listen(const Node& node, function_t&& fn, uint32_t priority = EventPriority::eDefault);
+	inline void erase(const Node& node) {
+		for (auto it = mListeners.begin(); it != mListeners.end();)
+			if (get<const Node*>(*it) == &node)
+				it = mListeners.erase(it);
+			else
+				++it;
+	}
+
+	inline void operator()(Args... args) const {
+		vector<tuple<const Node*, function_t, uint32_t>> tmp(mListeners.size());
+		ranges::copy(mListeners, tmp.begin());
+		for (const auto&[n, fn, p] : tmp)
+			if (mNodeGraph->contains(n))
+				invoke(fn, forward<Args>(args)...);
+	}
+
+private:
+	const NodeGraph* mNodeGraph = nullptr;
+	vector<tuple<const Node*, function_t, uint32_t>> mListeners;
 };
 
 class Node {

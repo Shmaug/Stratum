@@ -92,6 +92,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				r.diffuse_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
 				r.specular_reflectance.value = r.diffuse_reflectance.value * material.pbrMetallicRoughness.metallicFactor;
 				r.specular_reflectance.image = r.diffuse_reflectance.image;
+				r.diffuse_reflectance.value *= 1 - (float)material.pbrMetallicRoughness.metallicFactor;
 				r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
 				*m = r;
 			} else {
@@ -297,7 +298,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
 				Emissive emissive;
 				emissive.emission.image = {};
-				emissive.emission.value = (Array3d::Map(l.color.data()) * l.intensity).cast<float>();
+				emissive.emission.value = (Array3d::Map(l.color.data()) * l.intensity/(4*numbers::pi_v<float>*sphere->mRadius*sphere->mRadius)).cast<float>();
 				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(emissive);
 			}
 		}

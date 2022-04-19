@@ -89,7 +89,7 @@ void CommandBuffer::next_subpass(vk::SubpassContents contents) {
 	mSubpassIndex++;
 	for (uint32_t i = 0; i < mBoundFramebuffer->size(); i++) {
 		const string& attachmentName = mBoundFramebuffer->render_pass().attachments()[i].second;
-		auto layout = mBoundFramebuffer->render_pass().subpasses()[mSubpassIndex].at(attachmentName).mDescription.initialLayout;
+		auto layout = get<vk::AttachmentDescription>(mBoundFramebuffer->render_pass().subpasses()[mSubpassIndex].at(attachmentName)).initialLayout;
 		auto& attachment = (*mBoundFramebuffer)[i];
 		uint32_t aspectMask = (uint32_t)attachment.subresource_range().aspectMask;
 		while (aspectMask) {

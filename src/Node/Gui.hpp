@@ -3,7 +3,7 @@
 #include <Core/PipelineState.hpp>
 #include "NodeGraph.hpp"
 
-#include <imgui.h>
+#include <imgui/imgui.h>
 
 namespace stm {
 

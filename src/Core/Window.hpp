@@ -210,12 +210,9 @@ enum KeyCode {
 	eKeyF12 = XK_F12,
 	eKeyNumLock = XK_Num_Lock,
 	eKeyScrollLock = XK_Scroll_Lock,
-	eKeyLShift = XK_Shift_L,
-	eKeyRShift = XK_Shift_R,
-	eKeyLControl = XK_Control_L,
-	eKeyRControl = XK_Control_R,
-	eKeyLAlt = XK_Alt_L,
-	eKeyRAlt = XK_Alt_R,
+	eKeyShift = XK_Shift_L,
+	eKeyControl = XK_Control_L,
+	eKeyAlt = XK_Alt_L,
 
 	eKeySemicolon = XK_semicolon,
 	eKeyEqual = XK_equal,
@@ -232,6 +229,16 @@ enum KeyCode {
 };
 
 class MouseKeyboardState {
+public:
+	inline Array2f& cursor_pos() { return mCursorPos; }
+	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
+	inline const Array2f& cursor_pos() const { return mCursorPos; }
+	inline const Array2f& cursor_delta() const { return mCursorDelta; }
+	inline float scroll_delta() const { return mScrollDelta; }
+	inline const string& input_characters() const { return mInputCharacters; };
+	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
+	inline const vector<string>& files() const { return mInputFiles; }
+
 private:
 	friend class Instance;
 	friend class Window;
@@ -241,11 +248,13 @@ private:
 	float mScrollDelta;
 	unordered_set<KeyCode> mButtons;
 	string mInputCharacters;
+	vector<string> mInputFiles;
 	
 	inline void clear() {
 		mCursorDelta = Array2f::Zero();
 		mScrollDelta = 0;
 		mInputCharacters.clear();
+		mInputFiles.clear();
 	}
 	inline void add_cursor_delta(const Array2f& delta) { mCursorDelta += delta; }
 	inline void add_scroll_delta(float delta) { mScrollDelta += delta; }
@@ -253,14 +262,6 @@ private:
 	inline void set_button(KeyCode key) { mButtons.emplace(key); }
 	inline void unset_button(KeyCode key) { mButtons.erase(key); }
 
-public:
-	inline Array2f& cursor_pos() { return mCursorPos; }
-	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
-	inline const Array2f& cursor_pos() const { return mCursorPos; }
-	inline const Array2f& cursor_delta() const { return mCursorDelta; }
-	inline float scroll_delta() const { return mScrollDelta; }
-	inline const string& input_characters() const { return mInputCharacters; };
-	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
 };
 
 class Window {

@@ -71,9 +71,10 @@ struct ImageValue1 {
 	#ifdef __HLSL_VERSION
 	min16float value;
 	uint image_index_and_channel;
-	inline bool has_image() { return BF_GET(image_index_and_channel, 0, 30) < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_and_channel, 0, 30))]; }
+	inline uint image_index() { return BF_GET(image_index_and_channel, 0, 30); }
 	inline uint channel() { return BF_GET(image_index_and_channel, 30, 2); }
+	inline bool has_image() { return image_index() < gImageCount; }
+	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index())]; }
 	#endif
 	
 	#ifdef __cplusplus
