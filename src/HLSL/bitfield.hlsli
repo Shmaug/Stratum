@@ -14,7 +14,7 @@ bf   (bit field) is similar (it is in fact used as a bit mask) but it is used to
      range of neighboring bit by having them set ON.
 */
 /* shifts left the '1' over pos times to create a single HIGH bit at location pos. */
-#define BIT(pos) ( 1<<(pos) )
+#define BIT(pos) ( 1u << (pos) )
 
 /* Set single bit at pos to '1' by generating a mask
 in the proper bit location and ORing x with the mask. */

@@ -5,6 +5,7 @@
 #endif
 
 #include <nanovdb/NanoVDB.h>
+#include <nanovdb/util/GridBuilder.h>
 #include <nanovdb/util/IO.h>
 #ifdef STRATUM_ENABLE_OPENVDB
 #include <nanovdb/util/OpenToNanoVDB.h>

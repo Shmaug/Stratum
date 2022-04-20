@@ -28,7 +28,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
 #define PT_DESCRIPTOR_SET_1
-#include "../pt_descriptors.hlsli"
+#include "../../pt_descriptors.hlsli"
 #include "svgf_common.hlsli"
 
 [[vk::constant_id(0)]] const uint gGradientDownsample = 3u;

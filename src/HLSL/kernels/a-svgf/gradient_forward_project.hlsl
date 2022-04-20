@@ -31,7 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define PT_DESCRIPTOR_SET_0
 #define PT_DESCRIPTOR_SET_1
-#include "../pt_descriptors.hlsli"
+#include "../../pt_descriptors.hlsli"
 #include "svgf_common.hlsli"
 
 [[vk::push_constant]] const struct {
@@ -92,7 +92,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (res == 0) {
 		gPathStates[idx_curr_1d].rng_state = gPrevVisibility[idx_prev_1d].rng_state;
 		const uint instance_primitive_index = mapped_instance | (gPrevVisibility[idx_prev_1d].primitive_index()<<16);
-		make_shading_data(gPathStates[idx_curr_1d].vertex.shading_data, instance_primitive_index, gInstances[mapped_instance].inv_transform.transform_point(position_curr));
+		make_shading_data(gPathStateShadingData[idx_curr_1d], instance_primitive_index, gInstances[mapped_instance].inv_transform.transform_point(position_curr));
 
 		gVisibility[idx_curr_1d].rng_state = gPrevVisibility[idx_prev_1d].rng_state;
 		gVisibility[idx_curr_1d].position = position_curr;

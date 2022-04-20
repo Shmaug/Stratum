@@ -30,7 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::constant_id(0)]] const bool gUseVisibility = true;
 
 #define PT_DESCRIPTOR_SET_1
-#include "../pt_descriptors.hlsli"
+#include "../../pt_descriptors.hlsli"
 #include "svgf_common.hlsli"
 
 [[vk::push_constant]] struct {

@@ -31,7 +31,7 @@ struct Camera {
 		v.image_max = { mImageRect.offset.x + mImageRect.extent.width, mImageRect.offset.y + mImageRect.extent.height };
 		hlsl::float2 extent = mProjection.back_project(hlsl::float2::Constant(1)).head<2>() - mProjection.back_project(hlsl::float2::Constant(-1)).head<2>();
 		if (!mProjection.orthographic) extent /= mProjection.near_plane;
-		v.projection.sensor_area = abs(extent[0] * extent[1]);
+		v.projection.sensor_area = abs(extent[0] * extent[1] );
 		return v;
 	}
 };

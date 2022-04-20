@@ -254,7 +254,7 @@ void RayTraceScene::on_inspector_gui() {
 	}
 
 	if (mPrevFrame) {
-		static char path[MAX_PATH] { 'i', 'm', 'a', 'g', 'e', '.', 'h', 'd', 'r', '\0' };
+		static char path[256] { 'i', 'm', 'a', 'g', 'e', '.', 'h', 'd', 'r', '\0' };
 		ImGui::InputText("Output HDR", path, sizeof(path));
 		ImGui::SameLine();
 		if (ImGui::Button("Save")) {
@@ -708,6 +708,8 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		
 		mCurFrame->mVisibility = make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", extent.width*extent.height*sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 		mCurFrame->mPathStates = make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", extent.width*extent.height*sizeof(PathState), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+		mCurFrame->mPathStateVertices = make_shared<Buffer>(commandBuffer.mDevice, "gPathStateVertices", extent.width*extent.height*sizeof(PathVertex), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+		mCurFrame->mPathStateShadingData = make_shared<Buffer>(commandBuffer.mDevice, "gPathStateShadingData", extent.width*extent.height*sizeof(ShadingData), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 		mCurFrame->mReservoirs = make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", extent.width*extent.height*sizeof(Reservoir), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
 		mCurFrame->mAccumColor   = make_shared<Image>(commandBuffer.mDevice, "gAccumColor", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
@@ -718,15 +720,17 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		
 		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
 	}
-	const size_t max_path_vertices = extent.width*extent.height*max(1u,mPathTracePushConstants.gMaxEyeDepth);
-	if (!mCurFrame->mPathVertices || mCurFrame->mPathVertices.size() < max_path_vertices)
-		mCurFrame->mPathVertices = make_shared<Buffer>(commandBuffer.mDevice, "gLightPaths", max_path_vertices*sizeof(PathVertex), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+	const size_t max_light_vertices = extent.width*extent.height*max(1u,mPathTracePushConstants.gMaxLightDepth);
+	if (!mCurFrame->mLightPathVertices || mCurFrame->mLightPathVertices.size() < max_light_vertices) {
+		ProfilerRegion ps("create light path buffers");
+		mCurFrame->mLightPathVertices = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices", max_light_vertices*sizeof(PathVertex), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+		mCurFrame->mLightPathShadingData = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathShadingData", max_light_vertices*sizeof(ShadingData), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
+	}
 
 	const uint32_t& gGradientDownsample = mCreateGradientSamplesPipeline->specialization_constant("gGradientDownsample");
 	const vk::Extent3D gradExtent((extent.width + gGradientDownsample-1) / gGradientDownsample, (extent.height + gGradientDownsample-1) / gGradientDownsample, 1);
 	if (!mCurFrame->mGradientSamples || mCurFrame->mGradientSamples.extent() != gradExtent) {
 		ProfilerRegion ps("create gradient images");
-
 		mCurFrame->mGradientSamples = make_shared<Image>(commandBuffer.mDevice, "gGradientSamples", gradExtent, vk::Format::eR32Uint, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
 		for (array<Image::View, 2>& v : mCurFrame->mDiffTemp) {
 			v[0] = make_shared<Image>(commandBuffer.mDevice, "diff1 pingpong", gradExtent, vk::Format::eR16G16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
@@ -783,6 +787,11 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		ProfilerRegion ps("Create descriptor_set_1");
 		// set descriptors
 		descriptor_set_1 = make_shared<DescriptorSet>(mPathTraceDescriptorSetLayouts[1], "path_trace_descriptorset 1");
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathStates"), mCurFrame->mPathStates);
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathStateVertices"), mCurFrame->mPathStateVertices);
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathStateShadingData"), mCurFrame->mPathStateShadingData);
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gLightPathVertices"), mCurFrame->mLightPathVertices);
+		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gLightPathShadingData"), mCurFrame->mLightPathShadingData);
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gViews"), mCurFrame->mViews);
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPrevViews"), hasHistory ? mPrevFrame->mViews : mCurFrame->mViews);
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gViewVolumeInstances"), mCurFrame->mViewVolumeIndices);
@@ -793,8 +802,6 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPrevAlbedo"), image_descriptor(hasHistory ? mPrevFrame->mAlbedo : mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead));
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gReservoirs"), mCurFrame->mReservoirs);
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPrevReservoirs"), hasHistory ? mPrevFrame->mReservoirs : mCurFrame->mReservoirs);
-		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathStates"), mCurFrame->mPathStates);
-		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPathVertices"), mCurFrame->mPathVertices);
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gAccumColor"), image_descriptor(mCurFrame->mAccumColor, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite));
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gPrevAccumColor"), image_descriptor(hasHistory ? mPrevFrame->mAccumColor : mCurFrame->mAccumColor, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite));
 		descriptor_set_1->insert_or_assign(mPathTraceDescriptorMap[1].at("gAccumMoments"), image_descriptor(mCurFrame->mAccumMoments, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite));
@@ -818,13 +825,13 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 
 	commandBuffer.clear_color_image(mCurFrame->mRadiance, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
 	commandBuffer.clear_color_image(mCurFrame->mGradientSamples, vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
-	commandBuffer.clear_color_image(mCurFrame->mTemp[0], vk::ClearColorValue(array<uint32_t,4>{ 0, 0, 0, 0 }));
 	
 	mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 
-	if (mPathTracePushConstants.gMaxLightDepth > 1) { // Light paths
+	if (mPathTracePushConstants.gMaxLightDepth > 2) { // Light paths
 		{
 			ProfilerRegion ps("Sample photons", commandBuffer);
+			mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			commandBuffer.barrier({ mCurFrame->mPathStates }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			commandBuffer.bind_pipeline(mSamplePhotonsPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
@@ -832,8 +839,8 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		}
 		{
 			ProfilerRegion ps("Trace light paths", commandBuffer);
-			mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-			commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mPathVertices }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+			mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+			commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mPathStateVertices, mCurFrame->mPathStateShadingData }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			mRandomWalkPipeline->specialization_constant("gSamplingFlags") = mSamplePhotonsPipeline->specialization_constant("gSamplingFlags");
 			commandBuffer.bind_pipeline(mRandomWalkPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
@@ -844,7 +851,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 
 	{ // Visibility
 		ProfilerRegion ps("Sample visibility", commandBuffer);
-		commandBuffer.barrier({ mCurFrame->mPathStates }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mPathStateVertices, mCurFrame->mPathStateShadingData }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		mCurFrame->mPathTraceDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
@@ -855,7 +862,7 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 	if (hasHistory && mReprojection && mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") > 0) {	
 		// forward project
 		ProfilerRegion ps("Forward projection", commandBuffer);
-		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mPathStateVertices, mCurFrame->mPathStateShadingData, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		descriptor_set_1->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 		mGradientForwardProjectPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 		if (mRandomPerFrame) mGradientForwardProjectPipeline->push_constant<uint32_t>("gFrameNumber") = mCurFrame->mFrameNumber;
@@ -866,13 +873,15 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		commandBuffer.dispatch_over(gradExtent);
 	}
 
-	if (mPathTracePushConstants.gMaxEyeDepth > 1) { // Eye paths
+	if (mPathTracePushConstants.gMaxEyeDepth > 2) { // Eye paths
 		ProfilerRegion ps("Trace eye paths", commandBuffer);
 		mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		if (sampling_flags & SAMPLE_FLAG_SAMPLE_LIGHT_PATHS)
+			commandBuffer.barrier({ mCurFrame->mLightPathVertices, mCurFrame->mLightPathShadingData }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 		if (sampling_flags & SAMPLE_FLAG_SAMPLE_RESERVOIRS)
 			commandBuffer.barrier({ mCurFrame->mReservoirs }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		commandBuffer.barrier({ mCurFrame->mPathStates, mCurFrame->mPathStateVertices, mCurFrame->mPathStateShadingData, mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		commandBuffer.bind_pipeline(mRandomWalkPipeline->get_pipeline(mPathTraceDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
 		commandBuffer.dispatch_over(extent);
@@ -887,12 +896,6 @@ void RayTraceScene::render(CommandBuffer& commandBuffer, const Image::View& rend
 		commandBuffer.bind_descriptor_set(1, descriptor_set_1);
 		mResolvePipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(extent);
-	}
-
-	if (mTonemapPipeline->specialization_constant("gDebugMode") == DebugMode::eLightPathContributions) {
-		commandBuffer.copy_image(mCurFrame->mTemp[0], mCurFrame->mRadiance);
-		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-		mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 	}
 
 	Image::View tonemap_in = mCurFrame->mRadiance;

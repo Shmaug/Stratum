@@ -91,7 +91,10 @@ private:
 		Buffer::View<uint32_t> mViewVolumeIndices;
 		Buffer::View<hlsl::Reservoir> mReservoirs;
 		Buffer::View<hlsl::PathState> mPathStates;
-		Buffer::View<hlsl::PathVertex> mPathVertices;
+		Buffer::View<hlsl::PathVertex> mPathStateVertices;
+		Buffer::View<hlsl::ShadingData> mPathStateShadingData;
+		Buffer::View<hlsl::PathVertex> mLightPathVertices;
+		Buffer::View<hlsl::ShadingData> mLightPathShadingData;
 		Buffer::View<hlsl::VisibilityInfo> mVisibility;
 
 		Image::View mRadiance;

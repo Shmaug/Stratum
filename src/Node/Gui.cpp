@@ -62,7 +62,7 @@ string GetSystemFontFile(const string &faceName) {
 #pragma region profiler
 template<typename T> struct Range2 { T min, max; };
 using Range2f = Range2<float>;
-using Range2t = Range2<chrono::steady_clock::time_point>;
+using Range2t = Range2<chrono::high_resolution_clock::time_point>;
 using frame_time_unit = chrono::duration<float, milli>;
 
 ImVec2 startOffset = ImVec2(10.f, 10.f);

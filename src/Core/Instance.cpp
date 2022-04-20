@@ -173,12 +173,14 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 		xcb_screen_t* screen = iter.data;
 
 		// find suitable physical device
-		vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
-		for (uint32_t q = 0; q < queueFamilyProperties.size(); q++)
-			if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
-				mXCBScreen = screen;
-				break;
-			}
+		for (vk::PhysicalDevice physicalDevice : mInstance.enumeratePhysicalDevices()) {
+			vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+			for (uint32_t q = 0; q < queueFamilyProperties.size(); q++)
+				if (vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, q, mXCBConnection, screen->root_visual)) {
+					mXCBScreen = screen;
+					break;
+				}
+		}
 		if (mXCBScreen) break;
 	}
 	if (!mXCBScreen) throw runtime_error("Failed to find a device with XCB presentation support!");

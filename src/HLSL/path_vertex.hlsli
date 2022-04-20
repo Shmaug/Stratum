@@ -26,6 +26,7 @@ struct RayDifferential {
 #define SHADING_FLAG_FRONT_FACE BIT(0)
 #define SHADING_FLAG_FLIP_BITANGENT BIT(1)
 
+// 48 bytes
 struct ShadingData {
 	float3 position;
 	uint flags;
@@ -61,10 +62,10 @@ struct ShadingData {
 #endif
 };
 
+// 32 bytes
 struct PathVertex {
-	ShadingData shading_data;
 	float3 beta;
-	uint pad;
+	uint count;
 	uint instance_primitive_index;
 	uint vol_index;
 	float pdf_fwd;
@@ -75,6 +76,7 @@ struct PathVertex {
 #endif
 };
 
+// 64 bytes
 struct PathState {
 	uint4 rng_state;
 	float3 prev_vertex_position;
