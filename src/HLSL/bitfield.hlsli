@@ -56,7 +56,7 @@ of the bit is '1', '0' if it was '0'. */
 #define BF_GET_UNORM(y, start, len) ( BF_GET(y, start, len) / (float)SET_LSBITS(len) )
 #define BF_SET_UNORM(x, f, start, len) BF_SET(x, (uint)(saturate(f) * (float)SET_LSBITS(len)), start, len)
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 inline uint pack_f16_2(const float2 v) {
 	const uint2 f16 = f32tof16(v);

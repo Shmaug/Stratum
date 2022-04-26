@@ -3,13 +3,13 @@
 
 #include "../scene.hlsli"
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 inline uint upper_bound(StructuredBuffer<float> data, uint first, uint last, float value) {
 	uint it;
 	int count = last - first;
 	while (count > 0) {
-		uint it = first; 
-		int step = count / 2; 
+		uint it = first;
+		int step = count / 2;
 		it += step;
 		if (value >= data[it]) {
 			first = ++it;
@@ -31,11 +31,11 @@ inline float dist2d_pdf(StructuredBuffer<float> data, const uint pdf_marginals, 
 inline float2 sample_dist2d(StructuredBuffer<float> data, const uint cdf_marginals, const uint cdf_rows, const uint w, const uint h, const float2 rnd) {
 	const uint y_ptr = upper_bound(data, cdf_marginals, cdf_marginals + h + 1, rnd.y) - cdf_marginals;
 	const int y_offset = clamp(int(y_ptr - 1), 0, h - 1);
-	// Uniformly remap u1 to find the continuous offset 
+	// Uniformly remap u1 to find the continuous offset
 	float dy = rnd.y - data[cdf_marginals + y_offset];
 	if ((data[cdf_marginals + y_offset + 1] - data[cdf_marginals + y_offset]) > 0)
 		dy /= (data[cdf_marginals + y_offset + 1] - data[cdf_marginals + y_offset]);
-	
+
 	// Sample a column at the row y_offset
 	const int row_offset = y_offset * (w + 1);
 	const uint x_ptr = upper_bound(data, cdf_rows + row_offset, cdf_rows + row_offset + w + 1, rnd.x) - cdf_rows;
@@ -44,14 +44,14 @@ inline float2 sample_dist2d(StructuredBuffer<float> data, const uint cdf_margina
 	float dx = rnd.x - data[cdf_rows + row_offset + x_offset];
 	if (data[cdf_rows + row_offset + x_offset + 1] - data[cdf_rows + row_offset + x_offset] > 0)
 		dx /= (data[cdf_rows + row_offset + x_offset + 1] - data[cdf_rows + row_offset + x_offset]);
-	
+
 	return float2((x_offset + dx) / w, (y_offset + dy) / h);
 }
 #endif
 
 struct Environment {
 	ImageValue3 emission;
-	
+
 #ifdef __cplusplus
 	Buffer::View<float> marginal_pdf;
 	Buffer::View<float> row_pdf;
@@ -69,7 +69,7 @@ struct Environment {
 		image_value_field("Emission", emission);
 	}
 #endif
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	uint marginal_pdf;
 	uint row_pdf;
 	uint marginal_cdf;
@@ -97,7 +97,7 @@ struct Environment {
 #endif
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 template<> inline Environment load_material<Environment>(uint address, const ShadingData shading_data) {
     Environment material;
 	material.emission		= load_image_value3(address);
@@ -117,7 +117,7 @@ template<> inline EmissionEvalRecord eval_material_emission(const Environment ma
 	r.pdf = dist2d_pdf(gDistributions, material.marginal_pdf, material.row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	return r;
 }
-#endif // __HLSL_VERSION
+#endif // __HLSL__
 
 #ifdef __cplusplus
 
@@ -199,7 +199,7 @@ inline void build_distributions(const span<float4>& img, const vk::Extent2D& ext
 	}
 }
 
-inline void build_distributions(CommandBuffer& commandBuffer, const ShaderDatabase& shaders) {	
+inline void build_distributions(CommandBuffer& commandBuffer, const ShaderDatabase& shaders) {
 	auto build_row_dist = make_shared<ComputePipelineState>("build_row_dist", shaders.at("build_row_dist"));
 	auto sum_row_cdf = make_shared<ComputePipelineState>("sum_row_cdf", shaders.at("sum_row_cdf"));
 	auto build_marginal_dist = make_shared<ComputePipelineState>("build_marginal_dist", shaders.at("build_marginal_dist"));
@@ -212,7 +212,7 @@ inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path
 	Environment e;
 	e.emission.value = float3::Ones();
 	e.emission.image = make_shared<Image>(commandBuffer, filename.stem().string(), image, 1);
-	
+
 	Buffer::View<float> marginalPDF = make_shared<Buffer>(commandBuffer.mDevice, "marginal_pdf_tmp", image.extent.height*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	Buffer::View<float> rowPDF      = make_shared<Buffer>(commandBuffer.mDevice, "row_pdf_tmp"     , image.extent.width*image.extent.height*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	Buffer::View<float> marginalCDF = make_shared<Buffer>(commandBuffer.mDevice, "marginal_cdf_tmp", (image.extent.height+1)*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -232,7 +232,7 @@ inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path
 			span(rowPDF.data(), rowPDF.size()),
 			span(marginalCDF.data(), marginalCDF.size()),
 			span(rowCDF.data(), rowCDF.size()) );
-		
+
 		ofstream file(cacheFile, ios::binary);
 		file.write(reinterpret_cast<char*>(marginalPDF.data()), marginalPDF.size_bytes());
 		file.write(reinterpret_cast<char*>(rowPDF.data()), rowPDF.size_bytes());

@@ -41,10 +41,10 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 		const uint light_instance_index = gLightInstances[min(uint(rnd.z * gPushConstants.gLightCount), gPushConstants.gLightCount-1)];
 		BF_SET(ls.instance_primitive_index, light_instance_index, 0, 16);
 
-		ShadingData sd;
-		const ImageValue3 emissive = load_material<Emissive>(gInstances[ls.instance_index()].material_address() + 4, sd).emission;
+		ShadingData _sd;
+		const ImageValue3 emissive = load_material<Emissive>(gInstances[ls.instance_index()].material_address() + 4, _sd).emission;
 		ls.radiance = emissive.value;
-			
+
 		ls.pdfA = 1 / (float)gPushConstants.gLightCount;
 		if (gSampleEnvironment) ls.pdfA *= 1 - gPushConstants.gEnvironmentSampleProbability;
 
@@ -76,7 +76,7 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 					const float cosTheta = (1 - rnd.x) + rnd.x * cosThetaMax;
 					const float sinTheta = sqrt(max(0, 1 - cosTheta * cosTheta));
 					const float phi = rnd.y * 2 * M_PI;
-					
+
 					float3 T, B;
 					make_orthonormal(to_center, T, B);
 
@@ -86,7 +86,7 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 					ls.normal = normalize(ls.position - center);
 					ls.pdfA *= pdfWtoA(1/(2 * M_PI * (1 - cosThetaMax)), abs(dot(ls.to_light, ls.normal)) / pow2(ls.dist));
 				}
-				
+
 				break;
 			}
 			case INSTANCE_TYPE_TRIANGLES: {
@@ -94,10 +94,10 @@ inline void sample_light_or_environment(out LightSampleRecord ls, const float4 r
 				const uint prim_index = min(u*gInstances[light_instance_index].prim_count(), gInstances[light_instance_index].prim_count() - 1);
 				BF_SET(ls.instance_primitive_index, prim_index, 16, 16);
 				const float a = sqrt(rnd.x);
-				
+
 				ShadingData sd;
 				make_triangle_shading_data_from_barycentrics(sd, light_instance_index, ls.primitive_index(), float2(1 - a, a*rnd.y));
-				
+
 				if (emissive.has_image()) ls.radiance *= sample_image(emissive.image(), sd.uv, sd.uv_screen_size).rgb;
 
 				ls.position = sd.position;

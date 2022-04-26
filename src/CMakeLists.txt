@@ -2,18 +2,14 @@ cmake_minimum_required(VERSION 3.20)
 
 include(CompileShader.cmake)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CXX_STANDARD_REQUIRED TRUE)
 
-file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Common/**.cpp")
-list(APPEND STRATUM_SOURCE ${TMP_SRC})
-file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Core/**.cpp")
-list(APPEND STRATUM_SOURCE ${TMP_SRC})
-file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/Node/**.cpp")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/**.cpp")
 list(APPEND STRATUM_SOURCE ${TMP_SRC})
 file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/extern/miniz.c")
-list(APPEND STRATUM_SOURCE ${TMP_SRC})
-file(GLOB_RECURSE TMP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/extern/imgui/**.cpp")
 list(APPEND STRATUM_SOURCE ${TMP_SRC})
 
 add_executable(Stratum ${STRATUM_SOURCE} main.cpp stratum.rc)
@@ -22,6 +18,7 @@ set_target_properties(Stratum PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(Stratum PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern>"
+    "$<BUILD_INTERFACE:${SLANG_ROOT}>"
     "$<INSTALL_INTERFACE:include>"
     "$<INSTALL_INTERFACE:include/extern>")
 
@@ -33,15 +30,21 @@ if (${STRATUM_ENABLE_DEBUG_LAYERS})
     target_compile_definitions(Stratum PUBLIC STRATUM_ENABLE_DEBUG_LAYERS)
 endif()
 
+# Link dependencies
+
 target_link_libraries(Stratum PUBLIC Eigen3::Eigen Vulkan::Vulkan)
-target_link_libraries(Stratum PRIVATE pugixml)
 if (UNIX)
-    target_link_libraries(Stratum PUBLIC pthread ${CMAKE_DL_LIBS})
-    target_link_libraries(Stratum PUBLIC xcb xcb-keysyms)
+    target_link_libraries(Stratum PUBLIC pthread ${CMAKE_DL_LIBS} xcb xcb-keysyms)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_XCB_KHR)
+    target_link_libraries(Stratum PUBLIC "${SLANG_ROOT}/bin/linux-x86_64/slang.so" "${SLANG_ROOT}/bin/linux-x86_64/gfx.so") # TODO?
+	configure_file("${SLANG_ROOT}/bin/linux-x86_64/slang.so" "${CMAKE_CURRENT_BINARY_DIR}/slang.so" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/linux-x86_64/gfx.so" "${CMAKE_CURRENT_BINARY_DIR}/gfx.so" COPYONLY)
 elseif(WIN32)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_compile_options(Stratum PUBLIC /bigobj)
+    target_link_libraries(Stratum PUBLIC "${SLANG_ROOT}/bin/windows-x64/release/slang.lib" "${SLANG_ROOT}/bin/windows-x64/release/gfx.lib")
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/slang.dll" "${CMAKE_CURRENT_BINARY_DIR}/slang.dll" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/gfx.dll" "${CMAKE_CURRENT_BINARY_DIR}/gfx.dll" COPYONLY)
 endif()
 
 if (OpenXR_FOUND)
@@ -67,13 +70,21 @@ endif()
 endif()
 
 # Shaders
+make_directory("${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 
 file(GLOB_RECURSE STRATUM_SHADERS "**.[gh]lsl")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
 file(GLOB_RECURSE STRATUM_SHADERS "**.frag")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
 file(GLOB_RECURSE STRATUM_SHADERS "**.vert")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DEPENDS Stratum)
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
+
+# just copy slang files, they are compiled with slang API
+file(GLOB_RECURSE STRATUM_SHADERS "**.slang")
+foreach(SLANG_SHADER IN LISTS STRATUM_SHADERS)
+	add_custom_command(TARGET Stratum PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${SLANG_SHADER}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
+	configure_file("${SLANG_SHADER}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders" COPYONLY)
+endforeach()
 
 # Install rules
 

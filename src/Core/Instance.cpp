@@ -71,14 +71,14 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	}
 
 	bool debugMessenger = find_argument("debugMessenger").has_value();
-	
+
 	unordered_set<string> validationLayers;
 	for (const auto& layer : find_arguments("validationLayer")) validationLayers.emplace(layer);
 	if (debugMessenger) validationLayers.emplace("VK_LAYER_KHRONOS_validation");
-	
+
 	unordered_set<string> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 	for (const auto& ext : find_arguments("instanceExtension")) instanceExtensions.emplace(ext);
-	
+
 	#ifdef _WIN32
 	instanceExtensions.emplace(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 	#endif
@@ -95,7 +95,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 			if (available.find(*it) == available.end()) {
 				fprintf_color(ConsoleColor::eYellow, stderr, "Warning: Removing unsupported validation layer: %s\n", it->c_str());
 				it = validationLayers.erase(it);
-			} else 
+			} else
 				it++;
 	}
 	for (const string& s : validationLayers) mValidationLayers.push_back(s.c_str());
@@ -116,7 +116,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	appInfo.engineVersion = VK_MAKE_VERSION(STRATUM_VERSION_MAJOR, STRATUM_VERSION_MINOR, 0);
 	appInfo.apiVersion = mVulkanApiVersion = VK_API_VERSION_1_2;
 	mInstance = vk::createInstance(vk::InstanceCreateInfo({}, &appInfo, mValidationLayers, instanceExts));
-	
+
 	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
   VULKAN_HPP_DEFAULT_DISPATCHER.init(mInstance);
 	#endif
@@ -124,7 +124,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	if (debugMessenger) {
 		cout << "Creating debug messenger" << endl;
 		mDebugMessenger = mInstance.createDebugUtilsMessengerEXT(vk::DebugUtilsMessengerCreateInfoEXT({},
-			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError, 
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
 			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
 			DebugCallback));
 	}
@@ -190,7 +190,7 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	if (auto w = find_argument("width")) windowPosition.extent.width = stoi(*w);
 	if (auto h = find_argument("height")) windowPosition.extent.height = stoi(*h);
 	mWindow = make_unique<stm::Window>(*this, appInfo.pApplicationName, windowPosition);
-	
+
 	if (find_argument("fullscreen")) mWindow->fullscreen(true);
 }
 Instance::~Instance() {

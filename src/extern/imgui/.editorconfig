@@ -4,9 +4,6 @@
 #   - Suggest install to trim whitespaces: https://marketplace.visualstudio.com/items?itemName=MadsKristensen.TrailingWhitespaceVisualizer
 #   - Alternative for older VS2010 to VS2015: https://marketplace.visualstudio.com/items?itemName=EditorConfigTeam.EditorConfig
 
-# top-most EditorConfig file
-root = true
-
 # Default settings:
 # Use 4 spaces as indentation
 [*]

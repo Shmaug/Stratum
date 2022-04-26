@@ -161,7 +161,7 @@ void path_eval_transmittance(inout ray_query_t rayQuery, const uint index_1d, co
 		ShadingData v;
 		uint instance_primitive_index;
 		intersect(rayQuery, origin, direction, t_max, v, instance_primitive_index);
-		
+
 		if (!gEnableVolumes) {
 			if (BF_GET(instance_primitive_index,0,16) != INVALID_INSTANCE) {
 				// hit a surface
@@ -186,7 +186,7 @@ void path_eval_transmittance(inout ray_query_t rayQuery, const uint index_1d, co
 		}
 
 		if (BF_GET(instance_primitive_index,0,16) == INVALID_INSTANCE) break;
-		
+
 		if (is_volume(BF_GET(instance_primitive_index,0,16))) {
 			if (v.flags & SHADING_FLAG_FRONT_FACE) {
 				// entering volume
@@ -219,8 +219,8 @@ void path_state_trace_bounce(inout ray_query_t rayQuery, const uint index_1d, ou
 	for (uint steps = 0; steps < 64; steps++) {
 		intersect(rayQuery, origin, gPathState.dir_out, 1.#INF, gPathShadingData, gPathVertex.instance_primitive_index);
 
-		if (!gEnableVolumes) return;
-		
+		if (!gEnableVolumes) break;
+
 		if (is_volume(gPathVertex.vol_index)) {
 			// interact with volume
 			ShadingData sd;
@@ -238,7 +238,7 @@ void path_state_trace_bounce(inout ray_query_t rayQuery, const uint index_1d, ou
 				gPathVertex.instance_primitive_index = instance_primitive_index;
 				gPathShadingData.position = tr.scatter_p;
 				gPathShadingData.shape_area = 0;
-				return;
+				break;
 			}
 		}
 
@@ -253,9 +253,9 @@ void path_state_trace_bounce(inout ray_query_t rayQuery, const uint index_1d, ou
 				origin = ray_offset(gPathShadingData.position, gPathShadingData.geometry_normal());
 			}
 		} else
-			return;
+			break;
 	}
-	
+
 	if (gPathVertex.instance_index() != INVALID_INSTANCE)
 		gPathState.ray_differential.transfer(length(gPathState.prev_vertex_position - gPathShadingData.position));
 
@@ -279,7 +279,7 @@ void reservoir_ris(const Material material, const uint index_1d) {
 
 		const MaterialEvalRecord f = eval_material(material, dir_in, ls.to_light, gPathShadingData, false);
 		if (f.pdf_fwd <= 0) continue;
-		
+
 		const float l = luminance(f.f * ls.radiance);
 
 		ReservoirLightSample s;
@@ -309,7 +309,7 @@ void sample_reservoir(inout ray_query_t rayQuery, const uint index_1d, out Direc
 	float pdfA, dist;
 	light_sample_pdf(gReservoirs[index_1d].light_sample.instance_index(), light_vertex, gPathShadingData.position, r.to_light, dist, pdfA, r.G);
 	if (pdfA <= 0) { r.radiance = 0; return; }
-	
+
 	r.radiance = light_emission(gReservoirs[index_1d].light_sample.instance_primitive_index, -r.to_light, light_vertex) * gReservoirs[index_1d].W();
 
 	r.T_dir_pdf = 1;
@@ -330,7 +330,7 @@ void sample_light(inout ray_query_t rayQuery, const uint index_1d, out DirectLig
 	else
 		r.G = abs(dot(ls.normal, ls.to_light)) / pow2(ls.dist);
 	r.to_light = ls.to_light;
-	
+
 	r.T_dir_pdf = 1;
 	float T_nee_pdf = 1;
 	path_eval_transmittance(rayQuery, index_1d, ls.to_light, ls.dist, r.radiance, r.T_dir_pdf, T_nee_pdf);
@@ -352,38 +352,60 @@ void path_direct_light(const Material material, inout ray_query_t rayQuery, cons
 	if (any(ls.radiance > 0)) {
 		const MaterialEvalRecord f = eval_material(material, dir_in, ls.to_light, gPathShadingData, false);
 		if (f.pdf_fwd > 0) {
-			const float mis_w = (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY) ? 1 :
-				(gUseMIS ? mis_heuristic(ls.pdfA, pdfWtoA(f.pdf_fwd, ls.G)*ls.T_dir_pdf) : 0.5);
-			gRadiance[output_index].rgb += gPathVertex.beta * f.f * ls.radiance * ls.G * mis_w;
+			float w;
+			if (gSamplingFlags & SAMPLE_FLAG_SAMPLE_LIGHT_PATHS)
+				w = path_weight(depth+1, 1);
+			else
+				w = gUseMIS ? mis_heuristic(ls.pdfA, pdfWtoA(f.pdf_fwd, ls.G)*ls.T_dir_pdf) : 0.5;
+			gRadiance[output_index].rgb += gPathVertex.beta * f.f * ls.radiance * ls.G * w;
 		}
 	}
 }
 
 template<typename Material>
-void path_bounce_(inout ray_query_t rayQuery, const uint address, const uint index_1d, const uint2 output_index, const uint depth) {
-	const Material material = load_material<Material>(address + 4, gPathShadingData);
-	if (!material_has_bsdf<Material>()) return;
-
+void path_bounce_material(inout ray_query_t rayQuery, const uint address, const uint index_1d, const uint2 output_index, const uint depth, out MaterialSampleRecord s) {
+	const float3 rnd = float3(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d));
 	const float3 dir_in = -path_dir_in(index_1d);
+	const Material material = load_material<Material>(address + 4, gPathShadingData);
 
-	if (gTraceLightPaths) {
-		if (gSamplingFlags & SAMPLE_FLAG_CONNECT_TO_VIEWS)
-			connect_light_path_to_view(material, rayQuery, index_1d, dir_in, depth);
-	} else if (gSampleEmissive || gSampleEnvironment) {
+	if (gTraceLightPaths)
+		connect_light_path_to_view(material, rayQuery, index_1d, dir_in, depth);
+	else if (gSampleEmissive || gSampleEnvironment) {
 		if (gSamplingFlags & SAMPLE_FLAG_SAMPLE_LIGHT_PATHS)
 			connect_to_light_paths(material, rayQuery, index_1d, output_index, dir_in, depth);
-		else
-			path_direct_light(material, rayQuery, index_1d, output_index, dir_in, depth);
+		path_direct_light(material, rayQuery, index_1d, output_index, dir_in, depth);
 	}
 
 	// sample material & apply contribution
-	const float3 rnd = float3(rng_next_float(index_1d), rng_next_float(index_1d), rng_next_float(index_1d));
-	const MaterialSampleRecord s = sample_material(material, rnd, dir_in, gPathShadingData, gTraceLightPaths);
-	gPathVertex.beta *= s.f / s.pdf_fwd;
-	gPathVertex.pdf_fwd = s.pdf_fwd;
-	gPathVertex.pdf_rev = s.pdf_rev;
-	gPathState.dir_out = s.dir_out;
-	gPathState.dir_out_pdfW = s.pdf_fwd;
+	s = sample_material(material, rnd, dir_in, gPathShadingData, gTraceLightPaths);
+}
+void path_bounce(inout ray_query_t rayQuery, const uint index_1d, const uint2 output_index, const uint depth) {
+	// store light path vertices
+	if (gTraceLightPaths) {
+		// convert pdf_fwd (computed at previous vertex) to area measure
+		if (gPathVertex.instance_index() != INVALID_INSTANCE) {
+			const float3 dir_in = gPathState.prev_vertex_position - gPathShadingData.position;
+			const float dist2 = dot(dir_in, dir_in);
+			float G = 1 / dist2;
+			if (gPathShadingData.shape_area != 0)
+				G *= abs(dot(dir_in/sqrt(dist2), gPathShadingData.geometry_normal()));
+			gPathVertex.pdf_fwd = pdfWtoA(gPathVertex.pdf_fwd, G);
+		}
+		gPathVertex.pdf_rev = 0; // pdf_rev is assigned next iteration
+		gLightPathShadingData[gPushConstants.gNumLightPaths*depth + index_1d] = gPathShadingData;
+		gLightPathVertices[gPushConstants.gNumLightPaths*depth + index_1d] = gPathVertex;
+		gLightPathVertices[index_1d].path_length++;
+	}
+
+	MaterialSampleRecord s;
+
+	const uint address = instance_material_address(gPathVertex.instance_index());
+	const uint type = gMaterialData.Load(address);
+	switch (type) {
+	#define CASE_FN(Material) case e##Material: if (material_has_bsdf<Material>()) path_bounce_material<Material>(rayQuery, address, index_1d, output_index, depth, s); break;
+	FOR_EACH_BSDF_TYPE( CASE_FN )
+	#undef CASE_FN
+	}
 
 	if (s.eta == 0) {
 		gPathState.ray_differential.reflect(gPathShadingData.mean_curvature, s.roughness);
@@ -391,18 +413,27 @@ void path_bounce_(inout ray_query_t rayQuery, const uint address, const uint ind
 		gPathState.ray_differential.refract(gPathShadingData.mean_curvature, s.roughness, s.eta);
 		gPathState.eta_scale /= pow2(s.eta);
 	}
-}
-void path_bounce(inout ray_query_t rayQuery, const uint index_1d, const uint2 output_index, const uint depth) {
-	const uint address = instance_material_address(gPathVertex.instance_index());
-	const uint type = gMaterialData.Load(address);
-	switch (type) {
-	#define CASE_FN(Material) case e##Material: path_bounce_<Material>(rayQuery, address, index_1d, output_index, depth); break;
-	FOR_EACH_BSDF_TYPE( CASE_FN )
-	#undef CASE_FN
+
+	gPathVertex.beta *= s.f / s.pdf_fwd;
+	gPathVertex.pdf_fwd = s.pdf_fwd;
+	gPathVertex.pdf_rev = s.pdf_rev;
+	gPathState.dir_out = s.dir_out;
+	gPathState.dir_out_pdfW = s.pdf_fwd;
+
+	// compute reverse probability at previous vertex
+	if (gTraceLightPaths) {
+		if (gPathVertex.instance_index() != INVALID_INSTANCE) {
+			const float3 dir = gPathShadingData.position - gPathState.prev_vertex_position;
+			const float dist2 = dot(dir, dir);
+			float G = 1 / dist2;
+			if (gPathShadingData.shape_area != 0)
+				G *= abs(dot(dir/sqrt(dist2), gPathState.prev_vertex_geometry_normal()));
+			gLightPathVertices[gPushConstants.gNumLightPaths*(depth-1) + index_1d].pdf_rev = pdfWtoA(s.pdf_rev, G);
+		}
 	}
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(8, 4, 1)]
 void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	const uint view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
 	if (view_index == -1) return;
@@ -420,7 +451,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	gPathVertex.beta = 1;
 	gPathVertex.pdf_fwd = 0;
 	gPathVertex.pdf_rev = 0;
-	
+
 	const float2 jitter = (gSamplingFlags & SAMPLE_FLAG_SAMPLE_PIXEL_AREA) ? float2(rng_next_float(index_1d), rng_next_float(index_1d)) : 0.5;
 	const float2 uv = (index.xy + jitter - gViews[view_index].image_min)/gViews[view_index].extent();
 	float2 clipPos = 2*uv - 1;
@@ -436,7 +467,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	float dir_pdf, nee_pdf;
 	path_state_trace_bounce(rayQuery, index_1d, dir_pdf, nee_pdf);
 
-	 // store visibility
+	// store visibility
 	float2 prev_uv = (index.xy + 0.5 - gViews[view_index].image_min)/gViews[view_index].extent();
 	float prev_z = 1.#INF;
 	float2 dz = 0;
@@ -469,7 +500,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	gVisibility[index_1d].instance_primitive_index = gPathVertex.instance_primitive_index;
 	gVisibility[index_1d].store_nz(gPathShadingData.shading_normal(), z, prev_z, dz);
 	gVisibility[index_1d].prev_uv = prev_uv;
-	
+
 	// primary albedo and emission
 	const uint material_address = instance_material_address(gPathVertex.instance_index());
 	if (material_address == INVALID_MATERIAL) {
@@ -477,7 +508,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 		gPathVertex.beta = 0;
 		return;
 	}
-	
+
 	gRadiance[index.xy].w = 1;
 
 	// check for BSDF, add emission
@@ -562,7 +593,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	}
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(8, 4, 1)]
 void sample_photons(uint3 index : SV_DispatchThreadID) {
 	uint w,h;
 	gRadiance.GetDimensions(w,h);
@@ -575,8 +606,13 @@ void sample_photons(uint3 index : SV_DispatchThreadID) {
 
 	if (ls.pdfA <= 0 || all(ls.radiance <= 0)) {
 		gPathVertex.beta = 0;
+		gLightPathVertices[index_1d].path_length = 0;
 		return;
 	}
+
+	gPathState.ray_differential.radius = 0;
+	gPathState.ray_differential.spread = 0;
+	gPathState.eta_scale = 1;
 
 	gPathShadingData.position = ls.position;
 	gPathShadingData.packed_geometry_normal = pack_normal_octahedron(ls.normal);
@@ -586,10 +622,11 @@ void sample_photons(uint3 index : SV_DispatchThreadID) {
 	gPathVertex.vol_index = -1;
 	gPathVertex.pdf_fwd = ls.pdfA;
 	gPathVertex.pdf_rev = 0;
-	gPathVertex.count = 1;
+	gPathVertex.path_length = 1;
 	gLightPathVertices[index_1d] = gPathVertex;
+	gLightPathShadingData[index_1d] = gPathShadingData;
 	gRadiance[index.xy].w = 1;
-	
+
 	// compute dir_out
 	if (ls.instance_index() == INVALID_INSTANCE) {
 		// environment sample
@@ -606,10 +643,6 @@ void sample_photons(uint3 index : SV_DispatchThreadID) {
 		gPathVertex.beta *= abs(local_dir_out.z) / dir_pdf;
 		gPathState.dir_out_pdfW = dir_pdf;
 	}
-	
-	gPathState.ray_differential.radius = 0;
-	gPathState.ray_differential.spread = 0;
-	gPathState.eta_scale = 1;
 
 	ray_query_t rayQuery;
 
@@ -629,7 +662,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID) {
 	if (!has_bsdf) gPathVertex.beta = 0;
 }
 
-[numthreads(8, 8, 1)]
+[numthreads(8, 4, 1)]
 void random_walk(uint3 index : SV_DispatchThreadID) {
 	uint w,h;
 	gRadiance.GetDimensions(w,h);
@@ -637,44 +670,15 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 
 	const uint index_1d = index.y*w + index.x;
 
-	static const uint max_depth = gTraceLightPaths ? gPushConstants.gMaxLightDepth : (gPushConstants.gMaxEyeDepth-1);
+	static const uint max_depth = gTraceLightPaths ? gPushConstants.gMaxLightDepth : gPushConstants.gMaxEyeDepth;
 
 	ray_query_t rayQuery;
 	uint depth;
 	for (depth = 1; depth < max_depth; ) {
 		if (all(gPathVertex.beta <= 1e-6)) break;
-		
-		// store light path vertices
-		if (gTraceLightPaths) {
-			// convert pdf_fwd (computed at previous vertex) to area measure
-			if (gPathVertex.instance_index() != INVALID_INSTANCE) {
-				const float3 dir_in = gPathState.prev_vertex_position - gPathShadingData.position;
-				const float dist2 = dot(dir_in, dir_in);
-				float G = 1 / dist2;
-				if (gPathShadingData.shape_area != 0)
-					G *= abs(dot(dir_in/sqrt(dist2), gPathShadingData.geometry_normal()));
-				gPathVertex.pdf_fwd = pdfWtoA(gPathVertex.pdf_fwd, G);
-			}
-			gPathVertex.pdf_rev = 0; // pdf_rev is assigned next iteration
-			gLightPathVertices[w*h*depth + index_1d] = gPathVertex;
-			gLightPathShadingData[w*h*depth + index_1d] = gPathShadingData;
-			gLightPathVertices[index_1d].count++;
-		}
-		
+
 		path_bounce(rayQuery, index_1d, index.xy, depth);
 		if (gPathState.dir_out_pdfW <= 0) { depth++; break; }
-		
-		// compute reverse probability at previous vertex
-		if (gTraceLightPaths) {
-			if (gPathVertex.instance_index() != INVALID_INSTANCE) {
-				const float3 dir = gPathShadingData.position - gPathState.prev_vertex_position;
-				const float dist2 = dot(dir, dir);
-				float G = 1 / dist2;
-				if (gPathShadingData.shape_area != 0)
-					G *= abs(dot(dir/sqrt(dist2), gPathState.prev_vertex_geometry_normal()));
-				gLightPathVertices[w*h*(depth-1) + index_1d].pdf_rev = pdfWtoA(gPathVertex.pdf_rev, G);
-			}
-		}
 
 		float transmit_dir_pdf, transmit_nee_pdf;
 		path_state_trace_bounce(rayQuery, index_1d, transmit_dir_pdf, transmit_nee_pdf);
@@ -701,10 +705,10 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 		}
 
 		// add emission to pixel
-		if (!gTraceLightPaths && any(L > 0) && (gSamplingFlags & SAMPLE_FLAG_DIRECT_ONLY) == 0) {
+		if (!gTraceLightPaths && any(L > 0)) {
 			float w = 1;
 			if (gSamplingFlags & SAMPLE_FLAG_SAMPLE_LIGHT_PATHS)
-				w = path_weight(depth, 0); // BDPT weight
+				w = path_weight(depth+1, 0); // BDPT weight
 			else {
 				// MIS with direct light sampling
 				const uint instance_index = gPathVertex.instance_index();
@@ -724,7 +728,7 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 
 		// terminate path
 		if (!has_bsdf) break;
-		
+
 		if (depth >= gPushConstants.gMinDepth) {
 			const float l = min(max3(gPathVertex.beta) / gPathState.eta_scale, 0.95);
 			if (rng_next_float(index_1d) > l)
@@ -733,11 +737,11 @@ void random_walk(uint3 index : SV_DispatchThreadID) {
 				gPathVertex.beta /= l;
 		}
 	}
-	if (gTraceLightPaths) 
+	if (gTraceLightPaths)
 		gLightPathVertices[w*h*depth + index_1d].beta = 0;
 }
 
-[numthreads(8,8,1)]
+[numthreads(8, 8, 1)]
 void resolve(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;
 	gRadiance.GetDimensions(resolution.x, resolution.y);

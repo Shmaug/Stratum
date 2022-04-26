@@ -2,7 +2,7 @@
 #define ROUGHPLASTIC_H
 
 #include "../scene.hlsli"
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 #include "../microfacet.hlsli"
 #endif
 
@@ -12,7 +12,7 @@ struct RoughPlastic {
     ImageValue3 specular_reflectance;
     ImageValue1 roughness;
     float eta;
-    
+
     inline void store(ByteAppendBuffer& bytes, ResourcePool& resources) const {
         diffuse_reflectance.store(bytes, resources);
         specular_reflectance.store(bytes, resources);
@@ -27,7 +27,7 @@ struct RoughPlastic {
     }
 #endif
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
     float3 diffuse_reflectance;
     float roughness;
     float3 specular_reflectance;
@@ -35,7 +35,7 @@ struct RoughPlastic {
 #endif
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 template<> inline RoughPlastic load_material(uint address, const ShadingData shading_data) {
     RoughPlastic material;
@@ -87,9 +87,9 @@ template<> inline MaterialEvalRecord eval_material(const RoughPlastic material, 
 
     // We first account for the dielectric layer.
 
-    // Fresnel equation determines how much light goes through, 
+    // Fresnel equation determines how much light goes through,
     // and how much light is reflected for each wavelength.
-    // Fresnel equation is determined by the angle between the (micro) normal and 
+    // Fresnel equation is determined by the angle between the (micro) normal and
     // both incoming and outgoing directions (dir_out & dir_in).
     // However, since they are related through the Snell-Descartes law,
     // we only need one of them.
@@ -184,7 +184,7 @@ template<> inline MaterialSampleRecord sample_material(const RoughPlastic materi
         r.roughness = 1;
         half_vector = normalize(dir_in + r.dir_out);
     }
-    
+
     const Real n_dot_out = dot(shading_data.shading_normal(), r.dir_out);
     const Real F_i = fresnel_dielectric(dot(half_vector, dir_in), material.eta);
     const Real F_o = fresnel_dielectric(dot(half_vector, r.dir_out), material.eta);

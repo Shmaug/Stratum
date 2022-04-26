@@ -7,7 +7,7 @@
 
 struct ByteAppendBuffer {
   vector<uint32_t> data;
-  
+
   inline uint Load(uint32_t address) {
     return data[address/4];
   }
@@ -68,7 +68,7 @@ inline uint4 channel_mapping_swizzle(vk::ComponentMapping m) {
 #endif // __cplusplus
 
 struct ImageValue1 {
-	#ifdef __HLSL_VERSION
+	#ifdef __HLSL__
 	min16float value;
 	uint image_index_and_channel;
 	inline uint image_index() { return BF_GET(image_index_and_channel, 0, 30); }
@@ -76,7 +76,7 @@ struct ImageValue1 {
 	inline bool has_image() { return image_index() < gImageCount; }
 	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index())]; }
 	#endif
-	
+
 	#ifdef __cplusplus
 	float value;
 	Image::View image;
@@ -92,7 +92,7 @@ struct ImageValue1 {
 	#endif
 };
 struct ImageValue2 {
-	#ifdef __HLSL_VERSION
+	#ifdef __HLSL__
 	min16float2 value;
 	uint image_index_and_channel;
 	inline bool has_image() { return BF_GET(image_index_and_channel, 0, 30) < gImageCount; }
@@ -115,7 +115,7 @@ struct ImageValue2 {
 	#endif
 };
 struct ImageValue3 {
-	#ifdef __HLSL_VERSION
+	#ifdef __HLSL__
 	min16float3 value;
 	uint image_index;
 	inline bool has_image() { return image_index < gImageCount; }
@@ -132,7 +132,7 @@ struct ImageValue3 {
 	#endif
 };
 struct ImageValue4 {
-	#ifdef __HLSL_VERSION
+	#ifdef __HLSL__
 	min16float4 value;
 	uint image_index;
 	inline bool has_image() { return image_index < gImageCount; }
@@ -206,7 +206,7 @@ inline void image_value_field(const char* label, ImageValue4& v) {
 }
 #endif // __cplusplus
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 inline ImageValue1 load_image_value1(inout uint address) {
 	ImageValue1 r;
@@ -258,6 +258,6 @@ inline float4 sample_image(const ImageValue4 img, const ShadingData shading_data
 	return img.value * sample_image(img.image(), shading_data.uv, shading_data.uv_screen_size);
 }
 
-#endif // __HLSL_VERSION
+#endif // __HLSL__
 
 #endif

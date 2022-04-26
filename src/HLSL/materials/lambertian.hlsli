@@ -14,12 +14,12 @@ struct Lambertian {
     }
 #endif
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
     float3 reflectance;
 #endif
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 template<> inline Lambertian load_material(uint address, const ShadingData shading_data) {
 	Lambertian material;
     material.reflectance = sample_image(load_image_value3(address), shading_data);

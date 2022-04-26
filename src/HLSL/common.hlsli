@@ -1,6 +1,10 @@
 #ifndef MATH_H
 #define MATH_H
 
+#ifdef __HLSL_VERSION
+#define __HLSL__
+#endif
+
 #ifndef M_PI
 #define M_PI (3.1415926535897932)
 #endif
@@ -8,7 +12,7 @@
 #define M_1_PI (1/M_PI)
 #endif
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 #define CONST_CPP
 #define ARG_INOUT(T) inout T
 #define ARG_OUT(T) out T

@@ -1,7 +1,7 @@
 #include "../Scene.hpp"
 #include <Core/PipelineState.hpp>
 
-#include <pugixml.hpp>
+#include <extern/pugixml.hpp>
 #include <regex>
 
 using namespace stm::hlsl;

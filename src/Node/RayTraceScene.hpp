@@ -19,9 +19,9 @@ public:
 	STRATUM_API RayTraceScene(Node& node);
 
 	inline Node& node() const { return mNode; }
-		
+
 	STRATUM_API void create_pipelines();
-	
+
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer, const float deltaTime);
 	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<hlsl::ViewData>& views);
@@ -33,22 +33,22 @@ private:
 	};
 
 	Node& mNode;
-	
+
 	unordered_map<size_t, shared_ptr<AccelerationStructure>> mAABBs;
 
 	unordered_map<Mesh*, Buffer::View<hlsl::PackedVertexData>> mMeshVertices;
 	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
-	
+
 	component_ptr<ComputePipelineState> mCopyVerticesPipeline;
-	
+
 	component_ptr<ComputePipelineState> mSamplePhotonsPipeline;
 	component_ptr<ComputePipelineState> mSampleVisibilityPipeline;
 	component_ptr<ComputePipelineState> mRandomWalkPipeline;
 	component_ptr<ComputePipelineState> mResolvePipeline;
 	component_ptr<ComputePipelineState> mTonemapPipeline;
-	
+
 	component_ptr<ComputePipelineState> mSpatialReusePipeline;
-	
+
 	// A-SVGF pipelines
 	component_ptr<ComputePipelineState> mGradientForwardProjectPipeline;
 	component_ptr<ComputePipelineState> mTemporalAccumulationPipeline;
@@ -86,7 +86,7 @@ private:
 		Buffer::View<float> mDistributionData;
 		Buffer::View<uint32_t> mInstanceIndexMap;
 		shared_ptr<DescriptorSet> mPathTraceDescriptorSet;
-		
+
 		Buffer::View<hlsl::ViewData> mViews;
 		Buffer::View<uint32_t> mViewVolumeIndices;
 		Buffer::View<hlsl::Reservoir> mReservoirs;
@@ -97,6 +97,7 @@ private:
 		Buffer::View<hlsl::ShadingData> mLightPathShadingData;
 		Buffer::View<hlsl::VisibilityInfo> mVisibility;
 
+		Buffer::View<uint32_t> mRadianceMutex;
 		Image::View mRadiance;
 		Image::View mAlbedo;
 		Image::View mAccumColor;
@@ -117,7 +118,7 @@ private:
 	vector<shared_ptr<FrameResources>> mFrameResources;
 	shared_ptr<FrameResources> mPrevFrame;
 	shared_ptr<FrameResources> mCurFrame;
-	
+
 	STRATUM_API void update_scene(CommandBuffer& commandBuffer, const float deltaTime);
 };
 

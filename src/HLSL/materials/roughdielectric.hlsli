@@ -2,7 +2,7 @@
 #define ROUGHDIELECTRIC_H
 
 #include "../scene.hlsli"
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 #include "../microfacet.hlsli"
 #endif
 
@@ -27,7 +27,7 @@ struct RoughDielectric {
     }
 #endif
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
     float3 specular_reflectance;
     float roughness;
     float3 specular_transmittance;
@@ -68,7 +68,7 @@ struct RoughDielectric {
             r.pdf_fwd = (F * D * G_in) / (4 * abs(local_dir_in.z));
             r.pdf_rev = (F * D * G_out) / (4 * abs(local_dir_out.z));
         } else {
-            // Snell-Descartes law predicts that the light will contract/expand 
+            // Snell-Descartes law predicts that the light will contract/expand
             // due to the different index of refraction. So the normal BSDF needs
             // to scale with 1/eta^2. However, the "adjoint" of the BSDF does not have
             // the eta term. This is due to the non-reciprocal nature of the index of refraction:
@@ -85,7 +85,7 @@ struct RoughDielectric {
             // "Microfacet Models for Refraction through Rough Surfaces"
             r.f = specular_transmittance * (eta_factor * (1 - F) * D * (G_in * G_out) * local_eta * local_eta * abs(h_dot_out * h_dot_in)) / (abs(local_dir_in.z) * sqrt_denom * sqrt_denom);
             r.pdf_fwd = ((1 - F) * D * G_in) * abs((local_eta * local_eta) * h_dot_out * h_dot_in / (local_dir_in.z * sqrt_denom * sqrt_denom));
-            
+
             const Real rev_local_eta = 1 / local_eta;
             const Real rev_sqrt_denom = h_dot_out + rev_local_eta * h_dot_in;
             r.pdf_rev = ((1 - F) * D * G_out) * abs((rev_local_eta * rev_local_eta) * h_dot_in * h_dot_out / (local_dir_out.z * rev_sqrt_denom * rev_sqrt_denom));
@@ -95,11 +95,11 @@ struct RoughDielectric {
 #endif
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 template<> inline RoughDielectric load_material(uint address, const ShadingData shading_data) {
     RoughDielectric material;
     material.specular_transmittance = sample_image(load_image_value3(address), shading_data);
-    
+
     const ImageValue3 specular = load_image_value3(address);
     const ImageValue1 roughness = load_image_value1(address);
     const float4 s = sample_image(specular.image(), shading_data.uv, shading_data.uv_screen_size);

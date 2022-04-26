@@ -8,7 +8,7 @@ struct HeterogeneousVolume {
 	float anisotropy;
 	float3 albedo_scale;
 	float attenuation_unit;
-	
+
 #ifdef __cplusplus
 	component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>> density_grid, albedo_grid;
 	Buffer::View<byte> density_buffer, albedo_buffer;
@@ -29,7 +29,7 @@ struct HeterogeneousVolume {
 	}
 #endif
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	uint density_volume_index;
 	uint albedo_volume_index;
 
@@ -48,7 +48,7 @@ struct HeterogeneousVolume {
 		else
 			return read_albedo(albedo_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[albedo_volume_index], albedo_accessor, floor(pos_index)));
 	}
-	
+
 	struct DeltaTrackResult {
 		float3 transmittance; // includes sigma_s, if scattering occured
 		float3 dir_pdf;
@@ -66,7 +66,7 @@ struct HeterogeneousVolume {
 		pnanovdb_readaccessor_init(density_accessor, pnanovdb_tree_get_root(gVolumes[density_volume_index], pnanovdb_grid_get_tree(gVolumes[density_volume_index], pnanovdb_grid_handle_t(0))));
 		if (albedo_volume_index != -1)
 			pnanovdb_readaccessor_init(albedo_accessor, pnanovdb_tree_get_root(gVolumes[albedo_volume_index], pnanovdb_grid_get_tree(gVolumes[albedo_volume_index], pnanovdb_grid_handle_t(0))));
-	
+
 		const float3 majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor.root));
 		const uint channel = rng_next_uint(index_1d)%3;
 		if (majorant[channel] == 0) return r;
@@ -110,10 +110,10 @@ struct HeterogeneousVolume {
 		}
 		return r;
 	}
-#endif // __HLSL_VERSION
+#endif // __HLSL__
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 template<> inline HeterogeneousVolume load_material(uint address, const ShadingData shading_data) {
 	HeterogeneousVolume material;

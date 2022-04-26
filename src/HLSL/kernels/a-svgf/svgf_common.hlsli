@@ -27,7 +27,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "filter_type.hlsli"
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 #include "../../scene.hlsli"
 

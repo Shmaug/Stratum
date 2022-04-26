@@ -3,7 +3,7 @@
 
 #include "image_value.hlsli"
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 #define gCosThetaEpsilon 1e-6
 
@@ -105,7 +105,7 @@ inline void store_material(ByteAppendBuffer& bytes, ResourcePool& resources, con
 	case e##BSDF_T: \
 		get<BSDF_T>(material).store(bytes, resources); \
 		break;
-		
+
 	switch (material.index()) {
 	default:
 	FOR_EACH_BSDF_TYPE( STORE_MATERIAL_CASE )

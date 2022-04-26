@@ -16,7 +16,7 @@ struct Reservoir {
 	float total_weight;
 	float sample_target_pdf; // p_q_hat
 	float sample_source_pdf;
-	
+
 	inline float W() CONST_CPP { return (M == 0 || sample_target_pdf == 0) ? 0 : (total_weight / M) / sample_target_pdf; }
 
 	inline bool update(const float rnd, const ReservoirLightSample candidate_sample, const float source_pdf, const float target_pdf) {
@@ -43,7 +43,7 @@ struct Reservoir {
 	}
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 inline void init_reservoir(out Reservoir r) {
 	BF_SET(r.light_sample.instance_primitive_index, INVALID_INSTANCE, 0, 16);
 	BF_SET(r.light_sample.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);

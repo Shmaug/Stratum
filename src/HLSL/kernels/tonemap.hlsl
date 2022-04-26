@@ -62,7 +62,7 @@ void main(uint3 index : SV_DispatchThreadID) {
 	}
 	if (gDebugMode == DebugMode::eAlbedo)
 		radiance = gAlbedo[index.xy].rgb;
-	
+
 	switch (gDebugMode) {
 		default:
 			radiance *= gPushConstants.gExposure;
@@ -79,7 +79,7 @@ void main(uint3 index : SV_DispatchThreadID) {
 			}
 			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
 			break;
-			
+
 		case DebugMode::eAccumLength:
 			radiance = viridis_quintic(saturate(gDebug1[index.xy].a*gPushConstants.gExposure));
 			break;

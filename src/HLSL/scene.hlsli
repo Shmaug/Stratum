@@ -17,8 +17,7 @@
 #define SAMPLE_FLAG_SAMPLE_RESERVOIRS		BIT(8)
 #define SAMPLE_FLAG_RAY_CONE_LOD 			BIT(9)
 #define SAMPLE_FLAG_ENABLE_VOLUMES 			BIT(10)
-#define SAMPLE_FLAG_DIRECT_ONLY				BIT(11)
-#define SAMPLE_FLAG_CONNECT_TO_VIEWS		BIT(12)
+#define SAMPLE_FLAG_RANDOM_LIGHT_PATHS		BIT(11)
 
 #define INSTANCE_TYPE_TRIANGLES 0
 #define INSTANCE_TYPE_SPHERE 1
@@ -115,7 +114,7 @@ struct ViewData {
 	ProjectionData projection;
 	uint2 image_min;
 	uint2 image_max;
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	inline int2 extent() { return (int2)image_max - (int2)image_min; }
 #endif
 };
@@ -127,8 +126,8 @@ struct VisibilityInfo {
 	uint4 nz;
 	float2 prev_uv;
 	uint pad[2];
-#ifdef __HLSL_VERSION
-	
+#ifdef __HLSL__
+
 	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 
@@ -147,16 +146,17 @@ struct PathTracePushConstants {
 	uint gViewCount;
 	uint gLightCount;
 	uint gEnvironmentMaterialAddress;
-	float gEnvironmentSampleProbability;	
+	float gEnvironmentSampleProbability;
 	uint gRandomSeed;
 	uint gReservoirSamples;
 	uint gMaxNullCollisions;
 	uint gMinDepth;
 	uint gMaxEyeDepth;
 	uint gMaxLightDepth;
+	uint gNumLightPaths;
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 
 inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, const uint viewCount) {
 	for (uint i = 0; i < viewCount; i++)
@@ -184,7 +184,7 @@ inline uint3 load_tri_(ByteAddressBuffer indices, uint indexByteOffset, uint ind
 	uint3 tri;
 	if (indexStride == 2) {
 		// https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingSimpleLighting/Raytracing.hlsl
-		const uint dwordAlignedOffset = offsetBytes & ~3;    
+		const uint dwordAlignedOffset = offsetBytes & ~3;
 		const uint2 four16BitIndices = indices.Load2(dwordAlignedOffset);
 		if (dwordAlignedOffset == offsetBytes) {
 				tri.x = four16BitIndices.x & 0xffff;

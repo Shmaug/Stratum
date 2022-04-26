@@ -16,7 +16,7 @@ struct Emissive {
 #endif
 };
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 template<> inline Emissive load_material(uint address, const ShadingData shading_data) {
     Emissive material;
     material.emission = load_image_value3(address);
@@ -30,5 +30,5 @@ template<> inline EmissionEvalRecord eval_material_emission(const Emissive mater
     return r;
 }
 
-#endif // __HLSL_VERSION
+#endif // __HLSL__
 #endif

@@ -6,7 +6,7 @@
 struct RayDifferential {
 	float radius;
 	float spread;
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	inline void transfer(const float t) {
 		radius += spread*t;
 	}
@@ -38,7 +38,7 @@ struct ShadingData {
 	float uv_screen_size;
 	float mean_curvature;
 
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 	inline float3 shading_normal() { return unpack_normal_octahedron(packed_shading_normal); }
 	inline float3 tangent() { return unpack_normal_octahedron(packed_tangent); }
@@ -65,12 +65,12 @@ struct ShadingData {
 // 32 bytes
 struct PathVertex {
 	float3 beta;
-	uint count;
+	uint path_length;
 	uint instance_primitive_index;
 	uint vol_index;
 	float pdf_fwd;
 	float pdf_rev;
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 #endif
@@ -86,12 +86,12 @@ struct PathState {
 	RayDifferential ray_differential;
 	float eta_scale;
 	uint radiance_mutex;
-#ifdef __HLSL_VERSION
+#ifdef __HLSL__
 	inline float3 prev_vertex_geometry_normal() { return unpack_normal_octahedron(prev_vertex_packed_geometry_normal); }
 #endif
 };
 
-#if defined(__HLSL_VERSION) && defined(PT_DESCRIPTOR_SET_0)
+#if defined(__HLSL__) && defined(PT_DESCRIPTOR_SET_0)
 // assigns everything except r.position
 inline void make_triangle_shading_data(inout ShadingData r, const uint instance_index, const float2 bary, const PackedVertexData v0, const PackedVertexData v1, const PackedVertexData v2) {
 	r.uv = v0.uv() + (v1.uv() - v0.uv())*bary.x + (v2.uv() - v0.uv())*bary.y;
