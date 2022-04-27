@@ -1,117 +1,82 @@
 #include "Node/Application.hpp"
 #include "Node/Inspector.hpp"
-#include "Node/RayTraceScene.hpp"
+#include "Node/PathTracer.hpp"
 #include "Node/XR.hpp"
 
 using namespace stm;
-using namespace stm::hlsl;
 
 NodeGraph gNodeGraph;
 
-void make_scene(const component_ptr<Application>& app) {
-  auto scene = app.node().make_component<RayTraceScene>();
-  app->OnUpdate.listen(scene.node(), bind(&RayTraceScene::update, scene.get(), std::placeholders::_1, std::placeholders::_2), EventPriority::eAlmostLast);
-
-#ifdef STRATUM_ENABLE_OPENXR
-  auto xrnode = app.node().find_in_descendants<XR>();
-  if (xrnode) {
-    /*
-    xrnode->OnRender.listen(scene.node(), [=](CommandBuffer& commandBuffer) {
-      vector<ViewData> views;
-      views.reserve(xrnode->views().size());
-      for (const XR::View& v : xrnode->views())
-        views.emplace_back( v.mCamera.view(node_to_world(v.mCamera.node())) );
-      scene->render(commandBuffer, xrnode->back_buffer(), views);
-      xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
-    });
-
-    app->OnRenderWindow.listen(scene.node(), [=](CommandBuffer& commandBuffer) {
-      commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
-    }, EventPriority::eAlmostFirst);
-    */
-  } else
-#endif
-  {
-    app->OnRenderWindow.listen(scene.node(), [=](CommandBuffer& commandBuffer) {
-      scene->render(commandBuffer, app->window().back_buffer(), { app->mMainCamera->view(node_to_world(app->mMainCamera.node())) });
-    });
-  }
-}
-
 void load_plugins(const string& plugin_info, Node& dst) {
-  // load plugins
-  size_t s0 = plugin_info.find(';');
-  fs::path filename(plugin_info.substr(0,s0));
-  auto plugin = dst.make_child(filename.stem().string()).make_component<dynamic_library>(filename);
-  while (s0 != string::npos) {
-    s0++;
-    size_t s1 = plugin_info.find(';', s0);
-    string fn = plugin_info.substr(s0, (s1 == string::npos) ? s1 : s1-s0);
-    cout << "Calling " << filename << ":" << fn << endl;
-    plugin->invoke<void, Node&>(fn, ref(plugin.node()));
-    s0 = s1;
-  }
+	// load plugins
+	size_t s0 = plugin_info.find(';');
+	fs::path filename(plugin_info.substr(0, s0));
+	auto plugin = dst.make_child(filename.stem().string()).make_component<dynamic_library>(filename);
+	while (s0 != string::npos) {
+		s0++;
+		size_t s1 = plugin_info.find(';', s0);
+		string fn = plugin_info.substr(s0, (s1 == string::npos) ? s1 : s1 - s0);
+		cout << "Calling " << filename << ":" << fn << endl;
+		plugin->invoke<void, Node&>(fn, ref(plugin.node()));
+		s0 = s1;
+	}
 }
 
 int main(int argc, char** argv) {
-  cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
-  
-  vector<string> args;
-  for (int i = 0; i < argc; i++)
-    args.emplace_back(argv[i]);
+	cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
 
-  Node& instance_node = gNodeGraph.emplace("Instance");
-  Node& app_node = instance_node.make_child("Application");
+	vector<string> args;
+	for (int i = 0; i < argc; i++)
+		args.emplace_back(argv[i]);
 
-#ifdef STRATUM_ENABLE_OPENXR
-  // init XR first, to load required extensions
-  component_ptr<XR> xrnode;
-  if (ranges::find_if(args, [](const string& s) { return s == "--xr"; }) != args.end()) {
-    xrnode = app_node.make_child("XR").make_component<XR>();
-    string instanceExtensions, deviceExtensions;
-    xrnode->get_vulkan_extensions(instanceExtensions, deviceExtensions);
-    
-    string s;
-    istringstream ss(instanceExtensions);
-    while (getline(ss, s, ' ')) args.push_back("--instanceExtension:" + s);
-    ss = istringstream(deviceExtensions);
-    while (getline(ss, s, ' ')) args.push_back("--deviceExtension:" + s);
-  }
-#endif
-
-  auto instance = instance_node.make_component<Instance>(args);
-#ifdef STRATUM_ENABLE_OPENXR
-  if (xrnode)
-    instance->create_device(xrnode->get_vulkan_device(*instance));
-  else
-#endif
-  instance->create_device();
-
-  auto app = app_node.make_component<Application>(instance->window());
-
-  auto gui = app.node().make_child("ImGui").make_component<Gui>();
-  auto inspector = app.node().make_child("Inspector").make_component<Inspector>();
-
-  app->PreFrame.listen(instance.node(), bind(&Instance::poll_events, instance.get()));
+	Node& root_node = gNodeGraph.emplace("Application");
 
 #ifdef STRATUM_ENABLE_OPENXR
-  if (xrnode) {
-    xrnode->create_session(*instance);
-    app->PreFrame.listen(xrnode.node(), bind_front(&XR::poll_events, xrnode.get()));
-    app->OnUpdate.listen(xrnode.node(), bind(&XR::render, xrnode.get(), std::placeholders::_1), EventPriority::eAlmostLast + 1024);
-    app->PostFrame.listen(xrnode.node(), bind(&XR::present, xrnode.get()));
-  }
+	// init XR first, to load required extensions
+	component_ptr<XR> xrnode;
+	if (ranges::find_if(args, [](const string& s) { return s == "--xr"; }) != args.end()) {
+		xrnode = root_node.make_child("XR").make_component<XR>();
+		string instanceExtensions, deviceExtensions;
+		xrnode->get_vulkan_extensions(instanceExtensions, deviceExtensions);
+
+		string s;
+		istringstream ss(instanceExtensions);
+		while (getline(ss, s, ' ')) args.push_back("--instanceExtension:" + s);
+		ss = istringstream(deviceExtensions);
+		while (getline(ss, s, ' ')) args.push_back("--deviceExtension:" + s);
+	}
 #endif
 
-  make_scene(app);
+	auto instance = root_node.make_component<Instance>(args);
 
-  for (const string& plugin_info : instance->find_arguments("loadPlugin"))
-    load_plugins(plugin_info, app.node());
+	vk::PhysicalDevice device;
+#ifdef STRATUM_ENABLE_OPENXR
+	if (xrnode) device = xrnode->get_vulkan_device(*instance);
+#endif
+	instance->create_device();
 
-  app->run();
+	Node& app_node = root_node.make_child("Scene");
+	auto app = app_node.make_component<Application>(instance->window());
+	auto gui = app_node.make_component<Gui>();
+	auto inspector = app_node.make_component<Inspector>();
+	auto scene = app_node.make_component<Scene>();
 
-  instance->device().flush();
+#ifdef STRATUM_ENABLE_OPENXR
+	if (xrnode) xrnode->create_session(*instance);
+#endif
 
-	gNodeGraph.erase_recurse(instance_node);
+	Node& renderer_node = app_node.make_child("Renderer");
+	auto renderer = renderer_node.make_component<PathTracer>();
+	auto denoiser = renderer_node.make_component<Denoiser>();
+
+	for (const string& plugin_info : instance->find_arguments("loadPlugin"))
+		load_plugins(plugin_info, app.node());
+
+	app->run();
+
+	instance->device().flush();
+
+	gNodeGraph.erase_recurse(root_node);
+
 	return EXIT_SUCCESS;
 }

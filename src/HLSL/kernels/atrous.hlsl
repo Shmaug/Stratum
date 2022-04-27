@@ -26,13 +26,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #pragma compile dxc -spirv -T cs_6_7 -E main
+#pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
 
 #define PT_DESCRIPTOR_SET_1
-#include "../../pt_descriptors.hlsli"
-#include "svgf_common.hlsli"
+#include "../pt_descriptors.hlsli"
+#include "../svgf_common.hlsli"
 
-[[vk::constant_id(0)]] const uint gGradientDownsample = 3u;
-[[vk::constant_id(1)]] const uint gFilterKernelType = 0u;
+[[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
+[[vk::constant_id(1)]] const bool gUseVisibility = true;
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
@@ -41,25 +42,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	uint gStepSize;
 } gPushConstants;
 
-#define gInput1 gDiffImage1[gPushConstants.gIteration%2]
-#define gInput2 gDiffImage2[gPushConstants.gIteration%2]
-#define gOutput1 gDiffImage1[(gPushConstants.gIteration%2) ^ 1]
-#define gOutput2 gDiffImage2[(gPushConstants.gIteration%2) ^ 1]
+#define gInput gFilterImages[gPushConstants.gIteration%2]
+#define gOutput gFilterImages[(gPushConstants.gIteration+1)%2]
 
-static const float gaussian_kernel[2][2] = {
-	{ 1.0 / 4.0, 1.0 / 8.0  },
-	{ 1.0 / 8.0, 1.0 / 16.0 }
-};
-
-class TapData {
-	ViewData view;
-	int2 ipos;
-	float2 z_center;
+struct TapData {
+	uint view_index;
+	uint screen_width;
+	int2 index;
+	uint2 s_mem_index;
+	float3 center_normal;
+	min16float z_center;
+	min16float2 dz_center;
 	float l_center;
 	float sigma_l;
-	float2 sum_color;
-	float sum_luminance;
-	float sum_variance;
+
+	float4 sum_color;
 	float sum_weight;
 
 	inline void compute_sigma_luminance() {
@@ -67,39 +64,40 @@ class TapData {
 			{ 1.0 / 4.0, 1.0 / 8.0  },
 			{ 1.0 / 8.0, 1.0 / 16.0 }
 		};
-		float sum = sum_variance * kernel[0][0];
+		float s = sum_color.a*kernel[1][1];
 		for (int yy = -1; yy <= 1; yy++)
 			for (int xx = -1; xx <= 1; xx++) {
 				if (xx == 0 && yy == 0) continue;
-				const int2 p = ipos + int2(xx, yy);
-				if (!test_inside_screen(p*gGradientDownsample, view)) continue;
-				sum += gInput2[p].g * kernel[abs(xx)][abs(yy)];
+				const int2 p = index + int2(xx, yy);
+				if (!test_inside_screen(p, gViews[view_index])) continue;
+				s += gInput[p].a * kernel[abs(xx)][abs(yy)];
 			}
-		sigma_l = sqrt(max(sum, 0))*gPushConstants.gSigmaLuminanceBoost;
+		sigma_l = sqrt(max(s, 0))*gPushConstants.gSigmaLuminanceBoost;
 	}
 
-	void tap(int2 offset, float kernel_weight) {
-		const int2 p = ipos + offset;
-		if (!test_inside_screen(p*gGradientDownsample, view)) return;
-		
-		const float2 color1_p = gInput1[p]; 
-		const float4 color2_p = gInput2[p]; 
-		const float z_p       = color2_p.b;
-		const float l_p       = color2_p.r;
+	inline void tap(const int2 offset, const float kernel_weight) {
+		const int2 p = index + offset;
+		if (!test_inside_screen(p, gViews[view_index])) return;
 
-		const float w_l = abs(l_p - l_center) / (sigma_l + 1e-8); 
-		const float w_z = abs(z_p - z_center.x) / (z_center.y * length(int2(offset) * gPushConstants.gStepSize * gGradientDownsample) + 1e-2); 
-		const float w = exp(-w_l * w_l - w_z) * kernel_weight;
+		const float4 color_p  = gInput[p];
+		const float l_p = luminance(color_p.rgb);
+
+		const uint p_1d = p.y*screen_width + p.x;
+
+		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
+		const float w_z = gUseVisibility ? 3 * abs(gVisibility[p_1d].z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2) : 0;
+		const float w_n = gUseVisibility ? pow(max(0, dot(gVisibility[p_1d].normal(), center_normal)), 256) : 1;
+
+		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
 		if (isinf(w) || isnan(w) || w == 0) return;
 
-		sum_color     += color1_p * w; 
-		sum_luminance += l_p * w;
-		sum_variance  += w * w * color2_p.g; 
-		sum_weight    += w; 
+		sum_color  += color_p * float4(w, w, w, w*w);
+		sum_weight += w;
 	}
 };
 
-void subsampled(inout TapData t) {
+
+inline void subsampled(inout TapData t) {
 	/*
 	| | |x| | |
 	| |x| |x| |
@@ -108,7 +106,7 @@ void subsampled(inout TapData t) {
 	| | |x| | |
 	*/
 
-	if((gPushConstants.gIteration & 1) == 0) {
+	if ((gPushConstants.gIteration & 1) == 0) {
 		/*
 		| | | | | |
 		| |x| |x| |
@@ -137,15 +135,15 @@ void subsampled(inout TapData t) {
 	t.tap(int2( 1, -1) * gPushConstants.gStepSize, 1.0);
 }
 
-void box3(inout TapData t) {
+inline void box3(inout TapData t) {
 	const int r = 1;
-	for(int yy = -r; yy <= r; yy++)
-		for(int xx = -r; xx <= r; xx++)
-			if(xx != 0 || yy != 0)
+	for (int yy = -r; yy <= r; yy++)
+		for (int xx = -r; xx <= r; xx++)
+			if (xx != 0 || yy != 0)
 				t.tap(int2(xx, yy) * gPushConstants.gStepSize, 1.0);
 }
 
-void box5(inout TapData t) {
+inline void box5(inout TapData t) {
 	const int r = 2;
 	for(int yy = -r; yy <= r; yy++)
 		for(int xx = -r; xx <= r; xx++)
@@ -153,7 +151,7 @@ void box5(inout TapData t) {
 				t.tap(int2(xx, yy) * gPushConstants.gStepSize, 1.0);
 }
 
-void atrous(inout TapData t) {
+inline void atrous(inout TapData t) {
 	const float kernel[3] = { 1.0, 2.0 / 3.0, 1.0 / 6.0 };
 
 	t.tap(int2( 1,  0) * gPushConstants.gStepSize, 2.0 / 3.0);
@@ -188,24 +186,25 @@ void atrous(inout TapData t) {
 }
 
 [numthreads(8,8,1)]
-void main(int2 index : SV_DispatchThreadId) {
-	const uint viewIndex = get_view_index(index.xy*gGradientDownsample, gViews, gPushConstants.gViewCount);
-	if (viewIndex == -1) return;
+void main(uint3 index : SV_DispatchThreadId) {
 	TapData t;
-	t.view = gViews[viewIndex];
-	t.ipos = index.xy;
-	const float2 color_center1 = gInput1[t.ipos];
-	const float4 color_center2 = gInput2[t.ipos];
-	t.sum_color     = color_center1;
-	t.sum_luminance = color_center2.r;
-	t.sum_variance  = color_center2.g;
-	t.sum_weight    = 1;
-	t.l_center      = color_center2.r;
-	t.z_center      = color_center2.ba;
+	t.view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
+	if (t.view_index == -1) return;
+	uint h;
+	gOutput.GetDimensions(t.screen_width, h);
+
+	const uint index_1d = index.y*t.screen_width + index.x;
+	t.index = index.xy;
+	t.center_normal = gVisibility[index_1d].normal();
+	t.z_center = gVisibility[index_1d].z();
+	t.dz_center = gVisibility[index_1d].dz_dxy();
+	t.sum_weight = 1;
+	t.sum_color = gInput[index.xy];
+	t.l_center = luminance(t.sum_color.rgb);
 
 	t.compute_sigma_luminance();
-	
-	if (!isinf(t.z_center.x)) { // only filter foreground pixels
+
+	if (!isinf(t.z_center)) { // only filter foreground pixels
 		switch (gFilterKernelType) {
 		default:
 		case FilterKernelType::eAtrous:
@@ -235,11 +234,14 @@ void main(int2 index : SV_DispatchThreadId) {
 		}
 	}
 
-	const float invSum = 1/t.sum_weight;
-	t.sum_color     *= invSum;
-	t.sum_luminance *= invSum;
-	t.sum_variance  *= invSum*invSum;
+	const float inv_w = 1/t.sum_weight;
+	gOutput[t.index] = t.sum_color*float4(inv_w, inv_w, inv_w, inv_w*inv_w);
+}
 
-	gOutput1[t.ipos] = t.sum_color;
-	gOutput2[t.ipos] = float4(t.sum_luminance, t.sum_variance, t.z_center);
+[numthreads(8,8,1)]
+void copy_rgb(uint3 index : SV_DispatchThreadID) {
+	uint2 resolution;
+	gAccumColor.GetDimensions(resolution.x, resolution.y);
+	if (any(index.xy >= resolution)) return;
+	gAccumColor[index.xy] = float4(gFilterImages[0][index.xy].rgb, gAccumColor[index.xy].w);
 }

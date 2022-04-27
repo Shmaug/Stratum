@@ -11,16 +11,16 @@ public:
 		list<shared_ptr<sample_t>> mChildren;
 		chrono::high_resolution_clock::time_point mStartTime;
 		chrono::nanoseconds mDuration;
-		Vector4f mColor;
+		float4 mColor;
 		string mLabel;
-		
+
 		sample_t() = default;
 		sample_t(sample_t&& s) = default;
-		inline sample_t(const shared_ptr<sample_t>& parent, const string& label, const Vector4f& color)
+		inline sample_t(const shared_ptr<sample_t>& parent, const string& label, const float4& color)
 			: mParent(parent), mColor(color), mLabel(label), mStartTime(chrono::high_resolution_clock::now()), mDuration(chrono::nanoseconds::zero()) {}
 	};
 
-	inline static void begin_sample(const string& label, const Vector4f& color = Vector4f(.3f, .9f, .3f, 1)) {
+	inline static void begin_sample(const string& label, const float4& color = float4(.3f, .9f, .3f, 1)) {
 		auto s = make_unique<sample_t>(mCurrentSample, label, color);
 		if (mCurrentSample)
 			mCurrentSample = mCurrentSample->mChildren.emplace_back(move(s));

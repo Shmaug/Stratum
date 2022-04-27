@@ -31,7 +31,7 @@ stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position
 
 	ShowWindow(mHwnd, SW_SHOW);
 	DragAcceptFiles(mHwnd, TRUE);
-	
+
 	vk::Win32SurfaceCreateInfoKHR info = {};
 	info.hinstance = mInstance.hInstance();
 	info.hwnd = mHwnd;
@@ -104,7 +104,7 @@ stm::Window::~Window() {
 
 bool stm::Window::acquire_image() {
 	ProfilerRegion ps("Window::acquire_image");
-	
+
 	if (mRecreateSwapchain || !mSwapchain) {
 		create_swapchain();
 		if (!mSwapchain) return false;
@@ -210,7 +210,7 @@ void stm::Window::fullscreen(bool fs) {
 
 void stm::Window::create_swapchain() {
 	if (mSwapchain) destroy_swapchain();
-	
+
 	mPresentQueueFamily = mInstance.device().find_queue_family(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
@@ -251,7 +251,7 @@ void stm::Window::create_swapchain() {
 	createInfo.clipped = VK_FALSE;
 	mSwapchain = mPresentQueueFamily->mDevice->createSwapchainKHR(createInfo);
 	mPresentQueueFamily->mDevice.set_debug_name(mSwapchain, "Window/Swapchain");
-		
+
 	// create per-frame image views and semaphores
 	vector<vk::Image> images = mPresentQueueFamily->mDevice->getSwapchainImagesKHR(mSwapchain);
 	mSwapchainImages.clear();
@@ -309,7 +309,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, lpb.data(), &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) break;
 		const RAWINPUT& raw = *reinterpret_cast<const RAWINPUT*>(lpb.data());
 		if (raw.header.dwType == RIM_TYPEMOUSE) {
-			mInputState.add_cursor_delta(Vector2f((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY));
+			mInputState.add_cursor_delta(float2((float)raw.data.mouse.lLastX, (float)raw.data.mouse.lLastY));
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_DOWN) 	mInputState.set_button  (KeyCode::eMouse1);
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_1_UP)  	mInputState.unset_button(KeyCode::eMouse1);
 			if (raw.data.mouse.usButtonFlags & RI_MOUSE_BUTTON_2_DOWN)  mInputState.set_button  (KeyCode::eMouse2);
@@ -326,7 +326,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 			if      (key == VK_LMENU 	|| key == VK_RMENU) 	key = VK_MENU;
 			else if (key == VK_LCONTROL || key == VK_RCONTROL) 	key = VK_CONTROL;
 			else if (key == VK_LSHIFT 	|| key == VK_RSHIFT) 	key = VK_SHIFT;
-			
+
 			if (raw.data.keyboard.Flags & RI_KEY_BREAK)
 				mInputState.unset_button((KeyCode)key);
 			else {
@@ -344,7 +344,7 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 		POINT pt;
 		GetCursorPos(&pt);
 		ScreenToClient(mHwnd, &pt);
-		mInputState.cursor_pos() = Vector2f((float)pt.x, (float)pt.y);
+		mInputState.cursor_pos() = float2((float)pt.x, (float)pt.y);
 		break;
 	}
 	case WM_DROPFILES: {

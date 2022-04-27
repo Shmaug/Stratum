@@ -1,4 +1,4 @@
-#include "ShaderModule.hpp"
+#include "Shader.hpp"
 
 #include <json.hpp>
 
@@ -82,14 +82,14 @@ pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(string name) {
 	throw invalid_argument("Failed to parse attribute type");
 }
 
-ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
+Shader::Shader(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
 	fs::path json_path = fs::path(spv).replace_extension("json");
 	std::ifstream s(json_path);
 	if (!s.is_open()) throw runtime_error("Could not open " + json_path.string());
-	
+
 	auto shader = read_file<vector<uint32_t>>(spv);
-	mShaderModule = device->createShaderModule(vk::ShaderModuleCreateInfo({}, shader));
-	
+	mShader = device->createShaderModule(vk::ShaderModuleCreateInfo({}, shader));
+
 	nlohmann::json j;
 	s >> j;
 
@@ -123,8 +123,13 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 
 	mEntryPoint = j["entryPoints"][0]["name"];
 	mStage = gStageMap.at(j["entryPoints"][0]["mode"]);
-	ranges::copy(j["entryPoints"][0]["workgroup_size"], mWorkgroupSize.begin());
-	
+	if (j["entryPoints"][0]["workgroup_size"].is_array()) {
+		mWorkgroupSize.width = j["entryPoints"][0]["workgroup_size"][0];
+		mWorkgroupSize.height = j["entryPoints"][0]["workgroup_size"][1];
+		mWorkgroupSize.depth = j["entryPoints"][0]["workgroup_size"][2];
+	} else
+		mWorkgroupSize = vk::Extent3D(0, 0, 0);
+
 	for (const auto& v : j["specialization_constants"]) {
 		uint32_t defaultValue = 0;
 		if (v["type"] == "int")
@@ -138,7 +143,7 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 			defaultValue = v["default_value"].get<bool>();
 		mSpecializationConstants.emplace(v["name"], make_pair(v["id"], defaultValue));
 	}
-		
+
 	for (const auto& v : j["push_constants"])
 		for (const auto& c : j["types"][v["type"].get<string>()]["members"]) {
 			auto& dst = mPushConstants[c["name"]];
@@ -183,11 +188,11 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 	for (const auto& v : j["textures"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eCombinedImageSampler, spirv_array_size(j, v)));
 	for (const auto& v : j["images"]) {
-		
+
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageImage, spirv_array_size(j, v))); // TODO: texelbuffer
 	}
 	for (const auto& v : j["separate_images"]) {
-		
+
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampledImage, spirv_array_size(j, v)));
 	}
 	for (const auto& v : j["separate_samplers"])
@@ -205,10 +210,4 @@ ShaderModule::ShaderModule(Device& device, const fs::path& spv) : DeviceResource
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eAccelerationStructureKHR, spirv_array_size(j, v)));
 
 	cout << "Loaded " << spv << endl;
-}
-
-void ShaderModule::load_from_dir(ShaderDatabase& dst, Device& device, const fs::path& dir) {
-	for (const fs::path& p : fs::directory_iterator(dir))
-		if (p.extension() == ".spv")
-			dst.emplace(p.stem().string(), make_shared<ShaderModule>(device, p)).first->first;
 }

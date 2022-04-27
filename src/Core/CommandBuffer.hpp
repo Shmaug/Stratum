@@ -9,7 +9,7 @@
 namespace stm {
 
 class CommandBuffer : public DeviceResource {
-public:	
+public:
 	// assumes a CommandPool has been created for this_thread in queueFamily
 	STRATUM_API CommandBuffer(Device::QueueFamily& queueFamily, const string& name, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	STRATUM_API ~CommandBuffer();
@@ -23,14 +23,14 @@ public:
 	inline void signal_when_done(const shared_ptr<Semaphore>& semaphore) { hold_resource(semaphore); mSignalSemaphores.emplace(semaphore); }
 	inline const shared_ptr<Fence>& fence() const { return mFence; }
 	inline Device::QueueFamily& queue_family() const { return mQueueFamily; }
-	
+
 	inline const shared_ptr<Framebuffer>& bound_framebuffer() const { return mBoundFramebuffer; }
 	inline uint32_t subpass_index() const { return mSubpassIndex; }
 	inline const shared_ptr<Pipeline>& bound_pipeline() const { return mBoundPipeline; }
 	inline const shared_ptr<DescriptorSet>& bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
 
 	// Label a region for a tool such as RenderDoc
-	STRATUM_API void begin_label(const string& label, const Array4f& color = { 1,1,1,0 });
+	STRATUM_API void begin_label(const string& label, const float4& color = { 1,1,1,0 });
 	STRATUM_API void end_label();
 
 	STRATUM_API void reset(const string& name = "Command Buffer");
@@ -164,21 +164,21 @@ public:
 	inline void dispatch(const vk::Extent2D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, 1); }
 	inline void dispatch(const vk::Extent3D& dim) { mCommandBuffer.dispatch(dim.width, dim.height, dim.depth); }
 	inline void dispatch(uint32_t x, uint32_t y=1, uint32_t z=1) { mCommandBuffer.dispatch(x, y, z); }
-	
+
 	// dispatch on ceil(size / workgroupSize)
 	inline void dispatch_over(const vk::Extent2D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
-			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
-			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1],
+			(dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width,
+			(dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height,
 			1);
 	}
 	inline void dispatch_over(const vk::Extent3D& dim) {
 		auto cp = dynamic_pointer_cast<ComputePipeline>(mBoundPipeline);
 		mCommandBuffer.dispatch(
-			(dim.width + cp->workgroup_size()[0] - 1) / cp->workgroup_size()[0],
-			(dim.height + cp->workgroup_size()[1] - 1) / cp->workgroup_size()[1], 
-			(dim.depth + cp->workgroup_size()[2] - 1) / cp->workgroup_size()[2]);
+			(dim.width + cp->workgroup_size().width - 1) / cp->workgroup_size().width,
+			(dim.height + cp->workgroup_size().height - 1) / cp->workgroup_size().height,
+			(dim.depth + cp->workgroup_size().depth - 1) / cp->workgroup_size().depth);
 	}
 	inline void dispatch_over(uint32_t x, uint32_t y = 1, uint32_t z = 1) { return dispatch_over(vk::Extent3D(x,y,z)); }
 
@@ -194,7 +194,7 @@ public:
 		mBoundDescriptorSets.clear();
 		return true;
 	}
-	
+
 	template<typename T>
 	inline void push_constant(const string& name, const T& value) {
 		auto it = mBoundPipeline->push_constants().find(name);
@@ -266,15 +266,15 @@ private:
 	friend class Device;
 
 	enum class CommandBufferState { eRecording, eInFlight, eDone };
-	
+
 	STRATUM_API void clear();
-	
+
 	vk::CommandBuffer mCommandBuffer;
 
 	Device::QueueFamily& mQueueFamily;
 	vk::CommandPool mCommandPool;
 	CommandBufferState mState;
-	
+
 	shared_ptr<Fence> mFence;
 	unordered_set<shared_ptr<Semaphore>> mSignalSemaphores;
 	unordered_map<shared_ptr<Semaphore>, vk::PipelineStageFlags> mWaitSemaphores;

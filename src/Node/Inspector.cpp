@@ -2,22 +2,9 @@
 #include "Inspector.hpp"
 #include "Scene.hpp"
 #include "Application.hpp"
-#include "RayTraceScene.hpp" // for create_pipelines
 
-#include <portable-file-dialogs.h>
+namespace stm {
 
-using namespace stm;
-using namespace stm::hlsl;
-
-inline void inspector_gui_fn(Application* app) {
-	if (ImGui::Button("Reload Shaders")) {
-		app->window().mInstance.device()->waitIdle();
-		//app->window().mInstance.device().flush();
-		app->load_shaders();
-		app->node().for_each_descendant<Gui>([](const auto& v) { v->create_pipelines();	});
-		app->node().for_each_descendant<RayTraceScene>([](const auto& v) { v->create_pipelines();	});
-	}
-}
 inline void inspector_gui_fn(Instance* instance) {
 	ImGui::Text("Vulkan %u.%u.%u",
 		VK_API_VERSION_MAJOR(instance->vulkan_version()),
@@ -43,11 +30,6 @@ inline void inspector_gui_fn(Instance* instance) {
 	int64_t timeout = instance->window().acquire_image_timeout().count();
 	if (ImGui::InputScalar("Swapchain image timeout (ns)", ImGuiDataType_U64, &timeout))
 		instance->window().acquire_image_timeout(chrono::nanoseconds(timeout));
-}
-inline void inspector_gui_fn(ShaderDatabase* shader) {
-	for (const auto& [name, spv] : *shader) {
-		ImGui::LabelText(name.c_str(), "%s | %s", spv->entry_point().c_str(), to_string(spv->stage()).c_str());
-	}
 }
 inline void inspector_gui_fn(GraphicsPipelineState* pipeline) {
 	ImGui::Text("%lu pipelines", pipeline->pipelines().size());
@@ -97,10 +79,8 @@ inline void node_graph_gui_fn(Node& n, Node*& selected) {
 
 Inspector::Inspector(Node& node) : mNode(node) {
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
-	register_inspector_gui_fn<ShaderDatabase>(&inspector_gui_fn);
 	register_inspector_gui_fn<ComputePipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
-	register_inspector_gui_fn<Application>(&inspector_gui_fn);
 	register_inspector_gui_fn<Mesh>(&inspector_gui_fn);
 	register_inspector_gui_fn<nanovdb::GridHandle<nanovdb::HostBuffer>>(&inspector_gui_fn);
 
@@ -114,12 +94,7 @@ Inspector::Inspector(Node& node) : mNode(node) {
 
 		static Node* selected = nullptr;
 
-		if (ImGui::Begin("Scene")) {
-			if (ImGui::Button("Load File")) {
-				auto f = pfd::open_file("Open scene", "", scene_loader_filters());
-				for (const string& filepath : f.result())
-					load_scene(app->node().make_child(fs::path(filepath).filename().string()), commandBuffer, filepath);
-			}
+		if (ImGui::Begin("Node Graph")) {
 			node_graph_gui_fn(mNode.root(), selected);
 		}
 		ImGui::End();
@@ -135,8 +110,8 @@ Inspector::Inspector(Node& node) : mNode(node) {
 						mNode.node_graph().erase(*selected);
 					selected = nullptr;
 				} else {
-					if (!selected->find<hlsl::TransformData>() && ImGui::Button("Add Transform"))
-						selected->make_component<hlsl::TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
+					if (!selected->find<TransformData>() && ImGui::Button("Add Transform"))
+						selected->make_component<TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
 					type_index to_erase = typeid(nullptr_t);
 					for (type_index type : selected->components()) {
 						if (ImGui::CollapsingHeader(type.name())) {
@@ -158,4 +133,6 @@ Inspector::Inspector(Node& node) : mNode(node) {
 		}
 		ImGui::End();
 	}, EventPriority::eAlmostFirst);
+}
+
 }

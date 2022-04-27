@@ -127,7 +127,7 @@ void connect_to_light_paths(const Material material, inout ray_query_t rayQuery,
 	if (gSamplingFlags & SAMPLE_FLAG_RANDOM_LIGHT_PATHS) {
 		// pick random path/vertex
 		const uint light_path_index = rng_next_uint(index_1d) % gPushConstants.gNumLightPaths;
-		const uint light_depth = 1 + (rng_next_uint(index_1d) % (n_light-1));
+		const uint light_depth = rng_next_uint(index_1d) % (n_light);
 
 		const uint light_vertex_index = gPushConstants.gNumLightPaths*light_depth + light_path_index;
 		if (all(gLightPathVertices[light_vertex_index].beta <= 0)) return;
@@ -136,9 +136,10 @@ void connect_to_light_paths(const Material material, inout ray_query_t rayQuery,
 		if (material_address == INVALID_MATERIAL) return;
 
 		const float3 C = connect_to_light_subpath(material, rayQuery, index_1d, dir_in, light_depth);
-		gRadiance[index_2d].rgb += C * path_weight(eye_depth+1, light_depth+1) / (float)(n_light-1);
+		gRadiance[index_2d].rgb += C * path_weight(eye_depth+1, light_depth+1) / (float)n_light;
 
 	} else {
+		// connect every eye subpath vertex to every light subpath vertex
 		for (uint light_depth = 0; light_depth < n_light; light_depth++) {
 			const uint light_vertex_index = gPushConstants.gNumLightPaths*light_depth + index_1d;
 			if (all(gLightPathVertices[light_vertex_index].beta <= 0)) return;

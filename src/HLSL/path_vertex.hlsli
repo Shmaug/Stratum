@@ -91,6 +91,20 @@ struct PathState {
 #endif
 };
 
+struct PathTracePushConstants {
+	uint gViewCount;
+	uint gLightCount;
+	uint gEnvironmentMaterialAddress;
+	float gEnvironmentSampleProbability;
+	uint gRandomSeed;
+	uint gReservoirSamples;
+	uint gMaxNullCollisions;
+	uint gMinDepth;
+	uint gMaxEyeDepth;
+	uint gMaxLightDepth;
+	uint gNumLightPaths;
+};
+
 #if defined(__HLSL__) && defined(PT_DESCRIPTOR_SET_0)
 // assigns everything except r.position
 inline void make_triangle_shading_data(inout ShadingData r, const uint instance_index, const float2 bary, const PackedVertexData v0, const PackedVertexData v1, const PackedVertexData v2) {

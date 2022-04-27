@@ -26,10 +26,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "filter_type.hlsli"
-
-#ifdef __HLSL__
-
-#include "../../scene.hlsli"
+#include "../scene.hlsli"
 
 inline bool test_reprojected_normal(const float3 n1, const float3 n2) {
 	return dot(n1, n2) > cos(degrees(5));
@@ -42,12 +39,3 @@ inline bool test_inside_screen(const int2 p, ViewData view) {
 inline bool test_reprojected_depth(const float z1, const float z2, const float2 offset, const float2 dz) {
 	return abs(z1 - z2) < (length(dz*offset)*1.25 + 1e-2);
 }
-
-#define TILE_OFFSET_SHIFT 3u
-#define TILE_OFFSET_MASK ((1u << TILE_OFFSET_SHIFT) - 1u)
-
-inline uint get_gradient_idx_from_tile_pos(const uint2 pos) {
-	return (1 << 31) | pos.x | (pos.y << TILE_OFFSET_SHIFT);
-}
-
-#endif

@@ -199,14 +199,6 @@ inline void build_distributions(const span<float4>& img, const vk::Extent2D& ext
 	}
 }
 
-inline void build_distributions(CommandBuffer& commandBuffer, const ShaderDatabase& shaders) {
-	auto build_row_dist = make_shared<ComputePipelineState>("build_row_dist", shaders.at("build_row_dist"));
-	auto sum_row_cdf = make_shared<ComputePipelineState>("sum_row_cdf", shaders.at("sum_row_cdf"));
-	auto build_marginal_dist = make_shared<ComputePipelineState>("build_marginal_dist", shaders.at("build_marginal_dist"));
-	auto build_marginal_sample_dist = make_shared<ComputePipelineState>("build_marginal_sample_dist", shaders.at("build_marginal_sample_dist"));
-	auto build_conditional_sample_dist = make_shared<ComputePipelineState>("build_conditional_sample_dist", shaders.at("build_conditional_sample_dist"));
-}
-
 inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path& filename) {
 	ImageData image = load_image_data(commandBuffer.mDevice, filename, false);
 	Environment e;

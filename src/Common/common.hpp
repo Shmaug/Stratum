@@ -5,7 +5,6 @@
 namespace stm {
 
 using namespace std;
-using namespace Eigen;
 namespace fs = std::filesystem;
 
 #pragma region misc concepts
@@ -37,6 +36,7 @@ template<typename R> concept associative_range = ranges::range<R> &&
 template<typename V, typename T> concept view_of = ranges::view<V> && same_as<ranges::range_value_t<V>, T>;
 template<typename R, typename T> concept range_of = ranges::range<R> && same_as<ranges::range_value_t<R>, T>;
 #pragma endregion
+
 #pragma region misc math expressions
 template<unsigned_integral T>
 constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
@@ -91,7 +91,7 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 		case ConsoleColor::eWhite:  	fprintf(str, "\x1B[0m"); break;
 	}
 	#endif
-	
+
 	fprintf(str, format, forward<Args>(a)...);
 
 	#ifdef _WIN32
@@ -102,7 +102,7 @@ inline void fprintf_color(ConsoleColor color, FILE* str, const char* format, Arg
 	fprintf(str, "\x1B[0m");
 	#endif
 }
-template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) { 
+template<typename... Args> inline void printf_color(ConsoleColor color, const char* format, Args&&... a) {
 	fprintf_color(color, stdout, format, forward<Args>(a)...);
 }
 
@@ -277,7 +277,7 @@ inline constexpr T texel_size(vk::Format format) {
 
 	case vk::Format::eD32SfloatS8Uint:
 		return 5;
-		
+
 	case vk::Format::eR16G16B16Unorm:
 	case vk::Format::eR16G16B16Snorm:
 	case vk::Format::eR16G16B16Uscaled:
@@ -470,7 +470,7 @@ inline constexpr T channel_count(vk::Format format) {
 			return 4;
 
 		// TODO: compressed formats
-		
+
 	}
 	return 0;
 }
@@ -482,7 +482,7 @@ inline vk::PipelineStageFlags guess_stage(vk::ImageLayout layout) {
 
 		case vk::ImageLayout::eColorAttachmentOptimal:
 			return vk::PipelineStageFlagBits::eColorAttachmentOutput;
-		
+
 		case vk::ImageLayout::eShaderReadOnlyOptimal:
 		case vk::ImageLayout::eDepthReadOnlyOptimal:
 		case vk::ImageLayout::eStencilReadOnlyOptimal:
@@ -532,7 +532,7 @@ inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
     case vk::ImageLayout::eStencilReadOnlyOptimal:
     case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
 			return vk::AccessFlagBits::eDepthStencilAttachmentRead;
-		
+
     case vk::ImageLayout::eShaderReadOnlyOptimal:
 			return vk::AccessFlagBits::eShaderRead;
     case vk::ImageLayout::eTransferSrcOptimal:
@@ -543,7 +543,7 @@ inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
 	return vk::AccessFlagBits::eShaderRead;
 }
 
-inline auto format_bytes(size_t bytes) { 
+inline auto format_bytes(size_t bytes) {
 	const char* units[] { "B", "KB", "MB", "GB", "TB" };
 	uint32_t i = 0;
 	while (bytes > 1024 && i < ranges::size(units)-1) {
@@ -552,7 +552,7 @@ inline auto format_bytes(size_t bytes) {
 	}
 	return make_pair(bytes, units[i]);
 }
-inline auto format_number(float number) { 
+inline auto format_number(float number) {
 	const char* units[] { "", "K", "M", "B" };
 	uint32_t i = 0;
 	while (number > 1000 && i < ranges::size(units)-1) {
@@ -590,7 +590,7 @@ inline static void store_texel(void* data, const T v, uint32_t c, vk::Format for
 		case vk::Format::eR16G16B16A16Uint:
 			reinterpret_cast<uint16_t*>(data)[c] = (uint16_t)v;
 			break;
-			
+
 		case vk::Format::eR32Sint:
 		case vk::Format::eR32G32Sint:
 		case vk::Format::eR32G32B32Sint:
@@ -603,7 +603,7 @@ inline static void store_texel(void* data, const T v, uint32_t c, vk::Format for
 		case vk::Format::eR32G32B32A32Uint:
 			reinterpret_cast<uint32_t*>(data)[c] = (uint32_t)v;
 			break;
-			
+
 		case vk::Format::eR64Sint:
 		case vk::Format::eR64G64Sint:
 		case vk::Format::eR64G64B64Sint:
@@ -629,7 +629,7 @@ inline static void store_texel(void* data, const T v, uint32_t c, vk::Format for
 		case vk::Format::eR16G16B16A16Unorm:
 			reinterpret_cast<uint16_t*>(data)[c] = is_floating_point_v<T> ? (uint16_t)clamp(v*numeric_limits<uint16_t>::max(), 0, numeric_limits<uint16_t>::max()) : (uint16_t)v;
 			break;
-			
+
 		case vk::Format::eR8Snorm:
 		case vk::Format::eR8G8Snorm:
 		case vk::Format::eR8G8B8Snorm:
@@ -681,7 +681,7 @@ inline static float load_texel(void* data, uint32_t c, vk::Format format) {
 		case vk::Format::eR16G16B16Uint:
 		case vk::Format::eR16G16B16A16Uint:
 			return reinterpret_cast<uint16_t*>(data)[c];
-			
+
 		case vk::Format::eR32Sint:
 		case vk::Format::eR32G32Sint:
 		case vk::Format::eR32G32B32Sint:
@@ -692,7 +692,7 @@ inline static float load_texel(void* data, uint32_t c, vk::Format format) {
 		case vk::Format::eR32G32B32Uint:
 		case vk::Format::eR32G32B32A32Uint:
 			return reinterpret_cast<uint32_t*>(data)[c];
-			
+
 		case vk::Format::eR64Sint:
 		case vk::Format::eR64G64Sint:
 		case vk::Format::eR64G64B64Sint:
@@ -740,3 +740,5 @@ inline static float load_texel(void* data, uint32_t c, vk::Format format) {
 }
 
 }
+
+#include "hlsl_compat.hpp"

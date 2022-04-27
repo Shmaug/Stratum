@@ -1,8 +1,7 @@
 #pragma compile dxc -spirv -T cs_6_7 -E main
 
 #include "../common.hlsli"
-#include "../tonemap.hlsli"
-#include "a-svgf/filter_type.hlsli"
+#include "../tonemap.h"
 
 float3 tonemap_reinhard(const float3 color) {
 	return color/(1+color);
@@ -33,15 +32,10 @@ float3 tonemap_filmic(float3 color) {
 [[vk::constant_id(0)]] const uint gMode = 0;
 [[vk::constant_id(1)]] const bool gModulateAlbedo = true;
 [[vk::constant_id(2)]] const bool gGammaCorrection = true;
-[[vk::constant_id(3)]] const uint gDebugMode = 0;
-[[vk::constant_id(4)]] const uint gGradientDownsample = 3u;
 
 Texture2D<float4> gInput;
 RWTexture2D<float4> gOutput;
 Texture2D<float4> gAlbedo;
-
-Texture2D<float4> gDebug1;
-Texture2D<float2> gDebug2;
 
 [[vk::push_constant]] const struct {
 	float gExposure;
@@ -55,43 +49,25 @@ void main(uint3 index : SV_DispatchThreadID) {
 
 	float3 radiance = gInput[index.xy].rgb;
 	const float3 albedo = gAlbedo[index.xy].rgb;
-	if (gModulateAlbedo && gDebugMode != DebugMode::eDemodulatedRadiance) {
+	if (gModulateAlbedo) {
 		if (albedo.r > 0) radiance.r *= albedo.r;
 		if (albedo.g > 0) radiance.g *= albedo.g;
 		if (albedo.b > 0) radiance.b *= albedo.b;
 	}
-	if (gDebugMode == DebugMode::eAlbedo)
-		radiance = gAlbedo[index.xy].rgb;
 
-	switch (gDebugMode) {
-		default:
-			radiance *= gPushConstants.gExposure;
-			switch (gMode) {
-			case TonemapMode::eReinhard:
-				radiance = tonemap_reinhard(radiance);
-				break;
-			case TonemapMode::eUncharted2:
-				radiance = tonemap_uc2(radiance);
-				break;
-			case TonemapMode::eFilmic:
-				radiance = tonemap_filmic(radiance);
-				break;
-			}
-			if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
-			break;
-
-		case DebugMode::eAccumLength:
-			radiance = viridis_quintic(saturate(gDebug1[index.xy].a*gPushConstants.gExposure));
-			break;
-		case DebugMode::eTemporalGradient:
-			radiance = viridis_quintic(saturate(abs(gDebug2[index.xy/gGradientDownsample].g)*gPushConstants.gExposure));
-			break;
-		case DebugMode::eRelativeTemporalGradient: {
-			const float2 diff1 = gDebug2[index.xy/gGradientDownsample];
-			radiance = viridis_quintic(saturate((diff1.r > 1e-4 ? abs(diff1.g)/diff1.r : 0)*gPushConstants.gExposure));
-			break;
-		}
+	radiance *= gPushConstants.gExposure;
+	switch (gMode) {
+	case (uint)TonemapMode::eReinhard:
+		radiance = tonemap_reinhard(radiance);
+		break;
+	case (uint)TonemapMode::eUncharted2:
+		radiance = tonemap_uc2(radiance);
+		break;
+	case (uint)TonemapMode::eFilmic:
+		radiance = tonemap_filmic(radiance);
+		break;
 	}
+	if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
 
 	gOutput[index.xy] = float4(radiance, 1);
 }

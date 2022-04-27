@@ -4,7 +4,7 @@
 
 namespace stm {
 
-class ShaderModule;
+class Shader;
 
 class VertexArrayObject {
 public:
@@ -14,7 +14,7 @@ public:
 		uint32_t mOffset;
 		vk::VertexInputRate mInputRate;
 	};
-	
+
 	using Attribute = pair<AttributeDescription, Buffer::View<byte>>;
 
 	enum class AttributeType {
@@ -28,7 +28,7 @@ public:
 		eBlendIndex,
 		eBlendWeight
 	};
-	
+
 	VertexArrayObject() = default;
 	VertexArrayObject(VertexArrayObject&&) = default;
 	VertexArrayObject(const VertexArrayObject&) = default;
@@ -50,7 +50,7 @@ public:
 			return nullopt;
 	}
 	inline const vector<Attribute>& at(const AttributeType& t) const { return mAttributes.at(t); }
-	
+
 	inline vector<Attribute>& operator[](const AttributeType& t) { return mAttributes[t]; }
 	inline const vector<Attribute>& operator[](const AttributeType& t) const { return mAttributes.at(t); }
 
@@ -64,14 +64,14 @@ struct VertexLayoutDescription {
 	unordered_map<VertexArrayObject::AttributeType, vector<pair<VertexArrayObject::AttributeDescription, uint32_t/*binding index*/>>> mAttributes;
 	vk::PrimitiveTopology mTopology;
 	vk::IndexType mIndexType;
-	
+
 	VertexLayoutDescription() = default;
 	VertexLayoutDescription(const VertexLayoutDescription&) = default;
 	VertexLayoutDescription(VertexLayoutDescription&&) = default;
 	VertexLayoutDescription& operator=(const VertexLayoutDescription&) = default;
 	VertexLayoutDescription& operator=(VertexLayoutDescription&&) = default;
 	inline VertexLayoutDescription(vk::PrimitiveTopology topo, vk::IndexType indexType = vk::IndexType::eUint16) : mTopology(topo), mIndexType(indexType) {}
-	STRATUM_API VertexLayoutDescription(const ShaderModule& vertexShader, const VertexArrayObject& vertexData, vk::PrimitiveTopology topology, vk::IndexType indexType); 
+	STRATUM_API VertexLayoutDescription(const Shader& vertexShader, const VertexArrayObject& vertexData, vk::PrimitiveTopology topology, vk::IndexType indexType);
 };
 
 class Mesh {
@@ -87,7 +87,7 @@ public:
 	Mesh& operator=(Mesh&&) = default;
 	inline Mesh(const shared_ptr<VertexArrayObject> vertexData, Buffer::StrideView indices, vk::PrimitiveTopology topology)
 		: mVertices(vertexData), mIndices(indices), mTopology(topology) {}
-	
+
 	inline auto& vertices() { return mVertices; }
 	inline auto& indices() { return mIndices; }
 	inline auto& topology() { return mTopology; }
@@ -96,7 +96,7 @@ public:
 	inline const auto& topology() const { return mTopology; }
 	inline vk::IndexType index_type() const { return (mIndices.stride() == sizeof(uint32_t)) ? vk::IndexType::eUint32 : (mIndices.stride() == sizeof(uint16_t)) ? vk::IndexType::eUint16 : vk::IndexType::eUint8EXT; }
 
-	inline VertexLayoutDescription vertex_layout(const ShaderModule& vertexShader) const {
+	inline VertexLayoutDescription vertex_layout(const Shader& vertexShader) const {
 		return VertexLayoutDescription(vertexShader, *mVertices, mTopology, index_type());
 	}
 

@@ -17,6 +17,7 @@
 #define ARG_INOUT(T) inout T
 #define ARG_OUT(T) out T
 #endif
+
 #ifdef __cplusplus
 #define CONST_CPP const
 #define ARG_INOUT(T) T&

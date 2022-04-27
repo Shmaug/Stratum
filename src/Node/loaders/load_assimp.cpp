@@ -8,15 +8,12 @@
 
 #include <portable-file-dialogs.h>
 
-using namespace stm::hlsl;
-
 namespace stm {
 
 inline void shininess_to_roughness(Node& n, CommandBuffer& commandBuffer, ImageValue1& alpha) {
 	alpha.value = sqrt(2 / (alpha.value + 2));
 	if (alpha.image) {
-		const ShaderDatabase& shaders = *n.node_graph().find_components<ShaderDatabase>().front();
-		auto p = make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", shaders.at("material_convert_shininess_to_roughness"));
+		auto p = make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_shininess_to_roughness.spv"));
 
 		Image::View roughness = make_shared<Image>(commandBuffer.mDevice, "roughness", alpha.image.extent(), alpha.image.image()->format(), 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 		p->descriptor("gInput")  = image_descriptor(alpha.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -31,8 +28,7 @@ inline void shininess_to_roughness(Node& n, CommandBuffer& commandBuffer, ImageV
 }
 inline void pbr_to_diffuse_specular(Node& n, CommandBuffer& commandBuffer, ImageValue3& diffuse, ImageValue3& specular, ImageValue1& roughness) {
 	if (diffuse.image && specular.image) {
-		const ShaderDatabase& shaders = *n.node_graph().find_components<ShaderDatabase>().front();
-		auto p = make_shared<ComputePipelineState>("material_convert_pbr_to_diff_spec", shaders.at("material_convert_pbr_to_diff_spec"));
+		auto p = make_shared<ComputePipelineState>("material_convert_pbr_to_diff_spec", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_pbr_to_diff_spec.spv"));
 		Image::View diff_img = make_shared<Image>(commandBuffer.mDevice, "diffuse", diffuse.image.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 		Image::View spec_img = make_shared<Image>(commandBuffer.mDevice, "specular", specular.image.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 		p->descriptor("gInputDiffuse") = image_descriptor(diffuse.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -56,7 +52,7 @@ inline void pbr_to_diffuse_specular(Node& n, CommandBuffer& commandBuffer, Image
 }
 
 #ifdef STRATUM_ENABLE_ASSIMP
-void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
+void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("load_assimp", commandBuffer);
 
 	Device& device = commandBuffer.mDevice;
@@ -64,20 +60,20 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 	// Create an instance of the Importer class
 	Assimp::Importer importer;
 	// And have it read the given file with some example postprocessing
-	// Usually - if speed is not the most important aspect for you - you'll 
+	// Usually - if speed is not the most important aspect for you - you'll
 	// propably to request more postprocessing than we do in this example.
 	uint32_t flags = aiProcessPreset_TargetRealtime_MaxQuality;
 	flags &= ~(aiProcess_CalcTangentSpace); // Never use Assimp's tangent gen code
 	flags &= ~(aiProcess_FindDegenerates); // Avoid converting degenerated triangles to lines
 	flags &= ~(aiProcess_RemoveRedundantMaterials);
 	flags &= ~(aiProcess_SplitLargeMeshes);
-	
+
 	int removeFlags = aiComponent_COLORS;
 	for (uint32_t uvLayer = 1; uvLayer < AI_MAX_NUMBER_OF_TEXTURECOORDS; uvLayer++) removeFlags |= aiComponent_TEXCOORDSn(uvLayer);
 	importer.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, removeFlags);
 
 	const aiScene* scene = importer.ReadFile(filename.string(), flags);
-	
+
 	// If the import failed, report it
 	if (!scene) {
 		cout << "Failed to load " << filename << ": " << importer.GetErrorString() << endl;
@@ -87,7 +83,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 	vector<component_ptr<Material>> materials;
 	vector<component_ptr<Mesh>> meshes;
 	unordered_map<string, Image::View> images;
-	
+
 	auto get_image = [&](fs::path path, bool srgb) -> Image::View {
 		if (path.is_relative()) {
 			fs::path cur = fs::current_path();
@@ -118,7 +114,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 		for (int i = 0; i < scene->mNumMaterials; i++) {
 			aiMaterial* m = scene->mMaterials[i];
 			Material& material = *materials.emplace_back(materials_node.make_child(m->GetName().C_Str()).make_component<Material>());
-			
+
 			/*
 			cout << m->GetName().C_Str() << endl;
 			for (int p = 0; p < m->mNumProperties; p++) {
@@ -146,7 +142,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 				cout << endl;
 			}
 			*/
-			
+
 			ImageValue3 emission;
 			ImageValue3 diffuse;
 			ImageValue3 specular;
@@ -160,7 +156,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
             if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
 			if (m->Get(AI_MATKEY_SHININESS, roughness.value) == AI_SUCCESS) roughness.value = roughness.value;
             if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, tmp_color) == AI_SUCCESS) transmittance.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-			
+
 			m->Get(AI_MATKEY_REFRACTI, eta);
 
 			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
@@ -202,7 +198,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 		bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 		bufferUsage |= vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
 		#endif
-		
+
 		Node& meshes_node = root.make_child("meshes");
 		for (int i = 0; i < scene->mNumMeshes; i++) {
 			aiMesh* m = scene->mMeshes[i];
@@ -227,7 +223,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 			bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 			bufferUsage |= vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
 			#endif
-			
+
 			auto vao = make_shared<VertexArrayObject>(unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>>{
 				{ VertexArrayObject::AttributeType::ePosition, { {
 					VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex },
@@ -241,7 +237,7 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 			commandBuffer.copy_buffer(positions_tmp, vao->at(VertexArrayObject::AttributeType::ePosition)[0].second);
 			commandBuffer.copy_buffer(normals_tmp, vao->at(VertexArrayObject::AttributeType::eNormal)[0].second);
 			commandBuffer.copy_buffer(indices_tmp, indexBuffer);
-			
+
 			if (m->GetNumUVChannels() >= 1) {
 				Buffer::View<float2> uvs_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", m->mNumVertices*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 				for (int vi = 0; vi < m->mNumVertices; vi++)
@@ -255,15 +251,15 @@ void load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filen
 			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList) );
 		}
 	}
-	
+
 	stack<pair<aiNode*, Node*>> nodes;
 	nodes.push(make_pair(scene->mRootNode, &root.make_child(scene->mRootNode->mName.C_Str())));
 	while (!nodes.empty()) {
 		auto[an, n] = nodes.top();
 		nodes.pop();
 
-		n->make_component<TransformData>( from_float3x4(Array<ai_real,4,4,RowMajor>::Map(&an->mTransformation.a1).block<3,4>(0,0).cast<float>()) );
-		
+		n->make_component<TransformData>( from_float3x4(Eigen::Array<ai_real,4,4,Eigen::RowMajor>::Map(&an->mTransformation.a1).block<3,4>(0,0).cast<float>()) );
+
 		if (an->mNumMeshes == 1)
 			n->make_component<MeshPrimitive>(materials[scene->mMeshes[an->mMeshes[0]]->mMaterialIndex], meshes[an->mMeshes[0]]);
 		else if (an->mNumMeshes > 1)

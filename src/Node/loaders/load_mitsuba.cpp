@@ -4,7 +4,6 @@
 #include <extern/pugixml.hpp>
 #include <regex>
 
-using namespace stm::hlsl;
 namespace stm {
 
 vector<string> split_string(const string& str, const regex& delim_regex) {
@@ -66,12 +65,12 @@ vector<pair<float, float>> parse_spectrum(const string& value) {
 	return s;
 }
 
-Matrix4f parse_matrix4x4(const string& value) {
+Eigen::Matrix4f parse_matrix4x4(const string& value) {
 	vector<string> list = split_string(value, regex("(,| )+"));
 	if (list.size() != 16)
 		throw runtime_error("parse_matrix4x4 failed");
 
-	Matrix4f m;
+	Eigen::Matrix4f m;
 	int k = 0;
 	for (int i = 0; i < 4; i++)
 		for (int j = 0; j < 4; j++)
@@ -212,12 +211,8 @@ float3 parse_color(pugi::xml_node node) {
 }
 
 Image::View alpha_to_roughness(Node& n, CommandBuffer& commandBuffer, const Image::View& alpha) {
-
+	auto p = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_alpha_to_roughness.spv"));
 	Image::View roughness = make_shared<Image>(commandBuffer.mDevice, "roughness", alpha.extent(), alpha.image()->format(), alpha.image()->layer_count(), alpha.image()->level_count(), alpha.image()->sample_count(), vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-
-	const ShaderDatabase& shaders = *n.node_graph().find_components<ShaderDatabase>().front();
-	auto p = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", shaders.at("material_convert_alpha_to_roughness"));
-
 	p->descriptor("gInput")  = image_descriptor(alpha, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 	p->descriptor("gRoughness") = image_descriptor(roughness, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 	commandBuffer.bind_pipeline(p->get_pipeline());
@@ -523,7 +518,7 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 			else
 				material = dst.make_component<Material>(e);
 		}
-		
+
 		const string name_attrib = child.attribute("name").value();
 		if (name == "string" && name_attrib == "filename") {
 			filename = child.attribute("value").value();
@@ -692,9 +687,9 @@ void parse_scene(Node& root, CommandBuffer& commandBuffer, pugi::xml_node node) 
 	}
 }
 
-void load_mitsuba(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
+void Scene::load_mitsuba(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("load_mitsuba", commandBuffer);
-	
+
 	pugi::xml_document doc;
 	pugi::xml_parse_result result = doc.load_file(filename.c_str());
 	if (!result) {

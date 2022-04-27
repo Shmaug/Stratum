@@ -6,13 +6,11 @@
 
 #include <Core/Window.hpp>
 
-#include <Common/hlsl_compat.hpp>
-namespace stm::hlsl {
+namespace stm {
 #include <HLSL/scene.hlsli>
 }
 
 using namespace stm;
-using namespace stm::hlsl;
 
 #ifdef _WIN32
 string GetSystemFontFile(const string &faceName) {
@@ -263,7 +261,7 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 	const ImVec2 cursorPos = ImGui::GetCursorScreenPos(); // ImVec2(ImGui::GetCursorPosX() + startOffset.x, ImGui::GetCursorPosY() + startOffset.y);
 
 	drawList->AddLine(
-		cursorPos, 
+		cursorPos,
 		ImVec2(cursorPos.x + width, cursorPos.y),
 		colBase, 1.1f);
 
@@ -273,7 +271,7 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 
 	const float tickStartY = cursorPos.y + tickHeight/2;
 	const float tickEndY = cursorPos.y - tickHeight/2;
-	
+
 	// minor gridlines
 	for (float m : minor) {
 		if (m > cursorPos.x + width)
@@ -304,13 +302,13 @@ inline void DrawTimeline(const Profiler::sample_t& sample, const float width, co
 
 void Profiler::on_gui() {
 	if (mFrameHistory.size() < 2) return;
-	
+
 	vector<float> frameTimings(mFrameHistory.size());
 	ranges::transform(next(mFrameHistory.begin()), mFrameHistory.end(), frameTimings.begin(), [](const auto& s) {
 		return chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count();
 	});
 
-	float timeAccum = 0; 
+	float timeAccum = 0;
 	uint32_t frameCount = 0;
 	for (frameCount = 0; frameCount < frameTimings.size(); frameCount++) {
 		timeAccum += frameTimings[frameCount];
@@ -319,10 +317,10 @@ void Profiler::on_gui() {
 	ImGui::Text("%.1f fps", frameCount/(timeAccum/1000));
 
 	const float graphScale = 2;
-	
+
 	float width = ImGui::GetWindowContentRegionMax().x - ImGui::GetWindowContentRegionMin().x;
 	mFrameHistoryCount = size_t(width / graphScale);
-	
+
 	const float height = ImGui::GetWindowContentRegionMax().y - ImGui::GetWindowContentRegionMin().y;
 
 	DrawPlot(frameTimings, min(width, graphScale*frameTimings.size()), 80, [&](const size_t idx) { mTimelineSample = *next(mFrameHistory.begin(), idx+1); });
@@ -335,6 +333,18 @@ Gui::Gui(Node& node) : mNode(node) {
 	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
 	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
 	app->OnRenderWindow.listen(mNode, [&,app](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, EventPriority::eLast);
+	app->OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
+		ProfilerRegion ps("Inspector GUI");
+		auto gui = app.node().find_in_descendants<Gui>();
+		if (!gui) return;
+		gui->set_context();
+
+		if (ImGui::Begin("Profiler")) {
+			ProfilerRegion ps("Profiler::on_gui");
+			Profiler::on_gui();
+		}
+		ImGui::End();
+	}, EventPriority::eAlmostFirst);
 
 	mContext = ImGui::CreateContext();
 
@@ -342,7 +352,6 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 	io.ConfigFlags |= ImGuiConfigFlags_IsSRGB;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
-	
 	io.KeyMap[ImGuiKey_Tab] = eKeyTab;
 	io.KeyMap[ImGuiKey_LeftArrow] = eKeyLeft;
 	io.KeyMap[ImGuiKey_RightArrow] = eKeyRight;
@@ -366,50 +375,45 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.KeyMap[ImGuiKey_Y] = eKeyY;
 	io.KeyMap[ImGuiKey_Z] = eKeyZ;
 
+#ifdef _WIN32
+	const string file = GetSystemFontFile("Segoe UI (TrueType)");
+	if (!file.empty()) io.Fonts->AddFontFromFileTTF(file.c_str(), 32.f);
+#endif
+
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.Colors[ImGuiCol_WindowBg].w = 0.9f;
+	style.Colors[ImGuiCol_FrameBg].x *= 0.1f;
+	style.Colors[ImGuiCol_FrameBg].y *= 0.1f;
+	style.Colors[ImGuiCol_FrameBg].z *= 0.1f;
+	style.Colors[ImGuiCol_MenuBarBg] = style.Colors[ImGuiCol_WindowBg];
+	style.ScaleAllSizes(1.2f);
+
 	mMesh.topology() = vk::PrimitiveTopology::eTriangleList;
-	
+
 	unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>> attributes;
 	attributes[VertexArrayObject::AttributeType::ePosition].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, pos), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
 	attributes[VertexArrayObject::AttributeType::eTexcoord].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR32G32Sfloat,  (uint32_t)offsetof(ImDrawVert, uv ), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
 	attributes[VertexArrayObject::AttributeType::eColor   ].emplace_back(VertexArrayObject::AttributeDescription(sizeof(ImDrawVert), vk::Format::eR8G8B8A8Unorm, (uint32_t)offsetof(ImDrawVert, col), vk::VertexInputRate::eVertex), Buffer::View<byte>{});
 	mMesh.vertices() = make_shared<VertexArrayObject>(attributes);
-	
-	app->OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
-		ProfilerRegion ps("Inspector GUI");
-		auto gui = app.node().find_in_descendants<Gui>();
-		if (!gui) return;
-		gui->set_context();
 
-		if (ImGui::Begin("Profiler")) {
-			ProfilerRegion ps("Profiler::on_gui");
-			Profiler::on_gui();
-		}
-		ImGui::End();
-	}, EventPriority::eAlmostFirst);
-	create_pipelines();
-}
-Gui::~Gui() {
-	ImGui::DestroyContext(mContext);
-}
-
-void Gui::create_pipelines() {
-	const ShaderDatabase& shader = *mNode.node_graph().find_components<ShaderDatabase>().front();
-	const auto& color_image_fs = shader.at("raster_color_image_fs");
-	if (mPipeline) mNode.node_graph().erase(mPipeline.node());
-	mPipeline = mNode.make_child("Pipeline").make_component<GraphicsPipelineState>("Gui", shader.at("raster_color_image_vs"), color_image_fs);
+	const auto& color_image_fs = make_shared<Shader>(app->window().mInstance.device(), "Shaders/raster_color_image_fs.spv");
+	mPipeline = make_shared<GraphicsPipelineState>("Gui", make_shared<Shader>(app->window().mInstance.device(), "Shaders/raster_color_image_vs.spv"), color_image_fs);
 	mPipeline->raster_state().setFrontFace(vk::FrontFace::eClockwise);
 	mPipeline->depth_stencil().setDepthTestEnable(false);
 	mPipeline->depth_stencil().setDepthWriteEnable(false);
 	mPipeline->blend_states() = { vk::PipelineColorBlendAttachmentState(true,
-		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
-		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, 
+		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
+		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
 		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA) };
 	mPipeline->set_immutable_sampler("gSampler", make_shared<Sampler>(color_image_fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));
-	
+
 	mPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
+}
+Gui::~Gui() {
+	ImGui::DestroyContext(mContext);
 }
 
 void Gui::create_font_image(CommandBuffer& commandBuffer) {
@@ -433,12 +437,12 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 	Descriptor& imagesDescriptor = mPipeline->descriptor("gImages", 0);
 	if (imagesDescriptor.index() != 0 || !get<Image::View>(imagesDescriptor))
 		create_font_image(commandBuffer);
-	
+
 	Window& window = commandBuffer.mDevice.mInstance.window();
 	io.DisplaySize = ImVec2((float)window.swapchain_extent().width, (float)window.swapchain_extent().height);
 	io.DisplayFramebufferScale = ImVec2(1.f, 1.f);
 	io.DeltaTime = deltaTime;
-	
+
 	const MouseKeyboardState& input = window.input_state();
 	io.MousePos = ImVec2(input.cursor_pos().x(), input.cursor_pos().y());
 	io.MouseWheel = input.scroll_delta();
@@ -465,8 +469,8 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 
 	mDrawData = ImGui::GetDrawData();
 	if (mDrawData && mDrawData->TotalVtxCount) {
-		buffer_vector<ImDrawVert> vertices(commandBuffer.mDevice, mDrawData->TotalVtxCount, vk::BufferUsageFlagBits::eVertexBuffer);
-		buffer_vector<ImDrawIdx>  indices (commandBuffer.mDevice, mDrawData->TotalIdxCount, vk::BufferUsageFlagBits::eIndexBuffer);
+		Buffer::View<ImDrawVert> vertices = make_shared<Buffer>(commandBuffer.mDevice, "ImGui Vertices", mDrawData->TotalVtxCount*sizeof(ImDrawVert), vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		Buffer::View<ImDrawIdx>  indices  = make_shared<Buffer>(commandBuffer.mDevice, "ImGui Indices" , mDrawData->TotalIdxCount*sizeof(ImDrawIdx), vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		auto dstVertex = vertices.begin();
 		auto dstIndex  = indices.begin();
 		for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
@@ -485,11 +489,14 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 				}
 			}
 		}
-		
-		mMesh[VertexArrayObject::AttributeType::ePosition][0].second = vertices.buffer_view();
-		mMesh[VertexArrayObject::AttributeType::eTexcoord][0].second = vertices.buffer_view();
-		mMesh[VertexArrayObject::AttributeType::eColor   ][0].second = vertices.buffer_view();
-		mMesh.indices() = indices.buffer_view();
+
+		mMesh[VertexArrayObject::AttributeType::ePosition][0].second = vertices;
+		mMesh[VertexArrayObject::AttributeType::eTexcoord][0].second = vertices;
+		mMesh[VertexArrayObject::AttributeType::eColor   ][0].second = vertices;
+		mMesh.indices() = indices;
+
+		commandBuffer.hold_resource(vertices);
+		commandBuffer.hold_resource(indices);
 
 		Descriptor& imagesDescriptor = mPipeline->descriptor("gImages", 0);
 		if (imagesDescriptor.index() != 0 || !get<Image::View>(imagesDescriptor))
@@ -517,8 +524,8 @@ void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 
 	float2 scale = float2::Map(&mDrawData->DisplaySize.x);
 	float2 offset = float2::Map(&mDrawData->DisplayPos.x);
-	
-	Buffer::View<hlsl::ViewData> views = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(hlsl::ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+	Buffer::View<ViewData> views = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	views[0].world_to_camera = views[0].camera_to_world = make_transform(float3(0,0,1), quatf_identity(), float3::Ones());
 	views[0].projection = make_orthographic(scale, -1 - offset.array()*2/scale.array(), 0, 1);
 	views[0].image_min = { 0, 0 };
@@ -528,14 +535,14 @@ void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 	mPipeline->push_constant<uint32_t>("gViewIndex") = 0;
 	mPipeline->push_constant<float4>("gImageST") = float4(1,1,0,0);
 	mPipeline->push_constant<float4>("gColor") = float4::Ones();
-	
+
 	commandBuffer.bind_pipeline(mPipeline->get_pipeline(commandBuffer.bound_framebuffer()->render_pass(), commandBuffer.subpass_index(), mMesh.vertex_layout(*mPipeline->stage(vk::ShaderStageFlagBits::eVertex))));
 	mPipeline->bind_descriptor_sets(commandBuffer);
 	mPipeline->push_constants(commandBuffer);
 	mMesh.bind(commandBuffer);
 
 	commandBuffer->setViewport(0, vk::Viewport(mDrawData->DisplayPos.x, mDrawData->DisplayPos.y, mDrawData->DisplaySize.x, mDrawData->DisplaySize.y, 0, 1));
-	
+
 	uint32_t voff = 0, ioff = 0;
 	for (const ImDrawList* cmdList : span(mDrawData->CmdLists, mDrawData->CmdListsCount)) {
 		for (const ImDrawCmd& cmd : cmdList->CmdBuffer)

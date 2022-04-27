@@ -48,7 +48,7 @@
 [[vk::binding(16,1)]] RWTexture2D<float4> gFilterImages[2];
 [[vk::binding(17,1)]] RWTexture2D<float2> gDiffImage1[2];
 [[vk::binding(18,1)]] RWTexture2D<float4> gDiffImage2[2];
-[[vk::binding(19,0)]] SamplerState gSampler1;
+[[vk::binding(19,1)]] SamplerState gSampler1;
 
 [[vk::binding(20,1)]] StructuredBuffer<ViewData> gPrevViews;
 [[vk::binding(21,1)]] RWStructuredBuffer<Reservoir> gPrevReservoirs;

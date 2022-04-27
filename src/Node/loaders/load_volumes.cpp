@@ -11,7 +11,6 @@
 #include <nanovdb/util/OpenToNanoVDB.h>
 #endif
 
-using namespace stm::hlsl;
 namespace stm {
 
 inline void create_volume(Node& dst, CommandBuffer& commandBuffer, const string& name, const component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>>& density = {}, const component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>>& albedo = {}) {
@@ -94,8 +93,8 @@ nanovdb::GridHandle<nanovdb::HostBuffer> load_vol(const fs::path& filename) {
     throw runtime_error("Unsupported volume format (wrong number of channels). Filename:" + filename.string());
 }
 
-void load_vol(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
-  nanovdb::GridHandle<nanovdb::HostBuffer> density_handle = load_vol(filename);
+void Scene::load_vol(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
+  nanovdb::GridHandle<nanovdb::HostBuffer> density_handle = stm::load_vol(filename);
   if (density_handle) {
     if (!fs::exists(filename.string() + ".nvdb"))
       nanovdb::io::writeGrid(filename.string() + ".nvdb", density_handle);
@@ -103,14 +102,14 @@ void load_vol(Node& root, CommandBuffer& commandBuffer, const fs::path &filename
   }
 }
 
-void load_nvdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
+void Scene::load_nvdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
   nanovdb::GridHandle<nanovdb::HostBuffer> density_handle = nanovdb::io::readGrid(filename.string().c_str());
   if (density_handle)
     create_volume(root, commandBuffer, filename.stem().string(), root.make_component<nanovdb::GridHandle<nanovdb::HostBuffer>>(move(density_handle)));
 }
 
 #ifdef STRATUM_ENABLE_OPENVDB
-void load_vdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
+void Scene::load_vdb(Node& root, CommandBuffer& commandBuffer, const fs::path &filename) {
   static bool openvdb_initialized = false;
   if (!openvdb_initialized) {
     openvdb::initialize();

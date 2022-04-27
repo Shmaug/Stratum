@@ -34,7 +34,7 @@ inline void imgui_vk_scalar(const char* label, vk::Format format, void* data) {
 		case vk::Format::eR8G8B8A8Sint:
 			ImGui::InputScalarN(label, ImGuiDataType_S8, data, 4);
 			break;
-			
+
 		case vk::Format::eR16Uint:
 			ImGui::InputScalarN(label, ImGuiDataType_U16, data, 1);
 			break;
@@ -86,7 +86,7 @@ inline void imgui_vk_scalar(const char* label, vk::Format format, void* data) {
 		case vk::Format::eR32G32B32A32Sint:
 			ImGui::InputScalarN(label, ImGuiDataType_S32, data, 4);
 			break;
-			
+
 		case vk::Format::eR32Sfloat:
 			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 1);
 			break;
@@ -99,7 +99,7 @@ inline void imgui_vk_scalar(const char* label, vk::Format format, void* data) {
 		case vk::Format::eR32G32B32A32Sfloat:
 			ImGui::InputScalarN(label, ImGuiDataType_Float, data, 4);
 			break;
-			
+
 		case vk::Format::eR64Sfloat:
 			ImGui::InputScalarN(label, ImGuiDataType_Double, data, 1);
 			break;
@@ -116,17 +116,15 @@ inline void imgui_vk_scalar(const char* label, vk::Format format, void* data) {
 }
 
 class Gui {
-public:	
+public:
 	STRATUM_API Gui(Node& node);
 	STRATUM_API ~Gui();
 
 	inline Node& node() const { return mNode; }
-	
-	STRATUM_API void create_pipelines();
 
-	inline ImFont* font() const { return mFont; } 
-	inline ImFont* title_font() const { return mTitleFont; } 
-	
+	inline ImFont* font() const { return mFont; }
+	inline ImFont* title_font() const { return mTitleFont; }
+
 	STRATUM_API void create_font_image(CommandBuffer& commandBuffer);
 
 	STRATUM_API void new_frame(CommandBuffer& commandBuffer, float deltaTime);
@@ -139,10 +137,10 @@ public:
 			[](size_t sz, void* user_data) { return ::operator new(sz); },
 			[](void* ptr, void* user_data) { ::operator delete(ptr); });
 	}
-	
+
 private:
 	Node& mNode;
-	component_ptr<GraphicsPipelineState> mPipeline;
+	shared_ptr<GraphicsPipelineState> mPipeline;
 	unordered_map<Image::View, uint32_t> mImageMap;
 	Mesh mMesh;
 	bool mUploadFonts = true;
@@ -152,4 +150,4 @@ private:
 	ImFont* mTitleFont;
 };
 
-} 
+}

@@ -142,20 +142,6 @@ struct VisibilityInfo {
 #endif
 };
 
-struct PathTracePushConstants {
-	uint gViewCount;
-	uint gLightCount;
-	uint gEnvironmentMaterialAddress;
-	float gEnvironmentSampleProbability;
-	uint gRandomSeed;
-	uint gReservoirSamples;
-	uint gMaxNullCollisions;
-	uint gMinDepth;
-	uint gMaxEyeDepth;
-	uint gMaxLightDepth;
-	uint gNumLightPaths;
-};
-
 #ifdef __HLSL__
 
 inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, const uint viewCount) {

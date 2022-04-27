@@ -15,7 +15,7 @@ enum KeyCode {
 	eMouse5 = VK_XBUTTON2,
 
 	eCancel = VK_CANCEL,
-	
+
 	eKeyBackspace = VK_BACK,
 	eKeyTab = VK_TAB,
 	eKeyEnter = VK_RETURN,
@@ -124,7 +124,7 @@ enum KeyCode {
 	eMouse3 = 0x003,
 	eMouse4 = 0x004,
 	eMouse5 = 0x005,
-	
+
 	eCancel = 0x006,
 
 	eKeyBackspace = XK_BackSpace,
@@ -230,10 +230,10 @@ enum KeyCode {
 
 class MouseKeyboardState {
 public:
-	inline Array2f& cursor_pos() { return mCursorPos; }
+	inline float2& cursor_pos() { return mCursorPos; }
 	inline const unordered_set<KeyCode>& buttons() const { return mButtons; }
-	inline const Array2f& cursor_pos() const { return mCursorPos; }
-	inline const Array2f& cursor_delta() const { return mCursorDelta; }
+	inline const float2& cursor_pos() const { return mCursorPos; }
+	inline const float2& cursor_delta() const { return mCursorDelta; }
 	inline float scroll_delta() const { return mScrollDelta; }
 	inline const string& input_characters() const { return mInputCharacters; };
 	inline bool pressed(KeyCode key) const { return mButtons.count(key); }
@@ -243,20 +243,20 @@ private:
 	friend class Instance;
 	friend class Window;
 
-	Array2f mCursorPos;
-	Array2f mCursorDelta;
+	float2 mCursorPos;
+	float2 mCursorDelta;
 	float mScrollDelta;
 	unordered_set<KeyCode> mButtons;
 	string mInputCharacters;
 	vector<string> mInputFiles;
-	
+
 	inline void clear() {
-		mCursorDelta = Array2f::Zero();
+		mCursorDelta = float2::Zero();
 		mScrollDelta = 0;
 		mInputCharacters.clear();
 		mInputFiles.clear();
 	}
-	inline void add_cursor_delta(const Array2f& delta) { mCursorDelta += delta; }
+	inline void add_cursor_delta(const float2& delta) { mCursorDelta += delta; }
 	inline void add_scroll_delta(float delta) { mScrollDelta += delta; }
 	inline void add_input_character(char c) { mInputCharacters.push_back(c); };
 	inline void set_button(KeyCode key) { mButtons.emplace(key); }
@@ -267,7 +267,7 @@ private:
 class Window {
 public:
 	Instance& mInstance;
-	
+
 	STRATUM_API Window(Instance& instance, const string& title, vk::Rect2D position);
 	STRATUM_API ~Window();
 
@@ -280,7 +280,7 @@ public:
 	inline const vk::Extent2D& swapchain_extent() const { return mSwapchainExtent; }
 	inline const shared_ptr<Semaphore>& image_available_semaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
-	
+
 	inline void acquire_image_timeout(const chrono::nanoseconds& v) { mAcquireImageTimeout = v; }
 	inline const chrono::nanoseconds& acquire_image_timeout() const { return mAcquireImageTimeout; }
 
@@ -314,11 +314,11 @@ public:
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
 
-	inline Array2f clip_to_window(const Array2f& clip) const {
-		return (clip*.5f + Array2f::Constant(.5f))*Array2f((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
+	inline float2 clip_to_window(const float2& clip) const {
+		return (clip*.5f + float2::Constant(.5f))*float2((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);
 	}
-	inline Array2f window_to_clip(const Array2f& screen) const {
-		Array2f r = screen/Array2f((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - 1;
+	inline float2 window_to_clip(const float2& screen) const {
+		float2 r = screen/float2((float)mSwapchainExtent.width, (float)mSwapchainExtent.height)*2 - 1;
 		r.y() = -r.y();
 		return r;
 	}
@@ -326,7 +326,7 @@ public:
 private:
 	STRATUM_API void create_swapchain();
 	STRATUM_API void destroy_swapchain();
-	
+
 	vk::SurfaceKHR mSurface;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
@@ -342,7 +342,7 @@ private:
 
 	vk::PresentModeKHR mPreferredPresentMode = vk::PresentModeKHR::eMailbox;
 	chrono::nanoseconds mAcquireImageTimeout = 10s;
-	
+
 	bool mFullscreen = false;
 	bool mRecreateSwapchain = false;
 	vk::Rect2D mClientRect;

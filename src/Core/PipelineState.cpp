@@ -32,7 +32,7 @@ stm::Descriptor& PipelineState::descriptor(const string& name, uint32_t arrayInd
 			auto it = desc_it->second.emplace(arrayIndex, stm::Descriptor()).first;
 			return it->second;
 		}
-	
+
 	throw invalid_argument("Descriptor " + name + " does not exist");
 }
 
@@ -79,7 +79,7 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 			if (pipelineStage < firstStage && spirv->descriptors().find(name) != spirv->descriptors().end())
 				firstStage = pipelineStage;
 		}
-		
+
 		for (auto& [arrayIndex, d] : p)
 			if (d.index() == 0) {
 				const Image::View img = get<Image::View>(d);
@@ -90,21 +90,21 @@ void PipelineState::transition_images(CommandBuffer& commandBuffer) const {
 
 void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string, uint32_t>& dynamicOffsets) {
 	ProfilerRegion ps("PipelineState::bind_descriptor_sets");
-	
+
 	if (!commandBuffer.bound_framebuffer())
-		transition_images(commandBuffer);		
+		transition_images(commandBuffer);
 
 	const Pipeline& pipeline = *commandBuffer.bound_pipeline();
 
 	vector<shared_ptr<DescriptorSet>> descriptorSets(pipeline.descriptor_set_layouts().size());
 	for (uint32_t i = 0; i < descriptorSets.size(); i++) {
 		// fetch the bindings for the current set index
-		unordered_map<string, const ShaderModule::DescriptorBinding*> bindings;
+		unordered_map<string, const Shader::DescriptorBinding*> bindings;
 			for (auto& [id, descriptors] : mDescriptors)
 				for (const auto& stage : pipeline.shaders())
-					if (auto it = stage.mShader->descriptors().find(id); it != stage.mShader->descriptors().end() && it->second.mSet == i)
+					if (auto it = stage.shader().descriptors().find(id); it != stage.shader().descriptors().end() && it->second.mSet == i)
 						bindings[id] = &it->second;
-		
+
 		// find DescriptorSets matching current layout
 		const shared_ptr<DescriptorSetLayout>& layout = pipeline.descriptor_set_layouts()[i];
 		auto[first, last] = mDescriptorSets.equal_range(layout.get());
@@ -149,7 +149,7 @@ void PipelineState::bind_descriptor_sets(CommandBuffer& commandBuffer, const uno
 	unordered_map<uint32_t, vector<pair<uint32_t, uint32_t>>> offsetMap;
 	for (const auto&[id,offset] : dynamicOffsets)
 		for (const auto& stage : commandBuffer.bound_pipeline()->shaders())
-			if (auto it = stage.mShader->descriptors().find(id); it != stage.mShader->descriptors().end())
+			if (auto it = stage.shader().descriptors().find(id); it != stage.shader().descriptors().end())
 				offsetMap[it->second.mSet].emplace_back(make_pair(it->second.mBinding, offset));
 	vector<uint32_t> offsets;
 	for (uint32_t i = 0; i < descriptorSets.size(); i++) {
@@ -175,13 +175,13 @@ void PipelineState::push_constants(CommandBuffer& commandBuffer) const {
 shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline() {
 	ProfilerRegion ps("PipelineState::get_pipeline");
 
-	Pipeline::ShaderSpecialization shader = { mShaders.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants, mDescriptorBindingFlags };
+	Shader::Specialization shader = { mShaders.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants, mDescriptorBindingFlags };
 	size_t key = 0;
 	{
 		ProfilerRegion ps("hash_args");
 		key = hash_args(shader, mImmutableSamplers);
 	}
-	
+
 	auto pipeline = find_pipeline(key);
 	if (!pipeline) {
 		pipeline = make_shared<ComputePipeline>(mName, shader, mImmutableSamplers);
@@ -189,17 +189,16 @@ shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline() {
 	}
 	return static_pointer_cast<ComputePipeline>(pipeline);
 }
-
 shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline(const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts) {
 	ProfilerRegion ps("PipelineState::get_pipeline");
 
-	Pipeline::ShaderSpecialization shader = { mShaders.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants, {} };
+	Shader::Specialization shader = { mShaders.at(vk::ShaderStageFlagBits::eCompute), mSpecializationConstants, {} };
 	size_t key = 0;
 	{
 		ProfilerRegion ps("hash_args");
 		key = hash_args(shader, descriptorSetLayouts);
 	}
-	
+
 	auto pipeline = find_pipeline(key);
 	if (!pipeline) {
 		pipeline = make_shared<ComputePipeline>(mName, shader, descriptorSetLayouts);
@@ -211,12 +210,12 @@ shared_ptr<ComputePipeline> ComputePipelineState::get_pipeline(const vk::ArrayPr
 shared_ptr<GraphicsPipeline> GraphicsPipelineState::get_pipeline(const RenderPass& renderPass, uint32_t subpassIndex, const VertexLayoutDescription& vertexDescription, vk::ShaderStageFlags stageMask) {
 	ProfilerRegion ps("PipelineState::get_pipeline");
 
-	vector<Pipeline::ShaderSpecialization> shaders;
+	vector<Shader::Specialization> shaders;
 	shaders.reserve(mShaders.size());
 	for (const auto& [stage, shader] : mShaders)
 		if (stage & stageMask)
 			shaders.emplace_back(shader, mSpecializationConstants, mDescriptorBindingFlags);
-	
+
 	size_t key = 0;
 	{
 		ProfilerRegion ps("hash_args");

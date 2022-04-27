@@ -11,7 +11,7 @@ namespace stm {
 class XR {
 public:
   struct View {
-    component_ptr<hlsl::TransformData> mTransform;
+    component_ptr<TransformData> mTransform;
     component_ptr<Camera> mCamera;
     inline const Image::View& back_buffer() const { return mSwapchainImages[mImageIndex]; }
   private:
@@ -27,7 +27,7 @@ public:
   inline const xr::Instance& instance() const { return mInstance; }
   inline const xr::SystemId& system() const { return mSystem; }
   inline const vector<View>& views() const { return mViews; }
-  
+
 	inline const vk::ImageUsageFlags& back_buffer_usage() const { return mSwapchainImageUsage; }
 	inline vk::ImageUsageFlags& back_buffer_usage() { return mSwapchainImageUsage; }
 
@@ -53,7 +53,7 @@ private:
   xr::DebugUtilsMessengerEXT mDebugMessenger;
 
   Device::QueueFamily* mQueueFamily;
-  
+
   xr::Instance mInstance;
   xr::SystemId mSystem;
   xr::Session mSession;
@@ -63,7 +63,7 @@ private:
   vk::ImageUsageFlags mSwapchainImageUsage;
   vector<View> mViews;
   vector<xr::View> mXRViews;
-  
+
   xr::CompositionLayerProjection mCompositionLayer;
   xr::FrameState mFrameState;
   xr::SessionState mSessionState;

@@ -1,7 +1,6 @@
 #include "../Scene.hpp"
 #include <regex>
 
-using namespace stm::hlsl;
 namespace stm {
 
 // https://stackoverflow.com/questions/216823/how-to-trim-a-stdstring
@@ -238,7 +237,7 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
 	bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 	bufferUsage |= vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
 	#endif
-    
+
     auto vao = make_shared<VertexArrayObject>(unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>>{
         { VertexArrayObject::AttributeType::ePosition, { {
             VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex },
@@ -252,7 +251,7 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
 	commandBuffer.copy_buffer(positions_tmp, vao->at(VertexArrayObject::AttributeType::ePosition)[0].second);
 	commandBuffer.copy_buffer(normals_tmp, vao->at(VertexArrayObject::AttributeType::eNormal)[0].second);
 	commandBuffer.copy_buffer(indices_tmp, indexBuffer);
-    
+
     if (!uvs.empty()) {
         Buffer::View<float2> uvs_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", uvs.size()*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
         (*vao)[VertexArrayObject::AttributeType::eTexcoord].emplace_back(

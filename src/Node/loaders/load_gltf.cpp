@@ -5,13 +5,11 @@
 #define TINYGLTF_IMPLEMENTATION
 #include <tiny_gltf.h>
 
-using namespace stm::hlsl;
-
 namespace stm {
 
-void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
+void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("load_gltf", commandBuffer);
-	
+
 	tinygltf::Model model;
 	tinygltf::TinyGLTF loader;
 	string err, warn;
@@ -20,7 +18,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		(filename.extension() == ".gltf" && !loader.LoadASCIIFromFile(&model, &err, &warn, filename.string())) )
 		throw runtime_error(filename.string() + ": " + err);
 	if (!warn.empty()) fprintf_color(ConsoleColor::eYellow, stderr, "%s: %s\n", filename.string().c_str(), warn.c_str());
-	
+
 	Device& device = commandBuffer.mDevice;
 
 	vector<shared_ptr<Buffer>> buffers(model.buffers.size());
@@ -79,7 +77,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 	Node& materialsNode = root.make_child("materials");
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
 		component_ptr<Material> m = materialsNode.make_child(material.name).make_component<Material>();
-		const float3 emissive = Array3d::Map(material.emissiveFactor.data()).cast<float>();
+		const float3 emissive = Eigen::Array3d::Map(material.emissiveFactor.data()).cast<float>();
 		if (emissive.any()) {
 			Emissive e;
 			e.emission.value = emissive;
@@ -88,7 +86,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		} else {
 			if (material.pbrMetallicRoughness.metallicFactor > 0) {
 				RoughPlastic r;
-				r.diffuse_reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+				r.diffuse_reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
 				r.diffuse_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
 				r.specular_reflectance.value = r.diffuse_reflectance.value * material.pbrMetallicRoughness.metallicFactor;
 				r.specular_reflectance.image = r.diffuse_reflectance.image;
@@ -96,9 +94,9 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
 				*m = r;
 			} else {
-				if (material.extensions.contains("KHR_materials_transmission")) {			
+				if (material.extensions.contains("KHR_materials_transmission")) {
 					RoughDielectric r;
-					r.specular_reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+					r.specular_reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
 					r.specular_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
 					r.specular_transmittance.value = r.specular_reflectance.value * material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble();
 					r.specular_transmittance.image = r.specular_reflectance.image;
@@ -107,7 +105,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 					*m = r;
 				} else {
 					Lambertian l;
-					l.reflectance.value = Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+					l.reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
 					l.reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
 					*m = l;
 				}
@@ -158,7 +156,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 			const Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], stride, indexBufferView.byteOffset + indicesAccessor.byteOffset, indicesAccessor.count * stride);
 
 			shared_ptr<VertexArrayObject> vertexData = make_shared<VertexArrayObject>();
-			
+
 			vk::PrimitiveTopology topology;
 			switch (prim.mode) {
 				case TINYGLTF_MODE_POINTS: 					topology = vk::PrimitiveTopology::ePointList; break;
@@ -169,7 +167,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				case TINYGLTF_MODE_TRIANGLE_STRIP: 	topology = vk::PrimitiveTopology::eTriangleStrip; break;
 				case TINYGLTF_MODE_TRIANGLE_FAN: 		topology = vk::PrimitiveTopology::eTriangleFan; break;
 			}
-			
+
 			for (const auto&[attribName,attribIndex] : prim.attributes) {
 				const tinygltf::Accessor& accessor = model.accessors[attribIndex];
 
@@ -252,7 +250,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 					};
 					attributeType = semanticMap.at(typeName);
 				}
-				
+
 				auto& attribs = (*vertexData)[attributeType];
 				if (attribs.size() <= typeIndex) attribs.resize(typeIndex+1);
 				const tinygltf::BufferView& bv = model.bufferViews[accessor.bufferView];
@@ -271,25 +269,25 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 		const auto& node = model.nodes[n];
 		Node& dst = root.make_child(node.name);
 		nodes[n] = &dst;
-		
+
 		if (!node.translation.empty() || !node.rotation.empty() || !node.scale.empty()) {
 			float3 translate;
 			float3 scale;
 			if (node.translation.empty()) translate = float3::Zero();
-			else translate = Array3d::Map(node.translation.data()).cast<float>();
+			else translate = Eigen::Array3d::Map(node.translation.data()).cast<float>();
 			if (node.scale.empty()) scale = float3::Ones();
-			else scale = Array3d::Map(node.scale.data()).cast<float>();
+			else scale = Eigen::Array3d::Map(node.scale.data()).cast<float>();
 			const quatf rotate = node.rotation.empty() ? quatf_identity() : qnormalize(make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]));
 			dst.make_component<TransformData>(make_transform(translate, rotate, scale));
 		} else if (!node.matrix.empty())
-			dst.make_component<TransformData>(from_float3x4(Array<double,4,4>::Map(node.matrix.data()).block<3,4>(0,0).cast<float>()));
+			dst.make_component<TransformData>(from_float3x4(Eigen::Array<double,4,4>::Map(node.matrix.data()).block<3,4>(0,0).cast<float>()));
 
 		if (node.mesh < model.meshes.size())
 			for (uint32_t i = 0; i < model.meshes[node.mesh].primitives.size(); i++) {
 				const auto& prim = model.meshes[node.mesh].primitives[i];
 				dst.make_child(model.meshes[node.mesh].name).make_component<MeshPrimitive>(materials[prim.material], meshes[node.mesh][i]);
 			}
-		
+
 		auto light_it = node.extensions.find("KHR_lights_punctual");
 		if (light_it != node.extensions.end() && light_it->second.Has("light")) {
 			const tinygltf::Light& l = model.lights[light_it->second.Get("light").GetNumberAsInt()];
@@ -298,7 +296,7 @@ void load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filenam
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
 				Emissive emissive;
 				emissive.emission.image = {};
-				emissive.emission.value = (Array3d::Map(l.color.data()) * l.intensity/(4*numbers::pi_v<float>*sphere->mRadius*sphere->mRadius)).cast<float>();
+				emissive.emission.value = (Eigen::Array3d::Map(l.color.data()) * l.intensity/(4*numbers::pi_v<float>*sphere->mRadius*sphere->mRadius)).cast<float>();
 				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(emissive);
 			}
 		}

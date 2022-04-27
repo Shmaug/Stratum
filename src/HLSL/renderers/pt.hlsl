@@ -29,8 +29,12 @@
 
 #define PNANOVDB_HLSL
 #include "../../extern/nanovdb/PNanoVDB.h"
-#include "../tonemap.hlsli"
+
 #include "../rng.hlsli"
+uint rng_next_uint(const uint index_1d) { return pcg_next_uint(gPathState.rng_state); }
+float rng_next_float(const uint index_1d) { return pcg_next_float(gPathState.rng_state); }
+
+#include "../tonemap.h"
 #include "../image_value.hlsli"
 #include "../material.hlsli"
 #include "../light.hlsli"
@@ -535,23 +539,23 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 	switch (gDebugMode) {
 		default:
 			break;
-		case DebugMode::eZ:
+		case (uint)DebugMode::eZ:
 			gRadiance[index.xy].rgb = viridis_quintic(1 - exp(-0.1*z));
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eDz:
+		case (uint)DebugMode::eDz:
 			gRadiance[index.xy].rgb = viridis_quintic(length(dz));
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eShadingNormal:
+		case (uint)DebugMode::eShadingNormal:
 			gRadiance[index.xy].rgb = gPathShadingData.shading_normal()*.5 + .5;
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eGeometryNormal:
+		case (uint)DebugMode::eGeometryNormal:
 			gRadiance[index.xy].rgb = gPathShadingData.geometry_normal()*.5 + .5;
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eMaterialID: {
+		case (uint)DebugMode::eMaterialID: {
 			const uint material_address = instance_material_address(gPathVertex.instance_index());
 			if (material_address == INVALID_MATERIAL)
 				gRadiance[index.xy].rgb = 0;
@@ -570,23 +574,23 @@ void sample_visibility(uint3 index : SV_DispatchThreadID) {
 			gPathVertex.beta = 0;
 			break;
 		}
-		case DebugMode::eTangent:
+		case (uint)DebugMode::eTangent:
 			gRadiance[index.xy].rgb = gPathShadingData.tangent()*.5 + .5;
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eMeanCurvature:
+		case (uint)DebugMode::eMeanCurvature:
 			gRadiance[index.xy].rgb = viridis_quintic(saturate(gPathShadingData.mean_curvature));
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eRayRadius:
+		case (uint)DebugMode::eRayRadius:
 			gRadiance[index.xy].rgb = viridis_quintic(saturate(100*gPathState.ray_differential.radius));
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::eUVScreenSize:
+		case (uint)DebugMode::eUVScreenSize:
 			gRadiance[index.xy].rgb = viridis_quintic(saturate(log2(1024*gPathShadingData.uv_screen_size)/10));
 			gPathVertex.beta = 0;
 			break;
-		case DebugMode::ePrevUV:
+		case (uint)DebugMode::ePrevUV:
 			gRadiance[index.xy].rgb = float3(prev_uv, 0);
 			gPathVertex.beta = 0;
 			break;

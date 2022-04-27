@@ -44,8 +44,6 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
 			set(DST_NAME "${SRC_NAME}_${ENTRY_POINT}")
 		endif()
 
-		message(STATUS "Creating target for ${SRC_PATH}:${ENTRY_POINT}")
-
 		set(SPV_PATH "${DST_FOLDER}/${DST_NAME}.spv")
 		set(SPV_JSON_PATH "${DST_FOLDER}/${DST_NAME}.json")
 

@@ -3,48 +3,27 @@
 
 #include "quatf.hlsli"
 
-//#define TRANSFORM_UNIFORM_SCALING
-
 struct TransformData {
-#ifdef TRANSFORM_UNIFORM_SCALING
-	float3 mTranslation;
-	float mScale;
-	quatf mRotation;
-#else
  float4x4 m;
-#endif
 
 	inline float3 transform_vector(float3 v) CONST_CPP {
-#ifdef TRANSFORM_UNIFORM_SCALING
-		return rotate_vector(mRotation, v*mScale);
-#else
 #ifdef __cplusplus
 		return m.block<3,3>(0,0).matrix() * v.matrix();
 #else
 		return mul((float3x3)m, v).xyz;
 #endif
-#endif
 	}
 
 	inline float3 transform_point(float3 v) CONST_CPP {
-#ifdef TRANSFORM_UNIFORM_SCALING
-		return mTranslation + transform_vector(v);
-#else
 #ifdef __cplusplus
 		return (m.matrix() * v.matrix().homogeneous()).col(3).head<3>();
 #else
 		return mul(m, float4(v, 1)).xyz;
 #endif
-#endif
 	}
 
 	inline TransformData inverse() CONST_CPP {
 		TransformData r;
-#ifdef TRANSFORM_UNIFORM_SCALING
-		r.mRotation = inverse(mRotation);
-		r.mScale = 1/t.mScale;
-		r.mTranslation = rotate_vector(r.mRotation, -mTranslation * r.mScale);
-#else
 #ifdef __cplusplus
 		r.m = m.matrix().inverse();
 #else
@@ -59,21 +38,15 @@ struct TransformData {
 		r.m[1] = float4(b11*det, ( a22 * a00 - a02 * a20)*det, (-a12 * a00 + a02 * a10)*det, -m[1][3]);
 		r.m[2] = float4(b21*det, (-a21 * a00 + a01 * a20)*det, ( a11 * a00 - a01 * a10)*det, -m[2][3]);
 #endif
-#endif
 		return r;
 	}
 };
 
 inline TransformData make_transform(float3 t, quatf r, float3 s) {
 	TransformData result;
-#ifdef TRANSFORM_UNIFORM_SCALING
-	result.mTranslation = t;
-	result.mRotation = r;
-	result.mScale = pow(s[0]*s[1]*s[2], 1.f/3.f);
-#else
 #ifdef __cplusplus
-	result.m = Affine3f(Translation3f(t)).matrix();
-	result.m.block<3,3>(0,0) = (Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]) * Scaling(s.matrix())).matrix();
+	result.m = Eigen::Affine3f(Eigen::Translation3f(t)).matrix();
+	result.m.block<3,3>(0,0) = (Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]) * Eigen::Scaling(s.matrix())).matrix();
 #else
 	// https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToMatrix/index.htm
 	float sqw = r.w*r.w;
@@ -86,7 +59,7 @@ inline TransformData make_transform(float3 t, quatf r, float3 s) {
 	result.m[0][0] = ( sqx - sqy - sqz + sqw)*invs; // since sqw + sqx + sqy + sqz =1/invs*invs
 	result.m[1][1] = (-sqx + sqy - sqz + sqw)*invs;
 	result.m[2][2] = (-sqx - sqy + sqz + sqw)*invs;
-	
+
 	float tmp1 = r.xyz[0]*r.xyz[2];
 	float tmp2 = r.xyz[1]*r.w;
 	result.m[2][0] = 2 * (tmp1 + tmp2)*invs;
@@ -106,92 +79,29 @@ inline TransformData make_transform(float3 t, quatf r, float3 s) {
 	result.m[1][3] = t[1];
 	result.m[2][3] = t[2];
 #endif
-#endif
 	return result;
 }
 
 inline TransformData tmul(TransformData lhs, TransformData rhs) {
 	TransformData r;
-#ifdef TRANSFORM_UNIFORM_SCALING
-	r.mTranslation = transform_point(lhs, rhs.mTranslation);
-	r.mRotation = qmul(lhs.mRotation, rhs.mRotation);
-	r.mScale = lhs.mScale * rhs.mScale;
-#else
 #ifdef __cplusplus
 	r.m = (lhs.m.matrix() * rhs.m.matrix()).array();
 #else
 	r.m = mul(lhs.m, rhs.m); // https://github.com/Microsoft/DirectXShaderCompiler/blob/master/docs/SPIR-V.rst#vectors-and-matrices
 #endif
-#endif
 	return r;
 }
 
 inline float3x4 to_float3x4(TransformData t) {
-#ifdef TRANSFORM_UNIFORM_SCALING
-#ifdef __cplusplus
-	return (Eigen::Translation3f(t.mTranslation) * Eigen::Quaternionf(t.mRotation.w, t.mRotation.xyz[0], t.mRotation.xyz[1], t.mRotation.xyz[2]) * Eigen::Scaling(t.mScale)).matrix().array().block<3,4>(0,0);
-#else
-	float3x4 m;
-	float3 r0 = rotate_vector(t.mRotation, float3(1,0,0));
-	float3 r1 = rotate_vector(t.mRotation, float3(0,1,0));
-	float3 r2 = rotate_vector(t.mRotation, float3(0,0,1));
-	m[0] = float4(r0[0], r1[0], r2[0], t.mTranslation[0]);
-	m[1] = float4(r0[1], r1[1], r2[1], t.mTranslation[1]);
-	m[2] = float4(r0[2], r1[2], r2[2], t.mTranslation[2]);
-	return m;
-#endif
-#else
 #ifdef __cplusplus
 	return t.m.block<3,4>(0,0);
 #else
 	return (float3x4)t.m;
 #endif
-#endif
 }
 
 inline TransformData from_float3x4(const float3x4 m) {
 	TransformData t;
-#ifdef TRANSFORM_UNIFORM_SCALING
-#ifdef __cplusplus
-	t.mTranslation = m.col(3);
-	Matrix3f m3x3 = m.block<3,3>(0,0);
-	t.mScale = pow(m3x3.determinant(), 1.f/3.f);
-	m3x3 /= t.mScale;
-	Quaternionf q(m3x3);
-	t.mRotation = make_quatf(q.x(), q.y(), q.z(), q.w());
-#else
-	for (uint i = 0; i < 3; i++) t.mTranslation[i] = m[i][3];
-	float3x3 m3x3 = (float3x3)m;
-	t.mScale = pow(determinant(m3x3), 1.f/3.f);
-
-	float tr = m3x3[0][0] + m3x3[1][1] + m3x3[2][2];
-	if (tr > 0) { 
-		float S = sqrt(tr+1.0) * 2; // S=4*qw 
-		t.mRotation.w = 0.25 * S;
-		t.mRotation.xyz[0] = (m3x3[2][1] - m3x3[1][2]) / S;
-		t.mRotation.xyz[1] = (m3x3[0][2] - m3x3[2][0]) / S; 
-		t.mRotation.xyz[2] = (m3x3[1][0] - m3x3[0][1]) / S; 
-	} else if ((m3x3[0][0] > m3x3[1][1])&(m3x3[0][0] > m3x3[2][2])) { 
-		float S = sqrt(1.0 + m3x3[0][0] - m3x3[1][1] - m3x3[2][2]) * 2; // S=4*qx 
-		t.mRotation.w = (m3x3[2][1] - m3x3[1][2]) / S;
-		t.mRotation.xyz[0] = 0.25 * S;
-		t.mRotation.xyz[1] = (m3x3[0][1] + m3x3[1][0]) / S; 
-		t.mRotation.xyz[2] = (m3x3[0][2] + m3x3[2][0]) / S; 
-	} else if (m3x3[1][1] > m3x3[2][2]) { 
-		float S = sqrt(1.0 + m3x3[1][1] - m3x3[0][0] - m3x3[2][2]) * 2; // S=4*qy
-		t.mRotation.w = (m3x3[0][2] - m3x3[2][0]) / S;
-		t.mRotation.xyz[0] = (m3x3[0][1] + m3x3[1][0]) / S; 
-		t.mRotation.xyz[1] = 0.25 * S;
-		t.mRotation.xyz[2] = (m3x3[1][2] + m3x3[2][1]) / S; 
-	} else { 
-		float S = sqrt(1.0 + m3x3[2][2] - m3x3[0][0] - m3x3[1][1]) * 2; // S=4*qz
-		t.mRotation.w = (m3x3[1][0] - m3x3[0][1]) / S;
-		t.mRotation.xyz[0] = (m3x3[0][2] + m3x3[2][0]) / S;
-		t.mRotation.xyz[1] = (m3x3[1][2] + m3x3[2][1]) / S;
-		t.mRotation.xyz[2] = 0.25 * S;
-	}
-#endif
-#else
 #ifdef __cplusplus
 	t.m.block<3,4>(0,0) = m;
 	t.m.row(3) = float4(0,0,0,1);
@@ -200,7 +110,6 @@ inline TransformData from_float3x4(const float3x4 m) {
 	t.m[1] = m[1];
 	t.m[2] = m[2];
 	t.m[3] = float4(0,0,0,1);
-#endif
 #endif
 	return t;
 }

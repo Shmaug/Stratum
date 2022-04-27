@@ -29,9 +29,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 [[vk::constant_id(0)]] const bool gUseVisibility = true;
 
-#define PT_DESCRIPTOR_SET_1
-#include "../../pt_descriptors.hlsli"
-#include "svgf_common.hlsli"
+#include "../svgf_common.hlsli"
+#include "../denoise_descriptors.hlsli"
 
 [[vk::push_constant]] struct {
 	uint gViewCount;
@@ -70,7 +69,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	}
 	GroupMemoryBarrierWithGroupSync();
 	*/
-	
+
 	float4 c = load(index.xy, group_index.xy);
 	float2 m = load_moment(index.xy, group_index.xy);
 
@@ -97,19 +96,19 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			if (gUseVisibility && gVisibility[index_1d].instance_index() != gVisibility[p_1d].instance_index()) continue;
 
 			const float w_z = abs(gVisibility[p_1d].z() - gVisibility[index_1d].z()) / (length(gVisibility[index_1d].dz_dxy() * float2(xx, yy)) + 1e-2);
-			const float w_n = pow(saturate(dot(gVisibility[p_1d].normal(), gVisibility[index_1d].normal())), 128); 
+			const float w_n = pow(saturate(dot(gVisibility[p_1d].normal(), gVisibility[index_1d].normal())), 128);
 			const float w = gUseVisibility ? exp(-w_z) * w_n : 1;
 
 			if (isnan(w) || isinf(w)) continue;
-			
+
 			m += load_moment(p, group_index.xy + int2(xx,yy)) * w;
 			c.rgb += load(p, group_index.xy + int2(xx,yy)).rgb * w;
 			sum_w += w;
 		}
-	
+
 	sum_w = 1/sum_w;
 	m *= sum_w;
 	c.rgb *= sum_w;
-	
+
 	gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gPushConstants.gHistoryLimit)));
 }

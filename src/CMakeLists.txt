@@ -37,14 +37,14 @@ if (UNIX)
     target_link_libraries(Stratum PUBLIC pthread ${CMAKE_DL_LIBS} xcb xcb-keysyms)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_XCB_KHR)
     target_link_libraries(Stratum PUBLIC "${SLANG_ROOT}/bin/linux-x86_64/slang.so" "${SLANG_ROOT}/bin/linux-x86_64/gfx.so") # TODO?
-	configure_file("${SLANG_ROOT}/bin/linux-x86_64/slang.so" "${CMAKE_CURRENT_BINARY_DIR}/slang.so" COPYONLY)
-	configure_file("${SLANG_ROOT}/bin/linux-x86_64/gfx.so" "${CMAKE_CURRENT_BINARY_DIR}/gfx.so" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/linux-x86_64/slang.so" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.so" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/linux-x86_64/gfx.so" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/gfx.so" COPYONLY)
 elseif(WIN32)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_compile_options(Stratum PUBLIC /bigobj)
     target_link_libraries(Stratum PUBLIC "${SLANG_ROOT}/bin/windows-x64/release/slang.lib" "${SLANG_ROOT}/bin/windows-x64/release/gfx.lib")
-	configure_file("${SLANG_ROOT}/bin/windows-x64/release/slang.dll" "${CMAKE_CURRENT_BINARY_DIR}/slang.dll" COPYONLY)
-	configure_file("${SLANG_ROOT}/bin/windows-x64/release/gfx.dll" "${CMAKE_CURRENT_BINARY_DIR}/gfx.dll" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/slang.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.dll" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/gfx.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/gfx.dll" COPYONLY)
 endif()
 
 if (OpenXR_FOUND)
@@ -70,21 +70,16 @@ endif()
 endif()
 
 # Shaders
-make_directory("${CMAKE_CURRENT_BINARY_DIR}/Shaders")
+make_directory("${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders")
 
 file(GLOB_RECURSE STRATUM_SHADERS "**.[gh]lsl")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders" DEPENDS Stratum)
 file(GLOB_RECURSE STRATUM_SHADERS "**.frag")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders" DEPENDS Stratum)
 file(GLOB_RECURSE STRATUM_SHADERS "**.vert")
-stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/Shaders" DEPENDS Stratum)
-
-# just copy slang files, they are compiled with slang API
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders" DEPENDS Stratum)
 file(GLOB_RECURSE STRATUM_SHADERS "**.slang")
-foreach(SLANG_SHADER IN LISTS STRATUM_SHADERS)
-	add_custom_command(TARGET Stratum PRE_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${SLANG_SHADER}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
-	configure_file("${SLANG_SHADER}" "${CMAKE_CURRENT_BINARY_DIR}/Shaders" COPYONLY)
-endforeach()
+stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders" DEPENDS Stratum)
 
 # Install rules
 
@@ -101,4 +96,4 @@ install(EXPORT StratumTargets FILE StratumTargets.cmake DESTINATION lib/cmake)
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(Config.cmake.in StratumConfig.cmake INSTALL_DESTINATION lib/cmake)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/StratumConfig.cmake DESTINATION lib/cmake)
+install(FILES ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/StratumConfig.cmake DESTINATION lib/cmake)

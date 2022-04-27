@@ -4,7 +4,6 @@
 #define MTS_FILEFORMAT_VERSION_V3 0x0003
 #define MTS_FILEFORMAT_VERSION_V4 0x0004
 
-using namespace stm::hlsl;
 namespace stm {
 
 #define ZSTREAM_BUFSIZE 32768
@@ -152,7 +151,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp positions", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Array3d tmp;
+				Eigen::Array3d tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				positions_tmp[i] = tmp.cast<float>();
 			}
@@ -169,7 +168,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> normals_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp normals", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Array3d tmp;
+				Eigen::Array3d tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				normals_tmp[i] = tmp.cast<float>();
 			}
@@ -186,7 +185,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float2> uvs_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", sizeof(float2) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Array2d tmp;
+				Eigen::Array2d tmp;
 				zs.read(tmp.data(), sizeof(double) * 2);
 				uvs_tmp[i] = tmp.cast<float>();
 			}
@@ -203,7 +202,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> colors_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp colors", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Array3d tmp;
+				Eigen::Array3d tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				colors_tmp[i] = tmp.cast<float>();
 			}

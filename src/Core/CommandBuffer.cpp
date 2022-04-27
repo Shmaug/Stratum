@@ -13,7 +13,7 @@ CommandBuffer::CommandBuffer(Device::QueueFamily& queueFamily, const string& nam
 	allocInfo.commandBufferCount = 1;
 	mCommandBuffer = mDevice->allocateCommandBuffers({ allocInfo })[0];
 	mDevice.set_debug_name(mCommandBuffer, name);
-	
+
 	clear();
 	mCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 	mState = CommandBufferState::eRecording;
@@ -25,7 +25,7 @@ CommandBuffer::~CommandBuffer() {
 	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 }
 
-void CommandBuffer::begin_label(const string& text, const Array4f& color) {
+void CommandBuffer::begin_label(const string& text, const float4& color) {
 	vk::DebugUtilsLabelEXT label = {};
 	memcpy(label.color, &color, sizeof(color));
 	label.pLabelName = text.c_str();
@@ -37,7 +37,7 @@ void CommandBuffer::end_label() {
 
 void CommandBuffer::clear() {
 	for (const auto& resource : mHeldResources)
-		resource->mTracking.erase(this); 
+		resource->mTracking.erase(this);
 	mHeldResources.clear();
 	mBoundFramebuffer.reset();
 	mSubpassIndex = 0;
@@ -50,7 +50,7 @@ void CommandBuffer::clear() {
 }
 void CommandBuffer::reset(const string& name) {
 	clear();
-	
+
 	mCommandBuffer.reset({});
 
 	mFence = make_shared<Fence>(mDevice, name + "/fence");
@@ -63,7 +63,7 @@ void CommandBuffer::reset(const string& name) {
 void CommandBuffer::bind_descriptor_set(uint32_t index, const shared_ptr<DescriptorSet>& descriptorSet, const vk::ArrayProxy<const uint32_t>& dynamicOffsets) {
 	if (!mBoundPipeline) throw logic_error("attempt to bind descriptor sets without a pipeline bound\n");
 	hold_resource(descriptorSet);
-	
+
 	descriptorSet->flush_writes();
 
 	if (index >= mBoundDescriptorSets.size()) mBoundDescriptorSets.resize(index + 1);
@@ -117,7 +117,7 @@ void CommandBuffer::end_render_pass() {
 					attachment.image()->tracked_state((vk::ImageAspectFlags)aspect, layer, level) = make_tuple(layout, guess_stage(layout), guess_access_flags(layout));
 		}
 	}
-	
+
 	mBoundFramebuffer = nullptr;
 	mSubpassIndex = -1;
 }

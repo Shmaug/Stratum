@@ -7,11 +7,11 @@ namespace stm {
 
 class PipelineState {
 public:
-	inline PipelineState(const string& name, const vk::ArrayProxy<const shared_ptr<ShaderModule>>& shaders) : mName(name) {
+	inline PipelineState(const string& name, const vk::ArrayProxy<const shared_ptr<Shader>>& shaders) : mName(name) {
 		for (const auto& shader : shaders)
 			mShaders.emplace(shader->stage(), shader);
 	}
-	template<convertible_to<ShaderModule>... Args>
+	template<convertible_to<Shader>... Args>
 	inline PipelineState(const string& name, const shared_ptr<Args>&... args) : PipelineState(name, { args... }) {}
 
 	inline string& name() { return mName; }
@@ -42,8 +42,8 @@ public:
 				return it2->second.second; // default value
 		throw invalid_argument("No specialization constant named " + name);
 	}
-	
-	inline shared_ptr<ShaderModule> stage(vk::ShaderStageFlagBits stage) const { 
+
+	inline shared_ptr<Shader> stage(vk::ShaderStageFlagBits stage) const {
 		auto it = mShaders.find(stage);
 		return (it == mShaders.end()) ? nullptr : it->second;
 	}
@@ -74,7 +74,7 @@ public:
 		if (it->second.size() != sizeof(T)) throw invalid_argument("Type size must match push constant size");
 		return *reinterpret_cast<T*>(it->second.data());
 	}
-	
+
 	inline void descriptor_binding_flag(const string& name, vk::DescriptorBindingFlags flag) {
 		if (flag == vk::DescriptorBindingFlags{0})
 			mDescriptorBindingFlags.erase(name);
@@ -93,13 +93,13 @@ public:
 	inline auto descriptor_sets() const { return mDescriptorSets | views::values; }
 	STRATUM_API void bind_descriptor_sets(CommandBuffer& commandBuffer, const unordered_map<string,uint32_t>& dynamicOffsets = {});
 	STRATUM_API void push_constants(CommandBuffer& commandBuffer) const;
-	
+
 	inline auto pipelines() const { return mPipelines | views::values; }
 
 protected:
 	string mName;
 
-	map<vk::ShaderStageFlagBits, shared_ptr<ShaderModule>> mShaders;
+	map<vk::ShaderStageFlagBits, shared_ptr<Shader>> mShaders;
 	unordered_map<string, uint32_t> mSpecializationConstants;
 	unordered_map<string, shared_ptr<Sampler>> mImmutableSamplers;
 	unordered_map<string, vector<byte>> mPushConstants;
@@ -108,7 +108,7 @@ protected:
 
 	unordered_map<size_t, shared_ptr<Pipeline>> mPipelines;
 	unordered_multimap<const DescriptorSetLayout*, shared_ptr<DescriptorSet>> mDescriptorSets;
-	
+
 	inline shared_ptr<Pipeline> find_pipeline(size_t key) const {
 		auto it = mPipelines.find(key);
 		if (it == mPipelines.end())
@@ -116,24 +116,23 @@ protected:
 		else
 			return it->second;
 	}
-	inline void add_pipeline(size_t key, const shared_ptr<Pipeline>& pipeline) { 
+	inline void add_pipeline(size_t key, const shared_ptr<Pipeline>& pipeline) {
 		mPipelines.emplace(key, pipeline);
 	}
 };
 
 class ComputePipelineState : public PipelineState {
 public:
-	inline ComputePipelineState(const string& name, const shared_ptr<ShaderModule>& module) : PipelineState(name, { module }) {}
+	inline ComputePipelineState(const string& name, const shared_ptr<Shader>& module) : PipelineState(name, { module }) {}
 	STRATUM_API shared_ptr<ComputePipeline> get_pipeline();
 	STRATUM_API shared_ptr<ComputePipeline> get_pipeline(const vk::ArrayProxy<shared_ptr<DescriptorSetLayout>>& descriptorSetLayouts);
 };
 
 class GraphicsPipelineState : public PipelineState {
 public:
-	inline GraphicsPipelineState(const string& name, const vk::ArrayProxy<const shared_ptr<ShaderModule>>& modules) : PipelineState(name, modules) {}
-	template<convertible_to<ShaderModule>... Args>
+	inline GraphicsPipelineState(const string& name, const vk::ArrayProxy<const shared_ptr<Shader>>& modules) : PipelineState(name, modules) {}
+	template<convertible_to<Shader>... Args>
 	inline GraphicsPipelineState(const string& name, const shared_ptr<Args>&... args) : PipelineState(name, { args... }) {}
-
 
 	inline void sample_shading(bool v) { mSampleShading = v; }
 	inline const auto& sample_shading() const { return mSampleShading; }
@@ -157,4 +156,3 @@ private:
 };
 
 }
-

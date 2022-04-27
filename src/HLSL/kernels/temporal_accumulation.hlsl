@@ -30,9 +30,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 [[vk::constant_id(0)]] const uint gGradientFilterRadius = 0;
 [[vk::constant_id(1)]] const bool gUseVisibility = true;
 
-#define PT_DESCRIPTOR_SET_1
-#include "../../pt_descriptors.hlsli"
-#include "svgf_common.hlsli"
+#include "../svgf_common.hlsli"
+#include "../denoise_descriptors.hlsli"
 
 [[vk::push_constant]] const struct {
 	uint gViewCount;
@@ -55,7 +54,7 @@ void main(uint3 index : SV_DispatchThreadId) {
   	const uint2 ipos = index.xy;
 	const uint ipos_1d = ipos.y*extent.x + ipos.x;
 	const float2 pos_prev = gViews[view_index].image_min + gVisibility[ipos_1d].prev_uv * float2(gViews[view_index].image_max - gViews[view_index].image_min);
-	
+
 	const int2 p = pos_prev - 0.5;
 	const float2 w = frac(pos_prev - 0.5);
 
@@ -76,7 +75,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 				const float4 c = gPrevAccumColor[ipos_prev];
 
-				if (c.a <= 0 || any(isnan(c))) continue;	
+				if (c.a <= 0 || any(isnan(c))) continue;
 
 				const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
 				color_prev   += c * wc;
@@ -84,12 +83,15 @@ void main(uint3 index : SV_DispatchThreadId) {
 				sum_w        += wc;
 			}
 		}
-	} else if (all(gVisibility[ipos_1d].prev_uv >= 0) && all(gVisibility[ipos_1d].prev_uv < 1) && !isinf(gVisibility[ipos_1d].z())) {
-		color_prev = gPrevAccumColor[pos_prev];
-		if (any(isnan(color_prev.rgb)) || any(isinf(color_prev.rgb)))
-			color_prev = 0;
-		moments_prev = gPrevAccumMoments[pos_prev];
-		sum_w = 1;
+	} else {
+		const int2 nearest = lerp(floor(pos_prev), ceil(pos_prev), pos_prev<0.5);
+		if (test_inside_screen(nearest, gViews[view_index]) && !isinf(gVisibility[ipos_1d].z())) {
+			color_prev = gPrevAccumColor[nearest];
+			if (any(isnan(color_prev.rgb)) || any(isinf(color_prev.rgb)))
+				color_prev = 0;
+			moments_prev = gPrevAccumMoments[nearest];
+			sum_w = 1;
+		}
 	}
 
 	float4 color_curr = gRadiance[ipos];
@@ -103,27 +105,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 		color_prev   *= invSum;
 		moments_prev *= invSum;
 
-		float n = min(gPushConstants.gHistoryLimit, color_prev.a + color_curr.a);
-
-		if (gPushConstants.gAntilagScale > 0) {
-			float antilag_alpha = 0;
-			if (gGradientFilterRadius == 0) {
-				const float2 v = gDiffImage[ipos/gPushConstants.gGradientDownsample];
-				antilag_alpha = saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0);
-			} else {
-				for (int yy = -gGradientFilterRadius; yy <= gGradientFilterRadius; yy++)
-					for (int xx = -gGradientFilterRadius; xx <= gGradientFilterRadius; xx++) {
-						const int2 p = int2(ipos/gPushConstants.gGradientDownsample) + int2(xx, yy);
-						if (!test_inside_screen(p*gPushConstants.gGradientDownsample, gViews[view_index])) continue;
-						const float2 v = gDiffImage[p];
-						antilag_alpha = max(antilag_alpha, saturate(v.r > 1e-4 ? abs(v.g) / v.r : 0));
-					}
-			}
-			antilag_alpha = saturate(antilag_alpha*gPushConstants.gAntilagScale);
-			if (!isnan(antilag_alpha) && !isinf(antilag_alpha))
-				n = lerp(n, color_curr.a, antilag_alpha);
-		}
-
+		const float n = min(gPushConstants.gHistoryLimit, color_prev.a + color_curr.a);
 		const float alpha = saturate(color_curr.a / n);
 
 		gAccumColor[ipos] = float4(lerp(color_prev.rgb, color_curr.rgb, alpha), n);
