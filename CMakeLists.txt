@@ -21,11 +21,11 @@ if (NOT EXISTS ${SLANG_ROOT})
 		file(REMOVE "${SLANG_ROOT}.zip")
 		set(SLANGC "${SLANG_ROOT}/bin/windows-x64/release/slangc.exe")
 	else()
-		file(DOWNLOAD https://github.com/shader-slang/slang/releases/download/v0.23.10/slang-0.23.10-linux-x86_64.tar.gz "${SLANG_ROOT}.tar.gz")
+		file(DOWNLOAD https://github.com/shader-slang/slang/releases/download/v0.23.10/slang-0.23.10-linux-x86_64.zip "${SLANG_ROOT}.zip")
 		message(STATUS "Extracting slang")
-		file(ARCHIVE_EXTRACT INPUT "${SLANG_ROOT}.tar.gz" DESTINATION "${SLANG_ROOT}")
-		file(REMOVE "${SLANG_ROOT}.tar.gz")
-		set(SLANGC "${SLANG_ROOT}/bin/linux-x86_64/slangc") # TODO?
+		file(ARCHIVE_EXTRACT INPUT "${SLANG_ROOT}.zip" DESTINATION "${SLANG_ROOT}")
+		file(REMOVE "${SLANG_ROOT}.zip")
+		set(SLANGC "${SLANG_ROOT}/bin/linux-x64/release/slangc") # TODO?
 	endif()
 endif()
 

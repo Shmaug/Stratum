@@ -151,7 +151,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp positions", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Eigen::Array3d tmp;
+				double3 tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				positions_tmp[i] = tmp.cast<float>();
 			}
@@ -168,7 +168,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> normals_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp normals", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Eigen::Array3d tmp;
+				double3 tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				normals_tmp[i] = tmp.cast<float>();
 			}
@@ -185,7 +185,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float2> uvs_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", sizeof(float2) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Eigen::Array2d tmp;
+				double2 tmp;
 				zs.read(tmp.data(), sizeof(double) * 2);
 				uvs_tmp[i] = tmp.cast<float>();
 			}
@@ -202,7 +202,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		Buffer::View<float3> colors_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp colors", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
-				Eigen::Array3d tmp;
+				double3 tmp;
 				zs.read(tmp.data(), sizeof(double) * 3);
 				colors_tmp[i] = tmp.cast<float>();
 			}

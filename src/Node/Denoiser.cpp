@@ -4,7 +4,7 @@
 
 #include <random>
 
-#include <HLSL/filter_type.hlsli>
+#include <Shaders/filter_type.h>
 
 namespace stm {
 
@@ -57,8 +57,6 @@ void Denoiser::create_pipelines() {
 	mDescriptorSetLayout = make_shared<DescriptorSetLayout>(instance->device(), "denoiser_descriptor_set_layout", bindings);
 
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 128;
-	mTemporalAccumulationPipeline->push_constant<float>("gAntilagScale") = 0;
-	mTemporalAccumulationPipeline->push_constant<uint32_t>("gGradientDownsample") = 3;
 	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
 }
@@ -69,10 +67,7 @@ void Denoiser::on_inspector_gui() {
 		create_pipelines();
 	}
 
-	if (ImGui::Checkbox("Use Visibility", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gUseVisibility")))) {
-		mEstimateVariancePipeline->specialization_constant("gUseVisibility") = mTemporalAccumulationPipeline->specialization_constant("gUseVisibility");
-		mAtrousPipeline->specialization_constant("gUseVisibility") = mTemporalAccumulationPipeline->specialization_constant("gUseVisibility");
-	}
+	ImGui::Checkbox("Reprojection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant("gReprojection")));
 
 	ImGui::PushItemWidth(40);
 	ImGui::DragFloat("Target Sample Count", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
@@ -122,6 +117,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 		mCurFrame->mFence = commandBuffer.fence();
 	}
 
+	mCurFrame->mViews = views;
 	mCurFrame->mRadiance = radiance;
 	mCurFrame->mVisibility = visibility;
 
@@ -139,7 +135,12 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 
 	Image::View output = radiance;
 
-	if (mPrevFrame && mPrevFrame->mRadiance && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent()) {
+	bool history_valid = mPrevFrame && mPrevFrame->mRadiance && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent();
+	if (history_valid && !mTemporalAccumulationPipeline->specialization_constant("gReprojection"))
+		if ((mCurFrame->mViews[0].camera_to_world.m != mPrevFrame->mViews[0].camera_to_world.m).any())
+			history_valid = false;
+
+	if (history_valid) {
 		mCurFrame->mDescriptorSet = make_shared<DescriptorSet>(mDescriptorSetLayout, "denoiser_view_descriptors");
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gViews"), views);
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gRadiance"), image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead));
@@ -155,7 +156,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 
 		output = mCurFrame->mAccumColor;
 
-		commandBuffer.barrier({ mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		commandBuffer.barrier({ mCurFrame->mVisibility }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 		mCurFrame->mDescriptorSet->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 
 		{ // temporal accumulation
@@ -166,26 +167,23 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 			commandBuffer.bind_pipeline(mTemporalAccumulationPipeline->get_pipeline(mDescriptorSetLayout));
 			commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
 			mTemporalAccumulationPipeline->push_constants(commandBuffer);
-			if (!mTemporalAccumulationPipeline->specialization_constant("gUseVisibility"))
-				if ((views[0].camera_to_world.m != views[0].camera_to_world.m).any())
-					commandBuffer.push_constant<uint32_t>("gHistoryLimit", 0);
-			commandBuffer.dispatch_over(extent);
-		}
-
-		{ // estimate variance
-			ProfilerRegion ps("Estimate Variance", commandBuffer);
-
-			mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-			mCurFrame->mAccumColor.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-			mCurFrame->mAccumMoments.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-
-			commandBuffer.bind_pipeline(mEstimateVariancePipeline->get_pipeline(mDescriptorSetLayout));
-			commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
-			mTemporalAccumulationPipeline->push_constants(commandBuffer);
 			commandBuffer.dispatch_over(extent);
 		}
 
 		if (mAtrousIterations > 0) {
+			{ // estimate variance
+				ProfilerRegion ps("Estimate Variance", commandBuffer);
+
+				mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+				mCurFrame->mAccumColor.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+				mCurFrame->mAccumMoments.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+
+				commandBuffer.bind_pipeline(mEstimateVariancePipeline->get_pipeline(mDescriptorSetLayout));
+				commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
+				mTemporalAccumulationPipeline->push_constants(commandBuffer);
+				commandBuffer.dispatch_over(extent);
+			}
+
 			ProfilerRegion ps("Filter image", commandBuffer);
 			mAtrousPipeline->push_constant<uint32_t>("gViewCount") = (uint32_t)views.size();
 			commandBuffer.bind_pipeline(mAtrousPipeline->get_pipeline(mDescriptorSetLayout));

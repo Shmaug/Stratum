@@ -30,6 +30,7 @@ private:
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
+		Buffer::View<ViewData> mViews;
 		Image::View mRadiance;
 		Buffer::View<VisibilityInfo> mVisibility;
 		Image::View mAccumColor;
@@ -44,7 +45,6 @@ private:
 
 	uint32_t mAtrousIterations = 0;
 	uint32_t mHistoryTap = 0;
-
 };
 
 }

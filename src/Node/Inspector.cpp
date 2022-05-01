@@ -100,6 +100,11 @@ Inspector::Inspector(Node& node) : mNode(node) {
 		ImGui::End();
 
 		if (ImGui::Begin("Inspector")) {
+			if (ImGui::CollapsingHeader("Profiler")) {
+				ProfilerRegion ps("Profiler::on_gui");
+				Profiler::on_gui();
+				ImGui::Separator();
+			}
 			if (selected) {
 				ImGui::Text(selected->name().c_str());
 				ImGui::SetNextItemWidth(40);

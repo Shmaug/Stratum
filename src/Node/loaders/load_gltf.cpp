@@ -76,74 +76,20 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 	});
 	Node& materialsNode = root.make_child("materials");
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
-		component_ptr<Material> m = materialsNode.make_child(material.name).make_component<Material>();
-		const float3 emissive = Eigen::Array3d::Map(material.emissiveFactor.data()).cast<float>();
-		if (emissive.any()) {
-			Emissive e;
-			e.emission.value = emissive;
-			e.emission.image = get_image(material.emissiveTexture.index, true);
-			*m = e;
-		} else {
-			if (material.pbrMetallicRoughness.metallicFactor > 0) {
-				RoughPlastic r;
-				r.diffuse_reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
-				r.diffuse_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
-				r.specular_reflectance.value = r.diffuse_reflectance.value * material.pbrMetallicRoughness.metallicFactor;
-				r.specular_reflectance.image = r.diffuse_reflectance.image;
-				r.diffuse_reflectance.value *= 1 - (float)material.pbrMetallicRoughness.metallicFactor;
-				r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
-				*m = r;
-			} else {
-				if (material.extensions.contains("KHR_materials_transmission")) {
-					RoughDielectric r;
-					r.specular_reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
-					r.specular_reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
-					r.specular_transmittance.value = r.specular_reflectance.value * material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble();
-					r.specular_transmittance.image = r.specular_reflectance.image;
-					r.roughness.value = (float)material.pbrMetallicRoughness.roughnessFactor;
-					r.eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
-					*m = r;
-				} else {
-					Lambertian l;
-					l.reflectance.value = Eigen::Array3d::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
-					l.reflectance.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
-					*m = l;
-				}
-			}
-		}
-		/*
-		m->mMetallic = (float)material.pbrMetallicRoughness.metallicFactor;
-		m->mRoughness = (float)material.pbrMetallicRoughness.roughnessFactor;
-		m->mNormalScale = (float)material.normalTexture.scale;
-		m->mOcclusionScale = (float)material.occlusionTexture.strength;
-		if (material.pbrMetallicRoughness.baseColorTexture.index != -1) m->mAlbedoImage = images[model.textures[material.pbrMetallicRoughness.baseColorTexture.index].source];
-		if (material.normalTexture.index != -1) m->mNormalImage = images[model.textures[material.normalTexture.index].source];
-		if (material.emissiveTexture.index != -1) m->mEmissionImage = images[model.textures[material.emissiveTexture.index].source];
-		if (material.pbrMetallicRoughness.metallicRoughnessTexture.index != -1) m->mMetallicImage = m->mRoughnessImage = images[model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index].source];
-		if (material.occlusionTexture.index != -1) m->mOcclusionImage = images[model.textures[material.occlusionTexture.index].source];
-		m->mMetallicImageComponent = 0;
-		m->mRoughnessImageComponent = 1;
-		m->mOcclusionImageComponent = 0;
+		ImageValue3 emission;
+		ImageValue3 base_color;
+		ImageValue4 metallic_roughness;
+		float eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
+		float transmission = material.extensions.contains("KHR_materials_transmission") ? (float)material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble() : 0;
 
-		if (const auto& it = material.extensions.find("KHR_materials_ior"); it != material.extensions.end())
-			m->mIndexOfRefraction = (float)it->second.Get("ior").Get<double>();
-		else
-			m->mIndexOfRefraction = 1.5f;
-
-		if (const auto& it = material.extensions.find("KHR_materials_transmission"); it != material.extensions.end())
-			m->mTransmission = (float)it->second.Get("transmissionFactor").Get<double>();
-		else
-			m->mTransmission = 0;
-
-		if (const auto& it = material.extensions.find("KHR_materials_volume"); it != material.extensions.end()) {
-			const auto& c = it->second.Get("attenuationColor");
-			m->mAbsorption = (-Array3d(c.Get(0).Get<double>(), c.Get(1).Get<double>(), c.Get(2).Get<double>()) / it->second.Get("attenuationDistance").Get<double>()).cast<float>();
-		}
-
-		*/
-		if (material.alphaMode == "MASK")
-			m.node().make_child("alpha_mask").make_component<Image::View>( get_image(material.pbrMetallicRoughness.baseColorTexture.index, true) );
-		return m;
+		emission.value = double3::Map(material.emissiveFactor.data()).cast<float>();
+		emission.image = get_image(material.emissiveTexture.index, true);
+		base_color.value = double3::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
+		base_color.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
+		metallic_roughness.value = double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>();
+		metallic_roughness.image = get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, true);
+		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
+		return materialsNode.make_child(material.name).make_component<Material>(m);
 	});
 	Node& meshesNode = root.make_child("meshes");
 	for (uint32_t i = 0; i < model.meshes.size(); i++) {
@@ -159,13 +105,13 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 
 			vk::PrimitiveTopology topology;
 			switch (prim.mode) {
-				case TINYGLTF_MODE_POINTS: 					topology = vk::PrimitiveTopology::ePointList; break;
-				case TINYGLTF_MODE_LINE: 						topology = vk::PrimitiveTopology::eLineList; break;
-				case TINYGLTF_MODE_LINE_LOOP: 			topology = vk::PrimitiveTopology::eLineStrip; break;
-				case TINYGLTF_MODE_LINE_STRIP: 			topology = vk::PrimitiveTopology::eLineStrip; break;
-				case TINYGLTF_MODE_TRIANGLES: 			topology = vk::PrimitiveTopology::eTriangleList; break;
+				case TINYGLTF_MODE_POINTS: 			topology = vk::PrimitiveTopology::ePointList; break;
+				case TINYGLTF_MODE_LINE: 			topology = vk::PrimitiveTopology::eLineList; break;
+				case TINYGLTF_MODE_LINE_LOOP: 		topology = vk::PrimitiveTopology::eLineStrip; break;
+				case TINYGLTF_MODE_LINE_STRIP: 		topology = vk::PrimitiveTopology::eLineStrip; break;
+				case TINYGLTF_MODE_TRIANGLES: 		topology = vk::PrimitiveTopology::eTriangleList; break;
 				case TINYGLTF_MODE_TRIANGLE_STRIP: 	topology = vk::PrimitiveTopology::eTriangleStrip; break;
-				case TINYGLTF_MODE_TRIANGLE_FAN: 		topology = vk::PrimitiveTopology::eTriangleFan; break;
+				case TINYGLTF_MODE_TRIANGLE_FAN: 	topology = vk::PrimitiveTopology::eTriangleFan; break;
 			}
 
 			for (const auto&[attribName,attribIndex] : prim.attributes) {
@@ -274,9 +220,9 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 			float3 translate;
 			float3 scale;
 			if (node.translation.empty()) translate = float3::Zero();
-			else translate = Eigen::Array3d::Map(node.translation.data()).cast<float>();
+			else translate = double3::Map(node.translation.data()).cast<float>();
 			if (node.scale.empty()) scale = float3::Ones();
-			else scale = Eigen::Array3d::Map(node.scale.data()).cast<float>();
+			else scale = double3::Map(node.scale.data()).cast<float>();
 			const quatf rotate = node.rotation.empty() ? quatf_identity() : qnormalize(make_quatf((float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2], (float)node.rotation[3]));
 			dst.make_component<TransformData>(make_transform(translate, rotate, scale));
 		} else if (!node.matrix.empty())
@@ -294,10 +240,9 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 			if (l.type == "point" && l.extras.Has("radius")) {
 				auto sphere = dst.make_child(l.name).make_component<SpherePrimitive>();
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
-				Emissive emissive;
-				emissive.emission.image = {};
-				emissive.emission.value = (Eigen::Array3d::Map(l.color.data()) * l.intensity/(4*numbers::pi_v<float>*sphere->mRadius*sphere->mRadius)).cast<float>();
-				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(emissive);
+				Material m;
+				m.emission.value = (double3::Map(l.color.data()) * l.intensity/(4*((float)M_PI)*sphere->mRadius*sphere->mRadius)).cast<float>();
+				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(m);
 			}
 		}
 	}

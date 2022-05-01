@@ -210,51 +210,37 @@ float3 parse_color(pugi::xml_node node) {
 	}
 }
 
-Image::View alpha_to_roughness(Node& n, CommandBuffer& commandBuffer, const Image::View& alpha) {
-	auto p = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_alpha_to_roughness.spv"));
-	Image::View roughness = make_shared<Image>(commandBuffer.mDevice, "roughness", alpha.extent(), alpha.image()->format(), alpha.image()->layer_count(), alpha.image()->level_count(), alpha.image()->sample_count(), vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-	p->descriptor("gInput")  = image_descriptor(alpha, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	p->descriptor("gRoughness") = image_descriptor(roughness, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-	commandBuffer.bind_pipeline(p->get_pipeline());
-	p->bind_descriptor_sets(commandBuffer);
-	p->push_constants(commandBuffer);
-	commandBuffer.dispatch_over(alpha.extent());
-	roughness.image()->generate_mip_maps(commandBuffer);
-	return roughness;
-}
-
 tuple<string /* ID */, component_ptr<Material>> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi::xml_node node, const map<string /* name id */, Image::View>& texture_map) {
 	string type = node.attribute("type").value();
 	string id;
 	if (!node.attribute("id").empty()) {
 		id = node.attribute("id").value();
 	}
+
 	if (type == "diffuse") {
-		Lambertian l;
-		l.reflectance = make_image_value3({}, float3::Constant(0.5f));
+		ImageValue3 diffuse = make_image_value3({}, float3::Constant(0.5f));
 		for (auto child : node.children()) {
 			string name = child.attribute("name").value();
 			if (name == "reflectance")
-				l.reflectance = parse_spectrum_texture(child, texture_map);
+				diffuse = parse_spectrum_texture(child, texture_map);
 		}
-		return make_tuple(id,  dst.make_component<Material>(l));
+		auto m = dst.make_component<Material>();
+		m->base_color = diffuse;
+		m->packed_data = make_image_value4({}, float4(1,0,0,0));
+		return make_tuple(id, m);
 	} else if (type == "roughplastic" || type == "plastic") {
-		RoughPlastic r;
-		r.diffuse_reflectance  = make_image_value3({}, float3::Constant(0.5f));
-		r.specular_reflectance = make_image_value3({}, float3::Ones());
-		r.roughness = make_image_value1({}, 0.1f);
-		if (type == "plastic") {
-			// Approximate plastic materials with very small roughness
-			r.roughness = make_image_value1({}, 0.01f);
-		}
+		ImageValue3 diffuse  = make_image_value3({}, float3::Constant(0.5f));
+		ImageValue3 specular = make_image_value3({}, float3::Ones());
+		ImageValue1 roughness = make_image_value1({}, (type == "plastic") ? 0 : 0.1f);
+
 		float intIOR = 1.49;
 		float extIOR = 1.000277;
 		for (auto child : node.children()) {
 			string name = child.attribute("name").value();
 			if (name == "diffuseReflectance") {
-				r.diffuse_reflectance = parse_spectrum_texture(child, texture_map);
+				diffuse = parse_spectrum_texture(child, texture_map);
 			} else if (name == "specularReflectance") {
-				r.specular_reflectance = parse_spectrum_texture(child, texture_map);
+				specular = parse_spectrum_texture(child, texture_map);
 			} else if (name == "alpha") {
 				// Alpha requires special treatment since we need to convert
 				// the values to roughness
@@ -263,43 +249,36 @@ tuple<string /* ID */, component_ptr<Material>> parse_bsdf(Node& dst, CommandBuf
 					// referencing a texture
 					string ref_id = child.attribute("id").value();
 					auto t_it = texture_map.find(ref_id);
-					if (t_it == texture_map.end()) {
-						throw runtime_error(string("Texture not found. ID = ") + ref_id);
-					}
-					r.roughness = make_image_value1(alpha_to_roughness(dst, commandBuffer, t_it->second));
+					if (t_it == texture_map.end()) throw runtime_error(string("Texture not found. ID = ") + ref_id);
+					roughness = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second, 1));
 				} else if (type == "float") {
 					float alpha = stof(child.attribute("value").value());
-					r.roughness = make_image_value1({}, sqrt(alpha));
-				} else {
+					roughness.value = sqrt(alpha);
+				} else
 					throw runtime_error(string("Unknown float texture type:") + type);
-				}
 			} else if (name == "roughness") {
-				r.roughness = parse_float_texture(child, texture_map);
+				roughness = parse_float_texture(child, texture_map);
 			} else if (name == "intIOR") {
 				intIOR = stof(child.attribute("value").value());
 			} else if (name == "extIOR") {
 				extIOR = stof(child.attribute("value").value());
 			}
 		}
-		r.eta = intIOR / extIOR;
-		return make_tuple(id, dst.make_component<Material>(r));
+		float eta = intIOR / extIOR;
+		return make_tuple(id, dst.make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, make_image_value3({},float3::Zero()), eta, make_image_value3({},float3::Zero()))));
 	} else if (type == "roughdielectric" || type == "dielectric") {
-		RoughDielectric r;
-		r.specular_reflectance = make_image_value3({}, float3::Ones());
-		r.specular_transmittance = make_image_value3({}, float3::Ones());
-		r.roughness = make_image_value1({}, 0.1f);
-		if (type == "dielectric") {
-			// Approximate plastic materials with very small roughness
-			r.roughness = make_image_value1({}, 0.01f);
-		}
+		ImageValue3 diffuse = make_image_value3({}, float3::Ones());
+		ImageValue3 specular = make_image_value3({}, float3::Ones());
+		ImageValue3 transmittance = make_image_value3({}, float3::Ones());
+		ImageValue1 roughness = make_image_value1({}, (type == "dielectric") ? 0 : 0.1f);
 		float intIOR = 1.5046;
 		float extIOR = 1.000277;
 		for (auto child : node.children()) {
 			string name = child.attribute("name").value();
 			if (name == "specularReflectance") {
-				r.specular_reflectance = parse_spectrum_texture(child, texture_map);
+				specular = parse_spectrum_texture(child, texture_map);
 			} else if (name == "specularTransmittance") {
-				r.specular_transmittance = parse_spectrum_texture(child, texture_map);
+				transmittance = parse_spectrum_texture(child, texture_map);
 			} else if (name == "alpha") {
 				string type = child.name();
 				if (type == "ref") {
@@ -308,23 +287,22 @@ tuple<string /* ID */, component_ptr<Material>> parse_bsdf(Node& dst, CommandBuf
 					auto t_it = texture_map.find(ref_id);
 					if (t_it == texture_map.end())
 						throw runtime_error(string("Texture not found. ID = ") + ref_id);
-					r.roughness = make_image_value1(alpha_to_roughness(dst, commandBuffer, t_it->second));
+					roughness.image = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second)).image;
 				} else if (type == "float") {
-					const float alpha = stof(child.attribute("value").value());
-					r.roughness = make_image_value1({}, sqrt(alpha));
+					roughness.value = sqrt(stof(child.attribute("value").value()));
 				} else {
 					throw runtime_error(string("Unknown float texture type:") + type);
 				}
 			} else if (name == "roughness") {
-				r.roughness = parse_float_texture(child, texture_map);
+				roughness = parse_float_texture(child, texture_map);
 			} else if (name == "intIOR") {
 				intIOR = stof(child.attribute("value").value());
 			} else if (name == "extIOR") {
 				extIOR = stof(child.attribute("value").value());
 			}
 		}
-		r.eta = intIOR / extIOR;
-		return make_tuple(id, dst.make_component<Material>(r));
+		float eta = intIOR / extIOR;
+		return make_tuple(id, dst.make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, transmittance, eta, make_image_value3({},float3::Zero()))));
 	}/* else if (type == "disneydiffuse") {
 			ImageValue3 base_color = make_image_value3(0.5f);
 			ImageValue1 roughness = make_image_value1(float(0.5));
@@ -511,12 +489,12 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 					}
 				}
 			}
-			Emissive e;
-			e.emission = make_image_value3({}, radiance);
+			Material m;
+			m.emission = make_image_value3({}, radiance);
 			if (material)
-				*material = e;
+				*material = m;
 			else
-				material = dst.make_component<Material>(e);
+				material = dst.make_component<Material>(m);
 		}
 
 		const string name_attrib = child.attribute("name").value();
@@ -676,7 +654,7 @@ void parse_scene(Node& root, CommandBuffer& commandBuffer, pugi::xml_node node) 
 				if (filename.size() > 0) {
 					Environment e = load_environment(commandBuffer, filename);
 					e.emission.value *= scale;
-					n.make_component<Material>(e);
+					n.make_component<Environment>(e);
 				} else {
 					throw runtime_error("Filename unspecified for envmap.");
 				}

@@ -10,8 +10,10 @@ namespace stm {
 
 #pragma pack(push)
 #pragma pack(1)
-#include <HLSL/scene.hlsli>
-#include <HLSL/material.hlsli>
+#include <Shaders/scene.h>
+#include <Shaders/materials/environment.h>
+#include <Shaders/materials/material.h>
+#include <Shaders/materials/medium.h>
 #pragma pack(pop)
 
 struct Camera {
@@ -49,15 +51,17 @@ STRATUM_API Mesh load_obj(CommandBuffer& commandBuffer, const fs::path& filename
 class Scene {
 public:
 	struct SceneData {
-		ResourcePool mResources;
+		MaterialResources mResources;
 
 		shared_ptr<AccelerationStructure> mScene;
-		unordered_map<void* /* geometry component */, pair<TransformData, uint32_t /* instance index */ >> mInstanceTransformMap;
+		unordered_map<const void* /* address of component */, pair<TransformData, uint32_t /* instance index */ >> mInstanceTransformMap;
 
 		Buffer::View<PackedVertexData> mVertices;
 		Buffer::View<byte> mIndices;
 		Buffer::View<byte> mMaterialData;
 		Buffer::View<InstanceData> mInstances;
+		Buffer::View<TransformData> mInstanceInverseTransforms;
+		Buffer::View<TransformData> mInstanceMotionTransforms;
 		Buffer::View<uint32_t> mLightInstances;
 		Buffer::View<float> mDistributionData;
 		Buffer::View<uint32_t> mInstanceIndexMap;
@@ -133,6 +137,11 @@ public:
 			throw runtime_error("unknown extension:" + ext);
 	}
 
+	STRATUM_API ImageValue1 alpha_to_roughness(CommandBuffer& commandBuffer, const ImageValue1& alpha);
+	STRATUM_API ImageValue1 shininess_to_roughness(CommandBuffer& commandBuffer, const ImageValue1& alpha);
+	STRATUM_API Material make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmittance, const float eta, const ImageValue3& emission);
+	STRATUM_API Material make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmittance, const float eta, const ImageValue3& emission);
+
 	component_ptr<Camera> mMainCamera;
 
 private:
@@ -151,6 +160,11 @@ private:
 	shared_ptr<SceneData> mSceneData;
 
 	shared_ptr<ComputePipelineState> mCopyVerticesPipeline;
+
+	shared_ptr<ComputePipelineState> mConvertAlphaToRoughnessPipeline;
+	shared_ptr<ComputePipelineState> mConvertShininessToRoughnessPipeline;
+	shared_ptr<ComputePipelineState> mConvertPbrPipeline;
+	shared_ptr<ComputePipelineState> mConvertDiffuseSpecularPipeline;
 
 	vector<string> mToLoad;
 

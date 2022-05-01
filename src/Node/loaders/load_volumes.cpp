@@ -14,7 +14,7 @@
 namespace stm {
 
 inline void create_volume(Node& dst, CommandBuffer& commandBuffer, const string& name, const component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>>& density = {}, const component_ptr<nanovdb::GridHandle<nanovdb::HostBuffer>>& albedo = {}) {
-  HeterogeneousVolume& h = *dst.make_component<HeterogeneousVolume>();
+  Medium& h = *dst.make_component<Medium>();
   h.density_scale = float3::Ones();
   h.anisotropy = 0.f;
   h.albedo_scale = float3::Ones();
@@ -41,7 +41,7 @@ inline void create_volume(Node& dst, CommandBuffer& commandBuffer, const string&
     const nanovdb::Vec3R extent = bbox_max - bbox_min;
     const float scale = 1 / (float)(bbox_max - bbox_min).max();
     dst.make_component<TransformData>( make_transform(
-      -MatrixType<nanovdb::Vec3R::ValueType,3,1>::Map(&center[0]).cast<float>() * scale,
+      -VectorType<nanovdb::Vec3R::ValueType,3>::Map(&center[0]).cast<float>() * scale,
       quatf_identity(),
       float3::Constant(scale)) );
   }

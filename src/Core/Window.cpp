@@ -378,7 +378,7 @@ bool stm::Window::process_event(xcb_generic_event_t* event) {
 	switch (event->response_type & ~0x80) {
 	case XCB_MOTION_NOTIFY:
 		if (mn->same_screen)
-			mInputState.cursor_pos() = Vector2f((float)mn->event_x, (float)mn->event_y);
+			mInputState.cursor_pos() = float2((float)mn->event_x, (float)mn->event_y);
 		break;
 
 	case XCB_KEY_PRESS:

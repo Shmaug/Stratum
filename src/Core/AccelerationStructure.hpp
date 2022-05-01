@@ -9,7 +9,7 @@ public:
 	AccelerationStructure() = delete;
 	AccelerationStructure(const AccelerationStructure&) = delete;
 	AccelerationStructure(AccelerationStructure&&) = delete;
-	STRATUM_API AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureGeometryKHR>& geometries, const vk::ArrayProxyNoTemporaries<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges);
+	STRATUM_API AccelerationStructure(CommandBuffer& commandBuffer, const string& name, vk::AccelerationStructureTypeKHR type, const vk::ArrayProxy<const vk::AccelerationStructureGeometryKHR>& geometries, const vk::ArrayProxy<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges);
 	STRATUM_API ~AccelerationStructure();
 	inline const Buffer::View<byte>& buffer() const { return mBuffer; }
 	inline const vk::AccelerationStructureKHR* operator->() const { return &mAccelerationStructure; }

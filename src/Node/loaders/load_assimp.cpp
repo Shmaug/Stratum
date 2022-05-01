@@ -10,47 +10,6 @@
 
 namespace stm {
 
-inline void shininess_to_roughness(Node& n, CommandBuffer& commandBuffer, ImageValue1& alpha) {
-	alpha.value = sqrt(2 / (alpha.value + 2));
-	if (alpha.image) {
-		auto p = make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_shininess_to_roughness.spv"));
-
-		Image::View roughness = make_shared<Image>(commandBuffer.mDevice, "roughness", alpha.image.extent(), alpha.image.image()->format(), 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		p->descriptor("gInput")  = image_descriptor(alpha.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		p->descriptor("gRoughness") = image_descriptor(roughness, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		commandBuffer.bind_pipeline(p->get_pipeline());
-		p->bind_descriptor_sets(commandBuffer);
-		p->push_constants(commandBuffer);
-		commandBuffer.dispatch_over(alpha.image.extent());
-		roughness.image()->generate_mip_maps(commandBuffer);
-		alpha.image = roughness;
-	}
-}
-inline void pbr_to_diffuse_specular(Node& n, CommandBuffer& commandBuffer, ImageValue3& diffuse, ImageValue3& specular, ImageValue1& roughness) {
-	if (diffuse.image && specular.image) {
-		auto p = make_shared<ComputePipelineState>("material_convert_pbr_to_diff_spec", make_shared<Shader>(commandBuffer.mDevice, "Shaders/material_convert_pbr_to_diff_spec.spv"));
-		Image::View diff_img = make_shared<Image>(commandBuffer.mDevice, "diffuse", diffuse.image.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		Image::View spec_img = make_shared<Image>(commandBuffer.mDevice, "specular", specular.image.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		p->descriptor("gInputDiffuse") = image_descriptor(diffuse.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		p->descriptor("gInputPackedData") = image_descriptor(specular.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		p->descriptor("gDiffuse") = image_descriptor(diff_img, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		p->descriptor("gSpecular") = image_descriptor(spec_img, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		commandBuffer.bind_pipeline(p->get_pipeline());
-		p->bind_descriptor_sets(commandBuffer);
-		p->push_constants(commandBuffer);
-		commandBuffer.dispatch_over(diffuse.image.extent());
-		diff_img.image()->generate_mip_maps(commandBuffer);
-		spec_img.image()->generate_mip_maps(commandBuffer);
-		diffuse.value = float3::Ones();
-		specular.value = float3::Ones();
-		roughness.value = 1;
-		diffuse.image = diff_img;
-		specular.image = spec_img;
-		roughness.image = Image::View(spec_img.image(), 0, 0, 0, 0, (vk::ImageAspectFlags)0, vk::ComponentMapping(vk::ComponentSwizzle::eA));
-	} else
-		specular.value = diffuse.value;
-}
-
 #ifdef STRATUM_ENABLE_ASSIMP
 void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("load_assimp", commandBuffer);
@@ -115,55 +74,26 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			aiMaterial* m = scene->mMaterials[i];
 			Material& material = *materials.emplace_back(materials_node.make_child(m->GetName().C_Str()).make_component<Material>());
 
-			/*
-			cout << m->GetName().C_Str() << endl;
-			for (int p = 0; p < m->mNumProperties; p++) {
-				cout << "\t" << m->mProperties[p]->mKey.C_Str() << ": ";
-				switch (m->mProperties[p]->mType) {
-					case aiPTI_Float:
-						for (int offset = 0; offset < m->mProperties[p]->mDataLength; offset += sizeof(float))
-							cout << *reinterpret_cast<float*>(m->mProperties[p]->mData + offset) << " ";
-						break;
-					case aiPTI_Double:
-						for (int offset = 0; offset < m->mProperties[p]->mDataLength; offset += sizeof(double))
-							cout << *reinterpret_cast<double*>(m->mProperties[p]->mData + offset) << " ";
-						break;
-					case aiPTI_Integer:
-						for (int offset = 0; offset < m->mProperties[p]->mDataLength; offset += sizeof(uint32_t))
-							cout << *reinterpret_cast<uint32_t*>(m->mProperties[p]->mData + offset) << " ";
-						break;
-					case aiPTI_String:
-						cout << m->mProperties[p]->mData;
-						break;
-					case aiPTI_Buffer:
-						cout << "[" << m->mProperties[p]->mDataLength << " bytes]";
-						break;
-				}
-				cout << endl;
-			}
-			*/
-
-			ImageValue3 emission;
-			ImageValue3 diffuse;
-			ImageValue3 specular;
-			ImageValue3 transmittance;
-			ImageValue1 roughness;
+			ImageValue3 diffuse = make_image_value3({}, float3::Ones());
+			ImageValue4 specular = make_image_value4({}, float4::Ones());
+			ImageValue1 roughness = make_image_value1({}, 1);
+			ImageValue3 transmittance = make_image_value3({}, float3::Zero());
+			ImageValue3 emission = make_image_value3({}, float3::Zero());
 			float eta = 1.45f;
 
             aiColor3D tmp_color;
             if (m->Get(AI_MATKEY_COLOR_EMISSIVE, tmp_color) == AI_SUCCESS) emission.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-            if (m->Get(AI_MATKEY_COLOR_DIFFUSE, tmp_color) == AI_SUCCESS)  diffuse.value  = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-            if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+            if (m->Get(AI_MATKEY_COLOR_DIFFUSE, tmp_color) == AI_SUCCESS) diffuse.value  = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+            if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float4(tmp_color.r, tmp_color.g, tmp_color.b, 1);
 			if (m->Get(AI_MATKEY_SHININESS, roughness.value) == AI_SUCCESS) roughness.value = roughness.value;
             if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, tmp_color) == AI_SUCCESS) transmittance.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-
 			m->Get(AI_MATKEY_REFRACTI, eta);
 
 			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
 				aiString aiPath;
 				m->GetTexture(aiTextureType_EMISSIVE, 0, &aiPath);
-				emission.value = float3::Ones();
-				emission.image = get_image(aiPath.C_Str(), true);
+				material.emission.value = float3::Ones();
+				material.emission.image = get_image(aiPath.C_Str(), true);
 			}
 			if (m->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
 				aiString aiPath;
@@ -181,14 +111,7 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 				roughness.image = get_image(aiPath.C_Str(), true);
 			}
 
-			if ((emission.value > 0).any())
-				material = Emissive{emission};
-			else {
-				shininess_to_roughness(materials_node, commandBuffer, roughness);
-				if (interpret_as_pbr)
-					pbr_to_diffuse_specular(materials_node, commandBuffer, diffuse, specular, roughness);
-				material = RoughPlastic{diffuse,specular,roughness,eta};
-			}
+			material = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, diffuse, specular, transmittance, eta, emission);
 		}
 	}
 

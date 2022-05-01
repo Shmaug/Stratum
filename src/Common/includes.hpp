@@ -7,7 +7,6 @@
 #include <locale>
 #include <mutex>
 #include <numeric>
-#include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <stdlib.h>

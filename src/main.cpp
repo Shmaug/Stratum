@@ -1,6 +1,6 @@
 #include "Node/Application.hpp"
 #include "Node/Inspector.hpp"
-#include "Node/PathTracer.hpp"
+#include "Node/BDPT.hpp"
 #include "Node/XR.hpp"
 
 using namespace stm;
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
 #endif
 
 	Node& renderer_node = app_node.make_child("Renderer");
-	auto renderer = renderer_node.make_component<PathTracer>();
+	auto renderer = renderer_node.make_component<BDPT>();
 	auto denoiser = renderer_node.make_component<Denoiser>();
 
 	for (const string& plugin_info : instance->find_arguments("loadPlugin"))

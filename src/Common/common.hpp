@@ -44,8 +44,8 @@ constexpr T floorlog2i(T n) { return sizeof(T)*8 - countl_zero<T>(n) - 1; }
 template<typename T> requires(is_arithmetic_v<T>)
 constexpr T sign(T x) { return (x == 0) ? 0 : (x < 0) ? -1 : 1; }
 
-template<floating_point T> constexpr T degrees(const T& r) { return r * (T)180/numbers::pi_v<float>; }
-template<floating_point T> constexpr T radians(const T& d) { return d * numbers::pi_v<float>/(T)180; }
+template<floating_point T> constexpr T degrees(const T& r) { return r * (T)180/((float)M_PI); }
+template<floating_point T> constexpr T radians(const T& d) { return d * ((float)M_PI)/(T)180; }
 
 template<integral T> constexpr T align_up_mask(T value, size_t mask) { return (T)(((size_t)value + mask) & ~mask); }
 template<integral T> constexpr T align_down_mask(T value, size_t mask) { return (T)((size_t)value & ~mask); }
