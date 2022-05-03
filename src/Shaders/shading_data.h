@@ -88,6 +88,8 @@ inline void make_triangle_shading_data(inout ShadingData r, const InstanceData i
 		r.packed_shading_normal = pack_normal_octahedron(shading_normal);
 		r.packed_tangent = pack_normal_octahedron(tangent);
 
+		if (dot(shading_normal, geometry_normal) < 0) r.packed_geometry_normal = pack_normal_octahedron(-geometry_normal);
+
 		const float3 dNds = v2.normal - v0.normal;
 		const float3 dNdt = v2.normal - v1.normal;
 		const float3 dNdu = dNds * dsdu + dNdt * dtdu;

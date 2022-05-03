@@ -38,7 +38,6 @@ void from_metal_rough(uint3 index : SV_DispatchThreadId) {
 	gPackedData.GetDimensions(size.x, size.y);
 	if (any(index.xy >= size)) return;
 	const float4 metallic_roughness = gSpecular[index.xy];
-	// packing used in measure seven
 	const float occlusion = metallic_roughness.r;
 	const float roughness = metallic_roughness.g;
 	const float metallic = metallic_roughness.b;

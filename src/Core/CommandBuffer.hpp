@@ -303,11 +303,11 @@ private:
 	CommandBuffer* mCommandBuffer;
 public:
 	inline ProfilerRegion(const string& label) : ProfilerRegion(label, nullptr) {}
-	inline ProfilerRegion(const string& label, CommandBuffer& cmd) : ProfilerRegion(label, &cmd) {}
-	inline ProfilerRegion(const string& label, CommandBuffer* cmd) : mCommandBuffer(cmd) {
-		Profiler::begin_sample(label);
-		if (mCommandBuffer) mCommandBuffer->begin_label(label);
+	inline ProfilerRegion(const string& label, CommandBuffer* cmd, const float4& color = float4::Ones()) : mCommandBuffer(cmd) {
+		Profiler::begin_sample(label, color);
+		if (mCommandBuffer) mCommandBuffer->begin_label(label, color);
 	}
+	inline ProfilerRegion(const string& label, CommandBuffer& cmd, const float4& color = float4::Ones()) : ProfilerRegion(label, &cmd, color) {}
 	inline ~ProfilerRegion() {
 		if (mCommandBuffer) mCommandBuffer->end_label();
 		Profiler::end_sample();

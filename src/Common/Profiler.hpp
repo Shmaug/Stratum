@@ -20,7 +20,7 @@ public:
 			: mParent(parent), mColor(color), mLabel(label), mStartTime(chrono::high_resolution_clock::now()), mDuration(chrono::nanoseconds::zero()) {}
 	};
 
-	inline static void begin_sample(const string& label, const float4& color = float4(.3f, .9f, .3f, 1)) {
+	inline static void begin_sample(const string& label, const float4& color = float4::Ones()) {
 		auto s = make_shared<sample_t>(mCurrentSample, label, color);
 		if (mCurrentSample)
 			mCurrentSample = mCurrentSample->mChildren.emplace_back(s);
@@ -45,10 +45,19 @@ public:
 		}
 	}
 
+	inline static const auto& times() { return mFrameTimes; }
 	inline static const auto& history() { return mFrameHistory; }
 	inline static void clear_history() { mFrameHistory.clear(); }
 
-	STRATUM_API static void on_gui();
+	inline static void reset_timeline(uint32_t n) {
+		if (mFrameHistory.empty())
+			mFrameHistoryCount = n;
+		else
+			mFrameHistory.clear();
+	}
+
+	STRATUM_API static void timings_gui();
+	STRATUM_API static void timeline_gui();
 
 private:
 	STRATUM_API static shared_ptr<sample_t> mCurrentSample;

@@ -10,13 +10,12 @@ struct Material {
 	inline void load_and_sample(uint address, const float2 uv, const float uv_screen_size) {
 		color = sample_image(load_image_value3(address), uv, uv_screen_size);
 		const float4 packed = sample_image(load_image_value4(address), uv, uv_screen_size);
-		emission = sample_image(load_image_value3(address), uv, uv_screen_size);
-		eta = gMaterialData.Load<float>(address);
-
 		diffuse_reflectance = packed.r;
 		specular_reflectance = packed.g;
 		alpha = pow2(max(gMinRoughness, packed.b));
 		specular_transmittance = packed.a;
+		emission = sample_image(load_image_value3(address), uv, uv_screen_size);
+		eta = gMaterialData.Load<float>(address);
 	}
 
 	inline void eval_lambertian(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {

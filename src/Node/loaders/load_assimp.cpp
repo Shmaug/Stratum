@@ -21,10 +21,10 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 	// And have it read the given file with some example postprocessing
 	// Usually - if speed is not the most important aspect for you - you'll
 	// propably to request more postprocessing than we do in this example.
-	uint32_t flags = aiProcessPreset_TargetRealtime_MaxQuality;
+	uint32_t flags = aiProcessPreset_TargetRealtime_MaxQuality | aiProcess_TransformUVCoords;
 	flags &= ~(aiProcess_CalcTangentSpace); // Never use Assimp's tangent gen code
 	flags &= ~(aiProcess_FindDegenerates); // Avoid converting degenerated triangles to lines
-	flags &= ~(aiProcess_RemoveRedundantMaterials);
+	//flags &= ~(aiProcess_RemoveRedundantMaterials);
 	flags &= ~(aiProcess_SplitLargeMeshes);
 
 	int removeFlags = aiComponent_COLORS;

@@ -94,15 +94,29 @@ Inspector::Inspector(Node& node) : mNode(node) {
 
 		static Node* selected = nullptr;
 
-		if (ImGui::Begin("Node Graph")) {
-			node_graph_gui_fn(mNode.root(), selected);
+		if (!Profiler::history().empty()) {
+			if (ImGui::Begin("Timeline")) {
+				ProfilerRegion ps("Profiler::timeline_gui");
+				Profiler::timeline_gui();
+			}
+			ImGui::End();
 		}
+
+		if (ImGui::Begin("Node Graph"))
+			node_graph_gui_fn(mNode.root(), selected);
 		ImGui::End();
 
 		if (ImGui::Begin("Inspector")) {
 			if (ImGui::CollapsingHeader("Profiler")) {
-				ProfilerRegion ps("Profiler::on_gui");
-				Profiler::on_gui();
+				static int profiler_n = 3;
+				ImGui::SliderInt("Count", &profiler_n, 1, 256);
+				ImGui::SameLine();
+				if (ImGui::Button("Timeline"))
+					Profiler::reset_timeline(profiler_n);
+				{
+					ProfilerRegion ps("Profiler::timings_gui");
+					Profiler::timings_gui();
+				}
 				ImGui::Separator();
 			}
 			if (selected) {

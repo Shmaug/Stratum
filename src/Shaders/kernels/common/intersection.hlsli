@@ -5,9 +5,9 @@
 #include <materials/medium.h>
 
 struct IntersectionVertex {
+	ShadingData sd;
 	uint instance_index : 16;
 	uint primitive_index : 16;
-	ShadingData sd;
 };
 struct TransmittanceEstimate {
 	float3 transmittance;

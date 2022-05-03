@@ -125,13 +125,16 @@ void BDPT::on_inspector_gui() {
 	}
 
 	if (ImGui::CollapsingHeader("Path Tracing")) {
+		ImGui::Checkbox("Use Denoiser", &mDenoise);
+		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
+		ImGui::CheckboxFlags("Remap Threads", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_REMAP_THREADS);
+		ImGui::CheckboxFlags("Demodulate Albedo", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_DEMODULATE_ALBEDO);
+		ImGui::CheckboxFlags("Ray Cone LoD", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_RAY_CONES);
 		ImGui::PushItemWidth(40);
 		ImGui::DragScalar("Max Path Vertices", ImGuiDataType_U32, &mPushConstants.gMaxPathVertices, 1);
 		ImGui::DragScalar("Min Path Vertices", ImGuiDataType_U32, &mPushConstants.gMinPathVertices, 1);
 		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mPushConstants.gMaxNullCollisions, 1);
 		ImGui::PopItemWidth();
-
-		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
 		ImGui::CheckboxFlags("NEE", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_NEE);
 		if (mTraceStepPipeline->specialization_constant("gSpecializationFlags") & BDPT_FLAG_NEE) {
 			if ((mTraceStepPipeline->specialization_constant("gSpecializationFlags") & BDPT_FLAG_HAS_ENVIRONMENT) && (mTraceStepPipeline->specialization_constant("gSpecializationFlags") & BDPT_FLAG_HAS_EMISSIVES)) {
@@ -147,9 +150,6 @@ void BDPT::on_inspector_gui() {
 				ImGui::CheckboxFlags("Uniform Sphere Sampling", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_UNIFORM_SPHERE_SAMPLING);
 			ImGui::Unindent();
 		}
-		ImGui::CheckboxFlags("Ray Cone LoD", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_RAY_CONES);
-		ImGui::CheckboxFlags("Demodulate Albedo", &mTraceStepPipeline->specialization_constant("gSpecializationFlags"), BDPT_FLAG_DEMODULATE_ALBEDO);
-		ImGui::Checkbox("Use Denoiser", &mDenoise);
 	}
 
 	if (ImGui::CollapsingHeader("Post Processing")) {
