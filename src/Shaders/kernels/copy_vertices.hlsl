@@ -1,22 +1,33 @@
+#if 0
 #pragma compile dxc -spirv -T cs_6_7 -E main
+#endif
 
-#include <scene.h>
+#include "../scene.h"
 
-[[vk::binding(0,0)]] RWStructuredBuffer<PackedVertexData> gVertices;
-[[vk::binding(1,1)]] ByteAddressBuffer gPositions;
-[[vk::binding(2,1)]] ByteAddressBuffer gNormals;
-[[vk::binding(3,1)]] ByteAddressBuffer gTangents;
-[[vk::binding(4,1)]] ByteAddressBuffer gTexcoords;
+RWStructuredBuffer<PackedVertexData> gVertices;
+ByteAddressBuffer gPositions;
+ByteAddressBuffer gNormals;
+ByteAddressBuffer gTangents;
+ByteAddressBuffer gTexcoords;
 
-[[vk::push_constant]] const struct {
+struct PushConstants {
 	uint gCount;
 	uint gPositionStride;
 	uint gNormalStride;
 	uint gTangentStride;
 	uint gTexcoordStride;
-} gPushConstants;
+};
 
-[numthreads(32,1,1)]
+#ifdef __SLANG__
+[[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
+#else
+[[vk::push_constant]] static const PushConstants gPushConstants;
+#endif
+
+#ifdef __SLANG__
+[shader("compute")]
+#endif
+[numthreads(64,1,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	if (index.x >= gPushConstants.gCount) return;
 	PackedVertexData v;

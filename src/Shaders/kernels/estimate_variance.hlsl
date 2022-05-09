@@ -24,16 +24,22 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
+#if 0
 #pragma compile dxc -spirv -T cs_6_7 -E main
+#endif
 
 #include "common/denoise_descriptors.hlsli"
 #include "common/svgf_common.hlsli"
 
-[[vk::push_constant]] struct {
+struct PushConstants {
 	uint gViewCount;
 	float gHistoryLimit;
-} gPushConstants;
+};
+#ifdef __SLANG__
+[[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
+#else
+[[vk::push_constant]] const PushConstants gPushConstants;
+#endif
 
 #define GROUP_SIZE 8
 #define RADIUS_0 2
@@ -42,15 +48,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //groupshared uint3 s_mem[TILE_SIZE*TILE_SIZE];
 
-inline min16float4 load(const uint2 index, const int2 tile_pos) {
-	return (min16float4)gAccumColor[index];
-	//return (min16float4)unpack_f16_4(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].xy);
+inline float4 load(const uint2 index, const int2 tile_pos) {
+	return gAccumColor[index];
+	//return unpack_f16_4(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].xy);
 }
-inline min16float2 load_moment(const uint2 index, const int2 tile_pos) {
-	return (min16float2)gAccumMoments[index];
-	//return (min16float2)unpack_f16_2(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].z);
+inline float2 load_moment(const uint2 index, const int2 tile_pos) {
+	return gAccumMoments[index];
+	//return unpack_f16_2(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].z);
 }
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(GROUP_SIZE,GROUP_SIZE,1)]
 void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadID) {
 	const uint view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);

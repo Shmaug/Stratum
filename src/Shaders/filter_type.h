@@ -5,7 +5,7 @@
 namespace stm {
 #endif
 
-enum FilterKernelType {
+enum class FilterKernelType {
   eAtrous,
   eBox3,
   eBox5,

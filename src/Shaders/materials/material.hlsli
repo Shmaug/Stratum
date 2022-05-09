@@ -7,6 +7,7 @@ struct Material {
 	Real alpha;
 	Real eta;
 
+	SLANG_MUTATING
 	inline void load_and_sample(uint address, const float2 uv, const float uv_screen_size) {
 		color = sample_image(load_image_value3(address), uv, uv_screen_size);
 		const float4 packed = sample_image(load_image_value4(address), uv, uv_screen_size);
@@ -18,6 +19,8 @@ struct Material {
 		eta = gMaterialData.Load<float>(address);
 	}
 
+	inline float specular_weight() { return specular_reflectance / (specular_reflectance + diffuse_reflectance); }
+
 	inline void eval_lambertian(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
 		if (dir_in.z <= 0 || dir_out.z <= 0) {
 			r.f = 0;
@@ -27,30 +30,27 @@ struct Material {
 			r.f = dir_out.z * color / M_PI;
 			r.pdf_fwd = cosine_hemisphere_pdfW(dir_out.z);
 			r.pdf_rev = cosine_hemisphere_pdfW(dir_in.z);
-			r.f_estimate = r.f / r.pdf_fwd;
 		}
 	}
-	inline void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, const bool adjoint) {
+	inline void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		if (dir_in.z < 0) {
-			r.eval.f = 0;
-			r.eval.pdf_fwd = 0;
-			r.eval.pdf_rev = 0;
+			beta = 0;
+			r.pdf_fwd = 0;
+			r.pdf_rev = 0;
 			r.eta = 0;
 			r.roughness = 1;
 		} else {
+			r.pdf_rev = cosine_hemisphere_pdfW(dir_in.z);
 			r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
-			r.eval.f = r.dir_out.z * color / M_PI;
-			r.eval.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
-			r.eval.pdf_rev = cosine_hemisphere_pdfW(dir_in.z);
-			r.eval.f_estimate = r.eval.f / r.eval.pdf_fwd;
+			r.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
+			const Spectrum f = r.dir_out.z * color / M_PI;
+			beta *= f / r.pdf_fwd;
 			r.eta = 0;
 			r.roughness = 1;
 		}
 	}
 
-	inline float specular_weight() { return specular_reflectance / (specular_reflectance + diffuse_reflectance); }
-
-	inline void eval_roughdialectric(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
+	inline void eval_roughplastic(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
 		// We first account for the dielectric layer.
 
 		// Fresnel equation determines how much light goes through,
@@ -78,35 +78,39 @@ struct Material {
 		if (specular_reflectance + diffuse_reflectance <= 0) {
 			r.pdf_fwd = 0;
 			r.pdf_rev = 0;
-			r.f_estimate = 0;
 		} else {
 			// VNDF sampling importance samples smith_masking(cos_theta_in) * GTR2(cos_theta_h, alpha) * cos_theta_out
 			// (4 * cos_theta_v) is the Jacobian of the reflectiokn
 			// For the diffuse lobe, we importance sample cos_theta_out
-			float spec_weight = specular_weight();
-			r.pdf_fwd = lerp(cosine_hemisphere_pdfW(dir_out.z), (G_in  * D) / (4 * dir_in.z ), spec_weight);
-			r.pdf_rev = lerp(cosine_hemisphere_pdfW(dir_in.z),  (G_out * D) / (4 * dir_out.z), spec_weight);
-			r.f_estimate = r.f / r.pdf_fwd;
+			const float spec_prob = specular_weight();
+			r.pdf_fwd = lerp(cosine_hemisphere_pdfW(dir_out.z), (G_in  * D) / (4 * dir_in.z ), spec_prob);
+			r.pdf_rev = lerp(cosine_hemisphere_pdfW(dir_in.z),  (G_out * D) / (4 * dir_out.z), spec_prob);
 		}
 	}
-
-	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
-		eval_roughdialectric(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
-	}
-
-	inline void sample(out MaterialSampleRecord r, Vector3 rnd, const Vector3 dir_in, const bool adjoint) {
+	inline void sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		Vector3 half_vector;
-		if (rnd.z < specular_reflectance / (specular_reflectance + diffuse_reflectance)) {
+		if (rnd.z < specular_weight()) {
 			half_vector = sample_visible_normals(dir_in, alpha, rnd.xy);
 			r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
-			r.eta = 0;
 			r.roughness = sqrt(alpha);
 		} else {
 			r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
-			r.eta = 0;
-			r.roughness = 1;
 			half_vector = normalize(dir_in + r.dir_out);
+			r.roughness = 1;
 		}
-		eval_roughdialectric(r.eval, dir_in, r.dir_out, half_vector, adjoint);
+		r.eta = 0;
+		MaterialEvalRecord f;
+		eval_roughplastic(f, dir_in, r.dir_out, half_vector, adjoint);
+		beta *= f.f / f.pdf_fwd;
+		r.pdf_fwd = f.pdf_fwd;
+		r.pdf_rev = f.pdf_rev;
+	}
+
+	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
+		eval_roughplastic(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
+	}
+
+	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+		sample_roughplastic(r, rnd, dir_in, beta, adjoint);
 	}
 };

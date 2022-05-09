@@ -12,7 +12,7 @@ uint32_t PipelineState::descriptor_count(const string& name) const {
 					count *= get<uint32_t>(v);
 				else
 					// array size is a specialization constant
-					count *= specialization_constant(get<string>(v));
+					count *= specialization_constant<uint32_t>(get<string>(v));
 			return count;
 		}
 	return 0;

@@ -7,7 +7,7 @@
 
 #ifdef __HLSL__
 #define PNANOVDB_HLSL
-#include <nanovdb/PNanoVDB.h>
+#include "../extern/nanovdb/PNanoVDB.h"
 #endif
 
 #define INSTANCE_TYPE_TRIANGLES 0
@@ -27,8 +27,6 @@
 #define gVolumeCount 8
 
 struct InstanceData {
-	// instance -> world
-	TransformData transform;
 	uint4 packed;
 
 	inline uint type() CONST_CPP { return BF_GET(packed[0], 0, 4); }
@@ -48,9 +46,8 @@ struct InstanceData {
 };
 
 inline TransformData make_instance_motion_transform(const TransformData instance_inv_transform, const TransformData prevObjectToWorld) { return tmul(prevObjectToWorld, instance_inv_transform); }
-inline InstanceData make_instance_triangles(const TransformData objectToWorld, const uint materialAddress, const uint primCount, const uint firstVertex, const uint indexByteOffset, const uint indexStride) {
+inline InstanceData make_instance_triangles(const uint materialAddress, const uint primCount, const uint firstVertex, const uint indexByteOffset, const uint indexStride) {
 	InstanceData r;
-	r.transform = objectToWorld;
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
@@ -60,18 +57,16 @@ inline InstanceData make_instance_triangles(const TransformData objectToWorld, c
 	r.packed[3] = indexByteOffset;
 	return r;
 }
-inline InstanceData make_instance_sphere(const TransformData objectToWorld, const uint materialAddress, const float radius) {
+inline InstanceData make_instance_sphere(const uint materialAddress, const float radius) {
 	InstanceData r;
-	r.transform = objectToWorld;
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_SPHERE, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
 	r.packed[1] = asuint(radius);
 	return r;
 }
-inline InstanceData make_instance_volume(const TransformData objectToWorld, const uint materialAddress, const uint volume_index) {
+inline InstanceData make_instance_volume(const uint materialAddress, const uint volume_index) {
 	InstanceData r;
-	r.transform = objectToWorld;
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_VOLUME, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
@@ -90,8 +85,6 @@ struct PackedVertexData {
 };
 
 struct ViewData {
-	TransformData camera_to_world;
-	TransformData world_to_camera;
 	ProjectionData projection;
 	uint2 image_min;
 	uint2 image_max;
@@ -116,9 +109,9 @@ struct VisibilityInfo {
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 
 	inline float3 normal()        { return unpack_normal_octahedron2(packed_normal); }
-	inline min16float z()         { return (min16float)f16tof32(packed_z); }
-	inline min16float prev_z()    { return (min16float)f16tof32(packed_z>>16); }
-	inline min16float2 dz_dxy()   { return unpack_f16_2(packed_dz); }
+	inline float z()         { return f16tof32(packed_z); }
+	inline float prev_z()    { return f16tof32(packed_z>>16); }
+	inline float2 dz_dxy()   { return unpack_f16_2(packed_dz); }
 #endif
 };
 
@@ -126,14 +119,17 @@ struct RayDifferential {
 	float radius;
 	float spread;
 #ifdef __HLSL__
+	SLANG_MUTATING
 	inline void transfer(const float t) {
 		radius += spread*t;
 	}
+	SLANG_MUTATING
 	inline void reflect(const float mean_curvature, const float roughness) {
 		const float spec_spread = spread + 2 * mean_curvature * radius;
 		const float diff_spread = 0.2;
 		spread = max(0, lerp(spec_spread, diff_spread, roughness));
 	}
+	SLANG_MUTATING
 	inline void refract(const float mean_curvature, const float roughness, const float eta) {
 		const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
 		const float diff_spread = 0.2;

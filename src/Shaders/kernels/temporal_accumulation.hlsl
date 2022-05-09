@@ -25,24 +25,33 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#if 0
 #pragma compile dxc -spirv -T cs_6_7 -E main
-
-[[vk::constant_id(0)]] const bool gReprojection = false;
+#endif
 
 #include "common/denoise_descriptors.hlsli"
 #include "common/svgf_common.hlsli"
 
-[[vk::push_constant]] const struct {
+struct PushConstants {
 	uint gViewCount;
 	float gHistoryLimit;
-} gPushConstants;
+};
+#ifdef __SLANG__
+#ifndef gReprojection
+#define gReprojection (false)
+#endif
+[[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
+#else
+[[vk::constant_id(0)]] const bool gReprojection = false;
+[[vk::push_constant]] const PushConstants gPushConstants;
+#endif
 
-#define gDiffImage gDiffImage1[gPushConstants.gAtrousGradientIterations%2]
-
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	const uint view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
-	if (view_index == -1) return;
 
 	float2 extent;
 	gAccumColor.GetDimensions(extent.x, extent.y);

@@ -12,17 +12,27 @@
 #define M_1_PI (1/M_PI)
 #endif
 
+#ifdef __SLANG__
+#define SLANG_MUTATING [mutating]
+#else
+#define SLANG_MUTATING
+#endif
+
 #ifdef __HLSL__
-#define CONST_CPP
-#define stm_arg_inout(T) inout T
-#define stm_arg_out(T) out T
+#define STM_ARG_INOUT(T) inout T
+#define STM_ARG_OUT(T) out T
 #endif
 
 #ifdef __cplusplus
 #define CONST_CPP const
-#define stm_arg_inout(T) T&
-#define stm_arg_out(T) T&
+#define STM_ARG_INOUT(T) T&
+#define STM_ARG_OUT(T) T&
+#else
+#define CONST_CPP
 #endif
+
+#define POS_INFINITY asfloat(0x7F800000)
+#define NEG_INFINITY asfloat(0xFF800000)
 
 inline float max3(float3 x) { return max(max(x[0], x[1]), x[2]); }
 inline float max4(float4 x) { return max(max(x[0], x[1]), max(x[2], x[3])); }
@@ -106,7 +116,7 @@ inline float3 viridis_quintic(const float x) {
 		dot(x1, float4( 0.300805501,  2.614650302, -12.019139090,  28.933559110)) + dot(x2, float2(-33.491294770,  13.762053843)));
 }
 
-inline void make_orthonormal(const float3 N, stm_arg_out(float3) T, stm_arg_out(float3) B) {
+inline void make_orthonormal(const float3 N, STM_ARG_OUT(float3) T, STM_ARG_OUT(float3) B) {
 	if (N[0] != N[1] || N[0] != N[2])
 		T = float3(N[2] - N[1], N[0] - N[2], N[1] - N[0]);  //(1,1,1)x N
 	else

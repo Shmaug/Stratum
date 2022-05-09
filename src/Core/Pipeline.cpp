@@ -21,7 +21,7 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const Shader::Specia
           c *= get<uint32_t>(v);
         else
           // array size is a specialization constant
-          c *= shader.specialization_constants().at(get<string>(v));
+          c *= get<uint32_t>(shader.specialization_constants().at(get<string>(v)));
 
       auto flag_it = shader.descriptor_binding_flags().find(id);
 
@@ -54,7 +54,7 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const Shader::Specia
               sz *= get<uint32_t>(v);
             else
               // array size is a specialization constant
-              sz *= shader.specialization_constants().at(get<string>(v));
+              sz *= get<uint32_t>(shader.specialization_constants().at(get<string>(v)));
         }
         rangeBegin = std::min(rangeBegin, p.mOffset);
         rangeEnd   = std::max(rangeEnd  , p.mOffset + sz);
@@ -107,7 +107,7 @@ Pipeline::Pipeline(const string& name, const vk::ArrayProxy<const Shader::Specia
               sz *= get<uint32_t>(v);
             else
               // array size is a specialization constant
-              sz *= shader.specialization_constants().at(get<string>(v));
+              sz *= get<uint32_t>(shader.specialization_constants().at(get<string>(v)));
         }
         rangeBegin = std::min(rangeBegin, p.mOffset);
         rangeEnd   = std::max(rangeEnd  , p.mOffset + sz);
@@ -137,7 +137,7 @@ ComputePipeline::ComputePipeline(const string& name, const Shader::Specializatio
   shader.fill_specialization_info(entries, data);
 
   vk::SpecializationInfo specializationInfo((uint32_t)entries.size(), entries.data(), data.size()*sizeof(uint32_t), data.data());
-  vk::PipelineShaderStageCreateInfo stageInfo({}, shader.shader().stage(), shader.shader_module(), shader.shader().entry_point().c_str(), specializationInfo.mapEntryCount ? &specializationInfo : nullptr);
+  vk::PipelineShaderStageCreateInfo stageInfo({}, shader.shader().stage(), shader.shader_module(), shader.shader().compile_specializations() ? "main" : shader.shader().entry_point().c_str(), specializationInfo.mapEntryCount ? &specializationInfo : nullptr);
   mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(), vk::ComputePipelineCreateInfo({}, stageInfo, mLayout)).value;
   mDevice.set_debug_name(mPipeline, name);
 }
@@ -147,9 +147,9 @@ ComputePipeline::ComputePipeline(const string& name, const Shader::Specializatio
   vector<uint32_t> data;
   vector<vk::SpecializationMapEntry> entries;
   shader.fill_specialization_info(entries, data);
-
   vk::SpecializationInfo specializationInfo((uint32_t)entries.size(), entries.data(), data.size()*sizeof(uint32_t), data.data());
-  vk::PipelineShaderStageCreateInfo stageInfo({}, shader.shader().stage(), shader.shader_module(), shader.shader().entry_point().c_str(), specializationInfo.mapEntryCount ? &specializationInfo : nullptr);
+
+  vk::PipelineShaderStageCreateInfo stageInfo({}, shader.shader().stage(), shader.shader_module(), shader.shader().compile_specializations() ? "main" : shader.shader().entry_point().c_str(), specializationInfo.mapEntryCount ? &specializationInfo : nullptr);
   mPipeline = mDevice->createComputePipeline(mDevice.pipeline_cache(), vk::ComputePipelineCreateInfo({}, stageInfo, mLayout)).value;
   mDevice.set_debug_name(mPipeline, name);
 }
@@ -196,11 +196,10 @@ GraphicsPipeline::GraphicsPipeline(const string& name, const stm::RenderPass& re
   vector<vk::PipelineShaderStageCreateInfo> vkstages(shaders.size());
   for (uint32_t i = 0; i < shaders.size(); i++) {
     auto&[stageInfo,entries,data] = specializationInfos[i];
-
     const Shader::Specialization& stage = shaders.data()[i];
     stage.fill_specialization_info(entries, data);
     stageInfo = vk::SpecializationInfo((uint32_t)entries.size(), entries.data(), data.size()*sizeof(uint32_t), data.data());
-    vkstages[i] = vk::PipelineShaderStageCreateInfo({}, stage.shader().stage(), stage.shader_module(), stage.shader().entry_point().c_str(), stageInfo.mapEntryCount ? &stageInfo : nullptr);
+    vkstages[i] = vk::PipelineShaderStageCreateInfo({}, stage.shader().stage(), stage.shader_module(), stage.shader().compile_specializations() ? "main" : stage.shader().entry_point().c_str(), stageInfo.mapEntryCount ? &stageInfo : nullptr);
   }
   mDepthStencilState = depthStencilState;
   mDynamicStates = dynamicStates;

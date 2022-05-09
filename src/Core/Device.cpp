@@ -43,6 +43,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	mFeatures.wideLines = true;
 	mFeatures.largePoints = true;
 	mFeatures.sampleRateShading = true;
+	mFeatures.shaderFloat64 = true; // needed by slang?
 	mFeatures.shaderUniformBufferArrayDynamicIndexing = true;
 	mFeatures.shaderStorageBufferArrayDynamicIndexing = true;
 	mFeatures.shaderSampledImageArrayDynamicIndexing = true;
@@ -98,7 +99,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	}
 	mPipelineCache = mDevice.createPipelineCache(cacheInfo);
 	if (cacheInfo.pInitialData) delete reinterpret_cast<const byte*>(cacheInfo.pInitialData);
-	
+
 	vector<vk::DescriptorPoolSize> poolSizes {
 		vk::DescriptorPoolSize(vk::DescriptorType::eSampler, 								min(16384u, mLimits.maxDescriptorSetSamplers)),
 		vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 	min(16384u, mLimits.maxDescriptorSetSampledImages)),
@@ -152,7 +153,7 @@ Device::~Device() {
 		}
 	}
 	queueFamilies->clear();
-	
+
 	mDevice.destroyDescriptorPool(*mDescriptorPool.lock());
 
 	vmaDestroyAllocator(mAllocator);
@@ -207,7 +208,7 @@ void Device::submit(const shared_ptr<CommandBuffer>& commandBuffer) {
 	ProfilerRegion ps("CommandBuffer::submit");
 
 	(*commandBuffer)->end();
-	
+
 	vector<vk::Semaphore> waitSemaphores;
 	vector<vk::PipelineStageFlags> waitStages;
 	waitSemaphores.reserve(commandBuffer->mWaitSemaphores.size());
@@ -222,7 +223,7 @@ void Device::submit(const shared_ptr<CommandBuffer>& commandBuffer) {
 
 	commandBuffer->mQueueFamily.mQueues[0].submit(vk::SubmitInfo(waitSemaphores, waitStages, **commandBuffer, signalSemaphores), **commandBuffer->mFence);
 	commandBuffer->mState = CommandBuffer::CommandBufferState::eInFlight;
-	
+
 	scoped_lock l(mQueueFamilies.m());
 	commandBuffer->mQueueFamily.mCommandBuffers.at(this_thread::get_id()).second.emplace_back(commandBuffer);
 }

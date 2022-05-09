@@ -125,7 +125,7 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 		mConvertPbrPipeline->descriptor("gSpecular") = image_descriptor(metallic_roughness.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertPbrPipeline->descriptor("gTransmittance") = image_descriptor(transmittance.image ? transmittance.image : base_color.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertPbrPipeline->descriptor("gPackedData") = image_descriptor(dst.packed_data.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mConvertPbrPipeline->specialization_constant("gUseTransmittance") = (bool)transmittance.image;
+		mConvertPbrPipeline->specialization_constant<uint32_t>("gUseTransmittance") = (bool)transmittance.image;
 		commandBuffer.bind_pipeline(mConvertPbrPipeline->get_pipeline());
 		mConvertPbrPipeline->bind_descriptor_sets(commandBuffer);
 		mConvertPbrPipeline->push_constants(commandBuffer);
@@ -152,7 +152,7 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		mConvertDiffuseSpecularPipeline->descriptor("gTransmittance") = image_descriptor(transmittance.image ? transmittance.image : diffuse.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gBaseColor") = image_descriptor(diffuse.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mConvertDiffuseSpecularPipeline->descriptor("gPackedData") = image_descriptor(dst.packed_data.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mConvertDiffuseSpecularPipeline->specialization_constant("gUseTransmittance") = (bool)transmittance.image;
+		mConvertDiffuseSpecularPipeline->specialization_constant<uint32_t>("gUseTransmittance") = (bool)transmittance.image;
 		commandBuffer.bind_pipeline(mConvertDiffuseSpecularPipeline->get_pipeline());
 		mConvertDiffuseSpecularPipeline->bind_descriptor_sets(commandBuffer);
 		mConvertDiffuseSpecularPipeline->push_constants(commandBuffer);
@@ -176,11 +176,11 @@ Scene::Scene(Node& node) : mNode(node) {
 
 	gAnimatedTransform = nullptr;
 
-	mCopyVerticesPipeline = make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "Shaders/copy_vertices.spv"));
-	mConvertDiffuseSpecularPipeline = make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_diffuse_specular.spv"));
-	mConvertPbrPipeline = make_shared<ComputePipelineState>("material_convert_from_metal_rough", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_metal_rough.spv"));
-	mConvertAlphaToRoughnessPipeline = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
-	mConvertShininessToRoughnessPipeline = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
+	mCopyVerticesPipeline 					= make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/copy_vertices.hlsl", "main"));
+	mConvertDiffuseSpecularPipeline 		= make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "from_diffuse_specular"));
+	mConvertPbrPipeline 					= make_shared<ComputePipelineState>("material_convert_from_metal_rough", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "from_metal_rough"));
+	mConvertAlphaToRoughnessPipeline 		= make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "alpha_to_roughness"));
+	mConvertShininessToRoughnessPipeline 	= make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "shininess_to_roughness"));
 
 
 	auto mainCamera = mNode.make_child("Default Camera").make_component<Camera>(make_perspective(radians(70.f), 1.f, float2::Zero(), -1 / 1024.f));
@@ -252,6 +252,14 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 	bool update = mAlwaysUpdate;
 
+	if (commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyControl) &&
+		commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyO) &&
+		!commandBuffer.mDevice.mInstance.window().input_state_last().pressed(KeyCode::eKeyO)) {
+		auto f = pfd::open_file("Open scene", "", loader_filters());
+		for (const string& filepath : f.result())
+			mToLoad.emplace_back(filepath);
+	}
+
 	for (const string& file : commandBuffer.mDevice.mInstance.window().input_state().files()) {
 		const fs::path filepath = file;
 		const string name = filepath.filename().string();
@@ -288,6 +296,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 	vector<tuple<MeshPrimitive*, MeshAS*, uint32_t>> meshInstanceIndices;
 	vector<InstanceData> instanceDatas;
+	vector<TransformData> instanceTransforms;
 	vector<TransformData> instanceInverseTransforms;
 	vector<TransformData> instanceMotionTransforms;
 	if (mPrevFrame) instanceDatas.reserve(mPrevFrame->mInstances.size());
@@ -308,7 +317,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		return materialMap_it->second;
 	};
 
-	auto process_instance = [&](const void* prim_ptr, const InstanceData& instance, const bool emissive) {
+	auto process_instance = [&](const void* prim_ptr, const InstanceData& instance, const TransformData& transform, const bool emissive) {
 		const uint32_t instance_index = (uint32_t)instanceDatas.size();
 
 		if (emissive) lightInstances.emplace_back(instance_index);
@@ -320,14 +329,94 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				mSceneData->mInstanceIndexMap[it->second.second] = instance_index;
 			}
 		}
-		mSceneData->mInstanceTransformMap.emplace(prim_ptr, make_pair(instance.transform, instance_index));
+		mSceneData->mInstanceTransformMap.emplace(prim_ptr, make_pair(transform, instance_index));
 		instanceDatas.emplace_back(instance);
 
-		const TransformData inv_transform = instance.transform.inverse();
+		const TransformData inv_transform = transform.inverse();
+		instanceTransforms.emplace_back(transform);
 		instanceInverseTransforms.emplace_back(inv_transform);
 		instanceMotionTransforms.emplace_back(make_instance_motion_transform(inv_transform, prevTransform));
 		return instance_index;
 	};
+
+	{ // mesh instances
+		ProfilerRegion s("Process meshe instances", commandBuffer);
+		mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
+			if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
+			if (!prim->mMaterial) return;
+
+			// build BLAS
+			auto it = mMeshAccelerationStructures.find(prim->mMesh.get());
+			if (it == mMeshAccelerationStructures.end()) {
+				ProfilerRegion s("build acceleration structures", commandBuffer);
+				const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
+
+				if (prim->mMesh->index_type() != vk::IndexType::eUint32 && prim->mMesh->index_type() != vk::IndexType::eUint16)
+					return;
+
+				vk::AccelerationStructureGeometryTrianglesDataKHR triangles;
+				triangles.vertexFormat = vertexPosDesc.mFormat;
+				triangles.vertexData = commandBuffer.hold_resource(positions).device_address();
+				triangles.vertexStride = vertexPosDesc.mStride;
+				triangles.maxVertex = (uint32_t)(positions.size_bytes() / vertexPosDesc.mStride);
+				triangles.indexType = prim->mMesh->index_type();
+				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address();
+				vk::GeometryFlagBitsKHR flag = vk::GeometryFlagBitsKHR::eOpaque;
+				// TODO: non-opaque geometry
+				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, flag);
+				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mMesh->indices().size() / (prim->mMesh->indices().stride() * 3));
+				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name() + "/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
+				blasBarriers.emplace_back(
+					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
+					VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+					**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
+
+				// copy vertex data
+				if (mMeshVertices.find(prim->mMesh.get()) == mMeshVertices.end()) {
+					Buffer::View<PackedVertexData>& vertices = mMeshVertices.emplace(prim->mMesh.get(),
+						make_shared<Buffer>(commandBuffer.mDevice, prim.node().name() + "/PackedVertexData", triangles.maxVertex * sizeof(PackedVertexData), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eShaderDeviceAddress)).first->second;
+
+					auto positions = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
+					auto normals = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
+					auto texcoords = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTexcoord);
+					auto tangents = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTangent);
+
+					mCopyVerticesPipeline->descriptor("gVertices") = vertices;
+					mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(positions.second, positions.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gNormals") = Buffer::View(normals.second, normals.first.mOffset);
+					mCopyVerticesPipeline->descriptor("gTangents") = tangents ? Buffer::View(tangents->second, tangents->first.mOffset) : positions.second;
+					mCopyVerticesPipeline->descriptor("gTexcoords") = texcoords ? Buffer::View(texcoords->second, texcoords->first.mOffset) : positions.second;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = vertices.size();
+					mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = positions.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = normals.first.mStride;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents ? tangents->first.mStride : 0;
+					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords ? texcoords->first.mStride : 0;
+					commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
+					mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);
+					mCopyVerticesPipeline->push_constants(commandBuffer);
+					commandBuffer.dispatch_over(triangles.maxVertex);
+					commandBuffer.barrier({ vertices }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
+				}
+
+				it = mMeshAccelerationStructures.emplace(prim->mMesh.get(), MeshAS{ as, prim->mMesh->indices() }).first;
+			}
+
+			uint32_t material_address = process_material(prim->mMaterial.get());
+
+			const uint32_t triCount = prim->mMesh->indices().size_bytes() / (prim->mMesh->indices().stride() * 3);
+
+			TransformData transform = node_to_world(prim.node());
+			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
+			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
+			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, (prim->mMaterial->emission.value > 0).any());
+			instance.mask = BVH_FLAG_TRIANGLES;
+			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
+
+			meshInstanceIndices.emplace_back(prim.get(), &it->second, (uint32_t)instance.instanceCustomIndex);
+			totalVertexCount += mMeshVertices.at(prim->mMesh.get()).size();
+			totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
+		});
+	}
 
 	{ // sphere instances
 		ProfilerRegion s("Process sphere instances", commandBuffer);
@@ -364,88 +453,9 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_sphere(transform, material_address, r), (prim->mMaterial->emission.value > 0).any());
+			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_sphere(material_address, r), transform, (prim->mMaterial->emission.value > 0).any());
 			instance.mask = BVH_FLAG_SPHERES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
-		});
-	}
-
-	{ // mesh instances
-		ProfilerRegion s("Process meshe instances", commandBuffer);
-		mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
-			if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
-			if (!prim->mMaterial) return;
-
-			// build BLAS
-			auto it = mMeshAccelerationStructures.find(prim->mMesh.get());
-			if (it == mMeshAccelerationStructures.end()) {
-				ProfilerRegion s("build acceleration structures", commandBuffer);
-				const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
-
-				if (prim->mMesh->index_type() != vk::IndexType::eUint32 && prim->mMesh->index_type() != vk::IndexType::eUint16)
-					return;
-
-				vk::AccelerationStructureGeometryTrianglesDataKHR triangles;
-				triangles.vertexFormat = vertexPosDesc.mFormat;
-				triangles.vertexData = commandBuffer.hold_resource(positions).device_address();
-				triangles.vertexStride = vertexPosDesc.mStride;
-				triangles.maxVertex = (uint32_t)(positions.size_bytes() / vertexPosDesc.mStride);
-				triangles.indexType = prim->mMesh->index_type();
-				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address();
-				vk::GeometryFlagBitsKHR flag = vk::GeometryFlagBitsKHR::eOpaque;
-				// TODO: non-opaque geometry
-				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, flag);
-				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mMesh->indices().size() / (prim->mMesh->indices().stride() * 3));
-				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name() + "/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
-				blasBarriers.emplace_back(
-					vk::AccessFlagBits::eAccelerationStructureWriteKHR, vk::AccessFlagBits::eAccelerationStructureReadKHR,
-					VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-					**as->buffer().buffer(), as->buffer().offset(), as->buffer().size_bytes());
-
-				if (mMeshVertices.find(prim->mMesh.get()) == mMeshVertices.end()) {
-					Buffer::View<PackedVertexData>& vertices = mMeshVertices.emplace(prim->mMesh.get(),
-						make_shared<Buffer>(commandBuffer.mDevice, prim.node().name() + "/PackedVertexData", triangles.maxVertex * sizeof(PackedVertexData), vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eShaderDeviceAddress)).first->second;
-
-					// copy vertex data
-					auto positions = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
-					auto normals = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
-					auto texcoords = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTexcoord);
-					auto tangents = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTangent);
-
-					commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
-					mCopyVerticesPipeline->descriptor("gVertices") = vertices;
-					mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(positions.second, positions.first.mOffset);
-					mCopyVerticesPipeline->descriptor("gNormals") = Buffer::View(normals.second, normals.first.mOffset);
-					mCopyVerticesPipeline->descriptor("gTangents") = tangents ? Buffer::View(tangents->second, tangents->first.mOffset) : positions.second;
-					mCopyVerticesPipeline->descriptor("gTexcoords") = texcoords ? Buffer::View(texcoords->second, texcoords->first.mOffset) : positions.second;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = vertices.size();
-					mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = positions.first.mStride;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = normals.first.mStride;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents ? tangents->first.mStride : 0;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords ? texcoords->first.mStride : 0;
-					mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);
-					mCopyVerticesPipeline->push_constants(commandBuffer);
-					commandBuffer.dispatch_over(triangles.maxVertex);
-					commandBuffer.barrier({ vertices }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
-				}
-
-				it = mMeshAccelerationStructures.emplace(prim->mMesh.get(), MeshAS{ as, prim->mMesh->indices() }).first;
-			}
-
-			uint32_t material_address = process_material(prim->mMaterial.get());
-
-			const uint32_t triCount = prim->mMesh->indices().size_bytes() / (prim->mMesh->indices().stride() * 3);
-
-			TransformData transform = node_to_world(prim.node());
-			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
-			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(transform, material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), (prim->mMaterial->emission.value > 0).any());
-			instance.mask = BVH_FLAG_TRIANGLES;
-			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
-
-			meshInstanceIndices.emplace_back(prim.get(), &it->second, (uint32_t)instance.instanceCustomIndex);
-			totalVertexCount += mMeshVertices.at(prim->mMesh.get()).size();
-			totalIndexBufferSize += align_up(it->second.mIndices.size_bytes(), 4);
 		});
 	}
 
@@ -490,7 +500,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			const TransformData transform = node_to_world(vol.node());
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(vol.get(), make_instance_volume(transform, material_address, mSceneData->mResources.volume_data_map.at(vol->density_buffer)), false);
+			instance.instanceCustomIndex = process_instance(vol.get(), make_instance_volume(material_address, mSceneData->mResources.volume_data_map.at(vol->density_buffer)), transform, false);
 			instance.mask = BVH_FLAG_VOLUME;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});
@@ -543,6 +553,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 	if (!mSceneData->mInstances || mSceneData->mInstances.size() < instanceDatas.size()) {
 		mSceneData->mInstances = make_shared<Buffer>(commandBuffer.mDevice, "gInstances", max<size_t>(1, instanceDatas.size()) * sizeof(InstanceData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+		mSceneData->mInstanceTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gInstanceTransforms", max<size_t>(1, instanceDatas.size()) * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 		mSceneData->mInstanceInverseTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gInstanceInverseTransforms", max<size_t>(1, instanceDatas.size()) * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 		mSceneData->mInstanceMotionTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gInstanceMotionTransforms", max<size_t>(1, instanceDatas.size()) * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 	}
@@ -554,6 +565,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		mSceneData->mDistributionData = make_shared<Buffer>(commandBuffer.mDevice, "gDistributionData", max<size_t>(1, mSceneData->mResources.distribution_data_size) * sizeof(float), vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
 	memcpy(mSceneData->mInstances.data(), instanceDatas.data(), instanceDatas.size() * sizeof(InstanceData));
+	memcpy(mSceneData->mInstanceTransforms.data(), instanceTransforms.data(), instanceTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mInstanceInverseTransforms.data(), instanceInverseTransforms.data(), instanceInverseTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mInstanceMotionTransforms.data(), instanceMotionTransforms.data(), instanceMotionTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mMaterialData.data(), materialData.data.data(), materialData.data.size() * sizeof(uint32_t));

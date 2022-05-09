@@ -1,6 +1,7 @@
 #include "Shader.hpp"
 
 #include <json.hpp>
+#include <slang.h>
 
 using namespace stm;
 
@@ -82,13 +83,222 @@ pair<VertexArrayObject::AttributeType, uint32_t> attribute_type(string name) {
 	throw invalid_argument("Failed to parse attribute type");
 }
 
-Shader::Shader(Device& device, const fs::path& spv) : DeviceResource(device, spv.stem().string()) {
-	fs::path json_path = fs::path(spv).replace_extension("json");
+vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint32_t,string>>& defines, bool reflect) {
+	if (reflect) {
+		SlangSession* session = spCreateSession();
+		SlangCompileRequest* request = spCreateCompileRequest(session);
+
+		vector<const char*> args;
+		for (const string& arg : mCompileArgs) args.emplace_back(arg.c_str());
+		if (SLANG_FAILED(spProcessCommandLineArguments(request, args.data(), args.size())))
+			cout << "Failed to process compile arguments" << endl;
+
+		int targetIndex = spAddCodeGenTarget(request, SLANG_SPIRV);
+		spAddPreprocessorDefine(request, "__SLANG__", "");
+		spAddPreprocessorDefine(request, "__HLSL__", "");
+		vector<string> uintDefs;
+		for (const auto&[n,d] : defines)
+			if (d.index() == 0)
+				spAddPreprocessorDefine(request, n.c_str(), uintDefs.emplace_back(to_string(std::get<uint32_t>(d))).c_str());
+			else
+				spAddPreprocessorDefine(request, n.c_str(), std::get<string>(d).c_str());
+		spAddSearchPath(request, "../../src/Shaders");
+		spAddSearchPath(request, "../../src/extern");
+		int translationUnitIndex = spAddTranslationUnit(request, SLANG_SOURCE_LANGUAGE_SLANG, "");
+		spAddTranslationUnitSourceFile(request, translationUnitIndex, mShaderFile.string().c_str());
+		int entryPointIndex = spAddEntryPoint(request, translationUnitIndex, mEntryPoint.c_str(), SLANG_STAGE_NONE);
+		spSetTargetProfile(request, targetIndex, spFindProfile(session, "sm_6_6"));
+		spSetTargetFloatingPointMode(request, targetIndex, SLANG_FLOATING_POINT_MODE_FAST);
+
+		SlangResult r = spCompile(request);
+		cout << spGetDiagnosticOutput(request);
+		if (SLANG_FAILED(r)) throw runtime_error(spGetDiagnosticOutput(request));
+
+		slang::ShaderReflection* shaderReflection = slang::ShaderReflection::get(request);
+
+		static const unordered_map<SlangTypeKind, const char*> type_kind_name_map = {
+			{ SLANG_TYPE_KIND_NONE, "None" },
+			{ SLANG_TYPE_KIND_STRUCT, "Struct" },
+			{ SLANG_TYPE_KIND_ARRAY, "Array" },
+			{ SLANG_TYPE_KIND_MATRIX, "Matrix" },
+			{ SLANG_TYPE_KIND_VECTOR, "Vector" },
+			{ SLANG_TYPE_KIND_SCALAR, "Scalar" },
+			{ SLANG_TYPE_KIND_CONSTANT_BUFFER, "ConstantBuffer" },
+			{ SLANG_TYPE_KIND_RESOURCE, "Resource" },
+			{ SLANG_TYPE_KIND_SAMPLER_STATE, "SamplerState" },
+			{ SLANG_TYPE_KIND_TEXTURE_BUFFER, "TextureBuffer" },
+			{ SLANG_TYPE_KIND_SHADER_STORAGE_BUFFER, "ShaderStorageBuffer" },
+			{ SLANG_TYPE_KIND_PARAMETER_BLOCK, "ParameterBlock" },
+			{ SLANG_TYPE_KIND_GENERIC_TYPE_PARAMETER, "GenericTypeParameter" },
+			{ SLANG_TYPE_KIND_INTERFACE, "Interface" },
+			{ SLANG_TYPE_KIND_OUTPUT_STREAM, "OutputStream" },
+			{ SLANG_TYPE_KIND_SPECIALIZED, "Specialized" },
+			{ SLANG_TYPE_KIND_FEEDBACK, "Feedback" }
+		};
+		static const unordered_map<SlangBindingType, const char*> binding_type_name_map = {
+			{ SLANG_BINDING_TYPE_UNKNOWN, "Unknown" },
+			{ SLANG_BINDING_TYPE_SAMPLER, "Sampler" },
+			{ SLANG_BINDING_TYPE_TEXTURE, "Texture" },
+			{ SLANG_BINDING_TYPE_CONSTANT_BUFFER, "ConstantBuffer" },
+			{ SLANG_BINDING_TYPE_PARAMETER_BLOCK, "ParameterBlock" },
+			{ SLANG_BINDING_TYPE_TYPED_BUFFER, "TypedBuffer" },
+			{ SLANG_BINDING_TYPE_RAW_BUFFER, "RawBuffer" },
+			{ SLANG_BINDING_TYPE_COMBINED_TEXTURE_SAMPLER, "CombinedTextureSampler" },
+			{ SLANG_BINDING_TYPE_INPUT_RENDER_TARGET, "InputRenderTarget" },
+			{ SLANG_BINDING_TYPE_INLINE_UNIFORM_DATA, "InlineUniformData" },
+			{ SLANG_BINDING_TYPE_RAY_TRACTING_ACCELERATION_STRUCTURE, "RayTracingAccelerationStructure" },
+			{ SLANG_BINDING_TYPE_VARYING_INPUT, "VaryingInput" },
+			{ SLANG_BINDING_TYPE_VARYING_OUTPUT, "VaryingOutput" },
+			{ SLANG_BINDING_TYPE_EXISTENTIAL_VALUE, "ExistentialValue" },
+			{ SLANG_BINDING_TYPE_PUSH_CONSTANT, "PushConstant" },
+			{ SLANG_BINDING_TYPE_MUTABLE_FLAG, "MutableFlag" },
+			{ SLANG_BINDING_TYPE_MUTABLE_TETURE, "MutableTexture" },
+			{ SLANG_BINDING_TYPE_MUTABLE_TYPED_BUFFER, "MutableTypedBuffer" },
+			{ SLANG_BINDING_TYPE_MUTABLE_RAW_BUFFER, "MutableRawBuffer" },
+			{ SLANG_BINDING_TYPE_BASE_MASK, "BaseMask" },
+			{ SLANG_BINDING_TYPE_EXT_MASK, "ExtMask" },
+		};
+		static const unordered_map<SlangParameterCategory, const char*> category_name_map = {
+			{ SLANG_PARAMETER_CATEGORY_NONE, "None" },
+			{ SLANG_PARAMETER_CATEGORY_MIXED, "Mixed" },
+			{ SLANG_PARAMETER_CATEGORY_CONSTANT_BUFFER, "ConstantBuffer" },
+			{ SLANG_PARAMETER_CATEGORY_SHADER_RESOURCE, "ShaderResource" },
+			{ SLANG_PARAMETER_CATEGORY_UNORDERED_ACCESS, "UnorderedAccess" },
+			{ SLANG_PARAMETER_CATEGORY_VARYING_INPUT, "VaryingInput" },
+			{ SLANG_PARAMETER_CATEGORY_VARYING_OUTPUT, "VaryingOutput" },
+			{ SLANG_PARAMETER_CATEGORY_SAMPLER_STATE, "SamplerState" },
+			{ SLANG_PARAMETER_CATEGORY_UNIFORM, "Uniform" },
+			{ SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT, "DescriptorTableSlot" },
+			{ SLANG_PARAMETER_CATEGORY_SPECIALIZATION_CONSTANT, "SpecializationConstant" },
+			{ SLANG_PARAMETER_CATEGORY_PUSH_CONSTANT_BUFFER, "PushConstantBuffer" },
+			{ SLANG_PARAMETER_CATEGORY_REGISTER_SPACE, "RegisterSpace" },
+			{ SLANG_PARAMETER_CATEGORY_GENERIC, "GenericResource" },
+			{ SLANG_PARAMETER_CATEGORY_RAY_PAYLOAD, "RayPayload" },
+			{ SLANG_PARAMETER_CATEGORY_HIT_ATTRIBUTES, "HitAttributes" },
+			{ SLANG_PARAMETER_CATEGORY_CALLABLE_PAYLOAD, "CallablePayload" },
+			{ SLANG_PARAMETER_CATEGORY_SHADER_RECORD, "ShaderRecord" },
+			{ SLANG_PARAMETER_CATEGORY_EXISTENTIAL_TYPE_PARAM, "ExistentialTypeParam" },
+			{ SLANG_PARAMETER_CATEGORY_EXISTENTIAL_OBJECT_PARAM, "ExistentialObjectParam" },
+		};
+		static const unordered_map<SlangScalarType, size_t> scalar_size_map = {
+			{ SLANG_SCALAR_TYPE_NONE, 0 },
+			{ SLANG_SCALAR_TYPE_VOID, sizeof(uint32_t) },
+			{ SLANG_SCALAR_TYPE_BOOL, sizeof(uint32_t) },
+			{ SLANG_SCALAR_TYPE_INT32, sizeof(int32_t) },
+			{ SLANG_SCALAR_TYPE_UINT32, sizeof(uint32_t) },
+			{ SLANG_SCALAR_TYPE_INT64, sizeof(int64_t) },
+			{ SLANG_SCALAR_TYPE_UINT64, sizeof(uint64_t) },
+			{ SLANG_SCALAR_TYPE_FLOAT16, sizeof(uint16_t) },
+			{ SLANG_SCALAR_TYPE_FLOAT32, sizeof(uint32_t) },
+			{ SLANG_SCALAR_TYPE_FLOAT64, sizeof(uint64_t) },
+			{ SLANG_SCALAR_TYPE_INT8, sizeof(int8_t) },
+			{ SLANG_SCALAR_TYPE_UINT8, sizeof(uint8_t) },
+			{ SLANG_SCALAR_TYPE_INT16, sizeof(int16_t) },
+			{ SLANG_SCALAR_TYPE_UINT16, sizeof(uint16_t) }
+		};
+
+		static const unordered_map<SlangStage, vk::ShaderStageFlagBits> stage_map = {
+        	{ SLANG_STAGE_VERTEX, vk::ShaderStageFlagBits::eVertex },
+        	{ SLANG_STAGE_HULL, vk::ShaderStageFlagBits::eTessellationControl },
+        	{ SLANG_STAGE_DOMAIN, vk::ShaderStageFlagBits::eTessellationEvaluation },
+        	{ SLANG_STAGE_GEOMETRY, vk::ShaderStageFlagBits::eGeometry },
+        	{ SLANG_STAGE_FRAGMENT, vk::ShaderStageFlagBits::eFragment },
+        	{ SLANG_STAGE_COMPUTE, vk::ShaderStageFlagBits::eCompute },
+        	{ SLANG_STAGE_RAY_GENERATION, vk::ShaderStageFlagBits::eRaygenKHR },
+        	{ SLANG_STAGE_INTERSECTION, vk::ShaderStageFlagBits::eIntersectionKHR },
+        	{ SLANG_STAGE_ANY_HIT, vk::ShaderStageFlagBits::eAnyHitKHR },
+        	{ SLANG_STAGE_CLOSEST_HIT, vk::ShaderStageFlagBits::eClosestHitKHR },
+        	{ SLANG_STAGE_MISS, vk::ShaderStageFlagBits::eMissKHR },
+        	{ SLANG_STAGE_CALLABLE, vk::ShaderStageFlagBits::eCallableKHR },
+        	{ SLANG_STAGE_MESH, vk::ShaderStageFlagBits::eMeshNV },
+		};
+		mStage = stage_map.at(shaderReflection->getEntryPointByIndex(0)->getStage());
+		if (mStage == vk::ShaderStageFlagBits::eCompute) {
+			SlangUInt sz[3];
+			shaderReflection->getEntryPointByIndex(0)->getComputeThreadGroupSize(3, &sz[0]);
+			mWorkgroupSize.width  = (uint32_t)sz[0];
+			mWorkgroupSize.height = (uint32_t)sz[1];
+			mWorkgroupSize.depth  = (uint32_t)sz[2];
+		}
+
+		for(uint32_t parameter_index = 0; parameter_index < shaderReflection->getParameterCount(); parameter_index++) {
+			slang::VariableLayoutReflection* parameter = shaderReflection->getParameterByIndex(parameter_index);
+			slang::ParameterCategory category = parameter->getCategory();
+			slang::TypeReflection* type = parameter->getType();
+			slang::TypeLayoutReflection* typeLayout = parameter->getTypeLayout();
+
+			if (category == slang::ParameterCategory::DescriptorTableSlot) {
+				static const unordered_map<SlangBindingType, vk::DescriptorType> descriptor_type_map = {
+  					{ SLANG_BINDING_TYPE_SAMPLER, vk::DescriptorType::eSampler },
+  					{ SLANG_BINDING_TYPE_TEXTURE, vk::DescriptorType::eSampledImage},
+  					{ SLANG_BINDING_TYPE_CONSTANT_BUFFER, vk::DescriptorType::eUniformBuffer },
+  					{ SLANG_BINDING_TYPE_TYPED_BUFFER, vk::DescriptorType::eUniformTexelBuffer },
+  					{ SLANG_BINDING_TYPE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
+  					{ SLANG_BINDING_TYPE_COMBINED_TEXTURE_SAMPLER, vk::DescriptorType::eCombinedImageSampler },
+  					{ SLANG_BINDING_TYPE_INPUT_RENDER_TARGET, vk::DescriptorType::eInputAttachment },
+  					{ SLANG_BINDING_TYPE_INLINE_UNIFORM_DATA, vk::DescriptorType::eInlineUniformBlock },
+  					{ SLANG_BINDING_TYPE_RAY_TRACTING_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
+  					{ SLANG_BINDING_TYPE_MUTABLE_TETURE, vk::DescriptorType::eStorageImage },
+  					{ SLANG_BINDING_TYPE_MUTABLE_TYPED_BUFFER, vk::DescriptorType::eStorageTexelBuffer },
+  					{ SLANG_BINDING_TYPE_MUTABLE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
+				};
+				const vk::DescriptorType descriptor_type = descriptor_type_map.at((SlangBindingType)typeLayout->getBindingRangeType(0));
+
+				vector<variant<uint32_t,string>> array_size;
+				if (typeLayout->getKind() == slang::TypeReflection::Kind::Array)
+					array_size.emplace_back((uint32_t)typeLayout->getTotalArrayElementCount());
+
+				const uint32_t input_attachment_index = 0; // TODO
+
+				mDescriptorMap.emplace(parameter->getName(), DescriptorBinding(parameter->getBindingSpace(), parameter->getBindingIndex(), descriptor_type, array_size, input_attachment_index));
+
+			} else if (category == slang::ParameterCategory::PushConstantBuffer) {
+				// TODO: get offset from slang; currently assumes tightly packed scalar push constants
+				size_t offset = 0;
+				for (uint32_t i = 0; i < type->getElementType()->getFieldCount(); i++) {
+					slang::VariableReflection* field = type->getElementType()->getFieldByIndex(i);
+					slang::TypeLayoutReflection* fieldTypeLayout = typeLayout->getElementTypeLayout()->getFieldByIndex(i)->getTypeLayout();
+					slang::TypeReflection* fieldType = field->getType();
+					if (fieldType->getScalarType() == slang::TypeReflection::ScalarType::None) {
+						cerr << "Warning: Non-scalar push constants unsupported" << endl;
+						continue;
+					}
+					auto& dst = mPushConstants[field->getName()];
+					dst.mOffset = (uint32_t)offset;
+					dst.mArrayStride = fieldTypeLayout->getStride();
+					if (fieldType->getTotalArrayElementCount())
+						dst.mArraySize.emplace_back((uint32_t)fieldType->getTotalArrayElementCount());
+					dst.mTypeSize = scalar_size_map.at((SlangScalarType)fieldType->getScalarType());
+					offset += max<size_t>(fieldType->getTotalArrayElementCount(), 1) * fieldTypeLayout->getStride();
+				}
+			} else
+				cerr << "Warning: Unsupported resource category: " << category_name_map.at((SlangParameterCategory)category) << endl;
+		}
+
+		spDestroyCompileRequest(request);
+		spDestroySession(session);
+	}
+
+	const fs::path spvpath = (fs::temp_directory_path().string() / mShaderFile.stem()).string() + "_" + mEntryPoint + ".spv";
+
+	string compile_cmd = "..\\..\\extern\\slang\\bin\\windows-x64\\release\\slangc.exe " + mShaderFile.string() + " -entry " + mEntryPoint;
+	compile_cmd += " -profile sm_6_6 -lang slang -target spirv -o " + spvpath.string();
+	for (const string& arg : mCompileArgs)
+		compile_cmd += " " + arg;
+	compile_cmd += " -D__HLSL__ -D__SLANG__";
+	for (const auto&[n,d] : defines)
+		if (d.index() == 0)
+			compile_cmd += " -D" + n + "=" + to_string(std::get<uint32_t>(d));
+		else
+			compile_cmd += " -D" + n + "=" + std::get<string>(d);
+	system(compile_cmd.c_str());
+
+	return read_file<vector<uint32_t>>(spvpath);
+}
+
+void Shader::load_reflection(const fs::path& json_path) {
 	std::ifstream s(json_path);
 	if (!s.is_open()) throw runtime_error("Could not open " + json_path.string());
-
-	auto shader = read_file<vector<uint32_t>>(spv);
-	mShader = device->createShaderModule(vk::ShaderModuleCreateInfo({}, shader));
 
 	nlohmann::json j;
 	s >> j;
@@ -155,7 +365,6 @@ Shader::Shader(Device& device, const fs::path& spv) : DeviceResource(device, spv
 			}
 		}
 
-
 	static const unordered_map<string, vk::Format> gSpirvTypeMap {
 		{ "int",   vk::Format::eR32Sint },
 		{ "ivec2", vk::Format::eR32G32Sint },
@@ -187,14 +396,10 @@ Shader::Shader(Device& device, const fs::path& spv) : DeviceResource(device, spv
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eInputAttachment, spirv_array_size(j, v), v["input_attachment_index"]));
 	for (const auto& v : j["textures"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eCombinedImageSampler, spirv_array_size(j, v)));
-	for (const auto& v : j["images"]) {
-
+	for (const auto& v : j["images"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageImage, spirv_array_size(j, v))); // TODO: texelbuffer
-	}
-	for (const auto& v : j["separate_images"]) {
-
+	for (const auto& v : j["separate_images"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampledImage, spirv_array_size(j, v)));
-	}
 	for (const auto& v : j["separate_samplers"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eSampler, spirv_array_size(j, v)));
 	for (const auto& v : j["ubos"]) {
@@ -205,9 +410,46 @@ Shader::Shader(Device& device, const fs::path& spv) : DeviceResource(device, spv
 	}
 	for (const auto& v : j["ssbos"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eStorageBuffer, spirv_array_size(j, v)));
-
 	for (const auto& v : j["acceleration_structures"])
 		mDescriptorMap.emplace(v["name"], DescriptorBinding(v["set"], v["binding"], vk::DescriptorType::eAccelerationStructureKHR, spirv_array_size(j, v)));
 
-	cout << "Loaded " << spv << endl;
+}
+
+Shader::Shader(Device& device, const fs::path& filename, const string& entrypoint, const vector<string>& args) :
+	DeviceResource(device, filename.stem().string()), mShaderFile(filename), mEntryPoint(entrypoint), mCompileArgs(args) {
+
+	if (!fs::exists(filename)) throw runtime_error(filename.string() + " does not exist");
+	vector<uint32_t> spv;
+	if (filename.extension() == ".spv") {
+		// load spirv binary
+		spv = read_file<vector<uint32_t>>(mShaderFile);
+		cout << "Loaded " << mShaderFile << endl;
+		load_reflection(fs::path(mShaderFile).replace_extension("json"));
+		mCompileSpecializations = false;
+	} else if (filename.extension() == ".slang" || filename.extension() == ".hlsl" || filename.extension() == ".glsl") {
+		// Compile source with slang
+		spv = slang_compile({}, true);
+		cout << "Compiled " << mShaderFile << ": " << mEntryPoint << " (" << spv.size()*sizeof(uint32_t) << " bytes)" << endl;
+		mCompileSpecializations = true;
+	}
+	mShaderModules.emplace("", device->createShaderModule(vk::ShaderModuleCreateInfo({}, spv)));
+}
+
+const vk::ShaderModule& Shader::get(const unordered_map<string, variant<uint32_t,string>>& defines) {
+	if (defines.empty())
+		return mShaderModules.at("");
+
+	string define_args = "";
+	for (const auto&[n,d] : defines)
+		if (d.index() == 0)
+			define_args += " -D" + n + "=" + to_string(std::get<uint32_t>(d));
+		else
+			define_args += " -D" + n + "=" + std::get<string>(d);
+
+	if (auto it = mShaderModules.find(define_args); it != mShaderModules.end())
+		return it->second;
+
+	const vector<uint32_t> spv = slang_compile(defines);
+	cout << "Compiled " << mShaderFile << ": " << mEntryPoint << define_args << endl;
+	return mShaderModules.emplace(define_args, mDevice->createShaderModule(vk::ShaderModuleCreateInfo({}, spv))).first->second;
 }

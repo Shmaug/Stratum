@@ -4,9 +4,6 @@
 #include "quatf.h"
 
 struct TransformData {
-	#ifdef __HLSL__
-	row_major
-	#endif
 	float3x4 m;
 
 	inline float3 transform_vector(float3 v) CONST_CPP {

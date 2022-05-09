@@ -60,15 +60,21 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
 			endif()
 			list(APPEND COMPILE_CMD "-Fo" "${SPV_PATH}")
 		elseif (glslc IN_LIST COMPILE_CMD)
+			if (WIN32)
+				# make sure to use vulkan's dxc (supports SPIR-V)
+				list(POP_FRONT COMPILE_CMD)
+				list(PREPEND COMPILE_CMD "$ENV{VULKAN_SDK}/Bin/glslc")
+			endif()
 			list(APPEND COMPILE_CMD "-g") # helps reflection
 			list(APPEND COMPILE_CMD "-o" "${SPV_PATH}")
 		elseif (slangc IN_LIST COMPILE_CMD)
 			# use internal slangc
 			list(POP_FRONT COMPILE_CMD)
 			list(PREPEND COMPILE_CMD "${SLANGC}")
-			list(APPEND COMPILE_CMD "-Fo" "${SPV_PATH}")
+			list(APPEND COMPILE_CMD "-target" "spirv")
+			list(APPEND COMPILE_CMD "-D__HLSL__")
+			list(APPEND COMPILE_CMD "-D__SLANG__")
 			list(APPEND COMPILE_CMD "-o" "${SPV_PATH}")
-			list(APPEND COMPILE_CMD "-D" "__HLSL__")
 		endif()
 
 		add_custom_command(OUTPUT "${SPV_PATH}"

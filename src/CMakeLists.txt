@@ -40,8 +40,12 @@ if (UNIX)
 elseif(WIN32)
     target_compile_definitions(Stratum PUBLIC VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_compile_options(Stratum PUBLIC /bigobj)
+
+    target_compile_definitions(Stratum PUBLIC SLANG_STATIC)
     target_link_libraries(Stratum PUBLIC "${SLANG_ROOT}/bin/windows-x64/release/slang.lib")
 	configure_file("${SLANG_ROOT}/bin/windows-x64/release/slang.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.dll" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/slang-glslang.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang-glslang.dll" COPYONLY)
+	configure_file("${SLANG_ROOT}/bin/windows-x64/release/gfx.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/gfx.dll" COPYONLY)
 endif()
 
 if (OpenXR_FOUND)

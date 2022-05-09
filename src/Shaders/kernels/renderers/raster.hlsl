@@ -12,6 +12,8 @@
 
 SamplerState gSampler;
 StructuredBuffer<ViewData> gViews;
+StructuredBuffer<TransformData> gViewTransforms;
+StructuredBuffer<TransformData> gInverseViewTransforms;
 Texture2D<float4> gImages[gImageCount];
 
 [[vk::push_constant]] const struct {
@@ -44,7 +46,7 @@ struct v2f_image {
 
 v2f color_vs(appdata v) {
 	v2f o;
-	o.pos = gViews[gPushConstants.gViewIndex].projection.project_point(gViews[gPushConstants.gViewIndex].world_to_camera.transform_point(v.pos));
+	o.pos = gViews[gPushConstants.gViewIndex].projection.project_point(gInverseViewTransforms[gPushConstants.gViewIndex].transform_point(v.pos));
 	o.color = v.color*gPushConstants.gColor;
 	return o;
 }
@@ -52,7 +54,7 @@ float4 color_fs(float4 color : COLOR) : SV_Target0 { return color; }
 
 v2f_image color_image_vs(appdata_image v) {
 	v2f_image o;
-	o.pos = gViews[gPushConstants.gViewIndex].projection.project_point(gViews[gPushConstants.gViewIndex].world_to_camera.transform_point(v.pos));
+	o.pos = gViews[gPushConstants.gViewIndex].projection.project_point(gInverseViewTransforms[gPushConstants.gViewIndex].transform_point(v.pos));
 	o.color = v.color*gPushConstants.gColor;
 	o.uv = gPushConstants.gImageST.xy*v.uv + gPushConstants.gImageST.zw;
 	return o;
@@ -71,7 +73,7 @@ float4 skybox_vs(uint vertexId : SV_VertexID, out float2 clipPos : TEXCOORD0) : 
 	return float4(clipPos, 0, 1);
 }
 float4 skybox_fs(float2 clipPos : TEXCOORD0) : SV_Target0 {
-	const float3 ray = normalize(gViews[gPushConstants.gViewIndex].camera_to_world.transform_vector(gViews[gPushConstants.gViewIndex].projection.back_project(clipPos)));
+	const float3 ray = normalize(gViewTransforms[gPushConstants.gViewIndex].transform_vector(gViews[gPushConstants.gViewIndex].projection.back_project(clipPos)));
 	float4 color = gImages[gPushConstants.gImageIndex].SampleLevel(gSampler, cartesian_to_spherical_uv(ray), 0);
 	color.rgb = pow(color.rgb, 1/gPushConstants.gEnvironmentGamma);
 	return color;

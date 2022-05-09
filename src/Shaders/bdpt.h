@@ -17,7 +17,10 @@ namespace stm {
 
 #define BDPT_FLAG_COUNT_RAYS				BIT(31)
 
+//#define BDPT_SINGLE_BOUNCE_KERNEL
+
 struct BDPTPushConstants {
+	uint2 gOutputExtent;
 	uint gViewCount;
 	uint gLightCount;
 	uint gEnvironmentMaterialAddress;
@@ -30,16 +33,29 @@ struct BDPTPushConstants {
 
 struct PathState {
 	float3 position;
-	uint path_length;
-	float3 dir_out;
 	uint medium;
 	float3 beta;
-	uint packed_pixel;
+	uint packed_pixel_coord;
+	float3 dir_out;
+	uint path_length;
+#ifdef __HLSL__
+	inline uint2 pixel_coord() {
+		uint2 c;
+		c.x = packed_pixel_coord & 0xFFFF;
+		c.y = packed_pixel_coord >> 16;
+		return c ;
+	}
+#endif
 };
 
 enum class DebugMode {
 	eNone,
 	eAlbedo,
+	eDiffuse,
+	eSpecular,
+	eTransmission,
+	eRoughness,
+	eEmission,
 	eShadingNormal,
 	eGeometryNormal,
 	eDirOut,
@@ -56,6 +72,11 @@ inline string to_string(const stm::DebugMode& m) {
 		default: return "Unknown";
 		case stm::DebugMode::eNone: return "None";
 		case stm::DebugMode::eAlbedo: return "Albedo";
+		case stm::DebugMode::eDiffuse: return "Diffuse";
+		case stm::DebugMode::eSpecular: return "Specular";
+		case stm::DebugMode::eTransmission: return "Transmission";
+		case stm::DebugMode::eRoughness: return "Roughness";
+		case stm::DebugMode::eEmission: return "Emission";
 		case stm::DebugMode::eShadingNormal: return "ShadingNormal";
 		case stm::DebugMode::eGeometryNormal: return "GeometryNormal";
 		case stm::DebugMode::eDirOut: return "DirOut";

@@ -1,7 +1,11 @@
+#if 0
 #pragma compile dxc -spirv -T cs_6_7 -E alpha_to_roughness
 #pragma compile dxc -spirv -T cs_6_7 -E shininess_to_roughness
 #pragma compile dxc -spirv -T cs_6_7 -E from_metal_rough
 #pragma compile dxc -spirv -T cs_6_7 -E from_diffuse_specular
+#endif
+
+#include "../common.h"
 
 Texture2D<float4> gDiffuse;
 Texture2D<float4> gSpecular;
@@ -12,8 +16,17 @@ RWTexture2D<float4> gPackedData; // diffuse (R), specular (G), roughness (B), tr
 Texture2D<float> gInput;
 RWTexture2D<float> gRoughness;
 
+#ifdef __SLANG__
+#ifndef gUseTransmittance
+#define gUseTransmittance 0
+#endif
+#else
 [[vk::constant_id(0)]] const bool gUseTransmittance = 0;
+#endif
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void alpha_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -22,6 +35,9 @@ void alpha_to_roughness(uint3 index : SV_DispatchThreadId) {
 	gRoughness[index.xy] = sqrt(gInput[index.xy]);
 }
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void shininess_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -30,8 +46,9 @@ void shininess_to_roughness(uint3 index : SV_DispatchThreadId) {
 	gRoughness[index.xy] = sqrt(2 / (gInput[index.xy] + 2));
 }
 
-#include <common.h>
-
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void from_metal_rough(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -45,6 +62,9 @@ void from_metal_rough(uint3 index : SV_DispatchThreadId) {
 	gPackedData[index.xy] = float4(lerp(1, 0.1, metallic), lerp(0.25, 1, metallic), roughness, transmittance);
 }
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void from_diffuse_specular(uint3 index : SV_DispatchThreadId) {
 	uint2 size;

@@ -66,11 +66,11 @@ inline uint2 pack_f16_4(const float4 v) {
 	const uint4 f16 = f32tof16(v);
 	return uint2(f16.x | (f16.y << 16), (f16.z << 0)  | (f16.w << 16));
 }
-inline min16float2 unpack_f16_2(const uint v) {
-	return (min16float2)f16tof32(uint2(v, v >> 16));
+inline float2 unpack_f16_2(const uint v) {
+	return f16tof32(uint2(v, v >> 16));
 }
-inline min16float4 unpack_f16_4(const uint2 v) {
-	return min16float4(f16tof32(uint2(v.x, v.x >> 16)), f16tof32(uint2(v.y, v.y >> 16)));
+inline float4 unpack_f16_4(const uint2 v) {
+	return float4(f16tof32(uint2(v.x, v.x >> 16)), f16tof32(uint2(v.y, v.y >> 16)));
 }
 
 inline float2 pack_normal_octahedron2(const float3 v) {

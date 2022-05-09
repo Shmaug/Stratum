@@ -24,21 +24,31 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
+#if 0
 #pragma compile dxc -spirv -T cs_6_7 -E main
 #pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
+#endif
 
 #include "common/denoise_descriptors.hlsli"
 #include "common/svgf_common.hlsli"
+#include "../filter_type.h"
 
-[[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
-
-[[vk::push_constant]] const struct {
+struct PushConstants {
 	uint gViewCount;
 	float gSigmaLuminanceBoost;
 	uint gIteration;
 	uint gStepSize;
-} gPushConstants;
+};
+
+#ifdef __SLANG__
+#ifndef gFilterKernelType
+#define gFilterKernelType 1u
+#endif
+[[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
+#else
+[[vk::constant_id(0)]] const uint gFilterKernelType = 1u;
+[[vk::push_constant]] const PushConstants gPushConstants;
+#endif
 
 #define gInput gFilterImages[gPushConstants.gIteration%2]
 #define gOutput gFilterImages[(gPushConstants.gIteration+1)%2]
@@ -49,14 +59,15 @@ struct TapData {
 	int2 index;
 	uint2 s_mem_index;
 	float3 center_normal;
-	min16float z_center;
-	min16float2 dz_center;
+	float z_center;
+	float2 dz_center;
 	float l_center;
 	float sigma_l;
 
 	float4 sum_color;
 	float sum_weight;
 
+	SLANG_MUTATING
 	inline void compute_sigma_luminance() {
 		const float kernel[2][2] = {
 			{ 1.0 / 4.0, 1.0 / 8.0  },
@@ -73,6 +84,7 @@ struct TapData {
 		sigma_l = sqrt(max(s, 0))*gPushConstants.gSigmaLuminanceBoost;
 	}
 
+	SLANG_MUTATING
 	inline void tap(const int2 offset, const float kernel_weight) {
 		const int2 p = index + offset;
 		if (!test_inside_screen(p, gViews[view_index])) return;
@@ -83,7 +95,7 @@ struct TapData {
 		const uint p_1d = p.y*screen_width + p.x;
 
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
-		const float w_z = 3 * abs(gVisibility[p_1d].z() - z_center) / (length(dz_center * min16float2(offset * gPushConstants.gStepSize)) + 1e-2);
+		const float w_z = 3 * abs(gVisibility[p_1d].z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
 		const float w_n = pow(max(0, dot(gVisibility[p_1d].normal(), center_normal)), 256);
 
 		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
@@ -183,6 +195,9 @@ inline void atrous(inout TapData t) {
 	t.tap(int2( 2, -2) * gPushConstants.gStepSize, 1.0 / 36.0);
 }
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	TapData t;
@@ -194,8 +209,8 @@ void main(uint3 index : SV_DispatchThreadId) {
 	const uint index_1d = index.y*t.screen_width + index.x;
 	t.index = index.xy;
 	t.center_normal = gVisibility[index_1d].normal();
-	t.z_center = gVisibility[index_1d].z();
-	t.dz_center = gVisibility[index_1d].dz_dxy();
+	t.z_center = (float)gVisibility[index_1d].z();
+	t.dz_center = (float2)gVisibility[index_1d].dz_dxy();
 	t.sum_weight = 1;
 	t.sum_color = gInput[index.xy];
 	t.l_center = luminance(t.sum_color.rgb);
@@ -203,7 +218,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	t.compute_sigma_luminance();
 
 	if (!isinf(t.z_center)) { // only filter foreground pixels
-		switch (gFilterKernelType) {
+		switch ((FilterKernelType)gFilterKernelType) {
 		default:
 		case FilterKernelType::eAtrous:
 			atrous(t);
@@ -236,6 +251,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 	gOutput[t.index] = t.sum_color*float4(inv_w, inv_w, inv_w, inv_w*inv_w);
 }
 
+#ifdef __SLANG__
+[shader("compute")]
+#endif
 [numthreads(8,8,1)]
 void copy_rgb(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;

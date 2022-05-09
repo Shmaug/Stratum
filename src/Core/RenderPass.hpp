@@ -6,7 +6,7 @@ namespace stm {
 
 using RenderAttachmentId = string;
 
-enum BlendMode {
+enum class BlendMode {
 	eOpaque,
 	eAdd,
 	eSubtract,
@@ -15,22 +15,22 @@ enum BlendMode {
 inline vk::PipelineColorBlendAttachmentState blend_mode_state(BlendMode mode = BlendMode::eOpaque) {
 	switch (mode) {
 		default:
-		case eOpaque:
+		case BlendMode::eOpaque:
 			return vk::PipelineColorBlendAttachmentState(false,
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eAdd, // color op
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eAdd, // alpha op
 					vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
-		case eAdd:
+		case BlendMode::eAdd:
 			return vk::PipelineColorBlendAttachmentState(true,
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eAdd, // color op
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eAdd, // alpha op
 					vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
-		case eSubtract:
+		case BlendMode::eSubtract:
 			return vk::PipelineColorBlendAttachmentState(true,
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eSubtract, // color op
 					vk::BlendFactor::eOne, vk::BlendFactor::eOne, vk::BlendOp::eSubtract, // alpha op
 					vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
-		case eAlpha:
+		case BlendMode::eAlpha:
 			return vk::PipelineColorBlendAttachmentState(true,
 					vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, // color op
 					vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd, // alpha op
@@ -38,7 +38,7 @@ inline vk::PipelineColorBlendAttachmentState blend_mode_state(BlendMode mode = B
 	}
 }
 
-enum AttachmentType {
+enum class AttachmentType {
 	eInput = 1,
 	eColor = 2,
 	eResolve = 3,
@@ -64,7 +64,7 @@ public:
 		vector<vk::AttachmentDescription> attachments;
 
 		mHash = 0;
-		
+
 		for (uint32_t i = 0; i < mSubpassDescriptions.size(); i++) {
 			auto&[inputAttachments, colorAttachments, resolveAttachments, preserveAttachments, depthAttachment] = subpassData[i];
 
@@ -114,7 +114,7 @@ public:
 						if (get<AttachmentType>(srcAttachment) == AttachmentType::eColor ||
 							get<AttachmentType>(srcAttachment) == AttachmentType::eDepthStencil ||
 							get<AttachmentType>(srcAttachment) == AttachmentType::eResolve) {
-							vk::SubpassDependency* dep; 
+							vk::SubpassDependency* dep;
 							if (auto it = tmpdeps.find(srcSubpass); it == tmpdeps.end()) {
 								dep = &tmpdeps.emplace(srcSubpass, vk::SubpassDependency(srcSubpass, i)).first->second;
 								dep->dependencyFlags =  vk::DependencyFlagBits::eByRegion;
@@ -183,12 +183,12 @@ public:
 	inline ~Framebuffer() {
 		mDevice->destroyFramebuffer(mFramebuffer);
 	}
-	
+
 	inline vk::Framebuffer& operator*() { return mFramebuffer; };
 	inline vk::Framebuffer* operator->() { return &mFramebuffer; };
 	inline const vk::Framebuffer& operator*() const { return mFramebuffer; };
 	inline const vk::Framebuffer* operator->() const { return &mFramebuffer; };
-	
+
 	inline const vk::Extent2D& extent() const { return mExtent; }
 	inline stm::RenderPass& render_pass() const { return mRenderPass; };
 

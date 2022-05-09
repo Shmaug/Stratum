@@ -79,6 +79,7 @@ struct Environment {
 	uint marginal_cdf;
 	uint row_cdf;
 
+	SLANG_MUTATING
 	inline void load(uint address) {
 		emission = load_image_value3(address);
 		if (emission.has_image()) {

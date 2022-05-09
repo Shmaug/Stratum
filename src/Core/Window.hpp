@@ -4,7 +4,7 @@
 
 namespace stm {
 
-enum KeyCode {
+enum class KeyCode {
 #ifdef _WIN32
 	eNone = 0x00,
 

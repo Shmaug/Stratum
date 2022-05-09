@@ -17,6 +17,8 @@ public:
 
 	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility);
 
+	inline void reset_accumulation() { mResetAccumulation = true; }
+
 private:
 	Node& mNode;
 
@@ -45,6 +47,7 @@ private:
 
 	uint32_t mAtrousIterations = 0;
 	uint32_t mHistoryTap = 0;
+	bool mResetAccumulation = false;
 };
 
 }

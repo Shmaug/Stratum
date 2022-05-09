@@ -23,12 +23,12 @@ static const Real gCosThetaEpsilon = 1e-6;
 struct MaterialEvalRecord {
 	Spectrum f;
 	Real pdf_fwd;
-	Spectrum f_estimate; // f / pdf_fwd
 	Real pdf_rev;
 };
 struct MaterialSampleRecord {
-	MaterialEvalRecord eval;
 	Vector3 dir_out;
+	Real pdf_fwd;
+	Real pdf_rev;
 	Real eta;
 	Real roughness;
 };

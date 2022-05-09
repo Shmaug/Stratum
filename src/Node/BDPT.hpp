@@ -20,7 +20,7 @@ public:
 
 	STRATUM_API void on_inspector_gui();
 	STRATUM_API void update(CommandBuffer& commandBuffer, const float deltaTime);
-	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<ViewData>& views);
+	STRATUM_API void render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<pair<ViewData,TransformData>>& views);
 
 private:
 	Node& mNode;
@@ -35,6 +35,8 @@ private:
 
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
+	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES;
+	uint32_t mDebugMode = 0;
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
@@ -45,11 +47,12 @@ private:
 		shared_ptr<Scene::SceneData> mSceneData;
 
 		Buffer::View<ViewData> mViews;
+		Buffer::View<TransformData> mViewTransforms;
+		Buffer::View<TransformData> mViewInverseTransforms;
 		Buffer::View<uint32_t> mViewMediumIndices;
 		Image::View mRadiance;
 		Image::View mAlbedo;
 		Image::View mDebugImage;
-		Buffer::View<VisibilityInfo> mVisibility;
 
 		unordered_map<string, Buffer::View<byte>> mPathData;
 

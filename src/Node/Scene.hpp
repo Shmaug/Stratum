@@ -20,10 +20,8 @@ struct Camera {
 	ProjectionData mProjection;
 	vk::Rect2D mImageRect;
 
-	inline ViewData view(const TransformData& to_world) {
+	inline ViewData view() {
 		ViewData v;
-		v.camera_to_world = to_world;
-		v.world_to_camera = to_world.inverse();
 		v.projection = mProjection;
 		v.image_min = { mImageRect.offset.x, mImageRect.offset.y };
 		v.image_max = { mImageRect.offset.x + mImageRect.extent.width, mImageRect.offset.y + mImageRect.extent.height };
@@ -60,6 +58,7 @@ public:
 		Buffer::View<byte> mIndices;
 		Buffer::View<byte> mMaterialData;
 		Buffer::View<InstanceData> mInstances;
+		Buffer::View<TransformData> mInstanceTransforms;
 		Buffer::View<TransformData> mInstanceInverseTransforms;
 		Buffer::View<TransformData> mInstanceMotionTransforms;
 		Buffer::View<uint32_t> mLightInstances;

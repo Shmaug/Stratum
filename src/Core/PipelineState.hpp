@@ -24,23 +24,39 @@ public:
 		mPipelines.clear();
 	}
 
-	inline uint32_t& specialization_constant(const string& name) {
+	template<typename T>
+	inline T& specialization_constant(const string& name) {
 		auto it = mSpecializationConstants.find(name);
 		if (it != mSpecializationConstants.end())
-			return it->second;//mSpecializationConstants[name];
-		for (const auto& [stage, shader] : mShaders)
+			return get<T>(it->second);
+		for (const auto& [stage, shader] : mShaders) {
+			if (shader->compile_specializations())
+				return std::get<T>(mSpecializationConstants.emplace(name, T{}).first->second);
 			if (auto it2 = shader->specialization_constants().find(name); it2 != shader->specialization_constants().end())
-				return mSpecializationConstants.emplace(name, it2->second.second).first->second; // default value
+				return std::get<T>(mSpecializationConstants.emplace(name, it2->second.second).first->second); // default value
+		}
 		throw invalid_argument("No specialization constant named " + name);
 	}
-	inline uint32_t specialization_constant(const string& name) const {
+	template<typename T>
+	inline T specialization_constant(const string& name) const {
 		auto it = mSpecializationConstants.find(name);
 		if (it != mSpecializationConstants.end())
-			return it->second;
-		for (const auto& [stage, shader] : mShaders)
+			return get<T>(it->second);
+		for (const auto& [stage, shader] : mShaders) {
 			if (auto it2 = shader->specialization_constants().find(name); it2 != shader->specialization_constants().end())
-				return it2->second.second; // default value
+				return (T)it2->second.second; // default value
+		}
 		throw invalid_argument("No specialization constant named " + name);
+	}
+
+	inline void erase_specialization_constant(const string& name) {
+		auto it = mSpecializationConstants.find(name);
+		if (it != mSpecializationConstants.end())
+			mSpecializationConstants.erase(it);
+	}
+
+	inline bool has_specialization_constant(const string& name) const {
+		return mSpecializationConstants.find(name) != mSpecializationConstants.end();
 	}
 
 	inline shared_ptr<Shader> stage(vk::ShaderStageFlagBits stage) const {
@@ -100,7 +116,7 @@ protected:
 	string mName;
 
 	map<vk::ShaderStageFlagBits, shared_ptr<Shader>> mShaders;
-	unordered_map<string, uint32_t> mSpecializationConstants;
+	unordered_map<string, variant<uint32_t,string>> mSpecializationConstants;
 	unordered_map<string, shared_ptr<Sampler>> mImmutableSamplers;
 	unordered_map<string, vector<byte>> mPushConstants;
 	unordered_map<string, unordered_map<uint32_t, stm::Descriptor>> mDescriptors;

@@ -62,7 +62,7 @@ public:
 				if (mOffset + mSize * sizeof(T) > mBuffer->size()) throw out_of_range("view size out of bounds");
 			}
 		}
-		inline View(const shared_ptr<Buffer>& buffer, vk::DeviceSize byteOffset = 0, vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
+		inline View(const shared_ptr<Buffer>& buffer, const vk::DeviceSize byteOffset = 0, const vk::DeviceSize elementCount = VK_WHOLE_SIZE) : mBuffer(buffer), mOffset(byteOffset) {
 			if (mBuffer) {
 				mSize = (elementCount == VK_WHOLE_SIZE) ? (mBuffer->size() - mOffset) / sizeof(T) : elementCount;
 				if (mOffset + mSize * sizeof(T) > mBuffer->size()) throw out_of_range("view size out of bounds");
@@ -98,6 +98,12 @@ public:
 
 		inline iterator begin() const { return data(); }
 		inline iterator end() const { return data() + mSize; }
+
+		template<typename Ty>
+		inline View<Ty> cast() const {
+			if ((size_bytes() % sizeof(Ty)) != 0) throw logic_error("Buffer size must be divisible by sizeof(Ty)");
+			return View<Ty>(buffer(), offset(), size_bytes() / sizeof(Ty));
+		}
 
 	private:
 		shared_ptr<Buffer> mBuffer;

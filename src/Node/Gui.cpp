@@ -69,28 +69,28 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 	io.ConfigFlags |= ImGuiConfigFlags_IsSRGB;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
-	io.KeyMap[ImGuiKey_Tab] = eKeyTab;
-	io.KeyMap[ImGuiKey_LeftArrow] = eKeyLeft;
-	io.KeyMap[ImGuiKey_RightArrow] = eKeyRight;
-	io.KeyMap[ImGuiKey_UpArrow] = eKeyUp;
-	io.KeyMap[ImGuiKey_DownArrow] = eKeyDown;
-	io.KeyMap[ImGuiKey_PageUp] = eKeyPageUp;
-	io.KeyMap[ImGuiKey_PageDown] = eKeyPageDown;
-	io.KeyMap[ImGuiKey_Home] = eKeyHome;
-	io.KeyMap[ImGuiKey_End] = eKeyEnd;
-	io.KeyMap[ImGuiKey_Insert] = eKeyInsert;
-	io.KeyMap[ImGuiKey_Delete] = eKeyDelete;
-	io.KeyMap[ImGuiKey_Backspace] = eKeyBackspace;
-	io.KeyMap[ImGuiKey_Space] = eKeySpace;
-	io.KeyMap[ImGuiKey_Enter] = eKeyEnter;
-	io.KeyMap[ImGuiKey_Escape] = eKeyEscape;
-	io.KeyMap[ImGuiKey_KeyPadEnter] = eKeyEnter;
-	io.KeyMap[ImGuiKey_A] = eKeyA;
-	io.KeyMap[ImGuiKey_C] = eKeyC;
-	io.KeyMap[ImGuiKey_V] = eKeyV;
-	io.KeyMap[ImGuiKey_X] = eKeyX;
-	io.KeyMap[ImGuiKey_Y] = eKeyY;
-	io.KeyMap[ImGuiKey_Z] = eKeyZ;
+	io.KeyMap[ImGuiKey_Tab] = (int)KeyCode::eKeyTab;
+	io.KeyMap[ImGuiKey_LeftArrow] = (int)KeyCode::eKeyLeft;
+	io.KeyMap[ImGuiKey_RightArrow] = (int)KeyCode::eKeyRight;
+	io.KeyMap[ImGuiKey_UpArrow] = (int)KeyCode::eKeyUp;
+	io.KeyMap[ImGuiKey_DownArrow] = (int)KeyCode::eKeyDown;
+	io.KeyMap[ImGuiKey_PageUp] = (int)KeyCode::eKeyPageUp;
+	io.KeyMap[ImGuiKey_PageDown] = (int)KeyCode::eKeyPageDown;
+	io.KeyMap[ImGuiKey_Home] = (int)KeyCode::eKeyHome;
+	io.KeyMap[ImGuiKey_End] = (int)KeyCode::eKeyEnd;
+	io.KeyMap[ImGuiKey_Insert] = (int)KeyCode::eKeyInsert;
+	io.KeyMap[ImGuiKey_Delete] = (int)KeyCode::eKeyDelete;
+	io.KeyMap[ImGuiKey_Backspace] = (int)KeyCode::eKeyBackspace;
+	io.KeyMap[ImGuiKey_Space] = (int)KeyCode::eKeySpace;
+	io.KeyMap[ImGuiKey_Enter] = (int)KeyCode::eKeyEnter;
+	io.KeyMap[ImGuiKey_Escape] = (int)KeyCode::eKeyEscape;
+	io.KeyMap[ImGuiKey_KeyPadEnter] = (int)KeyCode::eKeyEnter;
+	io.KeyMap[ImGuiKey_A] = (int)KeyCode::eKeyA;
+	io.KeyMap[ImGuiKey_C] = (int)KeyCode::eKeyC;
+	io.KeyMap[ImGuiKey_V] = (int)KeyCode::eKeyV;
+	io.KeyMap[ImGuiKey_X] = (int)KeyCode::eKeyX;
+	io.KeyMap[ImGuiKey_Y] = (int)KeyCode::eKeyY;
+	io.KeyMap[ImGuiKey_Z] = (int)KeyCode::eKeyZ;
 
 #ifdef _WIN32
 	const string file = GetSystemFontFile("Segoe UI (TrueType)");
@@ -239,13 +239,15 @@ void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 	float2 scale = float2::Map(&mDrawData->DisplaySize.x);
 	float2 offset = float2::Map(&mDrawData->DisplayPos.x);
 
+	Buffer::View<TransformData> identity_transform = make_shared<Buffer>(commandBuffer.mDevice, "gCameraTransform", sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	identity_transform[0] = make_transform(float3(0,0,1), quatf_identity(), float3::Ones());
 	Buffer::View<ViewData> views = make_shared<Buffer>(commandBuffer.mDevice, "gCameraData", sizeof(ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	views[0].world_to_camera = views[0].camera_to_world = make_transform(float3(0,0,1), quatf_identity(), float3::Ones());
 	views[0].projection = make_orthographic(scale, -1 - offset.array()*2/scale.array(), 0, 1);
 	views[0].image_min = { 0, 0 };
 	views[0].image_max = { framebuffer->extent().width, framebuffer->extent().height };
 
 	mPipeline->descriptor("gViews") = commandBuffer.hold_resource(views);
+	mPipeline->descriptor("gInverseViewTransforms") = commandBuffer.hold_resource(identity_transform);
 	mPipeline->push_constant<uint32_t>("gViewIndex") = 0;
 	mPipeline->push_constant<float4>("gImageST") = float4(1,1,0,0);
 	mPipeline->push_constant<float4>("gColor") = float4::Ones();

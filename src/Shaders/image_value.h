@@ -74,10 +74,10 @@ inline uint4 channel_mapping_swizzle(vk::ComponentMapping m) {
 struct ImageValue1 {
 	float value;
 #ifdef __HLSL__
-	uint image_index : 30;
-	uint channel : 2;
-	inline bool has_image() { return image_index < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	uint image_index_channel;
+	inline bool has_image() { return BF_GET(image_index_channel,0,30) < gImageCount; }
+	inline uint channel() { return BF_GET(image_index_channel,30,2); }
+	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_channel,0,30))]; }
 #endif
 #ifdef __cplusplus
 	Image::View image;
@@ -204,9 +204,7 @@ inline void image_value_field(const char* label, ImageValue4& v) {
 inline ImageValue1 load_image_value1(inout uint address) {
 	ImageValue1 r;
 	r.value = gMaterialData.Load<float>(address); address += 4;
-	const uint image_index_and_channel = gMaterialData.Load(address); address += 4;
-	r.image_index = BF_GET(image_index_and_channel, 0, 30);
-	r.channel = BF_GET(image_index_and_channel, 30, 2);
+	r.image_index_channel = gMaterialData.Load(address); address += 4;
 	return r;
 }
 inline ImageValue2 load_image_value2(inout uint address) {
@@ -217,13 +215,13 @@ inline ImageValue2 load_image_value2(inout uint address) {
 }
 inline ImageValue3 load_image_value3(inout uint address) {
 	ImageValue3 r;
-	r.value = (min16float3)gMaterialData.Load<float3>(address); address += 12;
+	r.value = gMaterialData.Load<float3>(address); address += 12;
 	r.image_index = gMaterialData.Load(address); address += 4;
 	return r;
 }
 inline ImageValue4 load_image_value4(inout uint address) {
 	ImageValue4 r;
-	r.value = (min16float4)gMaterialData.Load<float4>(address); address += 16;
+	r.value = gMaterialData.Load<float4>(address); address += 16;
 	r.image_index = gMaterialData.Load(address); address += 4;
 	return r;
 }
@@ -240,7 +238,7 @@ inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float u
 inline float sample_image(const ImageValue1 img, const float2 uv, const float uv_screen_size) {
 	if (!img.has_image()) return img.value;
 	if (!any(img.value > 0)) return 0;
-	return img.value * sample_image(img.image(), uv, uv_screen_size)[img.channel];
+	return img.value * sample_image(img.image(), uv, uv_screen_size)[img.channel()];
 }
 inline float2 sample_image(const ImageValue2 img, const float2 uv, const float uv_screen_size) {
 	if (!img.has_image()) return img.value;

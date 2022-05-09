@@ -332,9 +332,9 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 			else {
 				mInputState.set_button((KeyCode)key);
 				if (mInputState.pressed(KeyCode::eKeyAlt)) {
-					if (key == KeyCode::eKeyEnter)
+					if ((KeyCode)key == KeyCode::eKeyEnter)
 						fullscreen(!fullscreen());
-					else if (key == KeyCode::eKeyF4) {
+					else if ((KeyCode)key == KeyCode::eKeyF4) {
 						DestroyWindow(mHwnd);
 						mHwnd = nullptr;
 					}
