@@ -76,18 +76,11 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 	});
 	Node& materialsNode = root.make_child("materials");
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
-		ImageValue3 emission;
-		ImageValue3 base_color;
-		ImageValue4 metallic_roughness;
+		ImageValue3 emission = make_image_value3(get_image(material.emissiveTexture.index, true), double3::Map(material.emissiveFactor.data()).cast<float>());
+		ImageValue3 base_color = make_image_value3(get_image(material.pbrMetallicRoughness.baseColorTexture.index, true), double3::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>());
+		ImageValue4 metallic_roughness = make_image_value4(get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, true), double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>());
 		float eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
 		float transmission = material.extensions.contains("KHR_materials_transmission") ? (float)material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble() : 0;
-
-		emission.value = double3::Map(material.emissiveFactor.data()).cast<float>();
-		emission.image = get_image(material.emissiveTexture.index, true);
-		base_color.value = double3::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>();
-		base_color.image = get_image(material.pbrMetallicRoughness.baseColorTexture.index, true);
-		metallic_roughness.value = double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>();
-		metallic_roughness.image = get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, true);
 		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
 		return materialsNode.make_child(material.name).make_component<Material>(m);
 	});
@@ -98,8 +91,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 			const tinygltf::Primitive& prim = model.meshes[i].primitives[j];
 			const auto& indicesAccessor = model.accessors[prim.indices];
 			const auto& indexBufferView = model.bufferViews[indicesAccessor.bufferView];
-			const size_t stride = tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType);
-			const Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], stride, indexBufferView.byteOffset + indicesAccessor.byteOffset, indicesAccessor.count * stride);
+			const size_t indexStride = tinygltf::GetComponentSizeInBytes(indicesAccessor.componentType);
+			const Buffer::StrideView indexBuffer = Buffer::StrideView(buffers[indexBufferView.buffer], indexStride, indexBufferView.byteOffset + indicesAccessor.byteOffset, indicesAccessor.count * indexStride);
 
 			shared_ptr<VertexArrayObject> vertexData = make_shared<VertexArrayObject>();
 
@@ -113,6 +106,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				case TINYGLTF_MODE_TRIANGLE_STRIP: 	topology = vk::PrimitiveTopology::eTriangleStrip; break;
 				case TINYGLTF_MODE_TRIANGLE_FAN: 	topology = vk::PrimitiveTopology::eTriangleFan; break;
 			}
+
+			optional<float> area;
 
 			for (const auto&[attribName,attribIndex] : prim.attributes) {
 				const tinygltf::Accessor& accessor = model.accessors[attribIndex];
@@ -204,9 +199,31 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				attribs[typeIndex] = {
 					VertexArrayObject::AttributeDescription(stride, attributeFormat, 0, vk::VertexInputRate::eVertex),
 					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset + accessor.byteOffset, stride*accessor.count) };
+
+				if (attributeType == VertexArrayObject::AttributeType::ePosition && topology == vk::PrimitiveTopology::eTriangleList) {
+					const byte* indices_ptr   = reinterpret_cast<const byte*>(model.buffers[indexBufferView.buffer].data.data()) + indexBufferView.byteOffset + indicesAccessor.byteOffset;
+					const byte* positions_ptr = reinterpret_cast<const byte*>(model.buffers[bv.buffer].data.data()) + bv.byteOffset + accessor.byteOffset;
+					area = 0.f;
+					for (int ii = 0; ii < indicesAccessor.count; ii += 3) {
+						uint32_t i0,i1,i2;
+						if (indexStride == sizeof(uint32_t)) {
+							i0 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii));
+							i1 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii+1));
+							i2 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii+2));
+						} else {
+							i0 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii));
+							i1 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii+1));
+							i2 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii+2));
+						}
+						const float3 v0 = *reinterpret_cast<const float3*>(positions_ptr + stride*i0);
+						const float3 v1 = *reinterpret_cast<const float3*>(positions_ptr + stride*i1);
+						const float3 v2 = *reinterpret_cast<const float3*>(positions_ptr + stride*i2);
+						area = *area + (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
+					}
+				}
 			}
 
-			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
+			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology, area);
 		}
 	}
 

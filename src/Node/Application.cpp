@@ -12,13 +12,14 @@ void Application::run() {
 	while (true) {
 		ProfilerRegion ps("Frame " + to_string(frameCount++));
 
+		instance->poll_events();
+		if (!mWindow.handle()) break;
+		if (!mWindow.acquire_image()) continue;
+
 		{
 			ProfilerRegion ps("Application::PreFrame");
-			instance->poll_events();
 			PreFrame();
 		}
-
-		if (!mWindow.handle()) break;
 
 		auto t1 = chrono::high_resolution_clock::now();
 		float deltaTime = chrono::duration_cast<chrono::duration<float>>(t1 - t0).count();
@@ -31,23 +32,18 @@ void Application::run() {
 			OnUpdate(*commandBuffer, deltaTime);
 		}
 
-		if (mWindow.acquire_image()) {
-			commandBuffer->wait_for(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
+		commandBuffer->wait_for(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eComputeShader);
 
-			{
-				ProfilerRegion ps("Application::OnRenderWindow");
-				OnRenderWindow(*commandBuffer);
-				mWindow.resolve(*commandBuffer);
-			}
+		{
+			ProfilerRegion ps("Application::OnRenderWindow");
+			OnRenderWindow(*commandBuffer);
+			mWindow.resolve(*commandBuffer);
+		}
 
-			auto present_semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "present semaphore");
-			commandBuffer->signal_when_done(present_semaphore);
-
-			commandBuffer->mDevice.submit(commandBuffer);
-
-			mWindow.present(**present_semaphore);
-		} else
-			commandBuffer->mDevice.submit(commandBuffer);
+		auto present_semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "present semaphore");
+		commandBuffer->signal_when_done(present_semaphore);
+		commandBuffer->mDevice.submit(commandBuffer);
+		mWindow.present(**present_semaphore);
 
 		{
 			ProfilerRegion ps("Application::PostFrame");

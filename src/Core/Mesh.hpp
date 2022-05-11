@@ -75,35 +75,36 @@ struct VertexLayoutDescription {
 };
 
 class Mesh {
-private:
-	shared_ptr<VertexArrayObject> mVertices;
-	Buffer::StrideView mIndices;
-	vk::PrimitiveTopology mTopology = vk::PrimitiveTopology::eTriangleList;
 public:
 	Mesh() = default;
 	Mesh(const Mesh&) = default;
 	Mesh(Mesh&&) = default;
 	Mesh& operator=(const Mesh&) = default;
 	Mesh& operator=(Mesh&&) = default;
-	inline Mesh(const shared_ptr<VertexArrayObject> vertexData, Buffer::StrideView indices, vk::PrimitiveTopology topology)
-		: mVertices(vertexData), mIndices(indices), mTopology(topology) {}
+	inline Mesh(const shared_ptr<VertexArrayObject> vertexData, Buffer::StrideView indices, vk::PrimitiveTopology topology, const optional<float>& area)
+		: mVertices(vertexData), mIndices(indices), mTopology(topology), mArea(area) {}
 
 	inline auto& vertices() { return mVertices; }
 	inline auto& indices() { return mIndices; }
 	inline auto& topology() { return mTopology; }
+	inline optional<float>& area() { return mArea; }
 	inline const auto& vertices() const { return mVertices; }
 	inline const auto& indices() const { return mIndices; }
 	inline const auto& topology() const { return mTopology; }
+	inline const optional<float>& area() const { return mArea; }
 	inline vk::IndexType index_type() const { return (mIndices.stride() == sizeof(uint32_t)) ? vk::IndexType::eUint32 : (mIndices.stride() == sizeof(uint16_t)) ? vk::IndexType::eUint16 : vk::IndexType::eUint8EXT; }
-
-	inline VertexLayoutDescription vertex_layout(const Shader& vertexShader) const {
-		return VertexLayoutDescription(vertexShader, *mVertices, mTopology, index_type());
-	}
+	inline VertexLayoutDescription vertex_layout(const Shader& vertexShader) const { return VertexLayoutDescription(vertexShader, *mVertices, mTopology, index_type()); }
 
 	inline vector<VertexArrayObject::Attribute>& operator[](const VertexArrayObject::AttributeType& t) { return mVertices->operator[](t); }
 	inline const vector<VertexArrayObject::Attribute>& operator[](const VertexArrayObject::AttributeType& t) const { return mVertices->operator[](t); }
 
 	STRATUM_API void bind(CommandBuffer& commandBuffer) const;
+
+private:
+	shared_ptr<VertexArrayObject> mVertices;
+	Buffer::StrideView mIndices;
+	vk::PrimitiveTopology mTopology = vk::PrimitiveTopology::eTriangleList;
+	optional<float> mArea;
 };
 
 }

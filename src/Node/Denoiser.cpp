@@ -57,7 +57,7 @@ void Denoiser::create_pipelines() {
 			mDescriptorMap.emplace(name, binding.mBinding);
 		}
 	};
-	/*
+	//*
 	process_shader(mTemporalAccumulationPipeline, "Shaders/temporal_accumulation.spv");
 	process_shader(mEstimateVariancePipeline, "Shaders/estimate_variance.spv");
 	process_shader(mAtrousPipeline, "Shaders/atrous.spv");
@@ -80,6 +80,9 @@ void Denoiser::on_inspector_gui() {
 		mTemporalAccumulationPipeline->stage(vk::ShaderStageFlagBits::eCompute)->mDevice->waitIdle();
 		create_pipelines();
 	}
+
+	if (ImGui::Button("Reset Accumulation"))
+		reset_accumulation();
 
 	ImGui::Checkbox("Reprojection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection")));
 

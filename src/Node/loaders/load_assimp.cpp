@@ -92,8 +92,7 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
 				aiString aiPath;
 				m->GetTexture(aiTextureType_EMISSIVE, 0, &aiPath);
-				material.emission.value = float3::Ones();
-				material.emission.image = get_image(aiPath.C_Str(), true);
+				material.emission = make_image_value3(get_image(aiPath.C_Str(), true), float3::Ones());
 			}
 			if (m->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
 				aiString aiPath;
@@ -171,7 +170,14 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 				commandBuffer.copy_buffer(uvs_tmp, vao->at(VertexArrayObject::AttributeType::eTexcoord)[0].second);
 			}
 
-			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList) );
+			float area = 0;
+			for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
+				const float3 v0 = positions_tmp[indices_tmp[ii]];
+				const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
+				const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
+				area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
+			}
+			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area) );
 		}
 	}
 

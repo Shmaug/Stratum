@@ -107,10 +107,15 @@ struct Material {
 	}
 
 	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
-		eval_roughplastic(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
+		if (specular_reflectance == 0)
+			eval_lambertian(r, dir_in, dir_out, adjoint);
+		else
+			eval_roughplastic(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
 	}
-
 	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
-		sample_roughplastic(r, rnd, dir_in, beta, adjoint);
+		if (specular_reflectance == 0)
+			sample_lambertian(r, rnd, dir_in, beta, adjoint);
+		else
+			sample_roughplastic(r, rnd, dir_in, beta, adjoint);
 	}
 };

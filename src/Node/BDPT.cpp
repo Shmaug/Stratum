@@ -48,7 +48,7 @@ void BDPT::create_pipelines() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
 	float exposure = 1;
-	uint32_t tonemapper = 1;
+	uint32_t tonemapper = 0;
 	if (mTraceStepPipeline) {
 		exposure = mTonemapPipeline->push_constant<float>("gExposure");
 		tonemapper = mTonemapPipeline->specialization_constant<uint32_t>("gMode");
@@ -123,10 +123,10 @@ void BDPT::on_inspector_gui() {
 		ImGui::Text("%.2f%s Rays/second", rps, ext);
 	}
 
-	if (ImGui::BeginCombo("Debug Mode", to_string((DebugMode)mDebugMode).c_str())) {
+	if (ImGui::BeginCombo("Debug Mode", to_string(mDebugMode).c_str())) {
 		for (uint32_t i = 0; i < (uint32_t)DebugMode::eDebugModeCount; i++)
-			if (ImGui::Selectable(to_string((DebugMode)i).c_str(), mDebugMode == i)) {
-				mDebugMode = i;
+			if (ImGui::Selectable(to_string((DebugMode)i).c_str(), mDebugMode == (DebugMode)i)) {
+				mDebugMode = (DebugMode)i;
 			}
 		ImGui::EndCombo();
 	}
@@ -139,26 +139,27 @@ void BDPT::on_inspector_gui() {
 				else pipeline->erase_specialization_constant(define);
 			}
 		};
-
-		ImGui::Checkbox("Use Denoiser", &mDenoise);
-		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
-		ImGui::CheckboxFlags("Remap Threads", &mSamplingFlags, BDPT_FLAG_REMAP_THREADS);
-		ImGui::CheckboxFlags("Demodulate Albedo", &mSamplingFlags, BDPT_FLAG_DEMODULATE_ALBEDO);
-		ImGui::CheckboxFlags("Ray Cone LoD", &mSamplingFlags, BDPT_FLAG_RAY_CONES);
 		define_checkbox(mTraceStepPipeline, "Single Bounce Kernel", "BDPT_SINGLE_BOUNCE_KERNEL");
 		define_checkbox(mTraceStepPipeline, "Store beta in smem", "GROUPSHARED_BETA");
 		define_checkbox(mTraceStepPipeline, "Store transmittance estimate in smem", "GROUPSHARED_TRANSMITTANCE");
 		define_checkbox(mTraceStepPipeline, "Store intersection in smem", "GROUPSHARED_ISECT");
 		define_checkbox(mTraceStepPipeline, "Store material in smem", "GROUPSHARED_MATERIAL");
 		define_checkbox(mTraceStepPipeline, "Store material sample in smem", "GROUPSHARED_MATERIAL_SAMPLE");
+
+		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
+		ImGui::CheckboxFlags("Remap Threads", &mSamplingFlags, BDPT_FLAG_REMAP_THREADS);
+		ImGui::CheckboxFlags("Demodulate Albedo", &mSamplingFlags, BDPT_FLAG_DEMODULATE_ALBEDO);
+		ImGui::CheckboxFlags("Ray Cone LoD", &mSamplingFlags, BDPT_FLAG_RAY_CONES);
+
 		ImGui::PushItemWidth(40);
 		ImGui::DragScalar("Max Path Vertices", ImGuiDataType_U32, &mPushConstants.gMaxPathVertices, 1);
 		ImGui::DragScalar("Min Path Vertices", ImGuiDataType_U32, &mPushConstants.gMinPathVertices, 1);
 		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mPushConstants.gMaxNullCollisions, 1);
 		ImGui::PopItemWidth();
+
 		ImGui::CheckboxFlags("NEE", &mSamplingFlags, BDPT_FLAG_NEE);
 		if (mSamplingFlags & BDPT_FLAG_NEE) {
-			if ((mSamplingFlags & BDPT_FLAG_HAS_ENVIRONMENT) && (mSamplingFlags & BDPT_FLAG_HAS_EMISSIVES)) {
+			if (mPushConstants.gEnvironmentMaterialAddress != -1 && mPushConstants.gLightCount > 0) {
 				ImGui::PushItemWidth(40);
 				ImGui::Indent();
 				ImGui::DragFloat("Environment Sample Probability", &mPushConstants.gEnvironmentSampleProbability, .1f, 0, 1);
@@ -167,13 +168,18 @@ void BDPT::on_inspector_gui() {
 			}
 			ImGui::Indent();
 			ImGui::CheckboxFlags("Multiple Importance", &mSamplingFlags, BDPT_FLAG_MIS);
-			if (mSamplingFlags & BDPT_FLAG_HAS_EMISSIVES)
+			if (mPushConstants.gLightCount > 0) {
+				ImGui::CheckboxFlags("Sample Light Power", &mSamplingFlags, BDPT_FLAG_SAMPLE_LIGHT_POWER);
 				ImGui::CheckboxFlags("Uniform Sphere Sampling", &mSamplingFlags, BDPT_FLAG_UNIFORM_SPHERE_SAMPLING);
+			}
 			ImGui::Unindent();
 		}
 	}
 
 	if (ImGui::CollapsingHeader("Post Processing")) {
+		if (auto denoiser = mNode.find<Denoiser>(); denoiser)
+			if (ImGui::Checkbox("Use Denoiser", &mDenoise))
+				denoiser->reset_accumulation();
 		uint32_t m = mTonemapPipeline->specialization_constant<uint32_t>("gMode");
 		if (ImGui::BeginCombo("Tone mapping", to_string((TonemapMode)m).c_str())) {
 			for (uint32_t i = 0; i < (uint32_t)TonemapMode::eTonemapModeCount; i++)
@@ -248,6 +254,8 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 	mPushConstants.gEnvironmentMaterialAddress = mCurFrame->mSceneData->mEnvironmentMaterialAddress;
 	mPushConstants.gLightCount = (uint32_t)mCurFrame->mSceneData->mLightInstances.size();
+	mPushConstants.gLightDistributionPDF = mCurFrame->mSceneData->mLightDistributionPDF;
+	mPushConstants.gLightDistributionCDF = mCurFrame->mSceneData->mLightDistributionCDF;
 
 	if (!mCurFrame->mSceneDescriptors) mCurFrame->mSceneDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[0], "path_tracer_scene_descriptors");
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gScene"), **mCurFrame->mSceneData->mScene);
@@ -258,8 +266,8 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceInverseTransforms"), mCurFrame->mSceneData->mInstanceInverseTransforms);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gMaterialData"), mCurFrame->mSceneData->mMaterialData);
-	//mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
-	//mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstances);
+	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
+	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstances);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
 	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.images)
 		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
@@ -298,7 +306,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			{ "gVisibility", 		make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		extent.width * extent.height * sizeof(VisibilityInfo), 	vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32) },
 			{ "gPathStates", 		make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", 		extent.width * extent.height * sizeof(PathState), 		vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32) },
 			{ "gRayDifferentials", 	make_shared<Buffer>(commandBuffer.mDevice, "gRayDifferentials", extent.width * extent.height * sizeof(RayDifferential), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32) },
-			{ "gRNGStates", 		make_shared<Buffer>(commandBuffer.mDevice, "gRNGStates", 		extent.width * extent.height * sizeof(uint4), 			vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32) },
 			//{ "gLightTraceSamples", make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",extent.width * extent.height * sizeof(float4), 			vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32) },
 		};
 		mCurFrame->mFrameNumber = 0;
@@ -347,14 +354,18 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	else
 		sampling_flags &= ~BDPT_FLAG_HAS_EMISSIVES;
 
+	if (push_constants.gLightCount == 0 && push_constants.gEnvironmentMaterialAddress == -1)
+		sampling_flags &= ~BDPT_FLAG_NEE;
+
 	if (has_volumes)
 		sampling_flags |= BDPT_FLAG_HAS_MEDIA;
-	else
+	else {
+		push_constants.gMaxNullCollisions = 0;
 		sampling_flags &= ~BDPT_FLAG_HAS_MEDIA;
-
+	}
 	mVisibilityPipeline->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
 	mTraceStepPipeline->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
-	mVisibilityPipeline->specialization_constant<uint32_t>("gDebugMode") = mDebugMode;
+	mVisibilityPipeline->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 
 	mCurFrame->mViewDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[1], "bdpt_view_descriptors");
 	mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gViews"), mCurFrame->mViews);
@@ -408,7 +419,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	}
 
 	Image::View tonemap_in = mCurFrame->mRadiance;
-	if ((DebugMode)mDebugMode != DebugMode::eNone)
+	if (mDebugMode != DebugMode::eNone)
 		tonemap_in = mCurFrame->mDebugImage;
 
 	if (mDenoise) {
@@ -416,7 +427,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		if (denoiser) {
 			if (mPrevFrame && mPrevFrame->mViewTransforms && (mCurFrame->mViewTransforms[0].m != mPrevFrame->mViewTransforms[0].m).any())
 				denoiser->reset_accumulation();
-			mCurFrame->mDenoiseResult = denoiser->denoise(commandBuffer, mCurFrame->mRadiance, mCurFrame->mViews, mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>());
+			mCurFrame->mDenoiseResult = denoiser->denoise(commandBuffer, tonemap_in, mCurFrame->mViews, mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>());
 			tonemap_in = mCurFrame->mDenoiseResult;
 		}
 	}

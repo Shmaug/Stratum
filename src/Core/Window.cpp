@@ -91,7 +91,12 @@ stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position
 	#endif
 }
 stm::Window::~Window() {
-	destroy_swapchain();
+	mInstance.device().flush();
+	mSwapchainImages.clear();
+	mRenderTargets.clear();
+	mImageAvailableSemaphores.clear();
+	if (mSwapchain) mInstance.device()->destroySwapchainKHR(mSwapchain);
+	mSwapchain = nullptr;
 	mInstance->destroySurfaceKHR(mSurface);
 #ifdef _WIN32
 	if (mHwnd) DestroyWindow(mHwnd);
@@ -119,7 +124,12 @@ bool stm::Window::acquire_image() {
 		return false;
 
 	if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
-		destroy_swapchain();
+		mInstance.device().flush();
+		mSwapchainImages.clear();
+		mRenderTargets.clear();
+		mImageAvailableSemaphores.clear();
+		if (mSwapchain) mInstance.device()->destroySwapchainKHR(mSwapchain);
+		mSwapchain = nullptr;
 		return false;
 	} else if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
@@ -209,8 +219,6 @@ void stm::Window::fullscreen(bool fs) {
 }
 
 void stm::Window::create_swapchain() {
-	if (mSwapchain) destroy_swapchain();
-
 	mPresentQueueFamily = mInstance.device().find_queue_family(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
@@ -230,15 +238,17 @@ void stm::Window::create_swapchain() {
 	//	}	else if (format.format == vk::Format::eB8G8R8A8Srgb)
 	//		mSurfaceFormat = format;
 
-	auto presentModes = mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface);
 	mPresentMode = vk::PresentModeKHR::eFifo; // required to be supported
-	for (auto mode : presentModes)
+	for (vk::PresentModeKHR mode : mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface))
 		if (mode == mPreferredPresentMode)
 			mPresentMode = mode;
 
+	if (mSwapchain) mInstance.device().flush();
+
 	vk::SwapchainCreateInfoKHR createInfo = {};
 	createInfo.surface = mSurface;
-	createInfo.minImageCount = capabilities.minImageCount + 1;
+	createInfo.oldSwapchain = mSwapchain;
+	createInfo.minImageCount = 3;
 	createInfo.imageFormat = mSurfaceFormat.format;
 	createInfo.imageColorSpace = mSurfaceFormat.colorSpace;
 	createInfo.imageExtent = mSwapchainExtent;
@@ -251,6 +261,8 @@ void stm::Window::create_swapchain() {
 	createInfo.clipped = VK_FALSE;
 	mSwapchain = mPresentQueueFamily->mDevice->createSwapchainKHR(createInfo);
 	mPresentQueueFamily->mDevice.set_debug_name(mSwapchain, "Window/Swapchain");
+
+	if (createInfo.oldSwapchain) mInstance.device()->destroySwapchainKHR(createInfo.oldSwapchain);
 
 	// create per-frame image views and semaphores
 	vector<vk::Image> images = mPresentQueueFamily->mDevice->getSwapchainImagesKHR(mSwapchain);
@@ -274,14 +286,6 @@ void stm::Window::create_swapchain() {
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
 }
-void stm::Window::destroy_swapchain() {
-	mInstance.device().flush();
-	mSwapchainImages.clear();
-	mRenderTargets.clear();
-	mImageAvailableSemaphores.clear();
-	if (mSwapchain) mInstance.device()->destroySwapchainKHR(mSwapchain);
-	mSwapchain = nullptr;
-}
 
 #ifdef _WIN32
 void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
@@ -290,6 +294,9 @@ void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
 	case WM_DESTROY:
 	case WM_QUIT:
 		mHwnd = NULL;
+		break;
+	case WM_PAINT:
+		mRepaint = true;
 		break;
 	case WM_SIZE:
 	case WM_MOVE: {

@@ -36,7 +36,7 @@ private:
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
 	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES;
-	uint32_t mDebugMode = 0;
+	DebugMode mDebugMode = DebugMode::eNone;
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;

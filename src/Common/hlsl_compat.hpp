@@ -103,22 +103,22 @@ template<typename T, int N> inline bool all(const VectorType<T,N>& a) { return a
 template<typename T, int N> inline bool any(const VectorType<T,N>& a) { return a.any(); }
 
 template<floating_point T> inline T saturate(const T& a) { return clamp(a, T(0), T(1)); }
-template<typename T,int M, int N> inline MatrixType<T,M,N> abs(const MatrixType<T,M,N>& a) { return a.abs(); }
-template<typename T, int N> inline VectorType<T,N> abs(const VectorType<T,N>& a) { return a.abs(); }
-template<typename T, int M, int N> inline T dot(const MatrixType<T,M,N>& a, const MatrixType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int M, int N> inline T length(const MatrixType<T,M,N>& a) { return a.matrix().norm(); }
-template<typename T, int M, int N> inline MatrixType<T,M,N> normalize(const MatrixType<T,M,N>& a) { return a.matrix().normalized(); }
-template<typename T, int N> inline T dot(const VectorType<T,N>& a, const VectorType<T,N>& b) { return a.matrix().dot(b.matrix()); }
-template<typename T, int N> inline T length(const VectorType<T,N>& a) { return a.matrix().norm(); }
-template<typename T, int N> inline VectorType<T,N> normalize(const VectorType<T,N>& a) { return a.matrix().normalized(); }
+template<typename T,int M, int N> inline MatrixType<T,M,N> abs(const MatrixType<T,M,N> a) { return a.abs(); }
+template<typename T, int N> inline VectorType<T,N> abs(const VectorType<T,N> a) { return a.abs(); }
+template<typename T, int M, int N> inline T dot(const MatrixType<T,M,N> a, const MatrixType<T,M,N>& b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int M, int N> inline T length(const MatrixType<T,M,N> a) { return a.matrix().norm(); }
+template<typename T, int M, int N> inline MatrixType<T,M,N> normalize(const MatrixType<T,M,N> a) { return a.matrix().normalized(); }
+template<typename T, int N> inline T dot(const VectorType<T,N> a, const VectorType<T,N>& b) { return a.matrix().dot(b.matrix()); }
+template<typename T, int N> inline T length(const VectorType<T,N> a) { return a.matrix().norm(); }
+template<typename T, int N> inline VectorType<T,N> normalize(const VectorType<T,N> a) { return a.matrix().normalized(); }
 
-template<typename T> inline VectorType<T,3> cross(const VectorType<T,3>& a, const VectorType<T,3>& b) { return a.matrix().cross(b.matrix()); }
+template<typename T> inline VectorType<T,3> cross(const VectorType<T,3> a, const VectorType<T,3> b) { return a.matrix().cross(b.matrix()); }
 
 inline float asfloat(uint32_t v) { return *reinterpret_cast<float*>(&v); }
 inline uint32_t asuint(float v) { return *reinterpret_cast<uint32_t*>(&v); }
-template<int M, int N> inline MatrixType<float, M, N> asfloat(const MatrixType<uint32_t, M, N>& v) { return MatrixType<float, M, N>::Map(reinterpret_cast<float*>(v.data())); }
-template<int M, int N> inline MatrixType<uint,  M, N> asuint (const MatrixType<float, M, N>& v)    { return MatrixType<uint,  M, N>::Map(reinterpret_cast<uint32_t*>(v.data())); }
-template<int N> inline VectorType<float, N> asfloat(const VectorType<uint32_t, N>& v) { return VectorType<float, N>::Map(reinterpret_cast<float*>(v.data())); }
-template<int N> inline VectorType<uint,  N> asuint (const VectorType<float, N>& v)    { return VectorType<uint,  N>::Map(reinterpret_cast<uint32_t*>(v.data())); }
+template<int M, int N> inline MatrixType<float, M, N> asfloat(const MatrixType<uint32_t, M, N> v) { return MatrixType<float, M, N>::Map(reinterpret_cast<float*>(v.data())); }
+template<int M, int N> inline MatrixType<uint,  M, N> asuint (const MatrixType<float, M, N> v)    { return MatrixType<uint,  M, N>::Map(reinterpret_cast<uint32_t*>(v.data())); }
+template<int N> inline VectorType<float, N> asfloat(const VectorType<uint32_t, N> v) { return VectorType<float, N>::Map(reinterpret_cast<float*>(v.data())); }
+template<int N> inline VectorType<uint,  N> asuint (const VectorType<float, N> v)    { return VectorType<uint,  N>::Map(reinterpret_cast<uint32_t*>(v.data())); }
 
 }

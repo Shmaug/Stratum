@@ -261,7 +261,14 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
         commandBuffer.copy_buffer(uvs_tmp, vao->at(VertexArrayObject::AttributeType::eTexcoord)[0].second);
     }
 
-	return Mesh(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList);
+	float area = 0;
+	for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
+		const float3 v0 = positions_tmp[indices_tmp[ii]];
+		const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
+		const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
+		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
+	}
+	return Mesh(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area);
 }
 
 }

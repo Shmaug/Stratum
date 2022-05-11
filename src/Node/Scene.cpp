@@ -176,12 +176,11 @@ Scene::Scene(Node& node) : mNode(node) {
 
 	gAnimatedTransform = nullptr;
 
-	mCopyVerticesPipeline 					= make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/copy_vertices.hlsl", "main"));
-	mConvertDiffuseSpecularPipeline 		= make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "from_diffuse_specular"));
-	mConvertPbrPipeline 					= make_shared<ComputePipelineState>("material_convert_from_metal_rough", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "from_metal_rough"));
-	mConvertAlphaToRoughnessPipeline 		= make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "alpha_to_roughness"));
-	mConvertShininessToRoughnessPipeline 	= make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "../../src/Shaders/kernels/material_convert.hlsl", "shininess_to_roughness"));
-
+	mCopyVerticesPipeline 					= make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "Shaders/copy_vertices.spv"));
+	mConvertDiffuseSpecularPipeline 		= make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_diffuse_specular.spv"));
+	mConvertPbrPipeline 					= make_shared<ComputePipelineState>("material_convert_from_metal_rough", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_metal_rough.spv"));
+	mConvertAlphaToRoughnessPipeline 		= make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
+	mConvertShininessToRoughnessPipeline 	= make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_shininess_to_roughness.spv"));
 
 	auto mainCamera = mNode.make_child("Default Camera").make_component<Camera>(make_perspective(radians(70.f), 1.f, float2::Zero(), -1 / 1024.f));
 	mainCamera.node().make_component<TransformData>(make_transform(float3(0, 1, 0), quatf_identity(), float3::Ones()));
@@ -259,18 +258,20 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		for (const string& filepath : f.result())
 			mToLoad.emplace_back(filepath);
 	}
+	for (const string& file : commandBuffer.mDevice.mInstance.window().input_state().files())
+		mToLoad.emplace_back(file);
 
-	for (const string& file : commandBuffer.mDevice.mInstance.window().input_state().files()) {
-		const fs::path filepath = file;
-		const string name = filepath.filename().string();
-		load(mNode.make_child(name), commandBuffer, filepath);
-		update = true;
-	}
 	for (const string& file : mToLoad) {
 		const fs::path filepath = file;
 		const string name = filepath.filename().string();
-		load(mNode.make_child(name), commandBuffer, filepath);
-		update = true;
+		Node& n = mNode.make_child(name);
+		try {
+			load(n, commandBuffer, filepath);
+			update = true;
+		} catch (exception e) {
+			cout << "Failed to load " << filepath << ": " << e.what() << endl;
+			mNode.node_graph().erase(n);
+		}
 	}
 	mToLoad.clear();
 
@@ -301,6 +302,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	vector<TransformData> instanceMotionTransforms;
 	if (mPrevFrame) instanceDatas.reserve(mPrevFrame->mInstances.size());
 	vector<uint32_t> lightInstances;
+	vector<float> lightInstancePowers;
 	lightInstances.reserve(1);
 
 	mSceneData->mInstanceIndexMap = make_shared<Buffer>(commandBuffer.mDevice, "InstanceIndexMap", sizeof(uint32_t) * max<size_t>(1, mPrevFrame ? mPrevFrame->mInstances.size() : 0), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -317,10 +319,13 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		return materialMap_it->second;
 	};
 
-	auto process_instance = [&](const void* prim_ptr, const InstanceData& instance, const TransformData& transform, const bool emissive) {
+	auto process_instance = [&](const void* prim_ptr, const InstanceData& instance, const TransformData& transform, const float emissive_power) {
 		const uint32_t instance_index = (uint32_t)instanceDatas.size();
 
-		if (emissive) lightInstances.emplace_back(instance_index);
+		if (emissive_power > 0) {
+			lightInstances.emplace_back(instance_index);
+			lightInstancePowers.emplace_back(emissive_power);
+		}
 
 		TransformData prevTransform;
 		if (mPrevFrame) {
@@ -340,7 +345,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	};
 
 	{ // mesh instances
-		ProfilerRegion s("Process meshe instances", commandBuffer);
+		ProfilerRegion s("Process mesh instances", commandBuffer);
 		mNode.for_each_descendant<MeshPrimitive>([&](const component_ptr<MeshPrimitive>& prim) {
 			if (prim->mMesh->topology() != vk::PrimitiveTopology::eTriangleList) return;
 			if (!prim->mMaterial) return;
@@ -401,14 +406,15 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				it = mMeshAccelerationStructures.emplace(prim->mMesh.get(), MeshAS{ as, prim->mMesh->indices() }).first;
 			}
 
-			uint32_t material_address = process_material(prim->mMaterial.get());
+			const uint32_t material_address = process_material(prim->mMaterial.get());
 
 			const uint32_t triCount = prim->mMesh->indices().size_bytes() / (prim->mMesh->indices().stride() * 3);
+			const TransformData transform = node_to_world(prim.node());
+			const float area = prim->mMesh->area().has_value() ? prim->mMesh->area().value()*transform.m.topLeftCorner<3,3>().matrix().determinant() : 1;
 
-			TransformData transform = node_to_world(prim.node());
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, (prim->mMaterial->emission.value > 0).any());
+			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, luminance(prim->mMaterial->emission.value) * area);
 			instance.mask = BVH_FLAG_TRIANGLES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
 
@@ -453,7 +459,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_sphere(material_address, r), transform, (prim->mMaterial->emission.value > 0).any());
+			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_sphere(material_address, r), transform, luminance(prim->mMaterial->emission.value) * (4*M_PI*r*r));
 			instance.mask = BVH_FLAG_SPHERES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});
@@ -505,6 +511,18 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});
 	}
+
+	// light distribution
+	if (lightInstancePowers.size() > 0) {
+		Buffer::View<float> lightPdf = make_shared<Buffer>(commandBuffer.mDevice, "light_pdf", lightInstancePowers.size()*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		Buffer::View<float> lightCdf = make_shared<Buffer>(commandBuffer.mDevice, "light_cdf", (lightInstancePowers.size()+1)*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		build_distribution(lightInstancePowers,
+			span(lightPdf.data(), lightPdf.size()),
+			span(lightCdf.data(), lightCdf.size()) );
+		mSceneData->mLightDistributionPDF = mSceneData->mResources.get_index(lightPdf);
+		mSceneData->mLightDistributionCDF = mSceneData->mResources.get_index(lightCdf);
+	} else
+		mSceneData->mLightDistributionPDF = mSceneData->mLightDistributionCDF = -1;
 
 	{ // Build TLAS
 		ProfilerRegion s("Build TLAS", commandBuffer);

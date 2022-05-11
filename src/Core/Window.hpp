@@ -290,6 +290,8 @@ public:
 	STRATUM_API void fullscreen(bool fs);
 	inline bool fullscreen() const { return mFullscreen; }
 
+	inline bool wants_repaint() { return mRepaint; }
+
 	inline uint32_t back_buffer_count() const { return (uint32_t)mSwapchainImages.size(); }
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
 	inline const Image::View& back_buffer() const { return mRenderTargets[back_buffer_index()]; }
@@ -325,7 +327,6 @@ public:
 
 private:
 	STRATUM_API void create_swapchain();
-	STRATUM_API void destroy_swapchain();
 
 	vk::SurfaceKHR mSurface;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
@@ -345,6 +346,7 @@ private:
 
 	bool mFullscreen = false;
 	bool mRecreateSwapchain = false;
+	bool mRepaint = false;
 	vk::Rect2D mClientRect;
 	string mTitle;
 

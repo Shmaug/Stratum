@@ -67,6 +67,8 @@ public:
 
 		uint32_t mEnvironmentMaterialAddress;
 		uint32_t mMaterialCount;
+		uint32_t mLightDistributionPDF;
+		uint32_t mLightDistributionCDF;
 	};
 
 	STRATUM_API Scene(Node& node);

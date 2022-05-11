@@ -13,16 +13,17 @@ namespace stm {
 #define BDPT_FLAG_HAS_MEDIA 				BIT(5)
 #define BDPT_FLAG_NEE 						BIT(6)
 #define BDPT_FLAG_MIS 						BIT(7)
-#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(8)
+#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(8)
+#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(9)
 
 #define BDPT_FLAG_COUNT_RAYS				BIT(31)
-
-//#define BDPT_SINGLE_BOUNCE_KERNEL
 
 struct BDPTPushConstants {
 	uint2 gOutputExtent;
 	uint gViewCount;
 	uint gLightCount;
+	uint gLightDistributionPDF;
+	uint gLightDistributionCDF;
 	uint gEnvironmentMaterialAddress;
 	float gEnvironmentSampleProbability;
 	uint gRandomSeed;
@@ -35,17 +36,9 @@ struct PathState {
 	float3 position;
 	uint medium;
 	float3 beta;
-	uint packed_pixel_coord;
+	float pdf_fwd;
 	float3 dir_out;
 	uint path_length;
-#ifdef __HLSL__
-	inline uint2 pixel_coord() {
-		uint2 c;
-		c.x = packed_pixel_coord & 0xFFFF;
-		c.y = packed_pixel_coord >> 16;
-		return c ;
-	}
-#endif
 };
 
 enum class DebugMode {
@@ -59,7 +52,7 @@ enum class DebugMode {
 	eShadingNormal,
 	eGeometryNormal,
 	eDirOut,
-	eDirOutPdf,
+	eNEEContrib,
 	eDebugModeCount
 };
 
@@ -80,7 +73,7 @@ inline string to_string(const stm::DebugMode& m) {
 		case stm::DebugMode::eShadingNormal: return "ShadingNormal";
 		case stm::DebugMode::eGeometryNormal: return "GeometryNormal";
 		case stm::DebugMode::eDirOut: return "DirOut";
-		case stm::DebugMode::eDirOutPdf: return "DirOutPdf";
+		case stm::DebugMode::eNEEContrib: return "NEEContrib";
 		case stm::DebugMode::eDebugModeCount: return "DebugModeCount";
 	}
 };

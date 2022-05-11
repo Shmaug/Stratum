@@ -147,8 +147,8 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 #endif
 
 	unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>> attributes;
+	Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp positions", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	{
-		Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp positions", sizeof(float3) * vertex_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		if (file_double_precision) {
 			for (uint32_t i = 0; i < vertex_count; i++) {
 				double3 tmp;
@@ -215,13 +215,20 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 		attributes[VertexArrayObject::AttributeType::eColor].emplace_back(VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex }, colors);
 	}
 
-	Buffer::View<uint32_t> indices = make_shared<Buffer>(commandBuffer.mDevice, "tmp inds", 3 * sizeof(uint32_t) * triangle_count, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	zs.read(indices.data(), sizeof(uint32_t) * 3 * triangle_count);
+	Buffer::View<uint32_t> indices_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp inds", 3 * triangle_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	zs.read(indices_tmp.data(), sizeof(uint32_t) * 3 * triangle_count);
 
-	Buffer::View<uint32_t> indexBuffer = make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " indices", indices.size_bytes(), bufferUsage | vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-	commandBuffer.copy_buffer(indices, indexBuffer);
+	Buffer::View<uint32_t> indexBuffer = make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " indices", indices_tmp.size_bytes(), bufferUsage | vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+	commandBuffer.copy_buffer(indices_tmp, indexBuffer);
 
-	return Mesh(make_shared<VertexArrayObject>(attributes), indexBuffer, vk::PrimitiveTopology::eTriangleList);
+	float area = 0;
+	for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
+		const float3 v0 = positions_tmp[indices_tmp[ii]];
+		const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
+		const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
+		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
+	}
+	return Mesh(make_shared<VertexArrayObject>(attributes), indexBuffer, vk::PrimitiveTopology::eTriangleList, area);
 }
 
 }

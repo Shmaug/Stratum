@@ -28,7 +28,7 @@ groupshared IntersectionVertex s_isect[GROUPSIZE_X*GROUPSIZE_Y];
 #define PASS_ISECT_ARG _isect
 #endif
 
-float trace_ray(const float3 origin, const float3 direction, const float t_max, DECLARE_ISECT_ARG) {
+float trace_ray(const float3 origin, const float3 direction, const float t_max, DECLARE_ISECT_ARG, const bool accept_first = false) {
 	if (gCountRays) InterlockedAdd(gRayCount[0], 1);
 
 	RayQuery<RAY_FLAG_NONE> rayQuery;
@@ -37,14 +37,13 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 	rayDesc.Direction = direction;
 	rayDesc.TMin = 0;
 	rayDesc.TMax = t_max;
-	rayQuery.TraceRayInline(gScene, RAY_FLAG_NONE, ~0, rayDesc);
+	rayQuery.TraceRayInline(gScene, accept_first ? RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH : RAY_FLAG_NONE, ~0, rayDesc);
 	while (rayQuery.Proceed()) {
-		uint hit_instance = rayQuery.CandidateInstanceID();
+		const uint hit_instance = rayQuery.CandidateInstanceID();
 		switch (rayQuery.CandidateType()) {
 			case CANDIDATE_PROCEDURAL_PRIMITIVE: {
 				const InstanceData instance = gInstances[hit_instance];
 				switch (instance.type()) {
-
 					case INSTANCE_TYPE_SPHERE: {
 						const float2 st = ray_sphere(rayQuery.CandidateObjectRayOrigin(), rayQuery.CandidateObjectRayDirection(), 0, instance.radius());
 						if (st.x < st.y) {
@@ -132,7 +131,7 @@ void trace_shadow_ray(inout rng_state_t rng_state, float3 origin, const float3 d
 	if (gHasMedia && cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
 	while (t_max > 1e-6f) {
 		IntersectionVertex shadow_isect;
-		const float dt = trace_ray(origin, direction, t_max, shadow_isect);
+		const float dt = trace_ray(origin, direction, t_max, shadow_isect, !gHasMedia);
 		if (!isinf(t_max)) t_max -= dt;
 
 		if (gHasMedia) {
