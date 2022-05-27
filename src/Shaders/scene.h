@@ -31,18 +31,19 @@ struct InstanceData {
 
 	inline uint type() CONST_CPP { return BF_GET(packed[0], 0, 4); }
 	inline uint material_address() CONST_CPP { return BF_GET(packed[0], 4, 28); }
+	inline uint light_index() CONST_CPP { return BF_GET(packed[1], 0, 12); }
 
 	// mesh
-	inline uint prim_count() CONST_CPP { return BF_GET(packed[1], 0, 16); }
-	inline uint index_stride() CONST_CPP { return BF_GET(packed[1], 16, 4); }
+	inline uint prim_count() CONST_CPP { return BF_GET(packed[1], 12, 16); }
+	inline uint index_stride() CONST_CPP { return BF_GET(packed[1], 28, 4); }
 	inline uint first_vertex() CONST_CPP { return packed[2]; }
 	inline uint indices_byte_offset() CONST_CPP { return packed[3]; }
 
 	// sphere
-	inline float radius() CONST_CPP { return asfloat(packed[1]); }
+	inline float radius() CONST_CPP { return asfloat(packed[2]); }
 
 	// volume
-	inline uint volume_index() CONST_CPP { return packed[1]; }
+	inline uint volume_index() CONST_CPP { return packed[2]; }
 };
 
 inline TransformData make_instance_motion_transform(const TransformData instance_inv_transform, const TransformData prevObjectToWorld) { return tmul(prevObjectToWorld, instance_inv_transform); }
@@ -51,8 +52,9 @@ inline InstanceData make_instance_triangles(const uint materialAddress, const ui
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_TRIANGLES, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
-	BF_SET(r.packed[1], primCount, 0, 16);
-	BF_SET(r.packed[1], indexStride, 16, 4);
+	BF_SET(r.packed[1], -1, 0, 12);
+	BF_SET(r.packed[1], primCount, 12, 16);
+	BF_SET(r.packed[1], indexStride, 28, 4);
 	r.packed[2] = firstVertex;
 	r.packed[3] = indexByteOffset;
 	return r;
@@ -62,7 +64,8 @@ inline InstanceData make_instance_sphere(const uint materialAddress, const float
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_SPHERE, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
-	r.packed[1] = asuint(radius);
+	BF_SET(r.packed[1], -1, 0, 12);
+	r.packed[2] = asuint(radius);
 	return r;
 }
 inline InstanceData make_instance_volume(const uint materialAddress, const uint volume_index) {
@@ -70,7 +73,8 @@ inline InstanceData make_instance_volume(const uint materialAddress, const uint 
 	r.packed = 0;
 	BF_SET(r.packed[0], INSTANCE_TYPE_VOLUME, 0, 4);
 	BF_SET(r.packed[0], materialAddress, 4, 28);
-	r.packed[1] = volume_index;
+	BF_SET(r.packed[1], -1, 0, 12);
+	r.packed[2] = volume_index;
 	return r;
 }
 
@@ -108,7 +112,7 @@ struct VisibilityInfo {
 	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 
-	inline float3 normal()        { return unpack_normal_octahedron2(packed_normal); }
+	inline float3 normal()   { return unpack_normal_octahedron2(packed_normal); }
 	inline float z()         { return f16tof32(packed_z); }
 	inline float prev_z()    { return f16tof32(packed_z>>16); }
 	inline float2 dz_dxy()   { return unpack_f16_2(packed_dz); }

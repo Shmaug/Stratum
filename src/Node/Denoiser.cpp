@@ -70,7 +70,7 @@ void Denoiser::create_pipelines() {
 	//*/
 	mDescriptorSetLayout = make_shared<DescriptorSetLayout>(instance->device(), "denoiser_descriptor_set_layout", bindings);
 
-	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 128;
+	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 0;
 	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
 }

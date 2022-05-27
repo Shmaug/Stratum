@@ -33,38 +33,44 @@ public:
 		auto tmp = mCurrentSample;
 		mCurrentSample = mCurrentSample->mParent;
 		if (!mCurrentSample) {
-			// frame ended (assume one ancestor sample per frame)
-			if (mFrameTimeCount > 0) {
-				mFrameTimes.emplace_back(chrono::duration_cast<chrono::duration<float, milli>>(tmp->mDuration).count());
-				while (mFrameTimes.size() > mFrameTimeCount) mFrameTimes.pop_front();
-			}
-			if (mFrameHistoryCount > 0) {
-				mFrameHistory.emplace_back(tmp);
-				mFrameHistoryCount--;
+			if (mSampleHistoryCount > 0) {
+				mSampleHistory.emplace_back(tmp);
+				mSampleHistoryCount--;
 			}
 		}
 	}
 
-	inline static const auto& times() { return mFrameTimes; }
-	inline static const auto& history() { return mFrameHistory; }
-	inline static void clear_history() { mFrameHistory.clear(); }
-
-	inline static void reset_timeline(uint32_t n) {
-		if (mFrameHistory.empty())
-			mFrameHistoryCount = n;
-		else
-			mFrameHistory.clear();
+	inline static void begin_frame() {
+		auto rn = chrono::high_resolution_clock::now();
+		if (mFrameStart && mFrameTimeCount > 0) {
+			auto duration = rn - *mFrameStart;
+			mFrameTimes.emplace_back(chrono::duration_cast<chrono::duration<float, milli>>(duration).count());
+			while (mFrameTimes.size() > mFrameTimeCount) mFrameTimes.pop_front();
+		}
+		mFrameStart = rn;
 	}
 
-	STRATUM_API static void timings_gui();
-	STRATUM_API static void timeline_gui();
+	inline static const auto& times() { return mFrameTimes; }
+	inline static const auto& history() { return mSampleHistory; }
+	inline static void clear_history() { mSampleHistory.clear(); }
+
+	inline static void reset_history(uint32_t n) {
+		if (mSampleHistory.empty())
+			mSampleHistoryCount = n;
+		else
+			mSampleHistory.clear();
+	}
+
+	STRATUM_API static void frame_times_gui();
+	STRATUM_API static void sample_timeline_gui();
 
 private:
 	STRATUM_API static shared_ptr<sample_t> mCurrentSample;
+	STRATUM_API static vector<shared_ptr<sample_t>> mSampleHistory;
+	STRATUM_API static uint32_t mSampleHistoryCount;
+	STRATUM_API static optional<chrono::high_resolution_clock::time_point> mFrameStart;
 	STRATUM_API static deque<float> mFrameTimes;
 	STRATUM_API static uint32_t mFrameTimeCount;
-	STRATUM_API static vector<shared_ptr<sample_t>> mFrameHistory;
-	STRATUM_API static uint32_t mFrameHistoryCount;
 };
 
 }

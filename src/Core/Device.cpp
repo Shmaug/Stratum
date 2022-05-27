@@ -34,7 +34,6 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	#pragma endregion
 
 	#pragma region Create logical device
-	vk::DeviceCreateInfo createInfo;
 	mFeatures.fillModeNonSolid = true;
 	mFeatures.sparseBinding = true;
 	mFeatures.samplerAnisotropy = true;
@@ -48,33 +47,33 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	mFeatures.shaderStorageBufferArrayDynamicIndexing = true;
 	mFeatures.shaderSampledImageArrayDynamicIndexing = true;
 	mFeatures.shaderStorageImageArrayDynamicIndexing = true;
-	mDescriptorIndexingFeatures.shaderUniformBufferArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.shaderStorageBufferArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.shaderStorageImageArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.shaderUniformTexelBufferArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.shaderStorageTexelBufferArrayNonUniformIndexing = true;
-	mDescriptorIndexingFeatures.descriptorBindingPartiallyBound = true;
-	mBufferDeviceAddressFeatures.bufferDeviceAddress = deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-	mAccelerationStructureFeatures.accelerationStructure = deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-	mRayTracingPipelineFeatures.rayTracingPipeline = deviceExtensions.contains(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-	mRayTracingPipelineFeatures.rayTraversalPrimitiveCulling = mRayTracingPipelineFeatures.rayTracingPipeline;
-	mRayQueryFeatures.rayQuery = deviceExtensions.contains(VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
+	auto& difeatures = get<vk::PhysicalDeviceDescriptorIndexingFeatures>(mFeatureChain);
+	difeatures.shaderUniformBufferArrayNonUniformIndexing = true;
+	difeatures.shaderStorageBufferArrayNonUniformIndexing = true;
+	difeatures.shaderSampledImageArrayNonUniformIndexing = true;
+	difeatures.shaderStorageImageArrayNonUniformIndexing = true;
+	difeatures.shaderUniformTexelBufferArrayNonUniformIndexing = true;
+	difeatures.shaderStorageTexelBufferArrayNonUniformIndexing = true;
+	difeatures.descriptorBindingPartiallyBound = true;
+	get<vk::PhysicalDeviceBufferDeviceAddressFeatures>(mFeatureChain).bufferDeviceAddress = deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+	get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>(mFeatureChain).accelerationStructure = deviceExtensions.contains(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+	auto& rtfeatures = get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>(mFeatureChain);
+	rtfeatures.rayTracingPipeline = deviceExtensions.contains(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+	rtfeatures.rayTraversalPrimitiveCulling = rtfeatures.rayTracingPipeline;
+	get<vk::PhysicalDeviceRayQueryFeaturesKHR>(mFeatureChain).rayQuery = deviceExtensions.contains(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+	//get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>(mFeatureChain).shaderBufferFloat32AtomicAdd = deviceExtensions.contains(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+
+	auto& createInfo = get<vk::DeviceCreateInfo>(mFeatureChain);
 	createInfo.setQueueCreateInfos(queueCreateInfos);
 	createInfo.setPEnabledLayerNames(validationLayers);
 	createInfo.setPEnabledExtensionNames(deviceExts);
 	createInfo.setPEnabledFeatures(&mFeatures);
-	createInfo.pNext = &mDescriptorIndexingFeatures;
-	mDescriptorIndexingFeatures.pNext = &mBufferDeviceAddressFeatures;
-	mBufferDeviceAddressFeatures.pNext = &mAccelerationStructureFeatures;
-	mAccelerationStructureFeatures.pNext = &mRayTracingPipelineFeatures;
-	mRayTracingPipelineFeatures.pNext = &mRayQueryFeatures;
-
+	createInfo.setPNext(&difeatures);
 	mDevice = mPhysicalDevice.createDevice(createInfo);
-	#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
-  VULKAN_HPP_DEFAULT_DISPATCHER.init(mDevice);
-	#endif
+#if VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(mDevice);
+#endif
 
 	string name = "[" + to_string(properties.deviceID) + "]: " + properties.deviceName.data();
 	set_debug_name(mDevice, name);
@@ -137,7 +136,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	allocatorInfo.instance = *mInstance;
 	allocatorInfo.vulkanApiVersion = mInstance.vulkan_version();
 	#if VK_KHR_buffer_device_address
-	if (mBufferDeviceAddressFeatures.bufferDeviceAddress)
+	if (buffer_device_address_features().bufferDeviceAddress)
 		allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 	#endif
 	vmaCreateAllocator(&allocatorInfo, &mAllocator);

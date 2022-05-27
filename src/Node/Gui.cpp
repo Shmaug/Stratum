@@ -7,55 +7,13 @@
 #include <Core/Window.hpp>
 
 namespace stm {
+#pragma pack(push)
+#pragma pack(1)
 #include <Shaders/scene.h>
+#pragma pack(pop)
 }
 
 using namespace stm;
-
-#ifdef _WIN32
-string GetSystemFontFile(const string &faceName) {
-	// Open Windows font registry key
-	HKEY hKey;
-	LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts", 0, KEY_READ, &hKey);
-	if (result != ERROR_SUCCESS) return "";
-
-	DWORD maxValueNameSize, maxValueDataSize;
-	result = RegQueryInfoKeyA(hKey, 0, 0, 0, 0, 0, 0, 0, &maxValueNameSize, &maxValueDataSize, 0, 0);
-	if (result != ERROR_SUCCESS) return "";
-
-	DWORD valueIndex = 0;
-	string valueName;
-	valueName.resize(maxValueNameSize);
-	vector<BYTE> valueData(maxValueDataSize);
-	string fontFile;
-
-	// Look for a matching font name
-	do {
-		fontFile.clear();
-		DWORD valueDataSize = maxValueDataSize;
-		DWORD valueNameSize = maxValueNameSize;
-		DWORD valueType;
-		result = RegEnumValueA(hKey, valueIndex, valueName.data(), &valueNameSize, 0, &valueType, valueData.data(), &valueDataSize);
-
-		valueIndex++;
-
-		if (result != ERROR_SUCCESS || valueType != REG_SZ) continue;
-
-		// Found a match
-		if (faceName == valueName) {
-			fontFile.assign((LPSTR)valueData.data(), valueDataSize);
-			break;
-		}
-	}
-	while (result != ERROR_NO_MORE_ITEMS);
-
-	RegCloseKey(hKey);
-
-	if (fontFile.empty()) return "";
-
-	return "C:\\Windows\\Fonts\\" + fontFile;
-}
-#endif
 
 Gui::Gui(Node& node) : mNode(node) {
 	auto app = mNode.find_in_ancestor<Application>();
@@ -92,13 +50,9 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.KeyMap[ImGuiKey_Y] = (int)KeyCode::eKeyY;
 	io.KeyMap[ImGuiKey_Z] = (int)KeyCode::eKeyZ;
 
-#ifdef _WIN32
-	const string file = GetSystemFontFile("Segoe UI (TrueType)");
-	if (!file.empty()) io.Fonts->AddFontFromFileTTF(file.c_str(), 32.f);
-#endif
+	io.Fonts->AddFontFromFileTTF("DroidSans.ttf", 16.f);
 
 	ImGuiStyle& style = ImGui::GetStyle();
-	style.ScaleAllSizes(1.1);
 	style.WindowRounding = 5;
 	style.ScrollbarSize *= 0.75f;
 

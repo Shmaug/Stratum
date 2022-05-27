@@ -5,10 +5,11 @@
 using namespace stm;
 
 shared_ptr<Profiler::sample_t> Profiler::mCurrentSample;
+vector<shared_ptr<Profiler::sample_t>> Profiler::mSampleHistory;
+uint32_t Profiler::mSampleHistoryCount = 0;
+optional<chrono::high_resolution_clock::time_point> Profiler::mFrameStart = nullopt;
 deque<float> Profiler::mFrameTimes;
-vector<shared_ptr<Profiler::sample_t>> Profiler::mFrameHistory;
 uint32_t Profiler::mFrameTimeCount = 256;
-uint32_t Profiler::mFrameHistoryCount = 0;
 
 inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample_t& s, const chrono::high_resolution_clock::time_point& t_min, const chrono::high_resolution_clock::time_point& t_max, const float x_min, const float x_max, const float y, const float height) {
 	const float dt = chrono::duration_cast<chrono::duration<float, milli>>(t_max - t_min).count();
@@ -34,10 +35,10 @@ inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample
 	return make_pair(p_min, p_max);
 }
 
-void Profiler::timeline_gui() {
-	chrono::high_resolution_clock::time_point t_min = mFrameHistory[0]->mStartTime;
-	chrono::high_resolution_clock::time_point t_max = mFrameHistory[0]->mStartTime;
-	for (const auto& f : mFrameHistory) {
+void Profiler::sample_timeline_gui() {
+	chrono::high_resolution_clock::time_point t_min = mSampleHistory[0]->mStartTime;
+	chrono::high_resolution_clock::time_point t_max = mSampleHistory[0]->mStartTime;
+	for (const auto& f : mSampleHistory) {
 		if (f->mStartTime < t_min) t_min = f->mStartTime;
 		if (auto t = f->mStartTime + f->mDuration; t > t_max) t_max = t;
 	}
@@ -49,7 +50,7 @@ void Profiler::timeline_gui() {
 	float pad = 4;
 
 	stack<pair<shared_ptr<Profiler::sample_t>, uint32_t>> todo;
-	for (const auto& f : mFrameHistory) todo.push(make_pair(f, 0));
+	for (const auto& f : mSampleHistory) todo.push(make_pair(f, 0));
 	while (!todo.empty()) {
 		auto[s,l] = todo.top();
 		todo.pop();
@@ -64,7 +65,7 @@ void Profiler::timeline_gui() {
 	}
 }
 
-void Profiler::timings_gui() {
+void Profiler::frame_times_gui() {
 	float fps_timer = 0;
 	uint32_t fps_counter = 0;
 	vector<float> frame_times(mFrameTimes.size());

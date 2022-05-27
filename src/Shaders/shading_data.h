@@ -19,13 +19,6 @@ struct ShadingData {
 	inline float3 shading_normal() { return unpack_normal_octahedron(packed_shading_normal); }
 	inline float3 tangent() { return unpack_normal_octahedron(packed_tangent); }
 
-	SLANG_MUTATING
-	inline void flip_shading_frame() {
-		packed_geometry_normal = pack_normal_octahedron(-geometry_normal());
-		packed_shading_normal  = pack_normal_octahedron(-shading_normal());
-		packed_tangent         = pack_normal_octahedron(-tangent());
-	}
-
 	inline float3 to_world(const float3 v) {
 		const float3 n = shading_normal();
 		const float3 t = tangent();
@@ -99,14 +92,15 @@ inline void make_triangle_shading_data(inout ShadingData r, const TransformData 
 		r.mean_curvature = (dot(dNdu, tangent) + dot(dNdv, bitangent)) / 2;
 	}
 }
-inline void make_triangle_shading_data_from_barycentrics(out ShadingData r, const InstanceData instance, const TransformData transform, const uint primitive_index, const float2 bary) {
+inline void make_triangle_shading_data_from_barycentrics(out ShadingData r, const InstanceData instance, const TransformData transform, const uint primitive_index, const float2 bary, out float3 local_position) {
 	const uint3 tri = load_tri(gIndices, instance, primitive_index);
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
 	const PackedVertexData v2 = gVertices[tri.z];
 	const float3 v1v0 = v1.position - v0.position;
 	const float3 v2v0 = v2.position - v0.position;
-	r.position = transform.transform_point(v0.position + v1v0*bary.x + v2v0*bary.y);
+	local_position = v0.position + v1v0*bary.x + v2v0*bary.y;
+	r.position = transform.transform_point(local_position);
 	make_triangle_shading_data(r, transform, bary, v0, v1, v2);
 }
 inline void make_triangle_shading_data_from_position(out ShadingData r, const InstanceData instance, const TransformData transform, const uint primitive_index, const float3 local_position) {

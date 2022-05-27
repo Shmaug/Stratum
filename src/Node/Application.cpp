@@ -7,14 +7,14 @@ namespace stm {
 void Application::run() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
-	size_t frameCount = 0;
 	auto t0 = chrono::high_resolution_clock::now();
 	while (true) {
-		ProfilerRegion ps("Frame " + to_string(frameCount++));
-
 		instance->poll_events();
 		if (!mWindow.handle()) break;
+		if (!mWindow.wants_repaint()) continue;
 		if (!mWindow.acquire_image()) continue;
+
+		Profiler::begin_frame();
 
 		{
 			ProfilerRegion ps("Application::PreFrame");
@@ -32,18 +32,18 @@ void Application::run() {
 			OnUpdate(*commandBuffer, deltaTime);
 		}
 
-		commandBuffer->wait_for(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eComputeShader);
-
 		{
 			ProfilerRegion ps("Application::OnRenderWindow");
 			OnRenderWindow(*commandBuffer);
 			mWindow.resolve(*commandBuffer);
 		}
 
-		auto present_semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "present semaphore");
-		commandBuffer->signal_when_done(present_semaphore);
+		commandBuffer->wait_for(mWindow.image_available_semaphore(), vk::PipelineStageFlagBits::eTransfer);
+
+		auto cmd_semaphore = make_shared<Semaphore>(commandBuffer->mDevice, "cmd semaphore");
+		commandBuffer->signal_when_done(cmd_semaphore);
 		commandBuffer->mDevice.submit(commandBuffer);
-		mWindow.present(**present_semaphore);
+		mWindow.present(**cmd_semaphore);
 
 		{
 			ProfilerRegion ps("Application::PostFrame");

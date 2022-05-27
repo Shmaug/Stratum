@@ -35,20 +35,20 @@ struct MaterialSampleRecord {
 
 #ifdef __cplusplus
 struct Material {
-    ImageValue3 base_color;
-    ImageValue4 packed_data; // diffuse (R), specular (G), roughness (B), transmission (A)
+    ImageValue4 diffuse_roughness;  // diffuse (RGB), roughness (A)
+    ImageValue4 specular_transmission; // specular (RGB), transmission (A)
     ImageValue3 emission;
 	float eta;
 
     inline void store(ByteAppendBuffer& bytes, MaterialResources& resources) const {
-        base_color.store(bytes, resources);
-        packed_data.store(bytes, resources);
+        diffuse_roughness.store(bytes, resources);
+        specular_transmission.store(bytes, resources);
         emission.store(bytes, resources);
 		bytes.Appendf(eta);
     }
     inline void inspector_gui() {
-        image_value_field("Base Color", base_color);
-        image_value_field("Diffuse (R), Specular (G), Roughness (B), Transmission (A)", packed_data);
+        image_value_field("Diffuse (RGB) Roughness (A)", diffuse_roughness);
+        image_value_field("Specular (RGB) Transmission (A)", specular_transmission);
         image_value_field("Emission", emission);
 		ImGui::DragFloat("Index of Refraction", &eta);
     }
@@ -56,6 +56,14 @@ struct Material {
 #endif
 
 #ifdef __HLSL__
+
+interface BSDF {
+	Spectrum emitted_radiance();
+	Real eval_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
+	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
+	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint);
+};
+
 #include "material.hlsli"
 #endif
 

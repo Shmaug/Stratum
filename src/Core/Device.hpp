@@ -71,7 +71,7 @@ public:
 		// CommandBuffers may be in-flight or idle
 		unordered_map<thread::id, pair<vk::CommandPool, list<shared_ptr<CommandBuffer>>>> mCommandBuffers;
 	};
-	
+
 	stm::Instance& mInstance;
 	static const vk::DeviceSize mMinAllocSize = 256_mB;
 
@@ -82,7 +82,7 @@ public:
 	inline vk::Device* operator->() { return &mDevice; }
 	inline const vk::Device& operator*() const { return mDevice; }
 	inline const vk::Device* operator->() const { return &mDevice; }
-	
+
 	inline vk::PhysicalDevice physical() const { return mPhysicalDevice; }
 	inline const vk::PhysicalDeviceLimits& limits() const { return mLimits; }
 	inline vk::PipelineCache pipeline_cache() const { return mPipelineCache; }
@@ -90,16 +90,17 @@ public:
 	inline uint32_t descriptor_set_count() const { return mDescriptorSetCount; }
 
 	inline const vk::PhysicalDeviceFeatures& features() const  { return mFeatures; }
-	inline const vk::PhysicalDeviceDescriptorIndexingFeatures& descriptor_indexing_features() const  { return mDescriptorIndexingFeatures; }
-	inline const vk::PhysicalDeviceBufferDeviceAddressFeatures& buffer_device_address() const  { return mBufferDeviceAddressFeatures; }
-	inline const vk::PhysicalDeviceAccelerationStructureFeaturesKHR& acceleration_structure_features() const  { return mAccelerationStructureFeatures; }
-	inline const vk::PhysicalDeviceRayQueryFeaturesKHR& ray_query_features() const  { return mRayQueryFeatures; }
-	inline const vk::PhysicalDeviceRayTracingPipelineFeaturesKHR& ray_tracing_pipeline_features() const  { return mRayTracingPipelineFeatures; }
+	inline const vk::PhysicalDeviceDescriptorIndexingFeatures& descriptor_indexing_features() const  { return get<vk::PhysicalDeviceDescriptorIndexingFeatures>(mFeatureChain); }
+	inline const vk::PhysicalDeviceBufferDeviceAddressFeatures& buffer_device_address_features() const  { return get<vk::PhysicalDeviceBufferDeviceAddressFeatures>(mFeatureChain); }
+	inline const vk::PhysicalDeviceAccelerationStructureFeaturesKHR& acceleration_structure_features() const  { return get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>(mFeatureChain); }
+	inline const vk::PhysicalDeviceRayTracingPipelineFeaturesKHR& ray_tracing_pipeline_features() const  { return get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>(mFeatureChain); }
+	inline const vk::PhysicalDeviceRayQueryFeaturesKHR& ray_query_features() const  { return get<vk::PhysicalDeviceRayQueryFeaturesKHR>(mFeatureChain); }
+	inline const vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT& shader_atomic_float_features() const  { return get<vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT>(mFeatureChain); }
 
 	template<typename T> inline vk::DeviceSize min_uniform_buffer_offset_alignment() {
 		return (sizeof(T) + mLimits.minUniformBufferOffsetAlignment - 1) & ~(mLimits.minUniformBufferOffsetAlignment - 1);
 	}
-	
+
 	inline auto queue_families() { return mQueueFamilies.lock(); }
 	inline QueueFamily* find_queue_family(vk::SurfaceKHR surface) {
 		auto queueFamilies = queue_families();
@@ -117,7 +118,7 @@ public:
 		info.pObjectName = name.c_str();
 		mDevice.setDebugUtilsObjectNameEXT(info);
 	}
-	
+
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	STRATUM_API void submit(const shared_ptr<CommandBuffer>& commandBuffer);
 	STRATUM_API void flush();
@@ -132,13 +133,17 @@ private:
  	vk::PhysicalDevice mPhysicalDevice;
 	VmaAllocator mAllocator;
 	vk::PipelineCache mPipelineCache;
-	
+
 	vk::PhysicalDeviceFeatures mFeatures;
-	vk::PhysicalDeviceBufferDeviceAddressFeatures mBufferDeviceAddressFeatures;
-	vk::PhysicalDeviceDescriptorIndexingFeatures mDescriptorIndexingFeatures;
-	vk::PhysicalDeviceAccelerationStructureFeaturesKHR mAccelerationStructureFeatures;
-	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR mRayTracingPipelineFeatures;
-	vk::PhysicalDeviceRayQueryFeaturesKHR mRayQueryFeatures;
+	vk::StructureChain<
+		vk::DeviceCreateInfo,
+		vk::PhysicalDeviceDescriptorIndexingFeatures,
+		vk::PhysicalDeviceBufferDeviceAddressFeatures,
+		vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+		vk::PhysicalDeviceRayTracingPipelineFeaturesKHR,
+		vk::PhysicalDeviceRayQueryFeaturesKHR,
+		vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT
+	> mFeatureChain;
 	vk::PhysicalDeviceLimits mLimits;
 
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;

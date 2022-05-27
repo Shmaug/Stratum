@@ -82,6 +82,10 @@ stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DI
 file(GLOB_RECURSE STRATUM_SHADERS "**.slang")
 stm_add_shaders(SOURCES ${STRATUM_SHADERS} DST_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Shaders" INCLUDES "${CMAKE_CURRENT_LIST_DIR}/Shaders" "${CMAKE_CURRENT_LIST_DIR}/extern" DEPENDS Stratum)
 
+
+configure_file("${CMAKE_CURRENT_LIST_DIR}/extern/imgui/misc/fonts/DroidSans.ttf" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DroidSans.ttf" COPYONLY)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/extern/imgui/misc/fonts/Roboto-Medium.ttf" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Roboto-Medium.ttf" COPYONLY)
+
 # Install rules
 
 install(TARGETS Stratum

@@ -1,6 +1,6 @@
 #include "material.h"
 
-struct Medium {
+struct Medium : BSDF {
 	Spectrum density_scale;
 	float anisotropy;
 	Spectrum albedo_scale;
@@ -89,14 +89,19 @@ struct Medium {
 		return POS_INFINITY;
 	}
 
-	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out) {
+	inline Spectrum emitted_radiance() { return 0; }
+
+	inline Real eval_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
+		return 1;
+	}
+	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
 		r.f = v;
 		r.pdf_fwd = v;
 		r.pdf_rev = v;
 	}
 
-	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in) {
+	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
 		if (abs(anisotropy) < 1e-3) {
 			const Real z = 1 - 2 * rnd.x;
 			const Real phi = 2 * M_PI * rnd.y;

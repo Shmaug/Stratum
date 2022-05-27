@@ -94,10 +94,23 @@ Inspector::Inspector(Node& node) : mNode(node) {
 
 		static Node* selected = nullptr;
 
+		if (ImGui::Begin("Profiler")) {
+			{
+				ProfilerRegion ps("Profiler::frame_times_gui");
+				Profiler::frame_times_gui();
+			}
+			static int profiler_n = 3;
+			ImGui::SliderInt("Count", &profiler_n, 1, 256);
+			ImGui::SameLine();
+			if (ImGui::Button("Timeline"))
+				Profiler::reset_history(profiler_n);
+		}
+		ImGui::End();
+
 		if (!Profiler::history().empty()) {
 			if (ImGui::Begin("Timeline")) {
 				ProfilerRegion ps("Profiler::timeline_gui");
-				Profiler::timeline_gui();
+				Profiler::sample_timeline_gui();
 			}
 			ImGui::End();
 		}
@@ -107,22 +120,13 @@ Inspector::Inspector(Node& node) : mNode(node) {
 		ImGui::End();
 
 		if (ImGui::Begin("Inspector")) {
-			if (ImGui::CollapsingHeader("Profiler")) {
-				static int profiler_n = 3;
-				ImGui::SliderInt("Count", &profiler_n, 1, 256);
-				ImGui::SameLine();
-				if (ImGui::Button("Timeline"))
-					Profiler::reset_timeline(profiler_n);
-				{
-					ProfilerRegion ps("Profiler::timings_gui");
-					Profiler::timings_gui();
-				}
-				ImGui::Separator();
-			}
 			if (selected) {
+				bool del = ImGui::Button("X");
+				ImGui::SameLine();
 				ImGui::Text(selected->name().c_str());
 				ImGui::SetNextItemWidth(40);
-				if (ImGui::Button("X")) {
+
+				if (del) {
 					if (app->window().input_state().pressed(KeyCode::eKeyShift))
 						mNode.node_graph().erase_recurse(*selected);
 					else
@@ -133,17 +137,17 @@ Inspector::Inspector(Node& node) : mNode(node) {
 						selected->make_component<TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
 					type_index to_erase = typeid(nullptr_t);
 					for (type_index type : selected->components()) {
+						bool d = ImGui::Button("X");
+						ImGui::SameLine();
 						if (ImGui::CollapsingHeader(type.name())) {
-							ImGui::SetNextItemWidth(40);
-							if (ImGui::Button("X"))
-								to_erase = type;
-							else {
-								void* ptr = selected->find(type);
-								auto it = mInspectorGuiFns.find(type);
-								if (it != mInspectorGuiFns.end())
-									it->second(ptr);
+							auto it = mInspectorGuiFns.find(type);
+							if (it != mInspectorGuiFns.end()) {
+								ImGui::Indent();
+								it->second(selected->find(type));
+								ImGui::Unindent();
 							}
 						}
+						if (d) to_erase = type;
 					}
 					if (to_erase != typeid(nullptr_t)) selected->erase_component(to_erase);
 				}

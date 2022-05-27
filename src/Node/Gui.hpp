@@ -143,7 +143,6 @@ private:
 	shared_ptr<GraphicsPipelineState> mPipeline;
 	unordered_map<Image::View, uint32_t> mImageMap;
 	Mesh mMesh;
-	bool mUploadFonts = true;
 	ImGuiContext* mContext;
 	const ImDrawData* mDrawData;
 	ImFont* mFont;

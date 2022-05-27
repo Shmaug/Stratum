@@ -78,7 +78,7 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
 		ImageValue3 emission = make_image_value3(get_image(material.emissiveTexture.index, true), double3::Map(material.emissiveFactor.data()).cast<float>());
 		ImageValue3 base_color = make_image_value3(get_image(material.pbrMetallicRoughness.baseColorTexture.index, true), double3::Map(material.pbrMetallicRoughness.baseColorFactor.data()).cast<float>());
-		ImageValue4 metallic_roughness = make_image_value4(get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, true), double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>());
+		ImageValue4 metallic_roughness = make_image_value4(get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, false), double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>());
 		float eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
 		float transmission = material.extensions.contains("KHR_materials_transmission") ? (float)material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble() : 0;
 		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
@@ -258,6 +258,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				auto sphere = dst.make_child(l.name).make_component<SpherePrimitive>();
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
 				Material m;
+				m.diffuse_roughness = make_image_value4({}, float4::Zero());
+				m.specular_transmission = make_image_value4({}, float4::Zero());
 				m.emission.value = (double3::Map(l.color.data()) * l.intensity/(4*((float)M_PI)*sphere->mRadius*sphere->mRadius)).cast<float>();
 				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(m);
 			}

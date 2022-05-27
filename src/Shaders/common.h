@@ -19,14 +19,16 @@
 #endif
 
 #ifdef __HLSL__
-#define STM_ARG_INOUT(T) inout T
-#define STM_ARG_OUT(T) out T
+#define __hlsl_in
+#define __hlsl_out(T) out T
+#define __hlsl_inout(T) inout T
 #endif
 
 #ifdef __cplusplus
 #define CONST_CPP const
-#define STM_ARG_INOUT(T) T&
-#define STM_ARG_OUT(T) T&
+#define __hlsl_in
+#define __hlsl_out(T) T&
+#define __hlsl_inout(T) T&
 #else
 #define CONST_CPP
 #endif
@@ -60,7 +62,7 @@ DECLARE_INTEGER_POW_FNS(float4)
 #undef DECLARE_INTEGER_POW_FNS
 
 inline float luminance(const float3 color) {
-	return dot(color, float3(0.299, 0.587, 0.114));
+	return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
 
 inline float3 hue_to_rgb(const float hue) {
@@ -116,7 +118,7 @@ inline float3 viridis_quintic(const float x) {
 		dot(x1, float4( 0.300805501,  2.614650302, -12.019139090,  28.933559110)) + dot(x2, float2(-33.491294770,  13.762053843)));
 }
 
-inline void make_orthonormal(const float3 N, STM_ARG_OUT(float3) T, STM_ARG_OUT(float3) B) {
+inline void make_orthonormal(const float3 N, __hlsl_out(float3) T, __hlsl_out(float3) B) {
 	if (N[0] != N[1] || N[0] != N[2])
 		T = float3(N[2] - N[1], N[0] - N[2], N[1] - N[0]);  //(1,1,1)x N
 	else

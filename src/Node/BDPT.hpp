@@ -3,10 +3,7 @@
 #include "Scene.hpp"
 #include "Denoiser.hpp"
 
-#pragma pack(push)
-#pragma pack(1)
 #include <Shaders/bdpt.h>
-#pragma pack(pop)
 
 namespace stm {
 
@@ -26,6 +23,7 @@ private:
 	Node& mNode;
 
 	shared_ptr<ComputePipelineState> mVisibilityPipeline;
+	shared_ptr<ComputePipelineState> mSamplePhotonsPipeline;
 	shared_ptr<ComputePipelineState> mTraceStepPipeline;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
 

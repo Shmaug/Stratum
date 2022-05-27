@@ -268,6 +268,8 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
 		const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
 		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
 	}
+
+	cout << "Loaded " << filename << endl;
 	return Mesh(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area);
 }
 

@@ -110,7 +110,10 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 				roughness.image = get_image(aiPath.C_Str(), true);
 			}
 
-			material = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, diffuse, specular, transmittance, eta, emission);
+			if (interpret_as_pbr)
+				material = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, diffuse, specular, transmittance, eta, emission);
+			else
+				material = root.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, make_image_value3(specular.image,specular.value.head<3>()), make_image_value1({}), transmittance, eta, emission);
 		}
 	}
 

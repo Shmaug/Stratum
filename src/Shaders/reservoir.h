@@ -1,13 +1,11 @@
 #ifndef RESERVOIR_H
 #define RESERVOIR_H
 
-#include "scene.h"
-
 struct ReservoirLightSample {
 	float3 local_position;
 	uint instance_primitive_index;
-	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+	inline uint instance_index() CONST_CPP { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() CONST_CPP { return BF_GET(instance_primitive_index, 16, 16); }
 };
 
 struct Reservoir {
@@ -17,8 +15,16 @@ struct Reservoir {
 	float sample_target_pdf; // p_q_hat
 	float sample_source_pdf;
 
-	inline float W() CONST_CPP { return (M == 0 || sample_target_pdf == 0) ? 0 : (total_weight / M) / sample_target_pdf; }
+	inline float W() CONST_CPP { return (M == 0 || sample_target_pdf <= 0) ? 0 : (total_weight / (M*sample_target_pdf)); }
 
+	SLANG_MUTATING
+	inline void init() {
+		M = 0;
+		sample_target_pdf = 0;
+		total_weight = 0;
+	}
+
+	SLANG_MUTATING
 	inline bool update(const float rnd, const ReservoirLightSample candidate_sample, const float source_pdf, const float target_pdf) {
 		const float ris_weight = target_pdf / source_pdf;
 		M++;
@@ -30,10 +36,12 @@ struct Reservoir {
 		}
 		return false;
 	}
+
+	SLANG_MUTATING
 	inline bool update(const float rnd, const Reservoir r) {
 		const float w = r.W();
-		total_weight += w;
 		M++;
+		total_weight += w;
 		if (rnd < w/total_weight) {
 			light_sample = r.light_sample;
 			sample_target_pdf = r.sample_target_pdf;
@@ -44,17 +52,9 @@ struct Reservoir {
 };
 
 #ifdef __HLSL__
-inline void init_reservoir(out Reservoir r) {
-	BF_SET(r.light_sample.instance_primitive_index, INVALID_INSTANCE, 0, 16);
-	BF_SET(r.light_sample.instance_primitive_index, INVALID_PRIMITIVE, 16, 16);
-	r.M = 0;
-	r.sample_target_pdf = 0;
-	r.total_weight = 0;
-}
-
 inline Reservoir merge(const float rnd1, const float rnd2, const Reservoir r1, const Reservoir r2) {
 	Reservoir merged;
-	init_reservoir(merged);
+	merged.init();
 	merged.update(rnd1, r1);
 	merged.update(rnd2, r2);
 	merged.M = r1.M + r2.M;

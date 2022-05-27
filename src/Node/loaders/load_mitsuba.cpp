@@ -93,6 +93,8 @@ TransformData parse_transform(pugi::xml_node node) {
 				y = stof(child.attribute("y").value());
 			if (!child.attribute("z").empty())
 				z = stof(child.attribute("z").value());
+			if (!child.attribute("value").empty())
+				x = y = z = stof(child.attribute("value").value());
 			t = tmul(make_transform(float3::Zero(), quatf_identity(), float3(x, y, z)), t);
 		} else if (name == "translate") {
 			float x = 0;
@@ -135,56 +137,6 @@ TransformData parse_transform(pugi::xml_node node) {
 	return t;
 }
 
-ImageValue3 parse_spectrum_texture(pugi::xml_node node, const map<string /* name id */, Image::View>& texture_map) {
-	string type = node.name();
-	if (type == "spectrum") {
-		vector<pair<float, float>> spec =
-			parse_spectrum(node.attribute("value").value());
-		if (spec.size() > 1) {
-			float3 xyz = integrate_XYZ(spec);
-			return make_image_value3({}, xyz_to_rgb(xyz));
-		} else if (spec.size() == 1) {
-			return make_image_value3({}, float3::Ones());
-		} else {
-			return make_image_value3({}, float3::Zero());
-		}
-	} else if (type == "rgb") {
-		return make_image_value3({}, parse_vector3(node.attribute("value").value()));
-	} else if (type == "srgb") {
-		float3 srgb = parse_srgb(node.attribute("value").value());
-		return make_image_value3({}, srgb_to_rgb(srgb));
-	} else if (type == "ref") {
-		// referencing a texture
-		string ref_id = node.attribute("id").value();
-		auto t_it = texture_map.find(ref_id);
-		if (t_it == texture_map.end()) {
-			throw runtime_error("Texture not found: " + ref_id);
-		}
-		return make_image_value3(t_it->second);
-	} else {
-		throw runtime_error("Unsupported spectrum texture type: " + type);
-		return make_image_value3({}, float3::Zero());
-	}
-}
-
-ImageValue1 parse_float_texture(pugi::xml_node node, const map<string /* name id */, Image::View>& texture_map) {
-	string type = node.name();
-	if (type == "ref") {
-		// referencing a texture
-		string ref_id = node.attribute("id").value();
-		auto t_it = texture_map.find(ref_id);
-		if (t_it == texture_map.end()) {
-			throw runtime_error("Texture not found: " + ref_id);
-		}
-		return make_image_value1(t_it->second);
-	} else if (type == "float") {
-		return make_image_value1({}, stof(node.attribute("value").value()));
-	} else {
-		throw runtime_error("Unsupported float texture type: " + type);
-		return make_image_value1({}, 0);
-	}
-}
-
 float3 parse_color(pugi::xml_node node) {
 	string type = node.name();
 	if (type == "spectrum") {
@@ -208,244 +160,6 @@ float3 parse_color(pugi::xml_node node) {
 		throw runtime_error("Unsupported color type: " + type);
 		return float3::Zero();
 	}
-}
-
-tuple<string /* ID */, component_ptr<Material>> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi::xml_node node, const map<string /* name id */, Image::View>& texture_map) {
-	string type = node.attribute("type").value();
-	string id;
-	if (!node.attribute("id").empty()) {
-		id = node.attribute("id").value();
-	}
-
-	if (type == "twosided") {
-		if (node.children().begin() == node.children().end()) throw runtime_error("Twosided BSDF has no children");
-		node = *node.children().begin();
-		type = node.attribute("type").value();
-	}
-
-	if (type == "diffuse") {
-		ImageValue3 diffuse = make_image_value3({}, float3::Constant(0.5f));
-		for (auto child : node.children()) {
-			string name = child.attribute("name").value();
-			if (name == "reflectance")
-				diffuse = parse_spectrum_texture(child, texture_map);
-		}
-		auto m = dst.make_component<Material>();
-		m->base_color = diffuse;
-		m->emission = make_image_value3({}, float3::Zero());
-		m->packed_data = make_image_value4({}, float4(1,0,0,0));
-		m->eta = 1.5f;
-		return make_tuple(id, m);
-	} else if (type == "roughplastic" || type == "plastic" || type == "conductor" || type == "roughconductor") {
-		ImageValue3 diffuse  = make_image_value3({}, float3::Constant(0.5f));
-		ImageValue3 specular = make_image_value3({}, float3::Ones());
-		ImageValue1 roughness = make_image_value1({}, (type == "plastic") ? 0 : 0.1f);
-
-		float intIOR = 1.49;
-		float extIOR = 1.000277;
-		float eta = intIOR / extIOR;
-		for (auto child : node.children()) {
-			string name = child.attribute("name").value();
-			if (name == "diffuseReflectance") {
-				diffuse = parse_spectrum_texture(child, texture_map);
-			} else if (name == "specularReflectance") {
-				specular = parse_spectrum_texture(child, texture_map);
-			} else if (name == "alpha") {
-				// Alpha requires special treatment since we need to convert
-				// the values to roughness
-				string type = child.name();
-				if (type == "ref") {
-					// referencing a texture
-					string ref_id = child.attribute("id").value();
-					auto t_it = texture_map.find(ref_id);
-					if (t_it == texture_map.end()) throw runtime_error("Texture not found: " + ref_id);
-					roughness = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second, 1));
-				} else if (type == "float") {
-					float alpha = stof(child.attribute("value").value());
-					roughness.value = sqrt(alpha);
-				} else
-					throw runtime_error("Unsupported float texture type: " + type);
-			} else if (name == "roughness") {
-				roughness = parse_float_texture(child, texture_map);
-			} else if (name == "intIOR") {
-				intIOR = stof(child.attribute("value").value());
-				eta = intIOR / extIOR;
-			} else if (name == "extIOR") {
-				extIOR = stof(child.attribute("value").value());
-				eta = intIOR / extIOR;
-			}
-		}
-		return make_tuple(id, dst.make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, make_image_value3({},float3::Zero()), eta, make_image_value3({},float3::Zero()))));
-	} else if (type == "roughdielectric" || type == "dielectric") {
-		ImageValue3 diffuse = make_image_value3({}, float3::Ones());
-		ImageValue3 specular = make_image_value3({}, float3::Ones());
-		ImageValue3 transmittance = make_image_value3({}, float3::Ones());
-		ImageValue1 roughness = make_image_value1({}, (type == "dielectric") ? 0 : 0.1f);
-		float intIOR = 1.5046;
-		float extIOR = 1.000277;
-		float eta = intIOR / extIOR;
-		for (auto child : node.children()) {
-			string name = child.attribute("name").value();
-			if (name == "specularReflectance") {
-				specular = parse_spectrum_texture(child, texture_map);
-			} else if (name == "specularTransmittance") {
-				transmittance = parse_spectrum_texture(child, texture_map);
-			} else if (name == "alpha") {
-				string type = child.name();
-				if (type == "ref") {
-					// referencing a texture
-					string ref_id = child.attribute("id").value();
-					auto t_it = texture_map.find(ref_id);
-					if (t_it == texture_map.end())
-						throw runtime_error("Texture not found: " + ref_id);
-					roughness.image = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second)).image;
-				} else if (type == "float") {
-					roughness.value = sqrt(stof(child.attribute("value").value()));
-				} else {
-					throw runtime_error("Unsupported float texture type: " + type);
-				}
-			} else if (name == "roughness") {
-				roughness = parse_float_texture(child, texture_map);
-			} else if (name == "intIOR") {
-				intIOR = stof(child.attribute("value").value());
-				eta = intIOR / extIOR;
-			} else if (name == "extIOR") {
-				extIOR = stof(child.attribute("value").value());
-				eta = intIOR / extIOR;
-			}
-		}
-		return make_tuple(id, dst.make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, transmittance, eta, make_image_value3({},float3::Zero()))));
-	}/* else if (type == "disneydiffuse") {
-			ImageValue3 base_color = make_image_value3(0.5f);
-			ImageValue1 roughness = make_image_value1(float(0.5));
-			ImageValue1 subsurface = make_image_value1(float(0));
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "baseColor") {
-							base_color = parse_spectrum_texture(child, texture_map);
-					} else if (name == "roughness") {
-							roughness = parse_float_texture(child, texture_map);
-					} else if (name == "subsurface") {
-							subsurface = parse_float_texture(child, texture_map);
-					}
-			}
-			return make_tuple(id, DisneyDiffuse{
-					base_color, roughness, subsurface});
-	} else if (type == "disneymetal") {
-			ImageValue3 base_color = make_image_value3(0.5f);
-			ImageValue1 roughness = make_image_value1(0.5f);
-			ImageValue1 anisotropic = make_image_value1(0.0f);
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "baseColor") {
-							base_color = parse_spectrum_texture(child, texture_map);
-					} else if (name == "roughness") {
-							roughness = parse_float_texture(child, texture_map);
-					} else if (name == "anisotropic") {
-							anisotropic = parse_float_texture(child, texture_map);
-					}
-			}
-			return make_tuple(id, DisneyMetal{base_color, roughness, anisotropic});
-	} else if (type == "disneyglass") {
-			ImageValue3 base_color = make_image_value3(0.5f);
-			ImageValue1 roughness = make_image_value1(0.5f);
-			ImageValue1 anisotropic = make_image_value1(0f);
-			float eta = float(1.5);
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "baseColor") {
-							base_color = parse_spectrum_texture(child, texture_map);
-					} else if (name == "roughness") {
-							roughness = parse_float_texture(child, texture_map);
-					} else if (name == "anisotropic") {
-							anisotropic = parse_float_texture(child, texture_map);
-					} else if (name == "eta") {
-							eta = stof(child.attribute("value").value());
-					}
-			}
-			return make_tuple(id, DisneyGlass{base_color, roughness, anisotropic, eta});
-	} else if (type == "disneyclearcoat") {
-			ImageValue1 clearcoat_gloss = make_image_value1(1);
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "clearcoatGloss") {
-							clearcoat_gloss = parse_float_texture(child, texture_map);
-					}
-			}
-			return make_tuple(id, DisneyClearcoat{clearcoat_gloss});
-	} else if (type == "disneysheen") {
-			ImageValue3 base_color = make_image_value3(0.5f);
-			ImageValue1 sheen_tint = make_image_value1(0.5f);
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "baseColor") {
-							base_color = parse_spectrum_texture(child, texture_map);
-					} else if (name == "sheenTint") {
-							sheen_tint = parse_float_texture(child, texture_map);
-					}
-			}
-			return make_tuple(id, DisneySheen{base_color, sheen_tint});
-	} else if (type == "disneybsdf") {
-			ImageValue3 base_color = make_image_value3(0.5f);
-			ImageValue1 specular_transmission = make_image_value1(0);
-			ImageValue1 metallic = make_image_value1(0);
-			ImageValue1 subsurface = make_image_value1(0);
-			ImageValue1 specular = make_image_value1(0.5);
-			ImageValue1 roughness = make_image_value1(0.5);
-			ImageValue1 specular_tint = make_image_value1(0);
-			ImageValue1 anisotropic = make_image_value1(0);
-			ImageValue1 sheen = make_image_value1(0);
-			ImageValue1 sheen_tint = make_image_value1(0.5);
-			ImageValue1 clearcoat = make_image_value1(0);
-			ImageValue1 clearcoat_gloss = make_image_value1(1);
-			float eta = float(1.5);
-			for (auto child : node.children()) {
-					string name = child.attribute("name").value();
-					if (name == "baseColor") {
-							base_color = parse_spectrum_texture(child, texture_map);
-					} else if (name == "specularTransmission") {
-							specular_transmission = parse_float_texture(child, texture_map);
-					} else if (name == "metallic") {
-							metallic = parse_float_texture(child, texture_map);
-					} else if (name == "subsurface") {
-							subsurface = parse_float_texture(child, texture_map);
-					} else if (name == "specular") {
-							specular = parse_float_texture(child, texture_map);
-					} else if (name == "roughness") {
-							roughness = parse_float_texture(child, texture_map);
-					} else if (name == "specularTint") {
-							specular_tint = parse_float_texture(child, texture_map);
-					} else if (name == "anisotropic") {
-							anisotropic = parse_float_texture(child, texture_map);
-					} else if (name == "sheen") {
-							sheen = parse_float_texture(child, texture_map);
-					} else if (name == "sheenTint") {
-							sheen_tint = parse_float_texture(child, texture_map);
-					} else if (name == "clearcoat") {
-							clearcoat = parse_float_texture(child, texture_map);
-					} else if (name == "clearcoatGloss") {
-							clearcoat_gloss = parse_float_texture(child, texture_map);
-					} else if (name == "eta") {
-							eta = stof(child.attribute("value").value());
-					}
-			}
-			return make_tuple(id, DisneyBSDF{base_color,
-																						specular_transmission,
-																						metallic,
-																						subsurface,
-																						specular,
-																						roughness,
-																						specular_tint,
-																						anisotropic,
-																						sheen,
-																						sheen_tint,
-																						clearcoat,
-																						clearcoat_gloss,
-																						eta});
-	}*/ else {
-		throw runtime_error("Unsupported BSDF: " + type);
-	}
-	return {};
 }
 
 Mesh create_mesh(CommandBuffer& commandBuffer, const vector<float3>& vertices, const vector<float3>& normals, const vector<float2>& uvs, const vector<uint32_t>& indices) {
@@ -488,9 +202,239 @@ Mesh create_mesh(CommandBuffer& commandBuffer, const vector<float3>& vertices, c
 	return Mesh(make_shared<VertexArrayObject>(attributes), indices_buf, vk::PrimitiveTopology::eTriangleList, area);
 }
 
-void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
-	map<string /* name id */, component_ptr<Material>>& material_map,
-	const map<string /* name id */, Image::View>& texture_map) {
+Image::View parse_texture(CommandBuffer& commandBuffer, pugi::xml_node node) {
+	string type = node.attribute("type").value();
+	fs::path filename;
+	float3 color0 = float3::Constant(0.4f);
+	float3 color1 = float3::Constant(0.2f);
+	float uscale = 1;
+	float vscale = 1;
+	float uoffset = 0;
+	float voffset = 0;
+	for (auto child : node.children()) {
+		string name = child.attribute("name").value();
+		if (name == "filename") {
+			filename = child.attribute("value").value();
+		} else if (name == "color0") {
+			color0 = parse_color(child);
+		} else if (name == "color1") {
+			color1 = parse_color(child);
+		} else if (name == "uvscale") {
+			uscale = vscale = stof(child.attribute("value").value());
+		} else if (name == "uscale") {
+			uscale = stof(child.attribute("value").value());
+		} else if (name == "vscale") {
+			vscale = stof(child.attribute("value").value());
+		} else if (name == "uoffset") {
+			uoffset = stof(child.attribute("value").value());
+		} else if (name == "voffset") {
+			voffset = stof(child.attribute("value").value());
+		}
+	}
+	if (type == "bitmap") {
+		ImageData pixels = load_image_data(commandBuffer.mDevice, filename, 0, 4);
+		return make_shared<Image>(commandBuffer, filename.stem().string(), pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+	} else if (type == "checkerboard") {
+		ImageData pixels;
+		pixels.extent = vk::Extent3D(512, 512, 1);
+		pixels.pixels = Buffer::TexelView{
+			make_shared<Buffer>(commandBuffer.mDevice, "checkerboard pixels", pixels.extent.width*pixels.extent.height*4, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU),
+			vk::Format::eR8G8B8A8Unorm };
+		for (uint32_t y = 0; y < pixels.extent.height; y++)
+			for (uint32_t x = 0; x < pixels.extent.width; x++) {
+				const float u = uoffset + uscale * (x + 0.5f) / (float)pixels.extent.width;
+				const float v = voffset + vscale * (y + 0.5f) / (float)pixels.extent.height;
+				const float3 c = fmodf(fmodf(floorf(u/2), 2.f) + fmodf(floorf(v/2), 2.f), 2.f) < 1 ? color0 : color1;
+				const size_t addr = 4*(y*pixels.extent.width + x);
+				pixels.pixels[addr+0] = (byte)(c[0] * 0xFF);
+				pixels.pixels[addr+1] = (byte)(c[1] * 0xFF);
+				pixels.pixels[addr+2] = (byte)(c[2] * 0xFF);
+				pixels.pixels[addr+3] = (byte)(0xFF);
+			}
+		return make_shared<Image>(commandBuffer, "checkerboard", pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+	}
+	throw runtime_error("Unsupported texture type: " + type + " for " + node.attribute("name").value());
+}
+
+ImageValue3 parse_spectrum_texture(CommandBuffer& commandBuffer, pugi::xml_node node, unordered_map<string /* name id */, Image::View>& texture_map) {
+	string type = node.name();
+	if (type == "spectrum") {
+		vector<pair<float, float>> spec =
+			parse_spectrum(node.attribute("value").value());
+		if (spec.size() > 1) {
+			float3 xyz = integrate_XYZ(spec);
+			return make_image_value3({}, xyz_to_rgb(xyz));
+		} else if (spec.size() == 1) {
+			return make_image_value3({}, float3::Ones());
+		} else {
+			return make_image_value3({}, float3::Zero());
+		}
+	} else if (type == "rgb") {
+		return make_image_value3({}, parse_vector3(node.attribute("value").value()));
+	} else if (type == "srgb") {
+		float3 srgb = parse_srgb(node.attribute("value").value());
+		return make_image_value3({}, srgb_to_rgb(srgb));
+	} else if (type == "ref") {
+		// referencing a texture
+		string ref_id = node.attribute("id").value();
+		auto t_it = texture_map.find(ref_id);
+		if (t_it == texture_map.end()) {
+			throw runtime_error("Texture not found: " + ref_id);
+		}
+		return make_image_value3(t_it->second);
+	} else if (type == "texture") {
+		Image::View t = parse_texture(commandBuffer, node);
+		if (!node.attribute("id").empty()) {
+			string id = node.attribute("id").value();
+			if (texture_map.find(id) != texture_map.end()) throw runtime_error("Duplicate texture ID: " + id);
+			texture_map.emplace(id, t);
+		}
+		return make_image_value3(t);
+	}
+
+	throw runtime_error("Unsupported spectrum texture type: " + type);
+}
+
+ImageValue1 parse_float_texture(CommandBuffer& commandBuffer, pugi::xml_node node, unordered_map<string /* name id */, Image::View>& texture_map) {
+	string type = node.name();
+	if (type == "ref") {
+		// referencing a texture
+		string ref_id = node.attribute("id").value();
+		auto t_it = texture_map.find(ref_id);
+		if (t_it == texture_map.end()) throw runtime_error("Texture not found: " + ref_id);
+		return make_image_value1(t_it->second);
+	} else if (type == "float") {
+		return make_image_value1({}, stof(node.attribute("value").value()));
+	} else if (type == "texture") {
+		Image::View t = parse_texture(commandBuffer, node);
+		if (!node.attribute("id").empty()) {
+			string id = node.attribute("id").value();
+			if (texture_map.find(id) != texture_map.end()) throw runtime_error("Duplicate texture ID: " + id);
+			texture_map.emplace(id, t);
+		}
+		return make_image_value1(t);
+	}
+
+	throw runtime_error("Unsupported float texture type: " + type);
+}
+
+component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi::xml_node node, unordered_map<string /* name id */, component_ptr<Material>>& material_map, unordered_map<string /* name id */, Image::View>& texture_map) {
+	string type = node.attribute("type").value();
+	string twosided_id;
+	if (!node.attribute("id").empty()) twosided_id = node.attribute("id").value();
+	if (type == "twosided") {
+		if (node.children().begin() == node.children().end()) throw runtime_error("Twosided BSDF has no children");
+		node = *node.children().begin();
+		type = node.attribute("type").value();
+	}
+	string id;
+	if (!node.attribute("id").empty()) id = node.attribute("id").value();
+
+	string name = !id.empty() ? id : !twosided_id.empty() ? twosided_id : (type + " BSDF");
+
+	if (type == "diffuse") {
+		ImageValue3 diffuse = make_image_value3({}, float3::Constant(0.5f));
+		for (auto child : node.children()) {
+			string name = child.attribute("name").value();
+			if (name == "reflectance")
+				diffuse = parse_spectrum_texture(commandBuffer, child, texture_map);
+		}
+		auto m = dst.make_child(name).make_component<Material>();
+		m->diffuse_roughness = make_image_value4(diffuse.image, float4(diffuse.value[0], diffuse.value[1], diffuse.value[2], 1.f));
+		m->specular_transmission = make_image_value4({}, float4::Zero());
+		m->emission = make_image_value3({}, float3::Zero());
+		m->eta = 1.5f;
+		if (!id.empty()) material_map[id] = m;
+		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		return m;
+	} else if (type == "roughplastic" || type == "plastic" || type == "conductor" || type == "roughconductor") {
+		ImageValue3 diffuse  = make_image_value3({}, float3::Constant(0.5f));
+		ImageValue3 specular = make_image_value3({}, float3::Ones());
+		ImageValue1 roughness = make_image_value1({}, (type == "plastic") ? 0 : 0.1f);
+
+		float intIOR = 1.49;
+		float extIOR = 1.000277;
+		float eta = intIOR / extIOR;
+		for (auto child : node.children()) {
+			string name = child.attribute("name").value();
+			if (name == "diffuseReflectance") {
+				diffuse = parse_spectrum_texture(commandBuffer, child, texture_map);
+			} else if (name == "specularReflectance") {
+				specular = parse_spectrum_texture(commandBuffer, child, texture_map);
+			} else if (name == "alpha") {
+				// Alpha requires special treatment since we need to convert
+				// the values to roughness
+				string type = child.name();
+				if (type == "ref") {
+					// referencing a texture
+					string ref_id = child.attribute("id").value();
+					auto t_it = texture_map.find(ref_id);
+					if (t_it == texture_map.end()) throw runtime_error("Texture not found: " + ref_id);
+					roughness = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second, 1));
+				} else if (type == "float") {
+					float alpha = stof(child.attribute("value").value());
+					roughness.value = sqrt(alpha);
+				} else
+					throw runtime_error("Unsupported float texture type: " + type);
+			} else if (name == "roughness") {
+				roughness = parse_float_texture(commandBuffer, child, texture_map);
+			} else if (name == "intIOR") {
+				intIOR = stof(child.attribute("value").value());
+				eta = intIOR / extIOR;
+			} else if (name == "extIOR") {
+				extIOR = stof(child.attribute("value").value());
+				eta = intIOR / extIOR;
+			}
+		}
+		auto m = dst.make_child(name).make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, make_image_value3({},float3::Zero()), eta, make_image_value3({},float3::Zero())));
+		if (!id.empty()) material_map[id] = m;
+		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		return m;
+	} else if (type == "roughdielectric" || type == "dielectric") {
+		ImageValue3 diffuse = make_image_value3({}, float3::Ones());
+		ImageValue3 specular = make_image_value3({}, float3::Ones());
+		ImageValue3 transmittance = make_image_value3({}, float3::Ones());
+		ImageValue1 roughness = make_image_value1({}, (type == "dielectric") ? 0 : 0.1f);
+		float intIOR = 1.5046;
+		float extIOR = 1.000277;
+		float eta = intIOR / extIOR;
+		for (auto child : node.children()) {
+			string name = child.attribute("name").value();
+			if (name == "specularReflectance") {
+				specular = parse_spectrum_texture(commandBuffer, child, texture_map);
+			} else if (name == "specularTransmittance") {
+				transmittance = parse_spectrum_texture(commandBuffer, child, texture_map);
+			} else if (name == "alpha") {
+				string type = child.name();
+				if (type == "ref") {
+					// referencing a texture
+					string ref_id = child.attribute("id").value();
+					auto t_it = texture_map.find(ref_id);
+					if (t_it == texture_map.end()) throw runtime_error("Texture not found: " + ref_id);
+					roughness.image = dst.find_in_ancestor<Scene>()->alpha_to_roughness(commandBuffer, make_image_value1(t_it->second)).image;
+				} else if (type == "float") {
+					roughness.value = sqrt(stof(child.attribute("value").value()));
+				} else
+					throw runtime_error("Unsupported float texture type: " + type);
+			} else if (name == "roughness") {
+				roughness = parse_float_texture(commandBuffer, child, texture_map);
+			} else if (name == "intIOR") {
+				intIOR = stof(child.attribute("value").value());
+				eta = intIOR / extIOR;
+			} else if (name == "extIOR") {
+				extIOR = stof(child.attribute("value").value());
+				eta = intIOR / extIOR;
+			}
+		}
+		auto m = dst.make_child(name).make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, transmittance, eta, make_image_value3({},float3::Zero())));
+		if (!id.empty()) material_map[id] = m;
+		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		return m;
+	}
+	throw runtime_error("Unsupported BSDF type: " + type);
+}
+
+void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, unordered_map<string, component_ptr<Material>>& material_map, unordered_map<string, Image::View>& texture_map, unordered_map<string, component_ptr<Mesh>>& obj_map) {
 	component_ptr<Material> material;
 	string filename;
 	int shape_index = -1;
@@ -506,13 +450,10 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 			if (!material)
 				material = it->second;
 		} else if (name == "bsdf") {
-			string material_name;
-			component_ptr<Material> m;
-			tie(material_name, m) = parse_bsdf(dst.make_child("BSDF"), commandBuffer, child, texture_map);
-			if (!material_name.empty())
-				material_map[material_name] = m;
-			if (!material)
-				material = m;
+			optional<ImageValue3> emission;
+			if (material) emission = material->emission;
+			material = parse_bsdf(dst, commandBuffer, child, material_map, texture_map);
+			if (emission) material->emission = *emission;
 		} else if (name == "emitter") {
 			float3 radiance = float3::Ones();
 			for (auto grand_child : child.children()) {
@@ -541,15 +482,16 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 					}
 				}
 			}
-			Material m;
-			m.emission = make_image_value3({}, radiance);
-			m.base_color = make_image_value3({}, float3::Zero());
-			m.eta = 1.5f;
-			m.packed_data = make_image_value4({}, float4::Zero());
 			if (material)
-				*material = m;
-			else
+				material->emission = make_image_value3({}, radiance);
+			else {
+				Material m;
+				m.diffuse_roughness = make_image_value4({}, float4::Zero());
+				m.specular_transmission = make_image_value4({}, float4::Zero());
+				m.emission = make_image_value3({}, radiance);
+				m.eta = 1.5f;
 				material = dst.make_component<Material>(m);
+			}
 		}
 
 		const string name_attrib = child.attribute("name").value();
@@ -564,7 +506,14 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 
 	string type = node.attribute("type").value();
 	if (type == "obj") {
-		dst.make_component<MeshPrimitive>(material, dst.make_component<Mesh>(load_obj(commandBuffer, filename)));
+		component_ptr<Mesh> m;
+		if (auto m_it = obj_map.find(filename); m_it == obj_map.end()) {
+			m = dst.make_component<Mesh>(load_obj(commandBuffer, filename));
+			obj_map.emplace(filename, m);
+		} else {
+			m = m_it->second;
+		}
+		dst.make_component<MeshPrimitive>(material, m);
 	} else if (type == "serialized") {
 		dst.make_component<MeshPrimitive>(material, dst.make_component<Mesh>(load_serialized(commandBuffer, filename, shape_index)));
 	} else if (type == "sphere") {
@@ -588,13 +537,13 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 				dst.make_component<TransformData>(make_transform(center, quatf_identity(), float3::Ones()));
 		}
 		dst.make_component<SpherePrimitive>(material, radius);
-	}/* else if (type == "rectangle") {
+	} else if (type == "rectangle") {
 		const vector<float3> vertices = { float3(-1,-1,0), float3(-1,1,0), float3(1,-1,0), float3(1,1,0) };
 		const vector<float3> normals = { float3(0,0,1), float3(0,0,1), float3(0,0,1), float3(0,0,1) };
 		const vector<float2> uvs = { float2(0,0), float2(0,1), float2(1,0), float2(1,1) };
 		const vector<uint32_t> indices = { 0, 1, 2, 1, 3, 2 };
 		dst.make_component<MeshPrimitive>(material, dst.make_component<Mesh>(create_mesh(commandBuffer, vertices, normals, uvs, indices)));
-	} else if (type == "cube") {
+	}/* else if (type == "cube") {
 		vector<float3> vertices(16);
 		vector<float3> normals(16);
 		vector<float2> uvs(16);
@@ -640,106 +589,24 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node,
 			indices[face*6 + 5] = i + 2;
 		}
 		dst.make_component<MeshPrimitive>(material, dst.make_component<Mesh>(create_mesh(commandBuffer, vertices, normals, uvs, indices)));
-	}*/ else
-		throw runtime_error("Unsupported shape: " + type);
-}
-
-Image::View parse_texture(CommandBuffer& commandBuffer, pugi::xml_node node) {
-	string type = node.attribute("type").value();
-	if (type == "bitmap") {
-		fs::path filename;
-		float uscale = 1;
-		float vscale = 1;
-		float uoffset = 0;
-		float voffset = 0;
-		for (auto child : node.children()) {
-			string name = child.attribute("name").value();
-			if (name == "filename") {
-				filename = child.attribute("value").value();
-			} else if (name == "uvscale") {
-				uscale = vscale = stof(child.attribute("value").value());
-			} else if (name == "uscale") {
-				uscale = stof(child.attribute("value").value());
-			} else if (name == "vscale") {
-				vscale = stof(child.attribute("value").value());
-			} else if (name == "uoffset") {
-				uoffset = stof(child.attribute("value").value());
-			} else if (name == "voffset") {
-				voffset = stof(child.attribute("value").value());
-			}
-		}
-		ImageData pixels = load_image_data(commandBuffer.mDevice, filename, 0, 4);
-		return make_shared<Image>(commandBuffer, filename.stem().string(), pixels);
-	} else if (type == "checkerboard") {
-		float3 color0 = float3::Constant(0.4f);
-		float3 color1 = float3::Constant(0.2f);
-		float uscale = 1;
-		float vscale = 1;
-		float uoffset = 0;
-		float voffset = 0;
-		for (auto child : node.children()) {
-			string name = child.attribute("name").value();
-			if (name == "color0") {
-				color0 = parse_color(child);
-			} else if (name == "color1") {
-				color1 = parse_color(child);
-			} else if (name == "uvscale") {
-				uscale = vscale = stof(child.attribute("value").value());
-			} else if (name == "uscale") {
-				uscale = stof(child.attribute("value").value());
-			} else if (name == "vscale") {
-				vscale = stof(child.attribute("value").value());
-			} else if (name == "uoffset") {
-				uoffset = stof(child.attribute("value").value());
-			} else if (name == "voffset") {
-				voffset = stof(child.attribute("value").value());
-			}
-		}
-		ImageData pixels;
-		pixels.extent = vk::Extent3D(8, 8, 1);
-		pixels.pixels = Buffer::TexelView{
-			make_shared<Buffer>(commandBuffer.mDevice, "checkerboard pixels", pixels.extent.width*pixels.extent.height*4, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU),
-			vk::Format::eR8G8B8A8Unorm };
-		for (uint32_t y = 0; y < pixels.extent.height; y++)
-			for (uint32_t x = 0; x < pixels.extent.width; x++) {
-				const bool f = (uint32_t(x*uscale/4)%2) ^ (uint32_t(y*vscale/4)%2);
-				const float3 c = f ? color0 : color1;
-				const size_t addr = 4*(y*pixels.extent.width + x);
-				pixels.pixels[addr+0] = (byte)(c[0] * 0xFF);
-				pixels.pixels[addr+1] = (byte)(c[1] * 0xFF);
-				pixels.pixels[addr+2] = (byte)(c[2] * 0xFF);
-				pixels.pixels[addr+3] = (byte)(0xFF);
-			}
-		return make_shared<Image>(commandBuffer, "checkerboard", pixels);
-	}
-	throw runtime_error("Unsupported texture type: " + type);
-	return {};
+	}*/
+	else throw runtime_error("Unsupported shape: " + type);
 }
 
 void parse_scene(Node& root, CommandBuffer& commandBuffer, pugi::xml_node node) {
-	map<string /* name id */, component_ptr<Material>> material_map;
-	map<string /* name id */, Image::View> texture_map;
+	unordered_map<string /* name id */, component_ptr<Material>> material_map;
+	unordered_map<string /* name id */, Image::View> texture_map;
+	unordered_map<string /* filename */, component_ptr<Mesh>> obj_map;
 	int envmap_light_id = -1;
 	for (auto child : node.children()) {
 		string name = child.name();
 		if (name == "bsdf") {
-			string material_name;
-			component_ptr<Material> m;
-			Node& n = root.make_child("BSDF");
-			tie(material_name, m) = parse_bsdf(n, commandBuffer, child, texture_map);
-			if (!material_name.empty())
-				material_map[material_name] = m;
+			parse_bsdf(root, commandBuffer, child, material_map, texture_map);
 		} else if (name == "shape") {
-			parse_shape(commandBuffer,
-				root.make_child("shape"),
-				child,
-				material_map,
-				texture_map);
+			parse_shape(commandBuffer, root.make_child("shape"), child, material_map, texture_map, obj_map);
 		} else if (name == "texture") {
 			string id = child.attribute("id").value();
-			if (texture_map.find(id) != texture_map.end()) {
-				throw runtime_error("Duplicate texture ID: " + id);
-			}
+			if (texture_map.find(id) != texture_map.end()) throw runtime_error("Duplicate texture ID: " + id);
 			texture_map[id] = parse_texture(commandBuffer, child);
 		} else if (name == "emitter") {
 			string type = child.attribute("type").value();

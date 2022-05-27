@@ -140,8 +140,8 @@ public:
 
 	STRATUM_API ImageValue1 alpha_to_roughness(CommandBuffer& commandBuffer, const ImageValue1& alpha);
 	STRATUM_API ImageValue1 shininess_to_roughness(CommandBuffer& commandBuffer, const ImageValue1& alpha);
-	STRATUM_API Material make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmittance, const float eta, const ImageValue3& emission);
-	STRATUM_API Material make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmittance, const float eta, const ImageValue3& emission);
+	STRATUM_API Material make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission);
+	STRATUM_API Material make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission);
 
 	component_ptr<Camera> mMainCamera;
 

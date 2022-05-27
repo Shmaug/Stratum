@@ -171,29 +171,41 @@ inline ImageValue4 make_image_value4(const Image::View& img, const float4& v = f
 inline void image_value_field(const char* label, ImageValue1& v) {
 	ImGui::DragFloat(label, &v.value, .01f);
 	if (v.image) {
-		const uint32_t w = ImGui::GetWindowSize().x;
-		ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		if (ImGui::Button("X")) v.image = {};
+		else {
+			const uint32_t w = ImGui::GetWindowSize().x;
+			ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		}
 	}
 }
 inline void image_value_field(const char* label, ImageValue2& v) {
 	ImGui::DragFloat2(label, v.value.data(), .01f);
 	if (v.image) {
-		const uint32_t w = ImGui::GetWindowSize().x;
-		ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		if (ImGui::Button("X")) v.image = {};
+		else {
+			const uint32_t w = ImGui::GetWindowSize().x;
+			ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		}
 	}
 }
 inline void image_value_field(const char* label, ImageValue3& v) {
 	ImGui::ColorEdit3(label, v.value.data(), ImGuiColorEditFlags_Float);
 	if (v.image) {
-		const uint32_t w = ImGui::GetWindowSize().x;
-		ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		if (ImGui::Button("X")) v.image = {};
+		else {
+			const uint32_t w = ImGui::GetWindowSize().x;
+			ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		}
 	}
 }
 inline void image_value_field(const char* label, ImageValue4& v) {
 	ImGui::ColorEdit4(label, v.value.data(), ImGuiColorEditFlags_Float);
 	if (v.image) {
-		const uint32_t w = ImGui::GetWindowSize().x;
-		ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		if (ImGui::Button("Remove")) v.image = {};
+		else {
+			const uint32_t w = ImGui::GetWindowSize().x;
+			ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
+		}
 	}
 }
 

@@ -7,6 +7,9 @@
 struct IntersectionVertex {
 	ShadingData sd;
 	uint instance_primitive_index;
+	float shape_pdf;
+	bool shape_pdf_area_measure;
+
 	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 	SLANG_MUTATING
@@ -96,23 +99,43 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 	if (rayQuery.CommittedStatus() != COMMITTED_NOTHING) {
 		// hit an instance
 		_isect.set_instance_index(rayQuery.CommittedInstanceID());
-		const InstanceData instance = gInstances[rayQuery.CommittedInstanceID()];
+		const InstanceData instance = gInstances[_isect.instance_index()];
+		const TransformData transform = gInstanceTransforms[_isect.instance_index()];
 		if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
 			_isect.set_primitive_index(INVALID_PRIMITIVE);
 			const float3 local_pos = rayQuery.CommittedObjectRayOrigin() + rayQuery.CommittedObjectRayDirection()*rayQuery.CommittedRayT();
 			switch (instance.type()) {
 				case INSTANCE_TYPE_SPHERE:
-					make_sphere_shading_data(_isect.sd, instance, gInstanceTransforms[rayQuery.CommittedInstanceID()], local_pos);
+					make_sphere_shading_data(_isect.sd, instance, transform, local_pos);
+					if (gUniformSphereSampling) {
+						_isect.shape_pdf = 1/_isect.sd.shape_area;
+						_isect.shape_pdf_area_measure = true;
+					} else {
+						const float3 center = float3(
+							transform.m[0][3],
+							transform.m[1][3],
+							transform.m[2][3]);
+						const float3 to_center = center - origin;
+						const float sin_elevation_max_sq = pow2(instance.radius()) / dot(to_center,to_center);
+						const float cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
+						_isect.shape_pdf = 1/(2 * M_PI * (1 - cos_elevation_max));
+						_isect.shape_pdf_area_measure = false;
+					}
 					break;
 				case INSTANCE_TYPE_VOLUME:
-					make_volume_shading_data(_isect.sd, instance, gInstanceTransforms[rayQuery.CommittedInstanceID()], local_pos);
+					make_volume_shading_data(_isect.sd, instance, transform, local_pos);
+					_isect.shape_pdf = 1;
+					_isect.shape_pdf_area_measure = false;
 					// shading_normal and geometry_normal are set in the rayQuery loop above
 					break;
 			}
 		} else { // COMMITTED_TRIANGLE_HIT
 			// triangle
 			_isect.set_primitive_index(rayQuery.CommittedPrimitiveIndex());
-			make_triangle_shading_data_from_barycentrics(_isect.sd, instance, gInstanceTransforms[rayQuery.CommittedInstanceID()], rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics());
+			float3 local_pos;
+			make_triangle_shading_data_from_barycentrics(_isect.sd, instance, transform, rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics(), local_pos);
+			_isect.shape_pdf = 1 / (_isect.sd.shape_area * instance.prim_count());
+			_isect.shape_pdf_area_measure = true;
 		}
 		_isect.sd.flags = 0;
 		if (dot(direction, _isect.sd.geometry_normal()) < 0)
@@ -123,15 +146,18 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 		_isect.set_instance_index(INVALID_INSTANCE);
 		_isect.set_primitive_index(INVALID_PRIMITIVE);
 		_isect.sd.shape_area = 0;
+		_isect.sd.position = direction;
+		_isect.shape_pdf = 0;
+		_isect.shape_pdf_area_measure = false;
 		return t_max;
 	}
 }
-void trace_shadow_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, float t_max, uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf) {
+void trace_visibility_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, float t_max, uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf) {
 	Medium m;
 	if (gHasMedia && cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
 	while (t_max > 1e-6f) {
 		IntersectionVertex shadow_isect;
-		const float dt = trace_ray(origin, direction, t_max, shadow_isect, !gHasMedia);
+		const float dt = trace_ray(origin, direction, t_max*0.999, shadow_isect, !gHasMedia);
 		if (!isinf(t_max)) t_max -= dt;
 
 		if (gHasMedia) {
