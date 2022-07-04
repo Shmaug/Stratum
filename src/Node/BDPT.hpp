@@ -22,10 +22,12 @@ public:
 private:
 	Node& mNode;
 
-	shared_ptr<ComputePipelineState> mVisibilityPipeline;
 	shared_ptr<ComputePipelineState> mSamplePhotonsPipeline;
-	shared_ptr<ComputePipelineState> mTraceStepPipeline;
+	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
+	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
+	IntegratorType mIntegratorType = IntegratorType::eNaiveSingleBounce;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
+	shared_ptr<ComputePipelineState> mTonemapReducePipeline;
 
 	array<unordered_map<string, uint32_t>, 2> mDescriptorMap;
 	array<shared_ptr<DescriptorSetLayout>, 2> mDescriptorSetLayouts;
@@ -33,7 +35,7 @@ private:
 
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
-	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES;
+	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS;
 	DebugMode mDebugMode = DebugMode::eNone;
 
 	struct FrameResources {
@@ -55,6 +57,7 @@ private:
 		unordered_map<string, Buffer::View<byte>> mPathData;
 
 		Image::View mDenoiseResult;
+		Buffer::View<uint4> mTonemapMax;
 		Image::View mTonemapResult;
 		uint32_t mFrameNumber;
 	};
@@ -64,9 +67,8 @@ private:
 	float mRaysPerSecond;
 	float mRaysPerSecondTimer;
 
-	vector<shared_ptr<FrameResources>> mFrameResources;
-	shared_ptr<FrameResources> mPrevFrame;
-	shared_ptr<FrameResources> mCurFrame;
+	vector<shared_ptr<FrameResources>> mFrameResourcePool;
+	shared_ptr<FrameResources> mPrevFrame, mCurFrame;
 };
 
 }

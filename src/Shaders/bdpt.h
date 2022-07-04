@@ -7,23 +7,29 @@
 namespace stm {
 #endif
 
-#define BDPT_FLAG_REMAP_THREADS				BIT(0)
-#define BDPT_FLAG_DEMODULATE_ALBEDO			BIT(1)
-#define BDPT_FLAG_RAY_CONES 				BIT(2)
-#define BDPT_FLAG_HAS_ENVIRONMENT 			BIT(3)
-#define BDPT_FLAG_HAS_EMISSIVES 			BIT(4)
-#define BDPT_FLAG_HAS_MEDIA 				BIT(5)
+#include "reservoir.h"
 
-#define BDPT_FLAG_NEE 						BIT(6)
-#define BDPT_FLAG_NEE_MIS 					BIT(7)
-#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(8)
-#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(9)
+#define BDPT_FLAG_HAS_ENVIRONMENT 			BIT(0)
+#define BDPT_FLAG_HAS_EMISSIVES 			BIT(1)
+#define BDPT_FLAG_HAS_MEDIA 				BIT(2)
 
-#define BDPT_FLAG_RESERVOIR_NEE				BIT(10)
+#define BDPT_FLAG_REMAP_THREADS				BIT(8)
+#define BDPT_FLAG_DEMODULATE_ALBEDO			BIT(9)
+#define BDPT_FLAG_RAY_CONES 				BIT(10)
+#define BDPT_FLAG_SAMPLE_BSDFS 				BIT(11)
 
-#define BDPT_FLAG_TRACE_LIGHT				BIT(11)
-#define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(12)
-#define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(13)
+#define BDPT_FLAG_NEE 						BIT(16)
+#define BDPT_FLAG_NEE_MIS 					BIT(17)
+#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(18)
+#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(19)
+#define BDPT_FLAG_RESERVOIR_NEE				BIT(20)
+#define BDPT_FLAG_PRESAMPLE_RESERVOIR_NEE	BIT(21)
+#define BDPT_FLAG_RESERVOIR_SPATIAL_REUSE	BIT(22)
+#define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(23)
+
+#define BDPT_FLAG_TRACE_LIGHT				BIT(24)
+#define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(25)
+#define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(26)
 
 #define BDPT_FLAG_COUNT_RAYS				BIT(31)
 
@@ -36,38 +42,63 @@ struct BDPTPushConstants {
 	uint gEnvironmentMaterialAddress;
 	float gEnvironmentSampleProbability;
 	uint gRandomSeed;
+
 	uint gMinPathVertices;
 	uint gMaxPathVertices;
 	uint gMaxLightPathVertices;
 	uint gMaxNullCollisions;
+
 	uint gNEEReservoirSamples;
+	uint gNEEReservoirSpatialSamples;
+	uint gReservoirPresampleTileCount;
+	uint gReservoirMaxM;
+
 	uint gDebugViewPathLength;
 	uint gDebugLightPathLength;
 };
 
 struct PathState {
 	float3 position;
-	uint medium;
+	uint path_length_medium;
 	float3 beta;
-	uint packed_pdfs;
+	float pdf_fwd;
 	float3 dir_out;
-	uint path_length;
+	float pdf_rev;
 #ifdef __HLSL__
 	SLANG_MUTATING
-	inline void pack_pdfs(const float pdf_fwd, const float pdf_rev) {
-		BF_SET(packed_pdfs, asuint(pdf_fwd), 0, 16);
-		BF_SET(packed_pdfs, asuint(pdf_rev), 16, 16);
+	inline void pack_path_length_medium(const uint path_length, const uint medium) {
+		BF_SET(path_length_medium, path_length, 0, 16);
+		BF_SET(path_length_medium, medium, 16, 16);
 	}
-	inline float pdf_fwd() { return f16tof32(packed_pdfs); }
-	inline float pdf_rev() { return f16tof32(packed_pdfs>>16); }
+	inline uint path_length() { return BF_GET(path_length_medium,0,16); }
+	inline uint medium() { return BF_GET(path_length_medium,16,16); }
 #endif
 };
 
+struct PointSample {
+	float3 local_position;
+	uint instance_primitive_index;
+	inline uint instance_index() CONST_CPP { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() CONST_CPP { return BF_GET(instance_primitive_index, 16, 16); }
+};
 
-#define PATH_VERTEX_FLAG_IS_MATERIAL 	BIT(0)
+struct PresampledLightPoint {
+	PointSample rs;
+	float3 local_to_light;
+	uint packed_contrib_pdf;
+#ifdef __HLSL__
+	// luminance(light_radiance) * G
+	inline float contribution() { return f16tof32(packed_contrib_pdf); }
+	inline float pdfA()         { return f16tof32(packed_contrib_pdf >> 16); }
+	SLANG_MUTATING
+	inline void pack_contrib_pdf(const float contrib, const float pdf) {
+		packed_contrib_pdf = f32tof16(contrib) | (f32tof16(pdf)<<16);
+	}
+#endif
+};
+
+#define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(0)
 #define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(1)
-#define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(2)
-#define PATH_VERTEX_FLAG_IS_ENVIRONMENT	BIT(3)
 
 struct LightPathVertex0 {
 	float3 position;
@@ -83,9 +114,7 @@ struct LightPathVertex1 {
 	uint packed_shading_normal;
 	uint packed_tangent;
 #ifdef __HLSL__
-	inline bool is_material() { return material_address_flags & PATH_VERTEX_FLAG_IS_MATERIAL; }
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
-	inline bool is_environment() { return material_address_flags & PATH_VERTEX_FLAG_IS_ENVIRONMENT; }
 	inline uint material_address() CONST_CPP { return BF_GET(material_address_flags, 4, 28); }
 
 	inline float3 local_dir_in()  { return unpack_normal_octahedron2(packed_local_dir_in); }
@@ -124,6 +153,11 @@ struct LightPathVertex3 {
 	float pdf_rev;
 };
 
+enum class IntegratorType {
+	eNaiveSingleBounce,
+	eNaiveMultiBounce,
+	eIntegratorTypeCount
+};
 enum class DebugMode {
 	eNone,
 	eAlbedo,
@@ -135,10 +169,8 @@ enum class DebugMode {
 	eShadingNormal,
 	eGeometryNormal,
 	eDirOut,
-	eNEEContribution,
-	eWeightedNEEContribution,
-	eLightTraceContribution,
 	ePathLengthContribution,
+	eReservoirWeight,
 	eDebugModeCount
 };
 
@@ -147,6 +179,14 @@ enum class DebugMode {
 #pragma pack(pop)
 
 namespace std {
+inline string to_string(const stm::IntegratorType& m) {
+	switch (m) {
+		default: return "Unknown";
+		case stm::IntegratorType::eNaiveSingleBounce: return "naive_single_bounce";
+		case stm::IntegratorType::eNaiveMultiBounce: return "naive_multi_bounce";
+		case stm::IntegratorType::eIntegratorTypeCount: return "IntegratorTypeCount";
+	}
+};
 inline string to_string(const stm::DebugMode& m) {
 	switch (m) {
 		default: return "Unknown";
@@ -160,10 +200,8 @@ inline string to_string(const stm::DebugMode& m) {
 		case stm::DebugMode::eShadingNormal: return "Shading Normal";
 		case stm::DebugMode::eGeometryNormal: return "Geometry Normal";
 		case stm::DebugMode::eDirOut: return "Bounce Direction";
-		case stm::DebugMode::eNEEContribution: return "NEE Contribution";
-		case stm::DebugMode::eWeightedNEEContribution: return "Weighted NEE Contribution";
-		case stm::DebugMode::eLightTraceContribution: return "Light Trace Contribution";
 		case stm::DebugMode::ePathLengthContribution: return "Path Contribution (per length)";
+		case stm::DebugMode::eReservoirWeight: return "Reservoir Weight";
 		case stm::DebugMode::eDebugModeCount: return "DebugModeCount";
 	}
 };

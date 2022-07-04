@@ -23,12 +23,6 @@ struct Material : BSDF {
 		spec_weight = lS / (lS + lR);
 	}
 
-	inline Real eval_lambertian_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
-		if (dir_in.z * dir_out.z <= 0)
-			return 0;
-		else
-			return abs(dir_out.z) * luminance(diffuse_reflectance) / M_PI;
-	}
 	inline void eval_lambertian(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
 		if (dir_in.z * dir_out.z <= 0) {
 			r.f = 0;
@@ -36,8 +30,8 @@ struct Material : BSDF {
 			r.pdf_rev = 0;
 		} else {
 			r.f = abs(dir_out.z) * diffuse_reflectance / M_PI;
-			r.pdf_fwd = cosine_hemisphere_pdfW(dir_out.z);
-			r.pdf_rev = cosine_hemisphere_pdfW(dir_in.z);
+			r.pdf_fwd = cosine_hemisphere_pdfW(abs(dir_out.z));
+			r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		}
 	}
 	inline void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
@@ -51,35 +45,6 @@ struct Material : BSDF {
 		r.roughness = 1;
 	}
 
-	inline Real eval_roughplastic_partial(const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
-		if (dir_in.z * dir_out.z <= 0) return 0;
-
-		// We first account for the dielectric layer.
-
-		// Fresnel equation determines how much light goes through,
-		// and how much light is reflected for each wavelength.
-		// Fresnel equation is determined by the angle between the (micro) normal and
-		// both incoming and outgoing directions (dir_out & dir_in).
-		// However, since they are related through the Snell-Descartes law,
-		// we only need one of them.
-		const Real F_o = fresnel_dielectric(dot(half_vector, dir_out), eta);
-		const Real D = GTR2(half_vector.z, alpha); // "Generalized Trowbridge Reitz", GTR2 is equivalent to GGX.
-		const Real G_in  = smith_masking_gtr2(dir_in, alpha);
-		const Real G_out = smith_masking_gtr2(dir_out, alpha);
-
-		const Real spec_contrib = ((G_in * G_out) * F_o * D) / (4 * dir_in.z * dir_out.z);
-
-		const Real F_i = fresnel_dielectric(dot(half_vector, dir_in ), eta);
-
-		// Next we account for the diffuse layer.
-
-		// In order to reflect from the diffuse layer,
-		// the photon needs to bounce through the dielectric layers twice.
-		// The transmittance is computed by 1 - fresnel.
-		const Real diffuse_contrib = (1 - F_o) * (1 - F_i) / M_PI;
-
-		return abs(dir_out.z) * (luminance(specular_reflectance) * spec_contrib + luminance(diffuse_reflectance) * diffuse_contrib);
-	}
 	inline void eval_roughplastic(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
 		// We first account for the dielectric layer.
 
@@ -135,14 +100,8 @@ struct Material : BSDF {
 		r.pdf_rev = f.pdf_rev;
 	}
 
-	inline Spectrum emitted_radiance() { return emission; }
+	inline Spectrum Le() { return emission; }
 
-	inline Real eval_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
-		if (all(specular_reflectance == 0))
-			return eval_lambertian_partial(dir_in, dir_out, adjoint);
-		else
-			return eval_roughplastic_partial(dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
-	}
 	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		if (all(specular_reflectance == 0))
 			eval_lambertian(r, dir_in, dir_out, adjoint);

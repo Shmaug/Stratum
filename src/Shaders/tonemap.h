@@ -15,10 +15,20 @@ enum class TonemapMode {
 	eFilmic,
 	eACES,
 	eACESApprox,
+	eViridisR,
+	eViridisLengthRGB,
 	eTonemapModeCount
 };
 
 #ifdef __cplusplus
+
+static const unordered_set<TonemapMode> gTonemapModeNeedsMax = {
+	TonemapMode::eViridisR,
+	TonemapMode::eReinhardExtended,
+	TonemapMode::eReinhardLuminanceExtended,
+	TonemapMode::eUncharted2
+};
+
 }
 
 namespace std {
@@ -34,6 +44,8 @@ inline string to_string(const stm::TonemapMode& m) {
 		case stm::TonemapMode::eFilmic: return "Filmic";
 		case stm::TonemapMode::eACES: return "ACES";
 		case stm::TonemapMode::eACESApprox: return "ACES (approximated)";
+		case stm::TonemapMode::eViridisR: return "Viridis Colormap - R channel";
+		case stm::TonemapMode::eViridisLengthRGB: return "Viridis Colormap - length(RGB)";
 	}
 };
 }

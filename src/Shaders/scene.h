@@ -97,9 +97,6 @@ struct ViewData {
 #endif
 };
 
-#define SHADING_FLAG_FRONT_FACE BIT(0)
-#define SHADING_FLAG_FLIP_BITANGENT BIT(1)
-
 struct VisibilityInfo {
 	uint3 position;
 	uint instance_primitive_index;

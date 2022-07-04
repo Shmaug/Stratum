@@ -58,8 +58,7 @@ struct Material {
 #ifdef __HLSL__
 
 interface BSDF {
-	Spectrum emitted_radiance();
-	Real eval_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
+	Spectrum Le();
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
 	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint);
 };

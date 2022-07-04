@@ -89,11 +89,8 @@ struct Medium : BSDF {
 		return POS_INFINITY;
 	}
 
-	inline Spectrum emitted_radiance() { return 0; }
+	inline Spectrum Le() { return 0; }
 
-	inline Real eval_partial(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
-		return 1;
-	}
 	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
 		r.f = v;

@@ -320,17 +320,16 @@ ImageValue1 parse_float_texture(CommandBuffer& commandBuffer, pugi::xml_node nod
 
 component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi::xml_node node, unordered_map<string /* name id */, component_ptr<Material>>& material_map, unordered_map<string /* name id */, Image::View>& texture_map) {
 	string type = node.attribute("type").value();
-	string twosided_id;
-	if (!node.attribute("id").empty()) twosided_id = node.attribute("id").value();
-	if (type == "twosided") {
-		if (node.children().begin() == node.children().end()) throw runtime_error("Twosided BSDF has no children");
-		node = *node.children().begin();
+	unordered_set<string> ids;
+	if (!node.attribute("id").empty()) ids.emplace(node.attribute("id").value());
+	while (type == "twosided" || type == "bumpmap" || type == "mask") {
+		if (node.child("bsdf").empty()) throw runtime_error(type + " has no child BSDF");
+		node = node.child("bsdf");
 		type = node.attribute("type").value();
+		if (!node.attribute("id").empty()) ids.emplace(node.attribute("id").value());
 	}
-	string id;
-	if (!node.attribute("id").empty()) id = node.attribute("id").value();
 
-	string name = !id.empty() ? id : !twosided_id.empty() ? twosided_id : (type + " BSDF");
+	string name = !ids.empty() ? *ids.begin() : (type + " BSDF");
 
 	if (type == "diffuse") {
 		ImageValue3 diffuse = make_image_value3({}, float3::Constant(0.5f));
@@ -344,8 +343,8 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 		m->specular_transmission = make_image_value4({}, float4::Zero());
 		m->emission = make_image_value3({}, float3::Zero());
 		m->eta = 1.5f;
-		if (!id.empty()) material_map[id] = m;
-		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		for (const string& id : ids)
+			if (!id.empty()) material_map[id] = m;
 		return m;
 	} else if (type == "roughplastic" || type == "plastic" || type == "conductor" || type == "roughconductor") {
 		ImageValue3 diffuse  = make_image_value3({}, float3::Constant(0.5f));
@@ -387,10 +386,10 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 			}
 		}
 		auto m = dst.make_child(name).make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, make_image_value3({},float3::Zero()), eta, make_image_value3({},float3::Zero())));
-		if (!id.empty()) material_map[id] = m;
-		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		for (const string& id : ids)
+			if (!id.empty()) material_map[id] = m;
 		return m;
-	} else if (type == "roughdielectric" || type == "dielectric") {
+	} else if (type == "roughdielectric" || type == "dielectric" || type == "thindielectric") {
 		ImageValue3 diffuse = make_image_value3({}, float3::Ones());
 		ImageValue3 specular = make_image_value3({}, float3::Ones());
 		ImageValue3 transmittance = make_image_value3({}, float3::Ones());
@@ -427,11 +426,14 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 			}
 		}
 		auto m = dst.make_child(name).make_component<Material>(dst.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, specular, roughness, transmittance, eta, make_image_value3({},float3::Zero())));
-		if (!id.empty()) material_map[id] = m;
-		if (!twosided_id.empty()) material_map[twosided_id] = m;
+		for (const string& id : ids)
+			if (!id.empty()) material_map[id] = m;
 		return m;
 	}
-	throw runtime_error("Unsupported BSDF type: " + type);
+	string idstr;
+	for (const string& id : ids)
+		idstr += id + " ";
+	throw runtime_error("Unsupported BSDF type: \"" + type + "\" with IDs " + idstr);
 }
 
 void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, unordered_map<string, component_ptr<Material>>& material_map, unordered_map<string, Image::View>& texture_map, unordered_map<string, component_ptr<Mesh>>& obj_map) {

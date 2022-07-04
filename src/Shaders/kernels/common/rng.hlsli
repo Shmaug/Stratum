@@ -22,4 +22,10 @@ float pcg_next_float(inout uint4 v) {
     return asfloat(0x3f800000 | (pcg_next_uint(v) >> 9)) - 1;
 }
 
+typedef uint4 rng_state_t;
+rng_state_t rng_init(const uint2 pixel, const uint offset = 0) { return uint4(pixel, gRandomSeed, offset); }
+void  rng_skip_next (inout rng_state_t state) { state.w++; }
+uint  rng_next_uint (inout rng_state_t state) { return pcg_next_uint(state); }
+float rng_next_float(inout rng_state_t state) { return pcg_next_float(state); }
+
 #endif

@@ -65,12 +65,16 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 	if (scene->HasMaterials()) {
 		bool interpret_as_pbr = false;
 		if (filename.extension().string() == ".fbx") {
-			pfd::message n("Interpret Fbx as PBR?", "Convert diffuse/specular to basecolor/roughness/metallic textures?", pfd::choice::yes_no);
+			pfd::message n("Load PBR materials?", "Interpret diffuse/specular as glTF basecolor/pbr textures?", pfd::choice::yes_no);
 			interpret_as_pbr = n.result() == pfd::button::yes;
 		}
 
+		cout << "Loading materials...";
+
 		Node& materials_node = root.make_child("materials");
 		for (int i = 0; i < scene->mNumMaterials; i++) {
+			cout << "\rLoading materials " << (i+1) << "/" << scene->mNumMaterials << "     ";
+
 			aiMaterial* m = scene->mMaterials[i];
 			Material& material = *materials.emplace_back(materials_node.make_child(m->GetName().C_Str()).make_component<Material>());
 
@@ -115,6 +119,7 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			else
 				material = root.find_in_ancestor<Scene>()->make_diffuse_specular_material(commandBuffer, diffuse, make_image_value3(specular.image,specular.value.head<3>()), make_image_value1({}), transmittance, eta, emission);
 		}
+		cout << endl;
 	}
 
 	if (scene->HasMeshes()) {
@@ -124,8 +129,12 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 		bufferUsage |= vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
 		#endif
 
+		cout << "Loading meshes...";
+
 		Node& meshes_node = root.make_child("meshes");
 		for (int i = 0; i < scene->mNumMeshes; i++) {
+			cout << "\rLoading meshes " << (i+1) << "/" << scene->mNumMeshes << "     ";
+
 			aiMesh* m = scene->mMeshes[i];
 			Node& mesh_node = meshes_node.make_child(m->mName.C_Str());
 
@@ -182,6 +191,7 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			}
 			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area) );
 		}
+		cout << endl;
 	}
 
 	stack<pair<aiNode*, Node*>> nodes;

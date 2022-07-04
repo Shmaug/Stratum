@@ -3,6 +3,9 @@
 
 #include "scene.h"
 
+#define SHADING_FLAG_FRONT_FACE BIT(0)
+#define SHADING_FLAG_FLIP_BITANGENT BIT(1)
+
 // 48 bytes
 struct ShadingData {
 	float3 position;
@@ -82,7 +85,9 @@ inline void make_triangle_shading_data(inout ShadingData r, const TransformData 
 		r.packed_shading_normal = pack_normal_octahedron(shading_normal);
 		r.packed_tangent = pack_normal_octahedron(tangent);
 
-		if (dot(shading_normal, geometry_normal) < 0) r.packed_geometry_normal = pack_normal_octahedron(-geometry_normal);
+		// force geometry normal to agree with shading normal
+		if (dot(shading_normal, geometry_normal) < 0)
+			r.packed_geometry_normal = pack_normal_octahedron(-geometry_normal);
 
 		const float3 dNds = v2.normal - v0.normal;
 		const float3 dNdt = v2.normal - v1.normal;
@@ -109,11 +114,18 @@ inline void make_triangle_shading_data_from_position(out ShadingData r, const In
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
 	const PackedVertexData v2 = gVertices[tri.z];
-    const float3 N = cross(v1.position - v0.position, v2.position - v0.position);
-    const float denom = dot(N, N);
-	const float2 bary = float2(
-		dot(N, cross(v2.position - v1.position, local_position - v1.position)),
-		dot(N, cross(v0.position - v2.position, local_position - v2.position))) / denom;
+
+	const float3 v1v0 = v1.position - v0.position;
+	const float3 v2v0 = v2.position - v0.position;
+	const float3 p_v0 = local_position - v0.position;
+	const float d00 = dot(v1v0, v1v0);
+	const float d01 = dot(v1v0, v2v0);
+	const float d11 = dot(v2v0, v2v0);
+	const float d20 = dot(p_v0, v1v0);
+	const float d21 = dot(p_v0, v2v0);
+	const float2 bary = float2((d11 * d20 - d01 * d21), (d00 * d21 - d01 * d20)) / (d00 * d11 - d01 * d01);
+
+	r.position = transform.transform_point(local_position);
  	make_triangle_shading_data(r, transform, bary, v0, v1, v2);
 }
 inline void make_sphere_shading_data(out ShadingData r, const InstanceData instance, const TransformData transform, const float3 local_position) {

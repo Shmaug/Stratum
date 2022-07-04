@@ -247,7 +247,8 @@ Scene::Scene(Node& node) : mNode(node) {
 void Scene::on_inspector_gui() {
 	if (mSceneData) {
 		ImGui::Text("%lu instances", mSceneData->mInstances.size());
-		ImGui::Text("%lu lights", mSceneData->mLightInstances.size());
+		ImGui::Text("%lu light instances", mSceneData->mLightInstances.size());
+		ImGui::Text("%lu emissive primitives", mSceneData->mEmissivePrimitiveCount);
 		ImGui::Text("%u materials", mSceneData->mMaterialCount);
 	}
 	if (ImGui::Button("Load File")) {
@@ -304,6 +305,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mSceneData->mInstanceTransformMap = {};
 	mSceneData->mResources.distribution_data_size = 0;
 
+	mSceneData->mEmissivePrimitiveCount = 0;
 	mSceneData->mMaterialCount = 0;
 	ByteAppendBuffer materialData;
 	materialData.data.reserve(mPrevFrame && mPrevFrame->mMaterialData ? mPrevFrame->mMaterialData.size() / sizeof(uint32_t) : 1);
@@ -430,6 +432,9 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			const TransformData transform = node_to_world(prim.node());
 			const float area = prim->mMesh->area().has_value() ? prim->mMesh->area().value()*transform.m.topLeftCorner<3,3>().matrix().determinant() : 1;
 
+			if ((prim->mMaterial->emission.value > 0).any())
+				mSceneData->mEmissivePrimitiveCount += triCount;
+
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
 			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, luminance(prim->mMaterial->emission.value) * area * M_PI);
@@ -447,6 +452,9 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		mNode.for_each_descendant<SpherePrimitive>([&](const component_ptr<SpherePrimitive>& prim) {
 			if (!prim->mMaterial) return;
 			uint32_t material_address = process_material(prim->mMaterial.get());
+
+			if ((prim->mMaterial->emission.value > 0).any())
+				mSceneData->mEmissivePrimitiveCount++;
 
 			TransformData transform = node_to_world(prim.node());
 			const float r = prim->mRadius * transform.m.block<3, 3>(0, 0).matrix().determinant();

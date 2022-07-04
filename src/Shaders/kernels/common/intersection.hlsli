@@ -18,20 +18,7 @@ struct IntersectionVertex {
 	inline uint set_primitive_index(const uint v) { return BF_SET(instance_primitive_index, v, 16, 16); }
 };
 
-#ifdef GROUPSHARED_ISECT
-// 12 floats
-groupshared IntersectionVertex s_isect[GROUPSIZE_X*GROUPSIZE_Y];
-#define _isect s_isect[group_thread_index]
-#define DECLARE_ISECT
-#define DECLARE_ISECT_ARG const uint group_thread_index
-#define PASS_ISECT_ARG group_thread_index
-#else
-#define DECLARE_ISECT IntersectionVertex _isect;
-#define DECLARE_ISECT_ARG inout IntersectionVertex _isect
-#define PASS_ISECT_ARG _isect
-#endif
-
-float trace_ray(const float3 origin, const float3 direction, const float t_max, DECLARE_ISECT_ARG, const bool accept_first = false) {
+float trace_ray(const float3 origin, const float3 direction, const float t_max, inout IntersectionVertex _isect, const bool accept_first = false) {
 	if (gCountRays) InterlockedAdd(gRayCount[0], 1);
 
 	RayQuery<RAY_FLAG_NONE> rayQuery;
@@ -200,7 +187,7 @@ void trace_visibility_ray(inout rng_state_t rng_state, float3 origin, const floa
 		}
 	}
 }
-void trace_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, inout uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf, DECLARE_ISECT_ARG) {
+void trace_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, inout uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf, inout IntersectionVertex _isect) {
 	Medium m;
 	if (gHasMedia && cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
 	for (uint steps = 0; steps < 64; steps++) {

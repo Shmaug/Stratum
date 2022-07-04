@@ -70,7 +70,9 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 					const float phi = 2 * M_PI * rnd.y;
 					const float3 local_normal = float3(r_ * cos(phi), z, r_ * sin(phi));
 					uv = cartesian_to_spherical_uv(local_normal);
+					ls.local_position = local_normal * r;
 					ls.position = gInstanceTransforms[light_instance_index].transform_point(r * local_normal);
+					uv = cartesian_to_spherical_uv(local_normal);
 					ls.normal = normalize(gInstanceTransforms[light_instance_index].transform_vector(local_normal));
 					ls.to_light = ls.position - ref_pos;
 					ls.dist = length(ls.to_light);
@@ -108,11 +110,13 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 
 					ls.normal = (T * sin_alpha * cos(azimuth) + B * sin_alpha * sin(azimuth) - to_center * cos_alpha);
 					ls.position = center + r * ls.normal;
-
 					ls.to_light = ls.position - ref_pos;
 					ls.dist = length(ls.to_light);
 					ls.to_light /= ls.dist;
-					uv = cartesian_to_spherical_uv(gInstanceInverseTransforms[light_instance_index].transform_vector(ls.normal));
+
+					const float3 local_normal = gInstanceInverseTransforms[light_instance_index].transform_vector(ls.normal);
+					ls.local_position = local_normal*r;
+					uv = cartesian_to_spherical_uv(local_normal);
 				}
 
 				break;
@@ -146,7 +150,7 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 	}
 }
 
-inline void point_on_light_pdf(inout float pdf, inout bool pdf_area_measure, DECLARE_ISECT_ARG) {
+inline void point_on_light_pdf(inout float pdf, inout bool pdf_area_measure, const IntersectionVertex _isect) {
 	if (_isect.instance_index() == INVALID_INSTANCE) {
 		if (!gHasEnvironment) { pdf = 0; return; }
 		if (gHasEmissives) pdf *= gEnvironmentSampleProbability;

@@ -69,6 +69,7 @@ public:
 		uint32_t mMaterialCount;
 		uint32_t mLightDistributionPDF;
 		uint32_t mLightDistributionCDF;
+		uint32_t mEmissivePrimitiveCount;
 	};
 
 	STRATUM_API Scene(Node& node);
