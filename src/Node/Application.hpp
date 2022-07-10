@@ -10,10 +10,10 @@ namespace stm {
 
 class Application {
 public:
-	NodeEvent<> PreFrame;
-	NodeEvent<CommandBuffer&, float> OnUpdate;
-	NodeEvent<CommandBuffer&> OnRenderWindow;
-	NodeEvent<> PostFrame;
+	Node::Event<> PreFrame;
+	Node::Event<CommandBuffer&, float> OnUpdate;
+	Node::Event<CommandBuffer&> OnRenderWindow;
+	Node::Event<> PostFrame;
 
 	inline Application(Node& node, Window& window) : mNode(node), mWindow(window) {}
 

@@ -9,7 +9,7 @@ vector<shared_ptr<Profiler::sample_t>> Profiler::mSampleHistory;
 uint32_t Profiler::mSampleHistoryCount = 0;
 optional<chrono::high_resolution_clock::time_point> Profiler::mFrameStart = nullopt;
 deque<float> Profiler::mFrameTimes;
-uint32_t Profiler::mFrameTimeCount = 256;
+uint32_t Profiler::mFrameTimeCount = 32;
 
 inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample_t& s, const chrono::high_resolution_clock::time_point& t_min, const chrono::high_resolution_clock::time_point& t_max, const float x_min, const float x_max, const float y, const float height) {
 	const float dt = chrono::duration_cast<chrono::duration<float, milli>>(t_max - t_min).count();
@@ -78,6 +78,6 @@ void Profiler::frame_times_gui() {
 	}
 
 	ImGui::Text("%.1f fps (%.1f ms)", fps_counter/(fps_timer/1000), fps_timer/fps_counter);
-	ImGui::SliderInt("Length", reinterpret_cast<int*>(&mFrameTimeCount), 2, 2048);
+	ImGui::SliderInt("Frame Time Count", reinterpret_cast<int*>(&mFrameTimeCount), 2, 256);
 	if (frame_times.size() > 1) ImGui::PlotLines("Frame Times", frame_times.data(), (uint32_t)frame_times.size(), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0, 64));
 }

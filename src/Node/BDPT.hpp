@@ -24,6 +24,7 @@ private:
 
 	shared_ptr<ComputePipelineState> mSamplePhotonsPipeline;
 	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
+	shared_ptr<ComputePipelineState> mPresampleLightPipeline;
 	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
 	IntegratorType mIntegratorType = IntegratorType::eNaiveSingleBounce;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
@@ -54,6 +55,7 @@ private:
 		Image::View mAlbedo;
 		Image::View mDebugImage;
 
+		Buffer::View<PresampledLightPoint> mPresampledLights;
 		unordered_map<string, Buffer::View<byte>> mPathData;
 
 		Image::View mDenoiseResult;

@@ -29,7 +29,7 @@ struct Material : BSDF {
 			r.pdf_fwd = 0;
 			r.pdf_rev = 0;
 		} else {
-			r.f = abs(dir_out.z) * diffuse_reflectance / M_PI;
+			r.f = diffuse_reflectance / M_PI;
 			r.pdf_fwd = cosine_hemisphere_pdfW(abs(dir_out.z));
 			r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		}
@@ -39,7 +39,7 @@ struct Material : BSDF {
 		r.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
 		r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		if (dir_in.z < 0) r.dir_out.z = -r.dir_out.z;
-		const Spectrum f = abs(r.dir_out.z) * diffuse_reflectance / M_PI;
+		const Spectrum f = diffuse_reflectance / M_PI;
 		beta *= f / r.pdf_fwd;
 		r.eta = 0;
 		r.roughness = 1;
@@ -68,7 +68,7 @@ struct Material : BSDF {
 		// The transmittance is computed by 1 - fresnel.
 		const Real diffuse_contrib = (1 - F_o) * (1 - F_i) / M_PI;
 
-		r.f = dir_out.z * (specular_reflectance * spec_contrib + diffuse_reflectance * diffuse_contrib);
+		r.f = specular_reflectance * spec_contrib + diffuse_reflectance * diffuse_contrib;
 
 		if (all(r.f <= 0)) {
 			r.pdf_fwd = 0;
@@ -101,17 +101,18 @@ struct Material : BSDF {
 	}
 
 	inline Spectrum Le() { return emission; }
+	inline bool can_eval() { return any(diffuse_reflectance > 0) || any(specular_reflectance > 0) || specular_transmittance > 0; }
 
 	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
-		if (all(specular_reflectance == 0))
-			eval_lambertian(r, dir_in, dir_out, adjoint);
-		else
+		if (any(specular_reflectance > 0))
 			eval_roughplastic(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
+		else
+			eval_lambertian(r, dir_in, dir_out, adjoint);
 	}
 	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
-		if (all(specular_reflectance == 0))
-			sample_lambertian(r, rnd, dir_in, beta, adjoint);
-		else
+		if (all(specular_reflectance > 0))
 			sample_roughplastic(r, rnd, dir_in, beta, adjoint);
+		else
+			sample_lambertian(r, rnd, dir_in, beta, adjoint);
 	}
 };

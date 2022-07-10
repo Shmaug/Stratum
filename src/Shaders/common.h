@@ -12,16 +12,17 @@
 #define M_1_PI (1/M_PI)
 #endif
 
-#ifdef __SLANG__
-#define SLANG_MUTATING [mutating]
-#else
-#define SLANG_MUTATING
-#endif
-
 #ifdef __HLSL__
 #define __hlsl_in
 #define __hlsl_out(T) out T
 #define __hlsl_inout(T) inout T
+#ifdef __SLANG__
+#define SLANG_MUTATING [mutating]
+#else
+#define SLANG_MUTATING
+#endif // SLANG
+#else // HLSL
+#define SLANG_MUTATING
 #endif
 
 #ifdef __cplusplus

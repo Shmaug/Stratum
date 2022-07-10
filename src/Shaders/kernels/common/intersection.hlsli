@@ -18,7 +18,7 @@ struct IntersectionVertex {
 	inline uint set_primitive_index(const uint v) { return BF_SET(instance_primitive_index, v, 16, 16); }
 };
 
-float trace_ray(const float3 origin, const float3 direction, const float t_max, inout IntersectionVertex _isect, const bool accept_first = false) {
+float trace_ray(const float3 origin, const float3 direction, const float t_max, inout IntersectionVertex _isect, out float3 local_hit_pos, const bool accept_first = false) {
 	if (gCountRays) InterlockedAdd(gRayCount[0], 1);
 
 	RayQuery<RAY_FLAG_NONE> rayQuery;
@@ -90,10 +90,10 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 		const TransformData transform = gInstanceTransforms[_isect.instance_index()];
 		if (rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT) {
 			_isect.set_primitive_index(INVALID_PRIMITIVE);
-			const float3 local_pos = rayQuery.CommittedObjectRayOrigin() + rayQuery.CommittedObjectRayDirection()*rayQuery.CommittedRayT();
+			local_hit_pos = rayQuery.CommittedObjectRayOrigin() + rayQuery.CommittedObjectRayDirection()*rayQuery.CommittedRayT();
 			switch (instance.type()) {
 				case INSTANCE_TYPE_SPHERE:
-					make_sphere_shading_data(_isect.sd, instance, transform, local_pos);
+					make_sphere_shading_data(_isect.sd, instance, transform, local_hit_pos);
 					if (gUniformSphereSampling) {
 						_isect.shape_pdf = 1/_isect.sd.shape_area;
 						_isect.shape_pdf_area_measure = true;
@@ -110,7 +110,7 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 					}
 					break;
 				case INSTANCE_TYPE_VOLUME:
-					make_volume_shading_data(_isect.sd, instance, transform, local_pos);
+					make_volume_shading_data(_isect.sd, instance, transform, local_hit_pos);
 					_isect.shape_pdf = 1;
 					_isect.shape_pdf_area_measure = false;
 					// shading_normal and geometry_normal are set in the rayQuery loop above
@@ -119,8 +119,8 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 		} else { // COMMITTED_TRIANGLE_HIT
 			// triangle
 			_isect.set_primitive_index(rayQuery.CommittedPrimitiveIndex());
-			float3 local_pos;
-			make_triangle_shading_data_from_barycentrics(_isect.sd, instance, transform, rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics(), local_pos);
+			local_hit_pos = float3(rayQuery.CommittedTriangleBarycentrics(), 0);
+			make_triangle_shading_data(_isect.sd, instance, transform, rayQuery.CommittedPrimitiveIndex(), rayQuery.CommittedTriangleBarycentrics());
 			_isect.shape_pdf = 1 / (_isect.sd.shape_area * instance.prim_count());
 			_isect.shape_pdf_area_measure = true;
 		}
@@ -136,6 +136,7 @@ float trace_ray(const float3 origin, const float3 direction, const float t_max, 
 		_isect.sd.position = direction;
 		_isect.shape_pdf = 0;
 		_isect.shape_pdf_area_measure = false;
+		local_hit_pos = direction;
 		return t_max;
 	}
 }
@@ -144,7 +145,8 @@ void trace_visibility_ray(inout rng_state_t rng_state, float3 origin, const floa
 	if (gHasMedia && cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
 	while (t_max > 1e-6f) {
 		IntersectionVertex shadow_isect;
-		const float dt = trace_ray(origin, direction, t_max*0.999, shadow_isect, !gHasMedia);
+		float3 local_pos;
+		const float dt = trace_ray(origin, direction, t_max*0.999, shadow_isect, local_pos, !gHasMedia);
 		if (!isinf(t_max)) t_max -= dt;
 
 		if (gHasMedia) {
@@ -187,48 +189,86 @@ void trace_visibility_ray(inout rng_state_t rng_state, float3 origin, const floa
 		}
 	}
 }
-void trace_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, inout uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf, inout IntersectionVertex _isect) {
-	Medium m;
-	if (gHasMedia && cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
-	for (uint steps = 0; steps < 64; steps++) {
-		const float dt = trace_ray(origin, direction, POS_INFINITY, _isect);
+void trace_ray(inout rng_state_t rng_state, float3 origin, const float3 direction, inout uint cur_medium, inout Spectrum beta, inout float T_dir_pdf, inout float T_nee_pdf, inout IntersectionVertex _isect, out float3 local_hit_pos) {
+	if (!gHasMedia)
+		trace_ray(origin, direction, POS_INFINITY, _isect, local_hit_pos);
+	else {
+		Medium m;
+		if (cur_medium != INVALID_INSTANCE) m.load(gInstances[cur_medium].material_address());
+		for (uint steps = 0; steps < 64; steps++) {
+			const float dt = trace_ray(origin, direction, POS_INFINITY, _isect, local_hit_pos);
 
-		if (!gHasMedia) break;
+			if (cur_medium != INVALID_INSTANCE) {
+				// interact with medium
+				const TransformData inv_transform = gInstanceInverseTransforms[cur_medium];
+				const Vector3 m_origin = inv_transform.transform_point(origin);
+				const Vector3 m_direction = inv_transform.transform_vector(direction);
+				Spectrum dir_pdf = 1;
+				Spectrum nee_pdf = 1;
+				const float3 scatter_p = m.delta_track(rng_state, m_origin, m_direction, dt, beta, dir_pdf, nee_pdf, true);
+				T_dir_pdf *= average(dir_pdf);
+				T_nee_pdf *= average(nee_pdf);
+				if (all(isfinite(scatter_p))) {
+					_isect.set_instance_index(cur_medium);
+					_isect.set_primitive_index(INVALID_PRIMITIVE);
+					_isect.sd.position = scatter_p;
+					_isect.sd.shape_area = 0;
+					break;
+				}
+			}
 
-		if (gHasMedia && cur_medium != INVALID_INSTANCE) {
-			// interact with medium
-			const TransformData inv_transform = gInstanceInverseTransforms[cur_medium];
-			const Vector3 m_origin = inv_transform.transform_point(origin);
-			const Vector3 m_direction = inv_transform.transform_vector(direction);
-			Spectrum dir_pdf = 1;
-			Spectrum nee_pdf = 1;
-			const float3 scatter_p = m.delta_track(rng_state, m_origin, m_direction, dt, beta, dir_pdf, nee_pdf, true);
-			T_dir_pdf *= average(dir_pdf);
-			T_nee_pdf *= average(nee_pdf);
-			if (all(isfinite(scatter_p))) {
-				_isect.set_instance_index(cur_medium);
-				_isect.set_primitive_index(INVALID_PRIMITIVE);
-				_isect.sd.position = scatter_p;
-				_isect.sd.shape_area = 0;
-				break;
+			if (_isect.instance_index() == INVALID_INSTANCE || steps == 63) break;
+
+			const InstanceData instance = gInstances[_isect.instance_index()];
+			if (instance.type() != INSTANCE_TYPE_VOLUME) break;
+
+			if (_isect.sd.flags & SHADING_FLAG_FRONT_FACE) {
+				// entering volume
+				cur_medium = _isect.instance_index();
+				m.load(instance.material_address());
+				origin = ray_offset(_isect.sd.position, -_isect.sd.geometry_normal());
+			} else {
+				// leaving volume
+				cur_medium = INVALID_INSTANCE;
+				origin = ray_offset(_isect.sd.position, _isect.sd.geometry_normal());
 			}
 		}
+	}
+}
 
-		if (_isect.instance_index() == INVALID_INSTANCE) break;
+float shape_pdf(const float3 origin, const float shape_area, const PointSample p, out bool area_measure) {
+	if (p.instance_index() == INVALID_INSTANCE) {
+		area_measure = false;
+		return 0;
+	}
 
-		const InstanceData instance = gInstances[_isect.instance_index()];
-		if (instance.type() != INSTANCE_TYPE_VOLUME) break;
+	const InstanceData instance = gInstances[p.instance_index()];
+	switch (instance.type()) {
+		case INSTANCE_TYPE_TRIANGLES:
+			area_measure = true;
+			return 1 / (shape_area * instance.prim_count());
 
-		if (_isect.sd.flags & SHADING_FLAG_FRONT_FACE) {
-			// entering volume
-			cur_medium = _isect.instance_index();
-			m.load(instance.material_address());
-			origin = ray_offset(_isect.sd.position, -_isect.sd.geometry_normal());
-		} else {
-			// leaving volume
-			cur_medium = INVALID_INSTANCE;
-			origin = ray_offset(_isect.sd.position, _isect.sd.geometry_normal());
-		}
+		case INSTANCE_TYPE_SPHERE:
+			if (gUniformSphereSampling) {
+				area_measure = true;
+				return 1/shape_area;
+			} else {
+				const float3 center = float3(
+					gInstanceTransforms[p.instance_index()].m[0][3],
+					gInstanceTransforms[p.instance_index()].m[1][3],
+					gInstanceTransforms[p.instance_index()].m[2][3]);
+				const float3 to_center = center - origin;
+				const float sin_elevation_max_sq = pow2(instance.radius()) / dot(to_center,to_center);
+				const float cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
+				area_measure = false;
+				return 1/(2 * M_PI * (1 - cos_elevation_max));
+			}
+			break;
+
+		default:
+		case INSTANCE_TYPE_VOLUME:
+			area_measure = false;
+			return 1;
 	}
 }
 

@@ -1,10 +1,9 @@
 #pragma once
 
-#include <Common/Profiler.hpp>
-
 #include "Fence.hpp"
 #include "RenderPass.hpp"
 #include "Pipeline.hpp"
+#include "Profiler.hpp"
 
 namespace stm {
 

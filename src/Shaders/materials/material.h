@@ -59,6 +59,7 @@ struct Material {
 
 interface BSDF {
 	Spectrum Le();
+	bool can_eval();
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
 	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint);
 };

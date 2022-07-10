@@ -17,7 +17,7 @@ struct Reservoir {
 	inline bool update(const float rnd, const float w) {
 		M++;
 		total_weight += w;
-		return rnd*total_weight < w;
+		return rnd*total_weight <= w;
 	}
 };
 

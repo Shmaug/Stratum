@@ -17,9 +17,9 @@ using namespace stm;
 
 Gui::Gui(Node& node) : mNode(node) {
 	auto app = mNode.find_in_ancestor<Application>();
-	app->OnUpdate.listen(mNode, bind_front(&Gui::new_frame, this), EventPriority::eFirst);
-	app->OnUpdate.listen(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), EventPriority::eAlmostLast);
-	app->OnRenderWindow.listen(mNode, [&,app](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, EventPriority::eLast);
+	app->OnUpdate.add_listener(mNode, bind_front(&Gui::new_frame, this), Node::EventPriority::eFirst);
+	app->OnUpdate.add_listener(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), Node::EventPriority::eAlmostLast);
+	app->OnRenderWindow.add_listener(mNode, [&,app](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, Node::EventPriority::eLast);
 
 	mContext = ImGui::CreateContext();
 

@@ -16,21 +16,19 @@ struct LightSampleRecord {
 	float3 normal;
 	uint material_address;
 
-	float3 local_position; // needed for reservoirs
-
 	inline uint instance_index() { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
 	inline bool is_environment() { return instance_index() == INVALID_INSTANCE; }
 };
 
-inline uint sample_light(out float pdf, float rnd) {
+inline uint sample_light(out float pdf, const float rnd) {
 	int li;
 	if (gSampleLightPower) {
 		li = dist1d_sample(gDistributions, gLightDistributionCDF, gLightCount, rnd);
 		pdf = dist1d_pdf(gDistributions, gLightDistributionPDF, li);
 	} else {
 		// pick random light
-		li = min(rnd*gLightCount, gLightCount-1);
+		li = rnd*(gLightCount*.9999);
 		pdf = 1/(float)gLightCount;
 	}
 	return gLightInstances[li];
@@ -47,10 +45,8 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 		ls.dist = POS_INFINITY;
 		ls.pdf_area_measure = false;
 		ls.material_address = gEnvironmentMaterialAddress;
-		ls.local_position = ls.to_light;
 	} else if (gHasEmissives) {
-		const float u = gHasEnvironment ? (rnd.w - gEnvironmentSampleProbability) / (1 - gEnvironmentSampleProbability) : rnd.w;
-		const uint light_instance_index = sample_light(ls.pdf, u);
+		const uint light_instance_index = sample_light(ls.pdf, gHasEnvironment ? (rnd.w - gEnvironmentSampleProbability) / (1 - gEnvironmentSampleProbability) : rnd.w);
 		BF_SET(ls.instance_primitive_index, light_instance_index, 0, 16);
 
 		if (gHasEnvironment) ls.pdf *= 1 - gEnvironmentSampleProbability;
@@ -70,7 +66,6 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 					const float phi = 2 * M_PI * rnd.y;
 					const float3 local_normal = float3(r_ * cos(phi), z, r_ * sin(phi));
 					uv = cartesian_to_spherical_uv(local_normal);
-					ls.local_position = local_normal * r;
 					ls.position = gInstanceTransforms[light_instance_index].transform_point(r * local_normal);
 					uv = cartesian_to_spherical_uv(local_normal);
 					ls.normal = normalize(gInstanceTransforms[light_instance_index].transform_vector(local_normal));
@@ -86,36 +81,40 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 					const float dist = length(to_center);
 					to_center /= dist;
 
-					// These are not exactly "elevation" and "azimuth": elevation here
-					// stands for the extended angle of the cone, and azimuth here stands
-					// for the polar coordinate angle on the substended disk.
-					// I just don't like the theta/phi naming convention...
-					const float sin_elevation_max_sq = r * r / pow2(dist);
-					const float cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
+					// Compute theta and phi values for sample in cone
+					const float sinThetaMax = r / dist;
+					const float sinThetaMax2 = sinThetaMax * sinThetaMax;
+					const float invSinThetaMax = 1 / sinThetaMax;
+					const float cosThetaMax = sqrt(max(0, 1 - sinThetaMax2));
 
-					ls.pdf /= 2 * M_PI * (1 - cos_elevation_max);
+					ls.pdf /= 2 * M_PI * (1 - cosThetaMax);
 					ls.pdf_area_measure = false;
 
-					// Uniformly interpolate between 1 (angle 0) and max
-					const float cos_elevation = (1 - rnd.x) + rnd.x * cos_elevation_max;
-					const float sin_elevation = sqrt(max(0, 1 - cos_elevation * cos_elevation));
-					const float azimuth = rnd.y * 2 * M_PI;
-					const float dc = dist;
-					const float ds = dc * cos_elevation - sqrt(max(0, r * r - dc * dc * sin_elevation * sin_elevation));
-					const float cos_alpha = (dc * dc + r * r - ds * ds) / (2 * dc * r);
-					const float sin_alpha = sqrt(max(0, 1 - cos_alpha * cos_alpha));
+					float cosTheta  = (cosThetaMax - 1) * rnd.x + 1;
+					float sinTheta2 = 1 - cosTheta * cosTheta;
+
+					if (sinThetaMax2 < 0.00068523 /* sin^2(1.5 deg) */) {
+						/* Fall back to a Taylor series expansion for small angles, where
+						the standard approach suffers from severe cancellation errors */
+						sinTheta2 = sinThetaMax2 * rnd.x;
+						cosTheta = sqrt(1 - sinTheta2);
+					}
+
+					// Compute angle alpha from center of sphere to sampled point on surface
+					const float cosAlpha = sinTheta2 * invSinThetaMax + cosTheta * sqrt(max(0, 1 - sinTheta2 * invSinThetaMax * invSinThetaMax));
+					const float sinAlpha = sqrt(max(0, 1 - cosAlpha*cosAlpha));
+					const float phi = rnd.y * 2 * M_PI;
 
 					float3 T, B;
 					make_orthonormal(to_center, T, B);
 
-					ls.normal = (T * sin_alpha * cos(azimuth) + B * sin_alpha * sin(azimuth) - to_center * cos_alpha);
+					ls.normal = -(T * sinAlpha * cos(phi) + B * sinAlpha * sin(phi) + to_center * cosAlpha);
 					ls.position = center + r * ls.normal;
 					ls.to_light = ls.position - ref_pos;
 					ls.dist = length(ls.to_light);
 					ls.to_light /= ls.dist;
 
 					const float3 local_normal = gInstanceInverseTransforms[light_instance_index].transform_vector(ls.normal);
-					ls.local_position = local_normal*r;
 					uv = cartesian_to_spherical_uv(local_normal);
 				}
 
@@ -128,11 +127,11 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 				const float2 bary = float2(1 - a, a*rnd.y);
 
 				ShadingData sd;
-				make_triangle_shading_data_from_barycentrics(sd, instance, gInstanceTransforms[light_instance_index], prim_index, bary, ls.local_position);
+				make_triangle_shading_data(sd, instance, gInstanceTransforms[light_instance_index], prim_index, bary);
 				uv = sd.uv;
 
 				ls.position = sd.position;
-				ls.normal = sd.shading_normal();
+				ls.normal = sd.geometry_normal();
 				ls.to_light = sd.position - ref_pos;
 				ls.dist = length(ls.to_light);
 				ls.to_light /= ls.dist;

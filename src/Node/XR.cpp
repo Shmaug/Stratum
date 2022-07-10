@@ -14,9 +14,9 @@ inline void inspector_gui_fn(XR* xrnode) {
 
 XR::XR(Node& node) : mNode(node), mSwapchainImageUsage(vk::ImageUsageFlagBits::eTransferDst) {
 	auto app = mNode.find_in_ancestor<Application>();
-	app->PreFrame.listen(xrnode.node(), bind_front(&XR::poll_events, xrnode.get()));
-	app->OnUpdate.listen(xrnode.node(), bind(&XR::render, xrnode.get(), std::placeholders::_1), EventPriority::eAlmostLast + 1024);
-	app->PostFrame.listen(xrnode.node(), bind(&XR::present, xrnode.get()));
+	app->PreFrame.add_listener(xrnode.node(), bind_front(&XR::poll_events, xrnode.get()));
+	app->OnUpdate.add_listener(xrnode.node(), bind(&XR::render, xrnode.get(), std::placeholders::_1), Node::EventPriority::eAlmostLast + 1024);
+	app->PostFrame.add_listener(xrnode.node(), bind(&XR::present, xrnode.get()));
 
 	vector<const char*> extensions{ XR_KHR_VULKAN_ENABLE_EXTENSION_NAME };
 	xr::InstanceCreateInfo instanceInfo = {};

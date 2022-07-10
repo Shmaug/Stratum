@@ -46,7 +46,7 @@ void alpha_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
 	gRoughnessRW.GetDimensions(size.x, size.y);
 	if (any(index.xy >= size)) return;
-	gRoughnessRW[index.xy] = sqrt(gInput[index.xy]);
+	gRoughnessRW[index.xy] = saturate(sqrt(gInput[index.xy]));
 }
 
 #ifdef __SLANG__
@@ -57,7 +57,7 @@ void shininess_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
 	gRoughnessRW.GetDimensions(size.x, size.y);
 	if (any(index.xy >= size)) return;
-	gRoughnessRW[index.xy] = sqrt(2 / (gInput[index.xy] + 2));
+	gRoughnessRW[index.xy] = saturate(sqrt(2 / (gInput[index.xy] + 2)));
 }
 
 #ifdef __SLANG__
@@ -68,7 +68,7 @@ void from_gltf_pbr(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
 	gSpecularTransmission.GetDimensions(size.x, size.y);
 	if (any(index.xy >= size)) return;
-	const float4 metallic_roughness = gUseSpecular ? gSpecular[index.xy] : float4(1,1,0,0);
+	const float4 metallic_roughness = gUseSpecular ? gSpecular[index.xy] : float4(1,0.5,0,0);
 	const float occlusion = metallic_roughness.r;
 	const float roughness = metallic_roughness.g;
 	const float metallic = metallic_roughness.b;

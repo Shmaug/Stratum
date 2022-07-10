@@ -6,13 +6,6 @@
 #include "../../materials/environment.h"
 #include "light.hlsli"
 
-Real correct_shading_normal(const Real ndotout, const Real ndotin, const Vector3 dir_out, const Vector3 dir_in, const Vector3 geometry_normal) {
-	Real num = ndotout * dot(dir_in, geometry_normal);
-	Real denom = dot(dir_out, geometry_normal) * ndotin;
-	if (denom == 0) return 0;
-	return abs(num / denom);
-}
-
 // connects a view path to a vertex in its associated light path
 struct LightPathConnection {
 	Spectrum f;
@@ -62,7 +55,7 @@ struct LightPathConnection {
 			} else {
 				Material m;
 				m.load_and_sample(lv1.material_address(), lv2.uv, 0);
-				m.eval(_eval, lv1.local_dir_in(), lv1.to_local(-to_light), true);
+				m.eval(_eval, lv1.local_dir_in(), normalize(lv1.to_local(-to_light)), true);
 			}
 			f *= _eval.f;
 		}
@@ -72,7 +65,7 @@ struct LightPathConnection {
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			local_to_light = to_light;
 		} else {
-			local_to_light = _isect.sd.to_local(to_light);
+			local_to_light = normalize(_isect.sd.to_local(to_light));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
 			origin = ray_offset(origin, local_to_light.z > 0 ? geometry_normal : -geometry_normal);
 			dist -= abs(dist - length(lv0.position - origin));
@@ -144,7 +137,7 @@ struct ViewConnection {
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			local_to_view = to_view;
 		} else {
-			local_to_view = _isect.sd.to_local(to_view);
+			local_to_view = normalize(_isect.sd.to_local(to_view));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
 			origin = ray_offset(origin, local_to_view.z > 0 ? geometry_normal : -geometry_normal);
 		}
@@ -174,11 +167,8 @@ struct NEE {
 	Vector3 local_to_light;
 	Real pdfA;
 	Real G;
-	Real T_dir_pdf;
-	Real T_nee_pdf;
-
-	Vector3 ray_origin;
-	Vector3 ray_direction;
+	Real T_dir_pdf, T_nee_pdf;
+	Vector3 ray_origin, ray_direction;
 	Real dist;
 
 	static Real mis(const Real a, const Real b) {
@@ -195,58 +185,20 @@ struct NEE {
 
 		return mis(pdfWtoA(bsdf_pdf, G), l_pdf);
 	}
-
-	// load shading data, emission, trace visibility ray
-	SLANG_MUTATING
-	void load_sample(inout rng_state_t _rng, const uint cur_medium, const IntersectionVertex _isect, const PointSample rs, const bool check_visibility = true) {
-		ShadingData sd;
-		make_shading_data(sd, rs.instance_index(), rs.primitive_index(), rs.local_position);
-
-		const uint material_address = gInstances[rs.instance_index()].material_address();
-		Material m;
-		m.load_and_sample(material_address, sd.uv, 0);
-		Le = m.emission;
-
-		if (rs.instance_index() == INVALID_INSTANCE) {
-			// environment map
-			ray_direction = sd.position;
-			dist = POS_INFINITY;
-			G = 1;
-		} else {
-			// point on instance
-			ray_direction = sd.position - _isect.sd.position;
-			dist = length(ray_direction);
-			const Real rcp_dist = 1/dist;
-			ray_direction *= rcp_dist;
-			G = pow2(rcp_dist);
-
-			if (!gHasMedia || sd.shape_area > 0) {
-				const Real cos_theta = -dot(ray_direction, sd.geometry_normal());
-				if (cos_theta < 1e-4) { Le = 0; return; }
-				G *= abs(cos_theta);
-			}
-
-			Le *= G;
-		}
-
-		if (gHasMedia && _isect.sd.shape_area == 0) {
-			local_to_light = ray_direction;
-			ray_origin = _isect.sd.position;
-		} else {
-			local_to_light = _isect.sd.to_local(ray_direction);
-			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			ray_origin = ray_offset(_isect.sd.position, local_to_light.z > 0 ? geometry_normal : -geometry_normal);
-		}
+	static Real reservoir_bsdf_mis(const Real a) {
+		if (!gUseNEEMIS) return 0.5;
+		return 1 - 1/pow2(1 + abs(a));
 	}
 
-	// load shading data, emission, trace visibility ray
+	// load shading data and Le
 	SLANG_MUTATING
-	void sample(inout rng_state_t _rng, const IntersectionVertex _isect, out PointSample ps) {
+	void sample(inout rng_state_t _rng, const IntersectionVertex _isect) {
 		LightSampleRecord ls;
 		sample_point_on_light(ls, float4(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng)), _isect.sd.position);
-		ps.local_position = ls.local_position;
-		ps.instance_primitive_index = ls.instance_primitive_index;
 		if (ls.pdf <= 0 || all(ls.radiance <= 0)) { Le = 0; return; }
+
+		dist = ls.dist;
+		ray_direction = ls.to_light;
 
 		if (ls.is_environment())
 			G = 1;
@@ -255,29 +207,34 @@ struct NEE {
 			if (cos_theta < 1e-4) { Le = 0; return; }
 			G = abs(cos_theta) / pow2(ls.dist);
 		}
-		Le = G * ls.radiance;
+		Le = ls.radiance;
 		pdfA = ls.pdf_area_measure ? ls.pdf : pdfWtoA(ls.pdf, G);
 
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			local_to_light = ls.to_light;
 			ray_origin = _isect.sd.position;
 		} else {
-			local_to_light = _isect.sd.to_local(ls.to_light);
+			local_to_light = normalize(_isect.sd.to_local(ls.to_light));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			ray_origin = ray_offset(_isect.sd.position, local_to_light.z > 0 ? geometry_normal : -geometry_normal);
+			ray_origin = ray_offset(_isect.sd.position, dot(geometry_normal, ls.to_light) > 0 ? geometry_normal : -geometry_normal);
 		}
-		ray_direction = ls.to_light;
-		dist = ls.dist;
 		T_dir_pdf = 1;
 		T_nee_pdf = 1;
 	}
 
 	SLANG_MUTATING
-	void check_visibility(inout rng_state_t _rng, const uint cur_medium) {
+	void eval_visibility(inout rng_state_t _rng, const uint cur_medium) {
 		if (any(Le > 0)) {
 			trace_visibility_ray(_rng, ray_origin, ray_direction, dist, cur_medium, Le, T_dir_pdf, T_nee_pdf);
 			if (T_nee_pdf > 0) Le /= T_nee_pdf;
 		}
+	}
+
+	// use if eval is called before eval_visibility
+	SLANG_MUTATING
+	void eval_visibility(inout rng_state_t _rng, const uint cur_medium, inout Spectrum contrib) {
+		trace_visibility_ray(_rng, ray_origin, ray_direction, dist, cur_medium, contrib, T_dir_pdf, T_nee_pdf);
+		if (T_nee_pdf > 0) contrib /= T_nee_pdf;
 	}
 
 	// returns full contribution (C*G*f/pdf) and pdf used for MIS
@@ -285,7 +242,7 @@ struct NEE {
 		MaterialEvalRecord _eval;
 		m.eval(_eval, local_dir_in, local_to_light, false);
 		bsdf_pdf = _eval.pdf_fwd;
-		return Le * _eval.f;
+		return Le * _eval.f * G * abs(local_to_light.z);
 	}
 };
 
@@ -294,20 +251,19 @@ struct PathIntegrator {
 	uint path_index;
 	uint path_length;
 	Spectrum _beta;
-	Real _pdf_fwd;
-	Real _pdf_rev;
+	Real bsdf_pdf;
 
 	rng_state_t _rng;
 
-	Vector3 origin;
-	Vector3 direction;
-
+	// the ray that was traced to get here
+	// also the ray traced by trace()
+	Vector3 origin, direction;
 	IntersectionVertex _isect;
+	Vector3 local_position;
 	uint _medium;
-	Vector3 local_dir_in;
-	Real G;
+	Vector3 local_dir_in; // _isect.sd.to_local(-direction)
+	Real G; // abs(dot(direction, _isect.sd.geometry_normal())) / dist2(_isect.sd.position, origin)
 	Real T_nee_pdf;
-	MaterialSampleRecord _material_sample;
 
 	SLANG_MUTATING
 	void init_rng() {
@@ -319,66 +275,16 @@ struct PathIntegrator {
 			if (gConnectToLightPaths || gConnectToViews)
 				return LightPathConnection::path_weight(path_length);
 			if (gUseNEE) {
-				if (gReservoirNEE && path_length == 3)
-					return 0.5; // average reservoir nee with bsdf sampling
+				if (gReservoirNEE)
+					return NEE::reservoir_bsdf_mis(pdfWtoA(bsdf_pdf, G));
 				else
-					return NEE::bsdf_mis(_pdf_fwd, T_nee_pdf, _isect, G);
+					return NEE::bsdf_mis(bsdf_pdf, T_nee_pdf, _isect, G);
 			}
 		}
 		return 1;
 	}
 
-	// expects _medium, origin and direction to bet set
-	// sets local_dir_in, G and T_nee_pdf. increments path_length
-	// adds radiance contribution from environment
-	SLANG_MUTATING
-	void trace() {
-		_rng = rng_init(pixel_coord, gLightTraceRNGOffset + path_length*gRNGsPerVertex);
-
-		Real T_dir_pdf = 1;
-		T_nee_pdf = 1;
-		trace_ray(_rng, origin, direction, _medium, _beta, T_dir_pdf, T_nee_pdf, _isect);
-		if (T_dir_pdf <= 0 || all(_beta <= 0)) { _beta = 0; return; }
-		_beta /= T_dir_pdf;
-		_pdf_fwd *= T_dir_pdf;
-
-		path_length++;
-
-		// handle miss
-		if (_isect.instance_index() == INVALID_INSTANCE) {
-			if (!gTraceLight && gHasEnvironment) {
-				Environment env;
-				env.load(gEnvironmentMaterialAddress);
-				const Real weight = path_weight();
-				const Spectrum contrib = _beta * env.eval(direction);
-				gRadiance[pixel_coord].rgb += contrib * weight;
-				if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 0 && path_length == gPushConstants.gDebugViewPathLength)
-					gDebugImage[pixel_coord.xy].rgb += contrib;
-			}
-			_beta = 0;
-			return;
-		}
-
-		const Vector3 dp = _isect.sd.position - origin;
-		const Real dist2 = dot(dp, dp);
-		G = 1/dist2;
-
-		// compute ray differential
-		if (gSpecializationFlags & BDPT_FLAG_RAY_CONES) {
-			RayDifferential ray_differential = gRayDifferentials[path_index];
-			ray_differential.transfer(sqrt(dist2));
-			_isect.sd.uv_screen_size *= ray_differential.radius;
-			gRayDifferentials[path_index] = ray_differential;
-		}
-
-		if (!gHasMedia || _isect.sd.shape_area > 0) {
-			local_dir_in = _isect.sd.to_local(-direction);
-			G *= abs(dot(direction, _isect.sd.geometry_normal()));
-		} else
-			local_dir_in = -direction;
-	}
-
-	// to be called after trace(). sets _material_sample
+	// to be called after trace()
 	void store_light_vertex(const uint material_address) {
 		uint flags = 0;
 		if (gHasMedia && _isect.sd.shape_area == 0) flags |= PATH_VERTEX_FLAG_IS_MEDIUM;
@@ -394,14 +300,40 @@ struct PathIntegrator {
 		gLightPathVertices1[i].packed_tangent = _isect.sd.packed_tangent;
 		gLightPathVertices2[i].uv = _isect.sd.uv;
 		gLightPathVertices2[i].pack_beta(_beta);
-		gLightPathVertices3[i].pdf_fwd = _pdf_fwd;
-		gLightPathVertices3[i].pdf_rev = _pdf_rev;
+		//gLightPathVertices3[i].pdf_fwd = _pdf_fwd;
+		//gLightPathVertices3[i].pdf_rev = _pdf_rev;
+	}
+
+	void eval_emission(BSDF m) {
+		if (!gTraceLight) {
+			if (_isect.instance_index() == INVALID_INSTANCE) {
+				// background hit
+				if (gHasEnvironment) {
+					Environment env;
+					env.load(gEnvironmentMaterialAddress);
+					const Real weight = path_weight();
+					const Spectrum contrib = _beta * env.eval(direction);
+					gRadiance[pixel_coord].rgb += contrib * weight;
+					if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 0 && path_length == gPushConstants.gDebugViewPathLength)
+						gDebugImage[pixel_coord.xy].rgb += contrib;
+				}
+			} else if (dot(_isect.sd.geometry_normal(), -direction) > 0) {
+				const Spectrum Le = m.Le();
+				if (any(Le > 0)) {
+					const Real weight = path_weight();
+					const Spectrum contrib = _beta * Le;
+					gRadiance[pixel_coord].rgb += contrib * weight;
+					if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 0 && path_length == gPushConstants.gDebugViewPathLength)
+						gDebugImage[pixel_coord.xy].rgb += contrib;
+				}
+			}
+		}
 	}
 
 	// NEE, BDPT, and light tracing connection strategies
 	SLANG_MUTATING
 	void sample_connections(BSDF m) {
-		if (path_length+1 > gMaxPathVertices) return;
+		if (path_length >= gMaxPathVertices || !m.can_eval()) return;
 
 		if (gTraceLight) {
 			// add light trace contribution
@@ -414,117 +346,138 @@ struct PathIntegrator {
 			// add nee contribution
 			if (gUseNEE) {
 				NEE c;
+				Spectrum contrib;
+
 				// pick a point on a light
-				const bool use_reservoir = gReservoirNEE && path_length == 2;
-				if (!use_reservoir) {
-					PointSample s;
-					c.sample(_rng, _isect, s);
-					c.Le /= c.pdfA;
-					c.check_visibility(_rng, _medium);
-				} else {
+				if (gReservoirNEE) {
 					Reservoir r;
-					PointSample rs;
-					Real rs_target_pdf;
+					rng_state_t rs;
+					Real rs_target_pdf = 0;
+					Real bsdf_pdf;
 					r.init();
 
 					// paths are divided into gReservoirPresampleTileSize tiles
 					const uint tile_offset = ((path_index/gReservoirPresampleTileSize) % gReservoirPresampleTileCount)*gReservoirPresampleTileSize;
 					for (uint i = 0; i < gNEEReservoirSamples; i++) {
 						NEE _c;
-						PointSample _s;
+						rng_state_t _s;
+
 						if (gPresampleReservoirNEE) {
-							// uniformly sample the tile for this path
+							// uniformly sample from the tile
 							const uint ti = rng_next_uint(_rng) % gReservoirPresampleTileSize;
+							_s = rng_init(-1, tile_offset + ti);
 							const PresampledLightPoint ls = gPresampledLights[tile_offset + ti];
-							_s = ls.rs;
-							_c.local_to_light = ls.local_to_light;
-							_c.Le = ls.contribution();
-							_c.pdfA = ls.pdfA();
-						} else
-							_c.sample(_rng, _isect, _s);
+							_c.Le = ls.Le;
+							_c.pdfA = ls.pdfA;
+							_c.ray_direction = ls.position - _isect.sd.position;
+							const Real dist2 = dot(_c.ray_direction, _c.ray_direction);
+							_c.G = 1/dist2;
+							_c.dist = sqrt(dist2);
+							_c.ray_direction /= _c.dist;
+							if (gHasMedia && _isect.sd.shape_area <= 0) {
+								_c.local_to_light = _c.ray_direction;
+								_c.ray_origin = _isect.sd.position;
+							} else {
+								_c.local_to_light = normalize(_isect.sd.to_local(_c.ray_direction));
+								const Vector3 geometry_normal = _isect.sd.geometry_normal();
+								const Real cos_theta = dot(_c.ray_direction, geometry_normal);
+								_c.G *= abs(cos_theta);
+								_c.ray_origin = ray_offset(_isect.sd.position, cos_theta > 0 ? geometry_normal : -geometry_normal);
+							}
+							_c.T_dir_pdf = 1;
+							_c.T_nee_pdf = 1;
+						} else {
+							_s = _rng;
+							_c.sample(_rng, _isect);
+						}
 
 						if (_c.pdfA <= 0) continue;
-						if (_s.instance_primitive_index == _isect.instance_primitive_index) continue;
 
 						// evaluate the material
-						Real bsdf_pdf;
-						const Real target_pdf = luminance(_c.eval(m, local_dir_in, bsdf_pdf));
-						if (target_pdf <= 0) continue;
+						Real _bsdf_pdf;
+						const Spectrum _contrib = _c.eval(m, local_dir_in, _bsdf_pdf);
+						const Real target_pdf = luminance(_contrib);
 
 						if (r.update(rng_next_float(_rng), target_pdf/_c.pdfA)) {
+							bsdf_pdf = pdfWtoA(_bsdf_pdf, _c.G);
 							c = _c;
 							rs = _s;
 							rs_target_pdf = target_pdf;
+							contrib = _contrib;
 						}
 					}
 					if (rs_target_pdf > 0)
 						r.W = r.total_weight / (r.M * rs_target_pdf);
-					else
-						r.W = 0;
 
-					if (r.W > 0) c.check_visibility(_rng, _medium);
-					if (all(c.Le <= 0)) r.W = 0;
+					if (r.W > 0) c.eval_visibility(_rng, _medium, contrib);
+					if (all(contrib <= 0)) { r.total_weight = 0; r.W = 0; }
 
-					// store reservoir for reuse
-					gReservoirs[path_index] = r;
-					gReservoirSamples[path_index] = rs;
-
-					// reservoir reuse
-					if (gReservoirTemporalReuse) {
-						const Reservoir prev = gPrevReservoirs[path_index];
-						if (prev.W > 0) {
-							const PointSample prev_rs = gPrevReservoirSamples[path_index];
-							NEE prev_c;
-							prev_c.load_sample(_rng, _medium, _isect, prev_rs);
-
-							if (any(prev_c.Le > 0)) {
+					if (path_length == 2) {
+						// reservoir reuse
+						if (gReservoirTemporalReuse) {
+							const Reservoir prev = gPrevReservoirs[path_index];
+							if (prev.M > 0) {
+								const rng_state_t prev_rs = gPrevReservoirSamples[path_index];
+								rng_state_t tmp_rng = prev_rs;
+								NEE prev_c;
+								prev_c.sample(tmp_rng, _isect);
 								// merge with previous reservoir
-								Reservoir temporal;
-								temporal.init();
-								temporal.update(rng_next_float(_rng), r.total_weight);
-								Real bsdf_pdf;
-								const Real prev_target_pdf = luminance(prev_c.eval(m, local_dir_in, bsdf_pdf));
-								if (temporal.update(rng_next_float(_rng), prev_target_pdf * prev.W * prev.M)) {
+								Real _bsdf_pdf;
+								const Spectrum prev_contrib = prev_c.eval(m, local_dir_in, _bsdf_pdf);
+								const Real prev_target_pdf = luminance(prev_contrib);
+								const uint merged_M = r.M + prev.M;
+								if (r.update(rng_next_float(_rng), prev_target_pdf * prev.W * prev.M)) {
+									bsdf_pdf = pdfWtoA(_bsdf_pdf, prev_c.G);
 									c = prev_c;
 									rs = prev_rs;
 									rs_target_pdf = prev_target_pdf;
+									contrib = prev_contrib;
 								}
-								temporal.M = min(gReservoirMaxM, r.M + prev.M);
-								temporal.W = temporal.total_weight / (temporal.M * rs_target_pdf);
-								r = temporal;
+								r.W = r.total_weight / (merged_M * rs_target_pdf);
+								r.M = min(gReservoirMaxM, merged_M);
 							}
 						}
+
+						// store reservoir for reuse
+						gReservoirs[path_index] = r;
+						gReservoirSamples[path_index] = rs;
 					}
 
-					// apply reservoir weight
-					c.Le *= r.W;
-					if ((DebugMode)gDebugMode == DebugMode::eReservoirWeight)
-						gDebugImage[pixel_coord].rgb += r.W;
-				}
+					if (r.W > 1e-6) {
+						// average nee and bsdf sampling
+						Real weight = gSampleBSDFs ? (1 - NEE::reservoir_bsdf_mis(bsdf_pdf)) : 1;
 
-				// evaluate material
-				if (any(c.Le > 0)) {
-					Real bsdf_pdf;
-					const Spectrum contrib = c.eval(m, local_dir_in, bsdf_pdf) * _beta;
+						// bdpt weight overrides nee/bsdf mis weight
+						if (gConnectToLightPaths || gConnectToViews) weight = LightPathConnection::path_weight(path_length + 1);
 
-					// mis between nee and bsdf sampling
-					Real weight;
-					if (!gSampleBSDFs)
-						weight = 1; // only direct light
-					else {
-						if (use_reservoir)
-							weight = 0.5; // average reservoir nee with bsdf sampling
-						else
-							weight = NEE::mis(c.pdfA, pdfWtoA(c.T_dir_pdf*bsdf_pdf, c.G));
+						contrib *= r.W;
+
+						gRadiance[pixel_coord].rgb += contrib * _beta * weight;
+
+						if ((DebugMode)gDebugMode == DebugMode::eReservoirWeight)
+							gDebugImage[pixel_coord].rgb += r.W;
 					}
+				} else {
+					c.sample(_rng, _isect);
+					c.eval_visibility(_rng, _medium);
+					if (any(c.Le > 0) && c.pdfA > 1e-6) {
+						Real bsdf_pdf;
+						contrib = c.eval(m, local_dir_in, bsdf_pdf);
 
-					// bdpt weight overrides nee/bsdf mis weight
-					if (gConnectToLightPaths || gConnectToViews) weight = LightPathConnection::path_weight(path_length + 1);
+						// mis between nee and bsdf sampling
+						Real weight = gSampleBSDFs ? NEE::mis(c.pdfA, pdfWtoA(c.T_dir_pdf*bsdf_pdf, c.G)) : 1;
 
-					gRadiance[pixel_coord].rgb += contrib * weight;
-					if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
-						gDebugImage[pixel_coord].rgb += contrib;
+						// bdpt weight overrides nee/bsdf mis weight
+						if (gConnectToLightPaths || gConnectToViews) weight = LightPathConnection::path_weight(path_length + 1);
+
+						contrib /= c.pdfA;
+
+						gRadiance[pixel_coord].rgb += contrib * _beta * weight;
+					}
 				}
+
+				if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
+					gDebugImage[pixel_coord].rgb += contrib * _beta;
 			}
 
 			// add bdpt contribution
@@ -551,56 +504,112 @@ struct PathIntegrator {
 		}
 	}
 
-	// sample next direction, compute _beta *= f/pdf
+	// sample next direction, compute _beta *= f/pdf, update origin and direction
 	SLANG_MUTATING
 	void sample_next_direction(BSDF m) {
 		const Vector3 rnd = Vector3(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng));
+		MaterialSampleRecord _material_sample;
 		m.sample(_material_sample, rnd, local_dir_in, _beta, gTraceLight);
+
+		bsdf_pdf = _material_sample.pdf_fwd;
+
+		if (_material_sample.pdf_fwd < 1e-6) {
+			_beta = 0;
+			return;
+		}
 
 		if (!gHasMedia || _isect.sd.shape_area > 0) {
 			const Real ndotout = _material_sample.dir_out.z;
 
+			_beta *= abs(ndotout);
+
+			_material_sample.dir_out = normalize(_isect.sd.to_world(_material_sample.dir_out));
+
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
+			const Real ngdotout = dot(geometry_normal, _material_sample.dir_out);
+			origin = ray_offset(_isect.sd.position, ngdotout > 0 ? geometry_normal : -geometry_normal);
 
-			_isect.sd.position = ray_offset(_isect.sd.position, ndotout > 0 ? geometry_normal : -geometry_normal);
+			// shading normal correction
+			if (gTraceLight) {
+				const Real num = ndotout * dot(geometry_normal, -direction);
+				const Real denom = ngdotout * local_dir_in.z;
+				if (abs(denom) > 1e-5) _beta *= abs(num / denom);
+			}
+		} else
+			origin = _isect.sd.position;
 
-			_material_sample.dir_out = _isect.sd.to_world(_material_sample.dir_out);
+		direction = _material_sample.dir_out;
 
-			if (gTraceLight) _beta *= correct_shading_normal(ndotout, local_dir_in.z, _material_sample.dir_out, -direction, geometry_normal);
-		}
+		if ((DebugMode)gDebugMode == DebugMode::eDirOut) gDebugImage[pixel_coord] = float4(direction*.5+.5, 1);
 	}
 
 	// add radiance contribution from surface, sample NEE/BDPT connections, do russian roullette sample next direction
 	SLANG_MUTATING
 	void advance(BSDF m) {
-		// add emission from surface
-		const Spectrum Le = m.Le();
-		if (!gTraceLight && local_dir_in.z > 0 && any(Le > 0)) {
-			const Real weight = path_weight();
-			const Spectrum contrib = _beta * Le;
-			gRadiance[pixel_coord].rgb += contrib * weight;
-			if ((DebugMode)gDebugMode == DebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 0 && path_length == gPushConstants.gDebugViewPathLength)
-				gDebugImage[pixel_coord.xy].rgb += contrib;
-		}
-
-		sample_connections(m);
+		if (path_length > 2)
+			eval_emission(m);
 
 		// no bounce on final vertex
 		if (path_length >= (gTraceLight ? gMaxLightPathVertices : gMaxPathVertices)) { _beta = 0; return; }
+
+		sample_connections(m);
 
 		if (!gSampleBSDFs) { _beta = 0; return; }
 
 		// russian roullette
 		if (path_length >= gMinPathVertices) {
 			const Real p = min(luminance(_beta), 0.95);
-			if (rng_next_float(_rng) > p)
+			if (rng_next_float(_rng) > p) {
 				_beta = 0;
-			else
+				return;
+			} else
 				_beta /= p;
 		}
 
 		sample_next_direction(m);
 	}
+
+	// expects _medium, origin and direction to bet set
+	// sets local_dir_in, G and T_nee_pdf. increments path_length
+	SLANG_MUTATING
+	void trace() {
+		Real T_dir_pdf = 1;
+		T_nee_pdf = 1;
+		trace_ray(_rng, origin, direction, _medium, _beta, T_dir_pdf, T_nee_pdf, _isect, local_position);
+		if (T_dir_pdf <= 0 || all(_beta <= 0)) { _beta = 0; return; }
+		_beta /= T_dir_pdf;
+		bsdf_pdf *= T_dir_pdf;
+
+		path_length++;
+
+		// handle miss
+		if (_isect.instance_index() == INVALID_INSTANCE) {
+			G = 1;
+			local_dir_in = direction;
+			if (gSpecializationFlags & BDPT_FLAG_RAY_CONES)
+				_isect.sd.uv_screen_size *= gRayDifferentials[path_index].radius;
+			return;
+		}
+
+		const Vector3 dp = _isect.sd.position - origin;
+		const Real dist2 = dot(dp, dp);
+		G = 1/dist2;
+
+		// update ray differential
+		if (gSpecializationFlags & BDPT_FLAG_RAY_CONES) {
+			RayDifferential ray_differential = gRayDifferentials[path_index];
+			ray_differential.transfer(sqrt(dist2));
+			_isect.sd.uv_screen_size *= ray_differential.radius;
+			gRayDifferentials[path_index] = ray_differential;
+		}
+
+		if (!gHasMedia || _isect.sd.shape_area > 0) {
+			local_dir_in = normalize(_isect.sd.to_local(-direction));
+			G *= abs(dot(direction, _isect.sd.geometry_normal()));
+		} else
+			local_dir_in = direction;
+	}
+
 };
 
 #endif

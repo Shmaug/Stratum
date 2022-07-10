@@ -90,6 +90,7 @@ struct Medium : BSDF {
 	}
 
 	inline Spectrum Le() { return 0; }
+	inline bool can_eval() { return true; }
 
 	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);

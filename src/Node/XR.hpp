@@ -41,7 +41,7 @@ public:
   STRATUM_API void render(CommandBuffer& commandBuffer);
   STRATUM_API void present();
 
-  NodeEvent<CommandBuffer&> OnRender;
+  Node::Event<CommandBuffer&> OnRender;
 
 private:
   STRATUM_API void create_views();

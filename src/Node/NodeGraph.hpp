@@ -8,14 +8,7 @@ class Node;
 class NodeGraph;
 template<typename T> class component_ptr;
 
-enum EventPriority : uint32_t {
-	eFirst       = 0,
-	eAlmostFirst = 0x3FFFFFFF,
-	eDefault     = 0x7FFFFFFF,
-	eAlmostLast  = 0xBFFFFFFD,
-	eLast        = 0xFFFFFFFF
-};
-
+// stores a component and the node it belongs to
 template<typename T>
 class component_ptr {
 public:
@@ -52,6 +45,7 @@ private:
 	T* mComponent = nullptr;
 };
 
+// stores nodes, components, and node relationships
 class NodeGraph {
 public:
 	inline bool empty() const { return mNodes.empty(); }
@@ -90,6 +84,7 @@ public:
 private:
 	friend class Node;
 
+	// stores components of one type, and the destructor for that type
 	class component_map {
 	private:
 		void(*mDestructor)(const void*);
@@ -117,55 +112,65 @@ private:
 			}
 		}
 	};
-	
+
 	unordered_map<const Node*, unique_ptr<Node>> mNodes;
 	unordered_map<type_index, component_map> mComponentMap;
 	unordered_multimap<const Node*, Node*> mEdges;
 };
 
-template<typename... Args>
-class NodeEvent {
-public:
-	using function_t = function<void(Args...)>;
-
-	NodeEvent() = default;
-	NodeEvent(NodeEvent&&) = default;
-	NodeEvent& operator=(NodeEvent&&) = default;
-	
-	NodeEvent(const NodeEvent&) = delete;
-	NodeEvent& operator=(const NodeEvent&) = delete;
-
-	inline void clear() { mListeners.clear(); }
-	inline bool empty() const { return mListeners.empty(); }
-	inline size_t count(const Node& node) const { return mListeners.count(&node); }
-	
-	void listen(const Node& node, function_t&& fn, uint32_t priority = EventPriority::eDefault);
-	inline void erase(const Node& node) {
-		for (auto it = mListeners.begin(); it != mListeners.end();)
-			if (get<const Node*>(*it) == &node)
-				it = mListeners.erase(it);
-			else
-				++it;
-	}
-
-	inline void operator()(Args... args) const {
-		vector<tuple<const Node*, function_t, uint32_t>> tmp(mListeners.size());
-		ranges::copy(mListeners, tmp.begin());
-		for (const auto&[n, fn, p] : tmp)
-			if (mNodeGraph->contains(n))
-				invoke(fn, forward<Args>(args)...);
-	}
-
-private:
-	const NodeGraph* mNodeGraph = nullptr;
-	vector<tuple<const Node*, function_t, uint32_t>> mListeners;
-};
-
+// Stores a name, parent pointer, and a list of component types
+// components and child pointers are stored in NodeGraph
 class Node {
 public:
-	NodeEvent<>      OnParentChanged;
-	NodeEvent<Node&> OnChildAdded;
-	NodeEvent<Node&> OnChildRemoving;
+	enum EventPriority : uint32_t {
+		eFirst       = 0,
+		eAlmostFirst = 0x3FFFFFFF,
+		eDefault     = 0x7FFFFFFF,
+		eAlmostLast  = 0xBFFFFFFD,
+		eLast        = 0xFFFFFFFF
+	};
+
+	template<typename... Args>
+	class Event {
+	public:
+		using function_t = function<void(Args...)>;
+
+		Event() = default;
+		Event(Event&&) = default;
+		Event& operator=(Event&&) = default;
+
+		Event(const Event&) = delete;
+		Event& operator=(const Event&) = delete;
+
+		inline void clear() { mListeners.clear(); }
+		inline bool empty() const { return mListeners.empty(); }
+		inline size_t count(const Node& node) const { return mListeners.count(&node); }
+
+		void add_listener(const Node& node, function_t&& fn, uint32_t priority = EventPriority::eDefault);
+		inline void erase(const Node& node) {
+			for (auto it = mListeners.begin(); it != mListeners.end();)
+				if (get<const Node*>(*it) == &node)
+					it = mListeners.erase(it);
+				else
+					++it;
+		}
+
+		inline void operator()(Args... args) const {
+			vector<tuple<const Node*, function_t, uint32_t>> tmp(mListeners.size());
+			ranges::copy(mListeners, tmp.begin());
+			for (const auto&[n, fn, p] : tmp)
+				if (mNodeGraph->contains(n))
+					invoke(fn, forward<Args>(args)...);
+		}
+
+	private:
+		const NodeGraph* mNodeGraph = nullptr;
+		vector<tuple<const Node*, function_t, uint32_t>> mListeners;
+	};
+
+	Event<>      OnParentChanged;
+	Event<Node&> OnChildAdded;
+	Event<Node&> OnChildRemoving;
 
 	Node() = delete;
 	Node(const Node&) = delete;
@@ -194,7 +199,7 @@ public:
 		n.set_parent(*this);
 		return n;
 	}
-	
+
 	template<typename T, typename... Args> requires(constructible_from<T, Args...>)
 	inline component_ptr<T> make_component(Args&&... args) {
 		if (mComponents.count(typeid(T))) throw logic_error("Cannot make multiple components of the same type within the same node");
@@ -288,7 +293,7 @@ public:
 		while (!q.empty()) {
 			const Node* n = q.front();
 			q.pop();
-			void* ptr = cmap_it->second.find(n); 
+			void* ptr = cmap_it->second.find(n);
 			if (ptr != nullptr) {
 				component_ptr p(n, reinterpret_cast<T*>(ptr));
 				fn(p);
@@ -308,7 +313,7 @@ private:
 };
 
 template<typename... Args>
-inline void NodeEvent<Args...>::listen(const Node& listener, function_t&& fn, uint32_t priority) {
+inline void Node::Event<Args...>::add_listener(const Node& listener, function_t&& fn, uint32_t priority) {
 	mListeners.emplace_back(&listener, forward<function_t>(fn), priority);
 	ranges::stable_sort(mListeners, {}, [](const auto& a) { return get<uint32_t>(a); });
 	if (!mNodeGraph) mNodeGraph = &listener.node_graph();

@@ -79,25 +79,18 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			Material& material = *materials.emplace_back(materials_node.make_child(m->GetName().C_Str()).make_component<Material>());
 
 			ImageValue3 diffuse = make_image_value3({}, float3::Ones());
-			ImageValue4 specular = make_image_value4({}, float4::Ones());
-			ImageValue1 roughness = make_image_value1({}, 1);
+			ImageValue4 specular = make_image_value4({}, interpret_as_pbr ? float4(1,.5f,0,0) : float4::Ones());
 			ImageValue3 transmittance = make_image_value3({}, float3::Zero());
 			ImageValue3 emission = make_image_value3({}, float3::Zero());
 			float eta = 1.45f;
 
             aiColor3D tmp_color;
-            if (m->Get(AI_MATKEY_COLOR_EMISSIVE, tmp_color) == AI_SUCCESS) emission.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
             if (m->Get(AI_MATKEY_COLOR_DIFFUSE, tmp_color) == AI_SUCCESS) diffuse.value  = float3(tmp_color.r, tmp_color.g, tmp_color.b);
             if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float4(tmp_color.r, tmp_color.g, tmp_color.b, 1);
-			if (m->Get(AI_MATKEY_SHININESS, roughness.value) == AI_SUCCESS) roughness.value = roughness.value;
             if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, tmp_color) == AI_SUCCESS) transmittance.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+            if (m->Get(AI_MATKEY_COLOR_EMISSIVE, tmp_color) == AI_SUCCESS) emission.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
 			m->Get(AI_MATKEY_REFRACTI, eta);
 
-			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
-				aiString aiPath;
-				m->GetTexture(aiTextureType_EMISSIVE, 0, &aiPath);
-				material.emission = make_image_value3(get_image(aiPath.C_Str(), true), float3::Ones());
-			}
 			if (m->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
 				aiString aiPath;
 				m->GetTexture(aiTextureType_DIFFUSE, 0, &aiPath);
@@ -108,10 +101,10 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 				m->GetTexture(aiTextureType_SPECULAR, 0, &aiPath);
 				specular.image = get_image(aiPath.C_Str(), true);
 			}
-			if (m->GetTextureCount(aiTextureType_SHININESS) > 0) {
+			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
 				aiString aiPath;
-				m->GetTexture(aiTextureType_SHININESS, 0, &aiPath);
-				roughness.image = get_image(aiPath.C_Str(), true);
+				m->GetTexture(aiTextureType_EMISSIVE, 0, &aiPath);
+				material.emission = make_image_value3(get_image(aiPath.C_Str(), true), float3::Ones());
 			}
 
 			if (interpret_as_pbr)
@@ -131,26 +124,70 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 
 		cout << "Loading meshes...";
 
-		Node& meshes_node = root.make_child("meshes");
-		for (int i = 0; i < scene->mNumMeshes; i++) {
-			cout << "\rLoading meshes " << (i+1) << "/" << scene->mNumMeshes << "     ";
+		vector<Buffer::View<float3>> positions_tmp(scene->mNumMeshes);
+		vector<Buffer::View<float3>> normals_tmp(scene->mNumMeshes);
+		vector<Buffer::View<float2>> uvs_tmp(scene->mNumMeshes);
+		vector<Buffer::View<uint32_t>> indices_tmp(scene->mNumMeshes);
+		vector<float> areas(scene->mNumMeshes);
 
-			aiMesh* m = scene->mMeshes[i];
-			Node& mesh_node = meshes_node.make_child(m->mName.C_Str());
+		for (int i = 0; i < scene->mNumMeshes; i++) {
+			cout << "\rCreating vertex buffers " << (i+1) << "/" << scene->mNumMeshes;
+
+			const aiMesh* m = scene->mMeshes[i];
 
 			if (!(m->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) || (m->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
 				continue;
 
-			Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp vertices", m->mNumVertices*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-			Buffer::View<float3> normals_tmp   = make_shared<Buffer>(commandBuffer.mDevice, "tmp normals" , m->mNumVertices*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-			Buffer::View<uint32_t> indices_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp indices" , m->mNumFaces*3*sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-			for (int vi = 0; vi < m->mNumVertices; vi++) {
-				positions_tmp[vi] = float3(m->mVertices[vi].x, m->mVertices[vi].y, m->mVertices[vi].z);
-				normals_tmp[vi] = float3(m->mNormals[vi].x, m->mNormals[vi].y, m->mNormals[vi].z);
+			positions_tmp[i] = make_shared<Buffer>(commandBuffer.mDevice, "tmp vertices", m->mNumVertices*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+			normals_tmp[i] = make_shared<Buffer>(commandBuffer.mDevice, "tmp normals" , m->mNumVertices*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+			indices_tmp[i] = make_shared<Buffer>(commandBuffer.mDevice, "tmp indices" , m->mNumFaces*3*sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+			if (m->GetNumUVChannels() >= 1)
+				uvs_tmp[i] = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", m->mNumVertices*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		}
+		cout << endl;
+
+		auto copy_vertices_fn = [&](uint32_t i) {
+			const aiMesh* m = scene->mMeshes[i];
+			if (!(m->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) || (m->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
+				return;
+
+			for (int vi = 0; vi < m->mNumVertices; vi++)
+				positions_tmp[i][vi] = float3((float)m->mVertices[vi].x, (float)m->mVertices[vi].y, (float)m->mVertices[vi].z);
+			for (int vi = 0; vi < m->mNumVertices; vi++)
+				normals_tmp[i][vi] = float3((float)m->mNormals[vi].x, (float)m->mNormals[vi].y, (float)m->mNormals[vi].z);
+			if (m->GetNumUVChannels() >= 1)
+				for (int vi = 0; vi < m->mNumVertices; vi++)
+					uvs_tmp[i][vi] = float2(m->mTextureCoords[0][vi].x, m->mTextureCoords[0][vi].y);
+
+			areas[i] = 0;
+			for (int fi = 0; fi < m->mNumFaces; fi++) {
+				const uint32_t idx = fi*3;
+				indices_tmp[i][idx+0] = m->mFaces[fi].mIndices[0];
+				indices_tmp[i][idx+1] = m->mFaces[fi].mIndices[1];
+				indices_tmp[i][idx+2] = m->mFaces[fi].mIndices[2];
+				const float3 v0 = positions_tmp[i][m->mFaces[fi].mIndices[0]];
+				const float3 v1 = positions_tmp[i][m->mFaces[fi].mIndices[1]];
+				const float3 v2 = positions_tmp[i][m->mFaces[fi].mIndices[2]];
+				areas[i] += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
 			}
-			for (int fi = 0; fi < m->mNumFaces; fi++)
-				for (int j = 0; j < 3; j++)
-					indices_tmp[fi*3 + j] = m->mFaces[fi].mIndices[j];
+		};
+
+		vector<thread> threads;
+		threads.reserve(scene->mNumMeshes);
+		for (uint32_t i = 0; i < scene->mNumMeshes; i++)
+			threads.push_back(thread(bind(copy_vertices_fn, i)));
+		cout << "Copying vertex data...";
+		for (thread& t : threads) if (t.joinable()) t.join();
+		cout << endl;
+
+		Node& meshes_node = root.make_child("meshes");
+		for (int i = 0; i < scene->mNumMeshes; i++) {
+			cout << "\rCreating meshes " << (i+1) << "/" << scene->mNumMeshes;
+
+			const aiMesh* m = scene->mMeshes[i];
+
+			if (!(m->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) || (m->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
+				continue;
 
 			vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer;
 			#ifdef VK_KHR_buffer_device_address
@@ -161,35 +198,26 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			auto vao = make_shared<VertexArrayObject>(unordered_map<VertexArrayObject::AttributeType, vector<VertexArrayObject::Attribute>>{
 				{ VertexArrayObject::AttributeType::ePosition, { {
 					VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex },
-					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " vertices", positions_tmp.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY) } } },
+					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " vertices", positions_tmp[i].size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY) } } },
 				{ VertexArrayObject::AttributeType::eNormal, { {
 					VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex },
-					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " normals", normals_tmp.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY) } } },
+					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " normals", normals_tmp[i].size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY) } } },
 			});
 
-			Buffer::View<uint32_t> indexBuffer = make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " indices", indices_tmp.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			commandBuffer.copy_buffer(positions_tmp, vao->at(VertexArrayObject::AttributeType::ePosition)[0].second);
-			commandBuffer.copy_buffer(normals_tmp, vao->at(VertexArrayObject::AttributeType::eNormal)[0].second);
-			commandBuffer.copy_buffer(indices_tmp, indexBuffer);
+			Buffer::View<uint32_t> indexBuffer = make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " indices", indices_tmp[i].size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			commandBuffer.copy_buffer(positions_tmp[i], vao->at(VertexArrayObject::AttributeType::ePosition)[0].second);
+			commandBuffer.copy_buffer(normals_tmp[i], vao->at(VertexArrayObject::AttributeType::eNormal)[0].second);
+			commandBuffer.copy_buffer(indices_tmp[i], indexBuffer);
 
 			if (m->GetNumUVChannels() >= 1) {
-				Buffer::View<float2> uvs_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp uvs", m->mNumVertices*sizeof(float2), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
-				for (int vi = 0; vi < m->mNumVertices; vi++)
-					uvs_tmp[vi] = float2(m->mTextureCoords[0][vi].x, m->mTextureCoords[0][vi].y);
 				(*vao)[VertexArrayObject::AttributeType::eTexcoord].emplace_back(
 					VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float2), vk::Format::eR32G32Sfloat, 0, vk::VertexInputRate::eVertex },
-					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " uvs", uvs_tmp.size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY));
-				commandBuffer.copy_buffer(uvs_tmp, vao->at(VertexArrayObject::AttributeType::eTexcoord)[0].second);
+					make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " uvs", uvs_tmp[i].size_bytes(), bufferUsage|vk::BufferUsageFlagBits::eVertexBuffer, VMA_MEMORY_USAGE_GPU_ONLY));
+				commandBuffer.copy_buffer(uvs_tmp[i], vao->at(VertexArrayObject::AttributeType::eTexcoord)[0].second);
 			}
 
-			float area = 0;
-			for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
-				const float3 v0 = positions_tmp[indices_tmp[ii]];
-				const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
-				const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
-				area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
-			}
-			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area) );
+			Node& mesh_node = meshes_node.make_child(m->mName.C_Str());
+			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, areas[i]) );
 		}
 		cout << endl;
 	}

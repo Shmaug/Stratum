@@ -57,24 +57,6 @@ struct BDPTPushConstants {
 	uint gDebugLightPathLength;
 };
 
-struct PathState {
-	float3 position;
-	uint path_length_medium;
-	float3 beta;
-	float pdf_fwd;
-	float3 dir_out;
-	float pdf_rev;
-#ifdef __HLSL__
-	SLANG_MUTATING
-	inline void pack_path_length_medium(const uint path_length, const uint medium) {
-		BF_SET(path_length_medium, path_length, 0, 16);
-		BF_SET(path_length_medium, medium, 16, 16);
-	}
-	inline uint path_length() { return BF_GET(path_length_medium,0,16); }
-	inline uint medium() { return BF_GET(path_length_medium,16,16); }
-#endif
-};
-
 struct PointSample {
 	float3 local_position;
 	uint instance_primitive_index;
@@ -82,19 +64,36 @@ struct PointSample {
 	inline uint primitive_index() CONST_CPP { return BF_GET(instance_primitive_index, 16, 16); }
 };
 
-struct PresampledLightPoint {
-	PointSample rs;
-	float3 local_to_light;
-	uint packed_contrib_pdf;
-#ifdef __HLSL__
-	// luminance(light_radiance) * G
-	inline float contribution() { return f16tof32(packed_contrib_pdf); }
-	inline float pdfA()         { return f16tof32(packed_contrib_pdf >> 16); }
+struct PathState {
+	PointSample p;
+	float3 origin;
+	uint path_length_medium;
+	float3 beta;
+	float bsdf_pdf;
+	float3 dir_in;
+	float pad;
+
 	SLANG_MUTATING
-	inline void pack_contrib_pdf(const float contrib, const float pdf) {
-		packed_contrib_pdf = f32tof16(contrib) | (f32tof16(pdf)<<16);
+	inline void pack_path_length_medium(const uint path_length, const uint medium) {
+		BF_SET(path_length_medium, path_length, 0, 16);
+		BF_SET(path_length_medium, medium, 16, 16);
 	}
+	inline uint path_length() CONST_CPP { return BF_GET(path_length_medium,0,16); }
+	inline uint medium() CONST_CPP { return BF_GET(path_length_medium,16,16); }
+};
+
+// 1024 * 32B = 32KiB tiles
+#define gReservoirPresampleTileSize 1024
+
+struct PresampledLightPoint {
+	float3 position;
+	uint packed_geometry_normal;
+	float3 Le;
+	uint pdfA;
+#ifdef __HLSL__
+	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 #endif
+
 };
 
 #define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(0)

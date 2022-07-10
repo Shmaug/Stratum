@@ -122,9 +122,12 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 	dst.diffuse_roughness.value[3] = metallic_roughness.value.y();
 	dst.specular_transmission.value.head<3>() = base_color.value*metallic;
 	dst.specular_transmission.value[3] = luminance(transmission.value);
+
 	dst.emission = emission;
 	dst.eta = eta;
 	if (base_color.image || metallic_roughness.image) {
+		dst.diffuse_roughness.value = float4(1,1,1,.5f);
+		dst.specular_transmission.value = float4(1,1,1,0);
 		vk::Extent3D extent = base_color.image ? base_color.image.extent() : metallic_roughness.image.extent();
 		dst.diffuse_roughness.image = make_shared<Image>(commandBuffer.mDevice, "diffuse_roughness", extent, vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 		dst.specular_transmission.image = make_shared<Image>(commandBuffer.mDevice, "specular_transmission", extent, vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
@@ -180,7 +183,7 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 Scene::Scene(Node& node) : mNode(node) {
 	auto app = mNode.find_in_ancestor<Application>();
 	app.node().find_in_descendants<Inspector>()->register_inspector_gui_fn<Scene>(&inspector_gui_fn);
-	app->OnUpdate.listen(mNode, bind_front(&Scene::update, this), EventPriority::eDefault);
+	app->OnUpdate.add_listener(mNode, bind_front(&Scene::update, this), Node::EventPriority::eDefault);
 
 	component_ptr<Inspector> gui = node.node_graph().find_components<Inspector>().front();
 	gui->register_inspector_gui_fn<TransformData>(&inspector_gui_fn);
@@ -203,7 +206,7 @@ Scene::Scene(Node& node) : mNode(node) {
 	mainCamera.node().make_component<TransformData>(make_transform(float3(0, 1, 0), quatf_identity(), float3::Ones()));
 	mMainCamera = mainCamera;
 	if (!mNode.find_in_ancestor<Instance>()->find_argument("--xr")) {
-		app->OnUpdate.listen(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
+		app->OnUpdate.add_listener(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
 			ProfilerRegion ps("Camera Controls");
 			const MouseKeyboardState& input = app->window().input_state();
 			auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();

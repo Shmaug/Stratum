@@ -77,7 +77,7 @@ inline void make_triangle_shading_data(inout ShadingData r, const TransformData 
 	float3 shading_normal = v0.normal + (v1.normal - v0.normal)*bary.x + (v2.normal - v0.normal)*bary.y;
 	if (all(shading_normal.xyz == 0) || any(isnan(shading_normal))) {
 		r.packed_shading_normal = r.packed_geometry_normal;
-		r.packed_tangent = pack_normal_octahedron(dPdu);
+		r.packed_tangent = pack_normal_octahedron(normalize(dPdu));
 		r.mean_curvature = 0;
 	} else {
 		shading_normal = normalize(transform.transform_vector(shading_normal));
@@ -97,14 +97,14 @@ inline void make_triangle_shading_data(inout ShadingData r, const TransformData 
 		r.mean_curvature = (dot(dNdu, tangent) + dot(dNdv, bitangent)) / 2;
 	}
 }
-inline void make_triangle_shading_data_from_barycentrics(out ShadingData r, const InstanceData instance, const TransformData transform, const uint primitive_index, const float2 bary, out float3 local_position) {
+inline void make_triangle_shading_data(out ShadingData r, const InstanceData instance, const TransformData transform, const uint primitive_index, const float2 bary) {
 	const uint3 tri = load_tri(gIndices, instance, primitive_index);
 	const PackedVertexData v0 = gVertices[tri.x];
 	const PackedVertexData v1 = gVertices[tri.y];
 	const PackedVertexData v2 = gVertices[tri.z];
 	const float3 v1v0 = v1.position - v0.position;
 	const float3 v2v0 = v2.position - v0.position;
-	local_position = v0.position + v1v0*bary.x + v2v0*bary.y;
+	const float3 local_position = v0.position + v1v0*bary.x + v2v0*bary.y;
 	r.position = transform.transform_point(local_position);
 	make_triangle_shading_data(r, transform, bary, v0, v1, v2);
 }
@@ -123,9 +123,7 @@ inline void make_triangle_shading_data_from_position(out ShadingData r, const In
 	const float d11 = dot(v2v0, v2v0);
 	const float d20 = dot(p_v0, v1v0);
 	const float d21 = dot(p_v0, v2v0);
-	const float2 bary = float2((d11 * d20 - d01 * d21), (d00 * d21 - d01 * d20)) / (d00 * d11 - d01 * d01);
-
-	r.position = transform.transform_point(local_position);
+	const float2 bary = float2(d11 * d20 - d01 * d21, d00 * d21 - d01 * d20) / (d00 * d11 - d01 * d01);
  	make_triangle_shading_data(r, transform, bary, v0, v1, v2);
 }
 inline void make_sphere_shading_data(out ShadingData r, const InstanceData instance, const TransformData transform, const float3 local_position) {
@@ -163,7 +161,7 @@ inline void make_shading_data(out ShadingData r, const uint instance_index, cons
 			make_volume_shading_data(r, instance, gInstanceTransforms[instance_index], local_position);
 			break;
 		case INSTANCE_TYPE_TRIANGLES:
-			make_triangle_shading_data_from_position(r, instance, gInstanceTransforms[instance_index], primitive_index, local_position);
+			make_triangle_shading_data(r, instance, gInstanceTransforms[instance_index], primitive_index, local_position.xy);
 			break;
 		}
 	}

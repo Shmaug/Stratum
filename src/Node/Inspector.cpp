@@ -86,7 +86,7 @@ Inspector::Inspector(Node& node) : mNode(node) {
 
 	auto app = mNode.find_in_ancestor<Application>();
 
-	app->OnUpdate.listen(mNode, [&, app](CommandBuffer& commandBuffer, float deltaTime) {
+	app->OnUpdate.add_listener(mNode, [&, app](CommandBuffer& commandBuffer, float deltaTime) {
 		ProfilerRegion ps("Inspector Gui");
 		auto gui = app.node().find_in_descendants<Gui>();
 		if (!gui) return;
@@ -155,7 +155,7 @@ Inspector::Inspector(Node& node) : mNode(node) {
 				ImGui::Text("Select a node to inspect");
 		}
 		ImGui::End();
-	}, EventPriority::eAlmostFirst);
+	}, Node::EventPriority::eAlmostFirst);
 }
 
 }
