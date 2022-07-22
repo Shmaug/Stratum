@@ -283,9 +283,12 @@ public:
 
 	inline void acquire_image_timeout(const chrono::nanoseconds& v) { mAcquireImageTimeout = v; }
 	inline const chrono::nanoseconds& acquire_image_timeout() const { return mAcquireImageTimeout; }
-
-	inline void preferred_present_mode(vk::PresentModeKHR v) { if (mPreferredPresentMode != v) mRecreateSwapchain = true; mPreferredPresentMode = v; }
+	inline void min_image_count(const uint32_t v) { if (mMinImageCount != v) mRecreateSwapchain = true; mMinImageCount = v; }
+	inline const uint32_t& min_image_count() const { return mMinImageCount; }
+	inline void preferred_present_mode(const vk::PresentModeKHR& v) { if (mPreferredPresentMode != v) mRecreateSwapchain = true; mPreferredPresentMode = v; }
 	inline vk::PresentModeKHR preferred_present_mode() const { return mPreferredPresentMode; }
+	inline void preferred_surface_format(const vk::SurfaceFormatKHR& v) { if (mPreferredSurfaceFormat != v) mRecreateSwapchain = true; mPreferredSurfaceFormat = v; }
+	inline vk::SurfaceFormatKHR preferred_surface_format() const { return mPreferredSurfaceFormat; }
 
 	STRATUM_API void fullscreen(bool fs);
 	inline bool fullscreen() const { return mFullscreen; }
@@ -296,13 +299,6 @@ public:
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
 	inline const Image::View& back_buffer() const { return mRenderTargets[back_buffer_index()]; }
 	inline const Image::View& back_buffer(uint32_t i) const { return mRenderTargets[i]; }
-
-#ifdef _WIN32
-	inline HWND handle() const { return mHwnd; }
-#endif
-#ifdef __linux
-	inline xcb_window_t handle() const { return mXCBWindow; }
-#endif
 
 	STRATUM_API void resize(uint32_t w, uint32_t h);
 
@@ -325,9 +321,14 @@ public:
 		return r;
 	}
 
-private:
-	STRATUM_API void create_swapchain();
+#ifdef _WIN32
+	inline HWND handle() const { return mHwnd; }
+#endif
+#ifdef __linux
+	inline xcb_window_t handle() const { return mXCBWindow; }
+#endif
 
+private:
 	vk::SurfaceKHR mSurface;
 	Device::QueueFamily* mPresentQueueFamily = nullptr;
 	vk::SwapchainKHR mSwapchain;
@@ -337,12 +338,15 @@ private:
 	vk::Extent2D mSwapchainExtent;
 	vk::SurfaceFormatKHR mSurfaceFormat;
 	vk::PresentModeKHR mPresentMode;
+	uint32_t mMinImageCount = 3;
 	uint32_t mBackBufferIndex = 0;
 	uint32_t mImageAvailableSemaphoreIndex = 0;
-	size_t mPresentCount = 0;
 
+	vk::SurfaceFormatKHR mPreferredSurfaceFormat = vk::SurfaceFormatKHR(vk::Format::eR8G8B8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear);
 	vk::PresentModeKHR mPreferredPresentMode = vk::PresentModeKHR::eMailbox;
 	chrono::nanoseconds mAcquireImageTimeout = 10s;
+
+	size_t mPresentCount = 0;
 
 	bool mFullscreen = false;
 	bool mRecreateSwapchain = false;
@@ -353,7 +357,6 @@ private:
 	MouseKeyboardState mInputState;
 	MouseKeyboardState mInputStateLast;
 
-	friend class Instance;
 #ifdef _WIN32
 	HWND mHwnd;
 	RECT mWindowedRect;
@@ -367,6 +370,10 @@ private:
 	STRATUM_API bool process_event(xcb_generic_event_t* event);
 	STRATUM_API xcb_generic_event_t* poll_event();
 #endif
+
+	STRATUM_API void create_swapchain();
+
+	friend class Instance;
 };
 
 }

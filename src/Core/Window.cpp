@@ -110,29 +110,29 @@ stm::Window::~Window() {
 bool stm::Window::acquire_image() {
 	ProfilerRegion ps("Window::acquire_image");
 
-	if (mRecreateSwapchain || !mSwapchain) {
+	if (mRecreateSwapchain || !mSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
 		create_swapchain();
-		if (!mSwapchain) return false;
-	}
-	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
-		return false; // minimized ?
+	if (!mSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0) return false; // minimized ?
 
-	mImageAvailableSemaphoreIndex = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
+	const uint32_t semaphore_index = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
 
-	vk::Result result = mInstance.device()->acquireNextImageKHR(mSwapchain, mAcquireImageTimeout.count(), **image_available_semaphore(), {}, &mBackBufferIndex);
+	vk::Result result = mInstance.device()->acquireNextImageKHR(mSwapchain, mAcquireImageTimeout.count(), **mImageAvailableSemaphores[semaphore_index], {}, &mBackBufferIndex);
 	if (result == vk::Result::eNotReady || result == vk::Result::eTimeout)
 		return false;
 
 	if (result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
-		mInstance.device().flush();
-		mSwapchainImages.clear();
-		mRenderTargets.clear();
-		mImageAvailableSemaphores.clear();
-		if (mSwapchain) mInstance.device()->destroySwapchainKHR(mSwapchain);
-		mSwapchain = nullptr;
-		return false;
-	} else if (result != vk::Result::eSuccess)
+		create_swapchain();
+		if (!mSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0) return false; // minimized ?
+
+		result = mInstance.device()->acquireNextImageKHR(mSwapchain, mAcquireImageTimeout.count(), **mImageAvailableSemaphores[semaphore_index], {}, &mBackBufferIndex);
+		if (result == vk::Result::eNotReady || result == vk::Result::eTimeout || result == vk::Result::eSuboptimalKHR || result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR)
+			return false;
+	}
+
+	if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
+
+	mImageAvailableSemaphoreIndex = semaphore_index;
 
 	return true;
 }
@@ -229,26 +229,27 @@ void stm::Window::create_swapchain() {
 		return; // invalid swapchain size, window invalid
 
 	// select the format of the swapchain
-	mSurfaceFormat = vk::Format::eR8G8B8A8Unorm;
-	//auto formats = mPresentQueueFamily->mDevice.physical().getSurfaceFormatsKHR(mSurface);
-	//for (const vk::SurfaceFormatKHR& format : formats)
-	//	if (format.format == vk::Format::eR8G8B8A8Srgb) {
-	//		mSurfaceFormat = format;
-	//		break;
-	//	}	else if (format.format == vk::Format::eB8G8R8A8Srgb)
-	//		mSurfaceFormat = format;
+	auto formats = mPresentQueueFamily->mDevice.physical().getSurfaceFormatsKHR(mSurface);
+	mSurfaceFormat = formats.front();
+	for (const vk::SurfaceFormatKHR& format : formats)
+		if (format == mPreferredSurfaceFormat) {
+			mSurfaceFormat = format;
+			break;
+		}
 
 	mPresentMode = vk::PresentModeKHR::eFifo; // required to be supported
-	for (vk::PresentModeKHR mode : mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface))
-		if (mode == mPreferredPresentMode)
+	for (const vk::PresentModeKHR& mode : mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface))
+		if (mode == mPreferredPresentMode) {
 			mPresentMode = mode;
+			break;
+		}
 
 	if (mSwapchain) mInstance.device().flush();
 
 	vk::SwapchainCreateInfoKHR createInfo = {};
 	createInfo.surface = mSurface;
 	createInfo.oldSwapchain = mSwapchain;
-	createInfo.minImageCount = 3;
+	createInfo.minImageCount = mMinImageCount;
 	createInfo.imageFormat = mSurfaceFormat.format;
 	createInfo.imageColorSpace = mSurfaceFormat.colorSpace;
 	createInfo.imageExtent = mSwapchainExtent;
@@ -285,6 +286,7 @@ void stm::Window::create_swapchain() {
 
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
+	mRecreateSwapchain = false;
 }
 
 #ifdef _WIN32

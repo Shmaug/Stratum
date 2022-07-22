@@ -53,6 +53,7 @@ public:
 
 		shared_ptr<AccelerationStructure> mScene;
 		unordered_map<const void* /* address of component */, pair<TransformData, uint32_t /* instance index */ >> mInstanceTransformMap;
+		vector<Node*> mInstanceNodes;
 
 		Buffer::View<PackedVertexData> mVertices;
 		Buffer::View<byte> mIndices;

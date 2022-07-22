@@ -55,6 +55,7 @@ Gui::Gui(Node& node) : mNode(node) {
 	ImGuiStyle& style = ImGui::GetStyle();
 	style.WindowRounding = 5;
 	style.ScrollbarSize *= 0.75f;
+	style.FrameRounding = 3;
 
 	mMesh.topology() = vk::PrimitiveTopology::eTriangleList;
 

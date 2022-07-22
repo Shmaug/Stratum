@@ -138,6 +138,16 @@ public:
 			[](void* ptr, void* user_data) { ::operator delete(ptr); });
 	}
 
+	template<typename T>
+	inline static void enum_dropdown(const char* label, T& selected, const uint32_t count, auto index_to_str) {
+		if (ImGui::BeginCombo(label, index_to_str((uint32_t)selected).c_str())) {
+			for (uint32_t i = 0; i < count; i++)
+				if (ImGui::Selectable(index_to_str(i).c_str(), (uint32_t)selected == i))
+					selected = (T)i;
+			ImGui::EndCombo();
+		}
+	}
+
 private:
 	Node& mNode;
 	shared_ptr<GraphicsPipelineState> mPipeline;

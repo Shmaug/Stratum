@@ -22,14 +22,15 @@ namespace stm {
 #define BDPT_FLAG_NEE_MIS 					BIT(17)
 #define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(18)
 #define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(19)
-#define BDPT_FLAG_RESERVOIR_NEE				BIT(20)
-#define BDPT_FLAG_PRESAMPLE_RESERVOIR_NEE	BIT(21)
-#define BDPT_FLAG_RESERVOIR_SPATIAL_REUSE	BIT(22)
-#define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(23)
+#define BDPT_FLAG_PRESAMPLE_LIGHTS			BIT(20)
+#define BDPT_FLAG_RESERVOIR_NEE				BIT(21)
+#define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(22)
+#define BDPT_FLAG_RESERVOIR_SPATIAL_REUSE	BIT(23)
+#define BDPT_FLAG_RESERVOIR_UNBIASED_REUSE	BIT(24)
 
-#define BDPT_FLAG_TRACE_LIGHT				BIT(24)
-#define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(25)
-#define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(26)
+#define BDPT_FLAG_TRACE_LIGHT				BIT(26)
+#define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(27)
+#define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(28)
 
 #define BDPT_FLAG_COUNT_RAYS				BIT(31)
 
@@ -48,10 +49,14 @@ struct BDPTPushConstants {
 	uint gMaxLightPathVertices;
 	uint gMaxNullCollisions;
 
-	uint gNEEReservoirSamples;
+	uint gLightPathCount;
+
+	uint gNEEReservoirM;
 	uint gNEEReservoirSpatialSamples;
-	uint gReservoirPresampleTileCount;
+	uint gNEEReservoirSpatialRadius;
 	uint gReservoirMaxM;
+	uint gLightPresampleTileSize;
+	uint gLightPresampleTileCount;
 
 	uint gDebugViewPathLength;
 	uint gDebugLightPathLength;
@@ -81,9 +86,6 @@ struct PathState {
 	inline uint path_length() CONST_CPP { return BF_GET(path_length_medium,0,16); }
 	inline uint medium() CONST_CPP { return BF_GET(path_length_medium,16,16); }
 };
-
-// 1024 * 32B = 32KiB tiles
-#define gReservoirPresampleTileSize 1024
 
 struct PresampledLightPoint {
 	float3 position;
@@ -116,9 +118,9 @@ struct LightPathVertex1 {
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
 	inline uint material_address() CONST_CPP { return BF_GET(material_address_flags, 4, 28); }
 
-	inline float3 local_dir_in()  { return unpack_normal_octahedron2(packed_local_dir_in); }
+	inline float3 local_dir_in()   { return unpack_normal_octahedron(packed_local_dir_in); }
 	inline float3 shading_normal() { return unpack_normal_octahedron(packed_shading_normal); }
-	inline float3 tangent() { return unpack_normal_octahedron(packed_tangent); }
+	inline float3 tangent()        { return unpack_normal_octahedron(packed_tangent); }
 	inline float3 to_world(const float3 v) {
 		const float3 n = shading_normal();
 		const float3 t = tangent();
@@ -138,8 +140,7 @@ struct LightPathVertex2 {
 #ifdef __HLSL__
 	SLANG_MUTATING
 	inline void pack_beta(const float3 beta) {
-		packed_beta[0] = f32tof16(beta[0]) | (f32tof16(beta[1]) << 16);
-		packed_beta[1] = f32tof16(beta[2]);
+		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]));
 	}
 	inline float3 beta() {
 		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
@@ -152,12 +153,13 @@ struct LightPathVertex3 {
 	float pdf_rev;
 };
 
+// to_string of an IntegratorType must be the name of the entry point in the shader
 enum class IntegratorType {
-	eNaiveSingleBounce,
-	eNaiveMultiBounce,
+	eMultiKernel,
+	eSingleKernel,
 	eIntegratorTypeCount
 };
-enum class DebugMode {
+enum class BDPTDebugMode {
 	eNone,
 	eAlbedo,
 	eDiffuse,
@@ -168,6 +170,7 @@ enum class DebugMode {
 	eShadingNormal,
 	eGeometryNormal,
 	eDirOut,
+	ePrevUV,
 	ePathLengthContribution,
 	eReservoirWeight,
 	eDebugModeCount
@@ -181,27 +184,28 @@ namespace std {
 inline string to_string(const stm::IntegratorType& m) {
 	switch (m) {
 		default: return "Unknown";
-		case stm::IntegratorType::eNaiveSingleBounce: return "naive_single_bounce";
-		case stm::IntegratorType::eNaiveMultiBounce: return "naive_multi_bounce";
+		case stm::IntegratorType::eMultiKernel: return "multi_kernel";
+		case stm::IntegratorType::eSingleKernel: return "single_kernel";
 		case stm::IntegratorType::eIntegratorTypeCount: return "IntegratorTypeCount";
 	}
 };
-inline string to_string(const stm::DebugMode& m) {
+inline string to_string(const stm::BDPTDebugMode& m) {
 	switch (m) {
 		default: return "Unknown";
-		case stm::DebugMode::eNone: return "None";
-		case stm::DebugMode::eAlbedo: return "Albedo";
-		case stm::DebugMode::eDiffuse: return "Diffuse";
-		case stm::DebugMode::eSpecular: return "Specular";
-		case stm::DebugMode::eTransmission: return "Transmission";
-		case stm::DebugMode::eRoughness: return "Roughness";
-		case stm::DebugMode::eEmission: return "Emission";
-		case stm::DebugMode::eShadingNormal: return "Shading Normal";
-		case stm::DebugMode::eGeometryNormal: return "Geometry Normal";
-		case stm::DebugMode::eDirOut: return "Bounce Direction";
-		case stm::DebugMode::ePathLengthContribution: return "Path Contribution (per length)";
-		case stm::DebugMode::eReservoirWeight: return "Reservoir Weight";
-		case stm::DebugMode::eDebugModeCount: return "DebugModeCount";
+		case stm::BDPTDebugMode::eNone: return "None";
+		case stm::BDPTDebugMode::eAlbedo: return "Albedo";
+		case stm::BDPTDebugMode::eDiffuse: return "Diffuse";
+		case stm::BDPTDebugMode::eSpecular: return "Specular";
+		case stm::BDPTDebugMode::eTransmission: return "Transmission";
+		case stm::BDPTDebugMode::eRoughness: return "Roughness";
+		case stm::BDPTDebugMode::eEmission: return "Emission";
+		case stm::BDPTDebugMode::eShadingNormal: return "Shading Normal";
+		case stm::BDPTDebugMode::eGeometryNormal: return "Geometry Normal";
+		case stm::BDPTDebugMode::eDirOut: return "Bounce Direction";
+		case stm::BDPTDebugMode::ePrevUV: return "Prev UV";
+		case stm::BDPTDebugMode::ePathLengthContribution: return "Path Contribution (per length)";
+		case stm::BDPTDebugMode::eReservoirWeight: return "Reservoir Weight";
+		case stm::BDPTDebugMode::eDebugModeCount: return "DebugModeCount";
 	}
 };
 }

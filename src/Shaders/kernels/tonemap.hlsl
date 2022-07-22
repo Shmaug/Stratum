@@ -11,7 +11,6 @@
 Texture2D<float4> gInput;
 RWTexture2D<float4> gOutput;
 Texture2D<float4> gAlbedo;
-
 RWStructuredBuffer<uint4> gMax;
 
 #define gMaxQuantization 1024.0
@@ -95,7 +94,24 @@ float3 aces_approx(float3 v) {
 }
 
 #define gReductionSize 32
+
 groupshared float4 gSharedMax[gReductionSize * gReductionSize / 32];
+float4 reduce_shared(float4 v, const uint group_index) {
+	v = WaveActiveMax(v);
+	if (WaveIsFirstLane()) gSharedMax[group_index / WaveGetLaneCount()] = v;
+
+	uint n = gReductionSize*gReductionSize / WaveGetLaneCount();
+	while (group_index < n) {
+		GroupMemoryBarrierWithGroupSync();
+		v = gSharedMax[group_index];
+		v = WaveActiveMax(v);
+		if (WaveIsFirstLane()) gSharedMax[group_index / WaveGetLaneCount()] = v;
+		n /= WaveGetLaneCount();
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+	return gSharedMax[0];
+}
 
 [numthreads(gReductionSize, gReductionSize, 1)]
 void reduce(uint3 index : SV_DispatchThreadID, uint group_index : SV_GroupIndex) {
@@ -104,31 +120,21 @@ void reduce(uint3 index : SV_DispatchThreadID, uint group_index : SV_GroupIndex)
 
     float4 v = 0;
     if (all(index.xy < resolution)) {
-		v = gInput[index.xy];
+		v.rgb = gInput[index.xy].rgb;
+		if (gModulateAlbedo) v.rgb *= gAlbedo[index.xy].rgb;
 		v.w = luminance(v.rgb);
 	}
-	v = WaveActiveMax(v);
 
-	// first lane in the wave writes the wave's max to sharedmax
-	if (WaveIsFirstLane()) gSharedMax[group_index / WaveGetLaneCount()] = v;
-    GroupMemoryBarrierWithGroupSync();
+	v = reduce_shared(v, group_index);
 
-	// first wave in the group reduces sharedmax
-    if (group_index < WaveGetLaneCount()) {
-		for (uint i = WaveGetLaneIndex(); i < gReductionSize*gReductionSize / WaveGetLaneCount(); i += WaveGetLaneCount()) {
-			v = gSharedMax[i];
-			v = WaveActiveMax(v);
-		}
-		// first thread in the group writes the output to gmem
-        if (WaveIsFirstLane()) {
-			v /= gReductionSize*gReductionSize;
-			const uint4 vi = clamp(v*gMaxQuantization,0,0xFFFFFFFF);
-			InterlockedMax(gMax[0].x, vi.x);
-			InterlockedMax(gMax[0].y, vi.y);
-			InterlockedMax(gMax[0].z, vi.z);
-			InterlockedMax(gMax[0].w, vi.w);
-		}
-    }
+	// first thread in the group writes the output to gmem
+	if (group_index == 0) {
+		const uint4 vi = clamp(v*gMaxQuantization,0,~0);
+		InterlockedMax(gMax[0].x, vi.x);
+		InterlockedMax(gMax[0].y, vi.y);
+		InterlockedMax(gMax[0].z, vi.z);
+		InterlockedMax(gMax[0].w, vi.w);
+	}
 }
 
 [numthreads(8,8,1)]

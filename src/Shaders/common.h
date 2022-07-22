@@ -16,13 +16,14 @@
 #define __hlsl_in
 #define __hlsl_out(T) out T
 #define __hlsl_inout(T) inout T
+#endif
+
 #ifdef __SLANG__
 #define SLANG_MUTATING [mutating]
+#define SLANG_SHADER(type) [shader(type)]
 #else
 #define SLANG_MUTATING
-#endif // SLANG
-#else // HLSL
-#define SLANG_MUTATING
+#define SLANG_SHADER(type)
 #endif
 
 #ifdef __cplusplus
@@ -192,7 +193,6 @@ inline float pdfAtoW(const float pdfA, const float G) {
 	return pdfA / G;
 }
 
-#ifdef __cplusplus
 
 // To support spectral data, we need to convert spectral measurements (how much energy at each wavelength) to
 // RGB. To do this, we first convert the spectral data to CIE XYZ, by
@@ -218,6 +218,7 @@ inline float3 XYZintegral_coeff(const float wavelength) {
 	return float3(xFit_1931(wavelength), yFit_1931(wavelength), zFit_1931(wavelength));
 }
 
+#ifdef __cplusplus
 inline float3 integrate_XYZ(const std::vector<std::pair<float, float>>& data) {
 	static const float CIE_Y_integral = 106.856895f;
 	static const float wavelength_beg = 400;
@@ -255,7 +256,6 @@ inline float3 integrate_XYZ(const std::vector<std::pair<float, float>>& data) {
 	ret *= (wavelength_span / (CIE_Y_integral * (wavelength_end - wavelength_beg)));
 	return ret;
 }
-
 #endif
 
 #endif

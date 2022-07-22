@@ -10,8 +10,8 @@ static float3 gAnimateTranslate = float3::Zero();
 static float3 gAnimateRotate = float3::Zero();
 static TransformData* gAnimatedTransform = nullptr;
 
-inline void inspector_gui_fn(Scene* scene) { scene->on_inspector_gui(); }
-inline void inspector_gui_fn(Camera* cam) {
+inline void inspector_gui_fn(Inspector& inspector, Scene* scene) { scene->on_inspector_gui(); }
+inline void inspector_gui_fn(Inspector& inspector, Camera* cam) {
 	ImGui::DragFloat("Near Plane", &cam->mProjection.near_plane, 0.01f, -1, 1);
 	if (cam->mProjection.orthographic) {
 		ImGui::DragFloat("Far Plane", &cam->mProjection.far_plane, 0.01f, -1, 1);
@@ -30,7 +30,7 @@ inline void inspector_gui_fn(Camera* cam) {
 	ImGui::InputInt2("ImageRect Offset", &cam->mImageRect.offset.x);
 	ImGui::InputInt2("ImageRect Extent", reinterpret_cast<int32_t*>(&cam->mImageRect.extent.width));
 }
-inline void inspector_gui_fn(TransformData* t) {
+inline void inspector_gui_fn(Inspector& inspector, TransformData* t) {
 	TransformData prev = *t;
 
 	float3 translate = t->m.topRightCorner(3, 1);
@@ -59,13 +59,32 @@ inline void inspector_gui_fn(TransformData* t) {
 	} else if (ImGui::Button("Animate"))
 		gAnimatedTransform = t;
 }
-inline void inspector_gui_fn(MeshPrimitive* mesh) {
-	ImGui::LabelText("Material", mesh->mMaterial ? mesh->mMaterial.node().name().c_str() : "nullptr");
-	ImGui::LabelText("Mesh", mesh->mMesh ? mesh->mMesh.node().name().c_str() : "nullptr");
+inline void inspector_gui_fn(Inspector& inspector, MeshPrimitive* mesh) {
+	if (mesh->mMesh) {
+		ImGui::Text("%s", type_index(typeid(Mesh)).name());
+		ImGui::SameLine();
+		if (ImGui::Button(mesh->mMesh.node().name().c_str()))
+			inspector.select(&mesh->mMesh.node());
+	}
+	if (mesh->mMaterial) {
+		ImGui::Text("%s", type_index(typeid(Material)).name());
+		ImGui::SameLine();
+		if (ImGui::Button(mesh->mMaterial.node().name().c_str()))
+			inspector.select(&mesh->mMaterial.node());
+	}
 }
-inline void inspector_gui_fn(SpherePrimitive* sphere) {
+inline void inspector_gui_fn(Inspector& inspector, SpherePrimitive* sphere) {
 	ImGui::DragFloat("Radius", &sphere->mRadius, .01f);
+	if (sphere->mMaterial) {
+		ImGui::Text("%s", type_index(typeid(Material)).name());
+		ImGui::SameLine();
+		if (ImGui::Button(sphere->mMaterial.node().name().c_str()))
+			inspector.select(&sphere->mMaterial.node());
+	}
 }
+inline void inspector_gui_fn(Inspector& inspector, Environment* v) { v->inspector_gui(); }
+inline void inspector_gui_fn(Inspector& inspector, Material* v) { v->inspector_gui(); }
+inline void inspector_gui_fn(Inspector& inspector, Medium* v) { v->inspector_gui(); }
 
 TransformData node_to_world(const Node& node) {
 	TransformData transform = make_transform(float3::Zero(), quatf_identity(), float3::Ones());
@@ -190,9 +209,9 @@ Scene::Scene(Node& node) : mNode(node) {
 	gui->register_inspector_gui_fn<Camera>(&inspector_gui_fn);
 	gui->register_inspector_gui_fn<MeshPrimitive>(&inspector_gui_fn);
 	gui->register_inspector_gui_fn<SpherePrimitive>(&inspector_gui_fn);
-	gui->register_inspector_gui_fn<Environment>([](Environment* env) { env->inspector_gui(); });
-	gui->register_inspector_gui_fn<Material>([](Material* material) { material->inspector_gui(); });
-	gui->register_inspector_gui_fn<Medium>([](Medium* medium) { medium->inspector_gui(); });
+	gui->register_inspector_gui_fn<Environment>(&inspector_gui_fn);
+	gui->register_inspector_gui_fn<Material>(&inspector_gui_fn);
+	gui->register_inspector_gui_fn<Medium>(&inspector_gui_fn);
 
 	gAnimatedTransform = nullptr;
 
@@ -322,10 +341,17 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	vector<TransformData> instanceTransforms;
 	vector<TransformData> instanceInverseTransforms;
 	vector<TransformData> instanceMotionTransforms;
-	if (mPrevFrame) instanceDatas.reserve(mPrevFrame->mInstances.size());
+	if (mPrevFrame) {
+		instanceDatas.reserve(mPrevFrame->mInstances.size());
+		instanceTransforms.reserve(mPrevFrame->mInstances.size());
+		instanceInverseTransforms.reserve(mPrevFrame->mInstances.size());
+		instanceMotionTransforms.reserve(mPrevFrame->mInstances.size());
+	}
 	vector<uint32_t> lightInstances;
 	vector<float> lightInstancePowers;
 	lightInstances.reserve(1);
+
+	mSceneData->mInstanceNodes.clear();
 
 	mSceneData->mInstanceIndexMap = make_shared<Buffer>(commandBuffer.mDevice, "InstanceIndexMap", sizeof(uint32_t) * max<size_t>(1, mPrevFrame ? mPrevFrame->mInstances.size() : 0), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	ranges::fill(mSceneData->mInstanceIndexMap, -1);
@@ -341,9 +367,10 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		return materialMap_it->second;
 	};
 
-	auto process_instance = [&](const void* prim_ptr, const InstanceData& instance, const TransformData& transform, const float emissive_power) {
+	auto process_instance = [&](const component_ptr<void>& prim, const InstanceData& instance, const TransformData& transform, const float emissive_power) {
 		const uint32_t instance_index = (uint32_t)instanceDatas.size();
 		instanceDatas.emplace_back(instance);
+		mSceneData->mInstanceNodes.emplace_back(&prim.node());
 
 		if (emissive_power > 0) {
 			BF_SET(instanceDatas[instance_index].packed[1], lightInstancePowers.size(), 0, 12);
@@ -353,12 +380,12 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 		TransformData prevTransform;
 		if (mPrevFrame) {
-			if (auto it = mPrevFrame->mInstanceTransformMap.find(prim_ptr); it != mPrevFrame->mInstanceTransformMap.end()) {
+			if (auto it = mPrevFrame->mInstanceTransformMap.find(prim.get()); it != mPrevFrame->mInstanceTransformMap.end()) {
 				prevTransform = it->second.first;
 				mSceneData->mInstanceIndexMap[it->second.second] = instance_index;
 			}
 		}
-		mSceneData->mInstanceTransformMap.emplace(prim_ptr, make_pair(transform, instance_index));
+		mSceneData->mInstanceTransformMap.emplace(prim.get(), make_pair(transform, instance_index));
 
 		const TransformData inv_transform = transform.inverse();
 		instanceTransforms.emplace_back(transform);
@@ -440,7 +467,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, luminance(prim->mMaterial->emission.value) * area * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, luminance(prim->mMaterial->emission.value) * area * M_PI);
 			instance.mask = BVH_FLAG_TRIANGLES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
 
@@ -488,7 +515,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(prim.get(), make_instance_sphere(material_address, r), transform, luminance(prim->mMaterial->emission.value) * (4*M_PI*r*r) * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_sphere(material_address, r), transform, luminance(prim->mMaterial->emission.value) * (4*M_PI*r*r) * M_PI);
 			instance.mask = BVH_FLAG_SPHERES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});
@@ -535,7 +562,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			const TransformData transform = node_to_world(vol.node());
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(vol.get(), make_instance_volume(material_address, mSceneData->mResources.volume_data_map.at(vol->density_buffer)), transform, false);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(vol), make_instance_volume(material_address, mSceneData->mResources.volume_data_map.at(vol->density_buffer)), transform, false);
 			instance.mask = BVH_FLAG_VOLUME;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});

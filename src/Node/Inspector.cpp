@@ -5,25 +5,36 @@
 
 namespace stm {
 
-inline void inspector_gui_fn(Instance* instance) {
+inline void inspector_gui_fn(Inspector& inspector, Instance* instance) {
 	ImGui::Text("Vulkan %u.%u.%u",
 		VK_API_VERSION_MAJOR(instance->vulkan_version()),
 		VK_API_VERSION_MINOR(instance->vulkan_version()),
 		VK_API_VERSION_PATCH(instance->vulkan_version()));
 
-	ImGui::LabelText("Descriptor Sets", "%u", instance->device().descriptor_set_count());
+	ImGui::LabelText("Descriptor sets", "%u", instance->device().descriptor_set_count());
 
 	ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
 	ImGui::LabelText("Render target format", to_string(instance->window().back_buffer().image()->format()).c_str());
-	ImGui::LabelText("Surface format", to_string(instance->window().surface_format().format).c_str());
-	ImGui::LabelText("Surface color space", to_string(instance->window().surface_format().colorSpace).c_str());
+	ImGui::LabelText("Image count", to_string(instance->window().back_buffer_count()).c_str());
 
-	vk::PresentModeKHR m = instance->window().present_mode();
-	if (ImGui::BeginCombo("Window present mode", to_string(m).c_str())) {
-		auto items = instance->device().physical().getSurfacePresentModesKHR(instance->window().surface());
-		for (uint32_t i = 0; i < ranges::size(items); i++)
-			if (ImGui::Selectable(to_string(items[i]).c_str(), m == items[i]))
-				instance->window().preferred_present_mode(items[i]);
+	vk::SurfaceCapabilitiesKHR capabilities = instance->device().physical().getSurfaceCapabilitiesKHR(instance->window().surface());
+	int c = instance->window().min_image_count();
+	ImGui::SetNextItemWidth(40);
+	if (ImGui::DragInt("Min image count", &c, 1, capabilities.minImageCount, capabilities.maxImageCount))
+		instance->window().min_image_count(c);
+
+	if (ImGui::BeginCombo("Present mode", to_string(instance->window().present_mode()).c_str())) {
+		for (auto mode : instance->device().physical().getSurfacePresentModesKHR(instance->window().surface()))
+			if (ImGui::Selectable(to_string(mode).c_str(), instance->window().present_mode() == mode))
+				instance->window().preferred_present_mode(mode);
+		ImGui::EndCombo();
+	}
+
+	auto fmt_to_str = [](vk::SurfaceFormatKHR f) { return to_string(f.format) + ", " + to_string(f.colorSpace); };
+	if (ImGui::BeginCombo("Surface format", fmt_to_str(instance->window().surface_format()).c_str())) {
+		for (auto format : instance->device().physical().getSurfaceFormatsKHR(instance->window().surface()))
+			if (ImGui::Selectable(fmt_to_str(format).c_str(), instance->window().surface_format() == format))
+				instance->window().preferred_surface_format(format);
 		ImGui::EndCombo();
 	}
 
@@ -31,15 +42,15 @@ inline void inspector_gui_fn(Instance* instance) {
 	if (ImGui::InputScalar("Swapchain image timeout (ns)", ImGuiDataType_U64, &timeout))
 		instance->window().acquire_image_timeout(chrono::nanoseconds(timeout));
 }
-inline void inspector_gui_fn(GraphicsPipelineState* pipeline) {
+inline void inspector_gui_fn(Inspector& inspector, GraphicsPipelineState* pipeline) {
 	ImGui::Text("%lu pipelines", pipeline->pipelines().size());
 	ImGui::Text("%lu descriptor sets", pipeline->descriptor_sets().size());
 }
-inline void inspector_gui_fn(ComputePipelineState* pipeline) {
+inline void inspector_gui_fn(Inspector& inspector, ComputePipelineState* pipeline) {
 	ImGui::Text("%lu pipelines", pipeline->pipelines().size());
 	ImGui::Text("%lu descriptor sets", pipeline->descriptor_sets().size());
 }
-inline void inspector_gui_fn(Mesh* mesh) {
+inline void inspector_gui_fn(Inspector& inspector, Mesh* mesh) {
 	ImGui::LabelText("Topology", to_string(mesh->topology()).c_str());
 	ImGui::LabelText("Index Type", to_string(mesh->index_type()).c_str());
 	if (mesh->vertices()) {
@@ -53,7 +64,7 @@ inline void inspector_gui_fn(Mesh* mesh) {
 				}
 	}
 }
-inline void inspector_gui_fn(nanovdb::GridHandle<nanovdb::HostBuffer>* grid) {
+inline void inspector_gui_fn(Inspector& inspector, nanovdb::GridHandle<nanovdb::HostBuffer>* grid) {
 	const nanovdb::GridMetaData* metadata = grid->gridMetaData();
 	ImGui::LabelText("grid name", metadata->shortGridName());
 	ImGui::LabelText("grid count", "%u", metadata->gridCount());
@@ -63,21 +74,24 @@ inline void inspector_gui_fn(nanovdb::GridHandle<nanovdb::HostBuffer>* grid) {
 	ImGui::LabelText("bbox max", "%.02f %.02f %.02f", metadata->worldBBox().max()[0], metadata->worldBBox().max()[1], metadata->worldBBox().max()[2]);
 }
 
-inline void node_graph_gui_fn(Node& n, Node*& selected) {
+void Inspector::node_graph_gui_fn(Node& n) {
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-	if (&n == selected) flags |= ImGuiTreeNodeFlags_Selected;
+	if (&n == mSelected) flags |= ImGuiTreeNodeFlags_Selected;
 	if (n.children().empty()) flags |= ImGuiTreeNodeFlags_Leaf;
-	//ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+
+	if (mSelected && mSelected->descendant_of(n))
+		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+
 	if (ImGui::TreeNodeEx(n.name().c_str(), flags)) {
 		if (ImGui::IsItemClicked())
-			selected = &n;
+			select(&n);
 		for (Node& c : n.children())
-			node_graph_gui_fn(c, selected);
+			node_graph_gui_fn(c);
 		ImGui::TreePop();
 	}
 }
 
-Inspector::Inspector(Node& node) : mNode(node) {
+Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 	register_inspector_gui_fn<Instance>(&inspector_gui_fn);
 	register_inspector_gui_fn<ComputePipelineState>(&inspector_gui_fn);
 	register_inspector_gui_fn<GraphicsPipelineState>(&inspector_gui_fn);
@@ -91,8 +105,6 @@ Inspector::Inspector(Node& node) : mNode(node) {
 		auto gui = app.node().find_in_descendants<Gui>();
 		if (!gui) return;
 		gui->set_context();
-
-		static Node* selected = nullptr;
 
 		if (ImGui::Begin("Profiler")) {
 			{
@@ -109,47 +121,49 @@ Inspector::Inspector(Node& node) : mNode(node) {
 
 		if (!Profiler::history().empty()) {
 			if (ImGui::Begin("Timeline")) {
-				ProfilerRegion ps("Profiler::timeline_gui");
+				ProfilerRegion ps("Profiler::sample_timeline_gui");
 				Profiler::sample_timeline_gui();
 			}
 			ImGui::End();
 		}
 
 		if (ImGui::Begin("Node Graph"))
-			node_graph_gui_fn(mNode.root(), selected);
+			node_graph_gui_fn(mNode.root());
 		ImGui::End();
 
 		if (ImGui::Begin("Inspector")) {
-			if (selected) {
+			if (mSelected) {
 				bool del = ImGui::Button("X");
 				ImGui::SameLine();
-				ImGui::Text(selected->name().c_str());
+				ImGui::Text(mSelected->name().c_str());
 				ImGui::SetNextItemWidth(40);
 
 				if (del) {
 					if (app->window().input_state().pressed(KeyCode::eKeyShift))
-						mNode.node_graph().erase_recurse(*selected);
+						mNode.node_graph().erase_recurse(*mSelected);
 					else
-						mNode.node_graph().erase(*selected);
-					selected = nullptr;
+						mNode.node_graph().erase(*mSelected);
+					select(nullptr);
 				} else {
-					if (!selected->find<TransformData>() && ImGui::Button("Add Transform"))
-						selected->make_component<TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
+					if (!mSelected->find<TransformData>() && ImGui::Button("Add Transform"))
+						mSelected->make_component<TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
 					type_index to_erase = typeid(nullptr_t);
-					for (type_index type : selected->components()) {
+					for (type_index type : mSelected->components()) {
 						bool d = ImGui::Button("X");
 						ImGui::SameLine();
 						if (ImGui::CollapsingHeader(type.name())) {
 							auto it = mInspectorGuiFns.find(type);
 							if (it != mInspectorGuiFns.end()) {
 								ImGui::Indent();
-								it->second(selected->find(type));
+								ImGui::Indent();
+								it->second(*this, mSelected->find(type));
+								ImGui::Unindent();
 								ImGui::Unindent();
 							}
 						}
 						if (d) to_erase = type;
 					}
-					if (to_erase != typeid(nullptr_t)) selected->erase_component(to_erase);
+					if (to_erase != typeid(nullptr_t)) mSelected->erase_component(to_erase);
 				}
 			} else
 				ImGui::Text("Select a node to inspect");

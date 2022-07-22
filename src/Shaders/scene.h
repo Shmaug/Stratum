@@ -88,34 +88,6 @@ struct PackedVertexData {
 	inline float2 uv() { return float2(u, v); }
 };
 
-struct ViewData {
-	ProjectionData projection;
-	uint2 image_min;
-	uint2 image_max;
-#ifdef __HLSL__
-	inline int2 extent() { return (int2)image_max - (int2)image_min; }
-#endif
-};
-
-struct VisibilityInfo {
-	uint3 position;
-	uint instance_primitive_index;
-	float2 packed_normal;
-	uint packed_z;
-	uint packed_dz;
-	float2 prev_uv;
-	uint pad[2];
-#ifdef __HLSL__
-	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-
-	inline float3 normal()   { return unpack_normal_octahedron2(packed_normal); }
-	inline float z()         { return f16tof32(packed_z); }
-	inline float prev_z()    { return f16tof32(packed_z>>16); }
-	inline float2 dz_dxy()   { return unpack_f16_2(packed_dz); }
-#endif
-};
-
 struct RayDifferential {
 	float radius;
 	float spread;
@@ -136,6 +108,36 @@ struct RayDifferential {
 		const float diff_spread = 0.2;
 		spread = max(0, lerp(spec_spread, diff_spread, roughness));
 	}
+#endif
+};
+
+struct ViewData {
+	ProjectionData projection;
+	int2 image_min;
+	int2 image_max;
+	inline int2 extent() CONST_CPP { return image_max - image_min; }
+#ifdef __HLSL__
+	inline bool test_inside(const int2 p) { return all(p >= image_min) && all(p < image_max); }
+#endif
+#ifdef __cplusplus
+	inline bool test_inside(const int2 p) const { return (p >= image_min).all() && (p < image_max).all(); }
+#endif
+};
+
+struct VisibilityInfo {
+	uint packed_normal;
+	uint instance_primitive_index;
+	uint packed_z;
+	uint packed_dz;
+
+	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
+	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
+
+#ifdef __HLSL__
+	inline float3 normal()   { return unpack_normal_octahedron(packed_normal); }
+	inline float z()         { return f16tof32(packed_z); }
+	inline float prev_z()    { return f16tof32(packed_z>>16); }
+	inline float2 dz_dxy()   { return unpack_f16_2(packed_dz); }
 #endif
 };
 

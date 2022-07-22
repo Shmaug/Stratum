@@ -1,3 +1,5 @@
+#pragma once
+
 #include "Gui.hpp"
 
 namespace stm {
@@ -7,10 +9,12 @@ public:
 	STRATUM_API Inspector(Node& node);
 
 	inline Node& node() const { return mNode; }
-    
+	inline Node* selected() const { return mSelected; }
+	inline void select(Node* n) { mSelected = n; }
+
 	template<typename T>
-	inline void register_inspector_gui_fn(void(*fn_ptr)(T*)) {
-		mInspectorGuiFns[typeid(T)] = reinterpret_cast<void(*)(void*)>(fn_ptr);
+	inline void register_inspector_gui_fn(void(*fn_ptr)(Inspector&,T*)) {
+		mInspectorGuiFns[typeid(T)] = reinterpret_cast<void(*)(Inspector&,void*)>(fn_ptr);
 	}
 	inline void unregister_inspector_gui_fn(type_index t) {
 		mInspectorGuiFns.erase(t);
@@ -18,7 +22,10 @@ public:
 
 private:
     Node& mNode;
-	unordered_map<type_index, void(*)(void*)> mInspectorGuiFns;
+	Node* mSelected;
+	unordered_map<type_index, void(*)(Inspector&,void*)> mInspectorGuiFns;
+
+	void node_graph_gui_fn(Node& n);
 };
 
 }

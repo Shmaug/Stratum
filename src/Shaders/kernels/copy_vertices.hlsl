@@ -24,9 +24,7 @@ struct PushConstants {
 [[vk::push_constant]] static const PushConstants gPushConstants;
 #endif
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(64,1,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	if (index.x >= gPushConstants.gCount) return;

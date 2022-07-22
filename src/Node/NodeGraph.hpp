@@ -45,6 +45,39 @@ private:
 	T* mComponent = nullptr;
 };
 
+template<>
+class component_ptr<void> {
+public:
+	component_ptr() = default;
+	component_ptr(const component_ptr&) = default;
+	inline component_ptr(nullptr_t) {}
+	inline component_ptr(component_ptr&& c) : mNode(c.mNode), mComponent(c.mComponent) { c.reset(); }
+	inline component_ptr(Node* n, void* c) : mNode(n), mComponent(c) {}
+	inline component_ptr(const Node* n, void* c) : mNode(const_cast<Node*>(n)), mComponent(c) {}
+	template<typename T>
+	inline component_ptr(const component_ptr<T>& c) : mNode(&c.node()), mComponent(c.get()) {}
+
+	component_ptr& operator=(const component_ptr&) = default;
+	inline component_ptr& operator=(component_ptr&& c) {
+		mNode = c.mNode;
+		mComponent = c.mComponent;
+		c.mNode = nullptr;
+		c.mComponent = nullptr;
+		return *this;
+	}
+
+	inline Node& node() const { return *mNode; }
+
+	inline operator bool() const { return mComponent != nullptr; }
+	inline void* operator->() const { return mComponent; }
+	inline void* get() const { return mComponent; }
+	inline void reset() { mNode = nullptr; mComponent = nullptr; }
+
+private:
+	Node* mNode = nullptr;
+	void* mComponent = nullptr;
+};
+
 // stores nodes, components, and node relationships
 class NodeGraph {
 public:
@@ -198,6 +231,13 @@ public:
 		Node& n = mNodeGraph.emplace(name);
 		n.set_parent(*this);
 		return n;
+	}
+
+	inline bool descendant_of(const Node& ancestor) const {
+		const Node* n = this;
+		while (n && n != &ancestor)
+			n = n->mParent;
+		return n == &ancestor;
 	}
 
 	template<typename T, typename... Args> requires(constructible_from<T, Args...>)

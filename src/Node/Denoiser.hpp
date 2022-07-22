@@ -3,6 +3,8 @@
 #include <Core/PipelineState.hpp>
 #include "Scene.hpp"
 
+#include <Shaders/denoiser.h>
+
 namespace stm {
 
 class Denoiser {
@@ -15,9 +17,10 @@ public:
 
 	STRATUM_API void on_inspector_gui();
 
-	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility);
+	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs);
 
 	inline void reset_accumulation() { mResetAccumulation = true; }
+	inline bool reprojection() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection"); }
 
 private:
 	Node& mNode;
@@ -37,6 +40,7 @@ private:
 		Buffer::View<VisibilityInfo> mVisibility;
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
+		Image::View mDebugImage;
 		array<Image::View, 2> mTemp;
 		shared_ptr<DescriptorSet> mDescriptorSet;
 	};
@@ -47,6 +51,7 @@ private:
 
 	uint32_t mAtrousIterations = 0;
 	uint32_t mHistoryTap = 0;
+	DenoiserDebugMode mDebugMode = DenoiserDebugMode::eNone;
 	bool mResetAccumulation = false;
 };
 

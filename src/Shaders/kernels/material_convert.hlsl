@@ -38,9 +38,7 @@ RWTexture2D<float> gRoughnessRW;
 [[vk::constant_id(3)]] const bool gUseRoughness = 0;
 #endif
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void alpha_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -49,9 +47,7 @@ void alpha_to_roughness(uint3 index : SV_DispatchThreadId) {
 	gRoughnessRW[index.xy] = saturate(sqrt(gInput[index.xy]));
 }
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void shininess_to_roughness(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -60,9 +56,7 @@ void shininess_to_roughness(uint3 index : SV_DispatchThreadId) {
 	gRoughnessRW[index.xy] = saturate(sqrt(2 / (gInput[index.xy] + 2)));
 }
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void from_gltf_pbr(uint3 index : SV_DispatchThreadId) {
 	uint2 size;
@@ -78,9 +72,7 @@ void from_gltf_pbr(uint3 index : SV_DispatchThreadId) {
 	gSpecularTransmission[index.xy] = float4(base_color*metallic, transmittance);
 }
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void from_diffuse_specular(uint3 index : SV_DispatchThreadId) {
 	uint2 size;

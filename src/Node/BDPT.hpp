@@ -26,7 +26,7 @@ private:
 	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
 	shared_ptr<ComputePipelineState> mPresampleLightPipeline;
 	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
-	IntegratorType mIntegratorType = IntegratorType::eNaiveSingleBounce;
+	IntegratorType mIntegratorType = IntegratorType::eMultiKernel;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
 	shared_ptr<ComputePipelineState> mTonemapReducePipeline;
 
@@ -37,7 +37,7 @@ private:
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
 	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS;
-	DebugMode mDebugMode = DebugMode::eNone;
+	BDPTDebugMode mDebugMode = BDPTDebugMode::eNone;
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
@@ -46,6 +46,7 @@ private:
 		shared_ptr<DescriptorSet> mViewDescriptors;
 
 		shared_ptr<Scene::SceneData> mSceneData;
+		Buffer::View<PresampledLightPoint> mPresampledLights;
 
 		Buffer::View<ViewData> mViews;
 		Buffer::View<TransformData> mViewTransforms;
@@ -53,10 +54,11 @@ private:
 		Buffer::View<uint32_t> mViewMediumIndices;
 		Image::View mRadiance;
 		Image::View mAlbedo;
+		Image::View mPrevUVs;
 		Image::View mDebugImage;
 
-		Buffer::View<PresampledLightPoint> mPresampledLights;
 		unordered_map<string, Buffer::View<byte>> mPathData;
+		Buffer::View<VisibilityInfo> mSelectionData;
 
 		Image::View mDenoiseResult;
 		Buffer::View<uint4> mTonemapMax;
@@ -69,7 +71,7 @@ private:
 	float mRaysPerSecond;
 	float mRaysPerSecondTimer;
 
-	vector<shared_ptr<FrameResources>> mFrameResourcePool;
+	list<shared_ptr<FrameResources>> mFrameResourcePool;
 	shared_ptr<FrameResources> mPrevFrame, mCurFrame;
 };
 

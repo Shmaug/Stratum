@@ -28,88 +28,65 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma compile dxc -spirv -T cs_6_7 -E main
 #endif
 
-#include "common/denoise_descriptors.hlsli"
-#include "common/svgf_common.hlsli"
+#include "../denoiser.h"
 
 struct PushConstants {
 	uint gViewCount;
 	float gHistoryLimit;
 };
 #ifdef __SLANG__
+#ifndef gDebugMode
+#define gDebugMode 0
+#endif
 [[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
 #else
+[[vk::constant_id(0)]] const uint gDebugMode = 0;
 [[vk::push_constant]] const PushConstants gPushConstants;
 #endif
 
-#define GROUP_SIZE 8
-#define RADIUS_0 2
-#define RADIUS_1 3
-#define TILE_SIZE (GROUP_SIZE + 2*RADIUS_1)
-
-//groupshared uint3 s_mem[TILE_SIZE*TILE_SIZE];
-
-inline float4 load(const uint2 index, const int2 tile_pos) {
-	return gAccumColor[index];
-	//return unpack_f16_4(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].xy);
-}
-inline float2 load_moment(const uint2 index, const int2 tile_pos) {
-	return gAccumMoments[index];
-	//return unpack_f16_2(s_mem[(RADIUS_1 + tile_pos.y)*TILE_SIZE + RADIUS_1 + tile_pos.x].z);
-}
-
-#ifdef __SLANG__
-[shader("compute")]
-#endif
-[numthreads(GROUP_SIZE,GROUP_SIZE,1)]
+SLANG_SHADER("compute")
+[numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadID) {
 	const uint view_index = get_view_index(index.xy, gViews, gPushConstants.gViewCount);
 	if (view_index == -1) return;
-
-	/*
-	if (all(group_index == 0)) {
-		for (uint j = 0; j < TILE_SIZE; j++)
-			for (uint i = 0; i < TILE_SIZE; i++) {
-				const int2 p = int2(index.xy) + int2(i,j) - RADIUS_1;
-				if (!test_inside_screen(p, gViews[view_index])) continue;
-				s_mem[j*TILE_SIZE + i] = uint3(pack_f16_4(gAccumColor[p]), pack_f16_2(gAccumMoments[p]));
-			}
-	}
-	GroupMemoryBarrierWithGroupSync();
-	*/
-
-	float4 c = load(index.xy, group_index.xy);
-	float2 m = load_moment(index.xy, group_index.xy);
 
 	uint2 extent;
 	gFilterImages[0].GetDimensions(extent.x, extent.y);
 	const uint index_1d = index.y*extent.x + index.x;
 
+
+	float4 c = gAccumColor[index.xy];
+	float2 m = gAccumMoments[index.xy];
+
+	const VisibilityInfo vis = gVisibility[index_1d];
+
 	const float histlen = c.a;
-	if (gVisibility[index_1d].instance_index() == INVALID_INSTANCE || histlen >= gPushConstants.gHistoryLimit) {
+	if (vis.instance_index() == INVALID_INSTANCE || histlen >= gPushConstants.gHistoryLimit) {
 		gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
 		return;
 	}
 
 	float sum_w = 1;
 
-	const int r = histlen > 1 ? RADIUS_0 : RADIUS_1;
+	const int r = histlen > 1 ? 2 : 3;
 	for (int yy = -r; yy <= r; yy++)
 		for (int xx = -r; xx <= r; xx++) {
 			if (xx == 0 && yy == 0) continue;
 
 			const int2 p = int2(index.xy) + int2(xx, yy);
-			if (!test_inside_screen(p, gViews[view_index])) continue;
+			if (!gViews[view_index].test_inside(p)) continue;
+
 			const uint p_1d = p.y*extent.x + p.x;
-			if (gVisibility[index_1d].instance_index() != gVisibility[p_1d].instance_index()) continue;
+			const VisibilityInfo vis_p = gVisibility[p_1d];
+			if (gInstanceIndexMap[vis.instance_index()] != vis_p.instance_index()) continue;
 
-			const float w_z = abs(gVisibility[p_1d].z() - gVisibility[index_1d].z()) / (length(gVisibility[index_1d].dz_dxy() * float2(xx, yy)) + 1e-2);
-			const float w_n = pow(saturate(dot(gVisibility[p_1d].normal(), gVisibility[index_1d].normal())), 128);
+			const float w_z = abs(vis_p.z() - vis.z()) / (length(vis.dz_dxy() * float2(xx, yy)) + 1e-2);
+			const float w_n = pow(saturate(dot(vis_p.normal(), vis.normal())), 128);
 			const float w = exp(-w_z) * w_n;
-
 			if (isnan(w) || isinf(w)) continue;
 
-			m += load_moment(p, group_index.xy + int2(xx,yy)) * w;
-			c.rgb += load(p, group_index.xy + int2(xx,yy)).rgb * w;
+			m += gAccumMoments[p] * w;
+			c.rgb += gAccumColor[p].rgb * w;
 			sum_w += w;
 		}
 

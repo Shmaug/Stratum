@@ -2,15 +2,17 @@
 #define RESERVOIR_H
 
 struct Reservoir {
-	uint M;
 	float total_weight;
+	uint M;
 	float W;
+	float src_pdf;
 
 	SLANG_MUTATING
 	inline void init() {
-		M = 0;
 		total_weight = 0;
+		M = 0;
 		W = 0;
+		src_pdf = 0;
 	}
 
 	SLANG_MUTATING

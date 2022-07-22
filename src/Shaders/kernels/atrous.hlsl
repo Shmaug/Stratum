@@ -24,13 +24,21 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+
 #if 0
 #pragma compile dxc -spirv -T cs_6_7 -E main
 #pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
 #endif
 
-#include "common/denoise_descriptors.hlsli"
-#include "common/svgf_common.hlsli"
+#ifdef __SLANG__
+#ifndef gDebugMode
+#define gDebugMode 0
+#endif
+#else
+[[vk::constant_id(0)]] const uint gDebugMode = 0;
+#endif
+
+#include "../denoiser.h"
 #include "../filter_type.h"
 
 struct PushConstants {
@@ -78,7 +86,7 @@ struct TapData {
 			for (int xx = -1; xx <= 1; xx++) {
 				if (xx == 0 && yy == 0) continue;
 				const int2 p = index + int2(xx, yy);
-				if (!test_inside_screen(p, gViews[view_index])) continue;
+				if (!gViews[view_index].test_inside(p)) continue;
 				s += gInput[p].a * kernel[abs(xx)][abs(yy)];
 			}
 		sigma_l = sqrt(max(s, 0))*gPushConstants.gSigmaLuminanceBoost;
@@ -87,19 +95,18 @@ struct TapData {
 	SLANG_MUTATING
 	inline void tap(const int2 offset, const float kernel_weight) {
 		const int2 p = index + offset;
-		if (!test_inside_screen(p, gViews[view_index])) return;
+		if (!gViews[view_index].test_inside(p)) return;
 
 		const float4 color_p  = gInput[p];
 		const float l_p = luminance(color_p.rgb);
 
-		const uint p_1d = p.y*screen_width + p.x;
-
+		const VisibilityInfo vis_p = gVisibility[p.y*screen_width + p.x];
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
-		const float w_z = 3 * abs(gVisibility[p_1d].z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
-		const float w_n = pow(max(0, dot(gVisibility[p_1d].normal(), center_normal)), 256);
+		const float w_z = 3 * abs(vis_p.z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
+		const float w_n = pow(max(0, dot(vis_p.normal(), center_normal)), 256);
 
 		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
-		if (isinf(w) || isnan(w) || w == 0) return;
+		if (isinf(w) || isnan(w)) return;
 
 		sum_color  += color_p * float4(w, w, w, w*w);
 		sum_weight += w;
@@ -195,9 +202,7 @@ inline void atrous(inout TapData t) {
 	t.tap(int2( 2, -2) * gPushConstants.gStepSize, 1.0 / 36.0);
 }
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void main(uint3 index : SV_DispatchThreadId) {
 	TapData t;
@@ -206,13 +211,13 @@ void main(uint3 index : SV_DispatchThreadId) {
 	uint h;
 	gOutput.GetDimensions(t.screen_width, h);
 
-	const uint index_1d = index.y*t.screen_width + index.x;
+	const VisibilityInfo vis = gVisibility[index.y*t.screen_width + index.x];
 	t.index = index.xy;
-	t.center_normal = gVisibility[index_1d].normal();
-	t.z_center = (float)gVisibility[index_1d].z();
-	t.dz_center = (float2)gVisibility[index_1d].dz_dxy();
+	t.center_normal = vis.normal();
+	t.z_center = (float)vis.z();
+	t.dz_center = (float2)vis.dz_dxy();
 	t.sum_weight = 1;
-	t.sum_color = gInput[index.xy];
+	t.sum_color = gInput[t.index];
 	t.l_center = luminance(t.sum_color.rgb);
 
 	t.compute_sigma_luminance();
@@ -251,9 +256,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	gOutput[t.index] = t.sum_color*float4(inv_w, inv_w, inv_w, inv_w*inv_w);
 }
 
-#ifdef __SLANG__
-[shader("compute")]
-#endif
+SLANG_SHADER("compute")
 [numthreads(8,8,1)]
 void copy_rgb(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;
