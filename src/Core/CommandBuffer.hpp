@@ -28,11 +28,25 @@ public:
 	inline const shared_ptr<Pipeline>& bound_pipeline() const { return mBoundPipeline; }
 	inline const shared_ptr<DescriptorSet>& bound_descriptor_set(uint32_t index) const { return mBoundDescriptorSets[index]; }
 
-	// Label a region for a tool such as RenderDoc
-	STRATUM_API void begin_label(const string& label, const float4& color = { 1,1,1,0 });
-	STRATUM_API void end_label();
-
 	STRATUM_API void reset(const string& name = "Command Buffer");
+
+	// Label a region for a tool such as RenderDoc
+	inline void begin_label(const string& label, const float4& color = { 1,1,1,0 }) const {
+		vk::DebugUtilsLabelEXT info = {};
+		copy_n(color.data(), 4, info.color.data());
+		info.pLabelName = label.c_str();
+		mCommandBuffer.beginDebugUtilsLabelEXT(info);
+	}
+	inline void end_label() const {
+		mCommandBuffer.endDebugUtilsLabelEXT();
+	}
+	inline void write_timestamp(vk::PipelineStageFlagBits stage, const string& label) const {
+		auto&[pool,count,labels] = mDevice.query_pool();
+		const uint32_t num = labels.size();
+		labels.emplace_back(label);
+		if (num < count)
+			mCommandBuffer.writeTimestamp(stage, pool, num);
+	}
 
 	inline bool clear_if_done() {
 		if (mState == CommandBufferState::eInFlight)
@@ -300,6 +314,7 @@ inline bool DeviceResource::in_use() {
 class ProfilerRegion {
 private:
 	CommandBuffer* mCommandBuffer;
+
 public:
 	inline ProfilerRegion(const string& label) : ProfilerRegion(label, nullptr) {}
 	inline ProfilerRegion(const string& label, CommandBuffer* cmd, const float4& color = float4::Ones()) : mCommandBuffer(cmd) {

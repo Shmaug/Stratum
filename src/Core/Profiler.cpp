@@ -5,17 +5,14 @@
 using namespace stm;
 
 shared_ptr<Profiler::sample_t> Profiler::mCurrentSample;
+vector<pair<chrono::steady_clock::time_point, vector<pair<string,chrono::nanoseconds>>>> Profiler::mTimestamps;
 vector<shared_ptr<Profiler::sample_t>> Profiler::mSampleHistory;
 uint32_t Profiler::mSampleHistoryCount = 0;
 optional<chrono::high_resolution_clock::time_point> Profiler::mFrameStart = nullopt;
 deque<float> Profiler::mFrameTimes;
 uint32_t Profiler::mFrameTimeCount = 32;
 
-inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample_t& s, const chrono::high_resolution_clock::time_point& t_min, const chrono::high_resolution_clock::time_point& t_max, const float x_min, const float x_max, const float y, const float height) {
-	const float dt = chrono::duration_cast<chrono::duration<float, milli>>(t_max - t_min).count();
-	const float t0 = chrono::duration_cast<chrono::duration<float, milli>>(s.mStartTime - t_min).count() / dt;
-	const float t1 = chrono::duration_cast<chrono::duration<float, milli>>(s.mStartTime + s.mDuration - t_min).count() / dt;
-
+inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample_t& s, const float t0, const float t1, const float x_min, const float x_max, const float y, const float height) {
 	const ImVec2 p_min = ImVec2(x_min + t0*(x_max - x_min), y);
 	const ImVec2 p_max = ImVec2(x_min + t1*(x_max - x_min), y + height);
 	if (p_max.x < x_min || p_max.x > x_max) return {};
@@ -24,7 +21,8 @@ inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample
 	bool hovered = (mousePos.y > p_min.y && mousePos.y < p_max.y && mousePos.x > p_min.x && mousePos.x < p_max.x);
 	if (hovered) {
 		ImGui::BeginTooltip();
-		ImGui::Text(s.mLabel.c_str());
+		const string label = s.mLabel + " (" + to_string(chrono::duration_cast<chrono::duration<float, milli>>(s.mDuration).count()) + "ms)";
+		ImGui::Text(label.c_str());
 		ImGui::EndTooltip();
 	}
 
@@ -37,11 +35,13 @@ inline optional<pair<ImVec2,ImVec2>> draw_sample_timeline(const Profiler::sample
 
 void Profiler::sample_timeline_gui() {
 	chrono::high_resolution_clock::time_point t_min = mSampleHistory[0]->mStartTime;
-	chrono::high_resolution_clock::time_point t_max = mSampleHistory[0]->mStartTime;
+	chrono::high_resolution_clock::time_point t_max = t_min;
 	for (const auto& f : mSampleHistory) {
 		if (f->mStartTime < t_min) t_min = f->mStartTime;
 		if (auto t = f->mStartTime + f->mDuration; t > t_max) t_max = t;
 	}
+
+	const float inv_dt = 1/chrono::duration_cast<chrono::duration<float, milli>>(t_max - t_min).count();
 
 	const ImVec2 w_min = ImVec2(ImGui::GetWindowContentRegionMin().x + ImGui::GetWindowPos().x, ImGui::GetWindowContentRegionMin().y + ImGui::GetWindowPos().y);
 	const float x_max = w_min.x + ImGui::GetWindowContentRegionWidth();
@@ -49,19 +49,53 @@ void Profiler::sample_timeline_gui() {
 	float height = 28;
 	float pad = 4;
 
-	stack<pair<shared_ptr<Profiler::sample_t>, uint32_t>> todo;
-	for (const auto& f : mSampleHistory) todo.push(make_pair(f, 0));
-	while (!todo.empty()) {
-		auto[s,l] = todo.top();
-		todo.pop();
+	// timestamps
+	{
+		chrono::nanoseconds gpu_t_min = mTimestamps[0].second[0].second;
+		chrono::nanoseconds gpu_t_max = gpu_t_min;
+		for (const auto&[ft0,f] : mTimestamps) {
+			cout << "T - " << chrono::duration_cast<chrono::duration<float, milli>>(chrono::high_resolution_clock::now() - ft0).count() << "ms" << endl;
+			for (uint32_t i = 0; i < f.size(); i++) {
+				const auto&[l,t] = f[i];
+				cout << "\t" << l << ":\t" << t.count() << "ns";
+				if (i > 0)
+					cout << "\t(" << chrono::duration_cast<chrono::duration<float, milli>>(t - f[i-1].second).count() << "ms)";
+				cout << endl;
+				if (t < gpu_t_min) gpu_t_min = t;
+				if (t > gpu_t_max) gpu_t_max = t;
+			}
+		}
+		const double inv_gpu_dt = 1.0 / (gpu_t_max.count() - gpu_t_min.count());
+		for (const auto&[ft0,f] : mTimestamps)
+			for (uint32_t i = 1; i < f.size(); i++) {
+				const auto&[label0,t0] = f[i-1];
+				const auto&[label1,t1] = f[i];
+				Profiler::sample_t tmp;
+				tmp.mDuration = t1 - t0;
+				tmp.mColor = float4::Ones();
+				tmp.mLabel = label0;
+				draw_sample_timeline(tmp, t0.count()*inv_gpu_dt, t1.count()*inv_gpu_dt, w_min.x, x_max, w_min.y, height);
+			}
+	}
 
-		auto r = draw_sample_timeline(*s, t_min, t_max, w_min.x, x_max, w_min.y + l*(height + pad), height);
-		if (!r) continue;
+	// profiler sample history
+	{
+		stack<pair<shared_ptr<Profiler::sample_t>, uint32_t>> todo;
+		for (const auto& f : mSampleHistory) todo.push(make_pair(f, 1));
+		while (!todo.empty()) {
+			auto[s,l] = todo.top();
+			todo.pop();
 
-		const auto[p_min,p_max] = *r;
+			const float t0 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime - t_min).count() * inv_dt;
+			const float t1 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime + s->mDuration - t_min).count() * inv_dt;
+			auto r = draw_sample_timeline(*s, t0, t1, w_min.x, x_max, w_min.y + l*(height + pad), height);
+			if (!r) continue;
 
-		for (const auto& c : s->mChildren)
-			todo.push(make_pair(c, l+1));
+			const auto[p_min,p_max] = *r;
+
+			for (const auto& c : s->mChildren)
+				todo.push(make_pair(c, l+1));
+		}
 	}
 }
 

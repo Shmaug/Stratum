@@ -25,16 +25,6 @@ CommandBuffer::~CommandBuffer() {
 	mDevice->freeCommandBuffers(mCommandPool, { mCommandBuffer });
 }
 
-void CommandBuffer::begin_label(const string& text, const float4& color) {
-	vk::DebugUtilsLabelEXT label = {};
-	memcpy(label.color, &color, sizeof(color));
-	label.pLabelName = text.c_str();
-	mCommandBuffer.beginDebugUtilsLabelEXT(label);
-}
-void CommandBuffer::end_label() {
-	mCommandBuffer.endDebugUtilsLabelEXT();
-}
-
 void CommandBuffer::clear() {
 	for (const auto& resource : mHeldResources)
 		resource->mTracking.erase(this);

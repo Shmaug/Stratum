@@ -7,22 +7,29 @@
 
 using namespace stm;
 
-stm::Window::Window(Instance& instance, const string& title, vk::Rect2D position) : mInstance(instance), mTitle(title), mClientRect(position) {
+stm::Window::Window(Instance& instance, const string& title, const vk::Rect2D& position) : mInstance(instance), mTitle(title) {
 	#ifdef _WIN32
 
 	mWindowedRect = {};
 
 	SetProcessDPIAware();
 
+	RECT r;
+	r.left = position.offset.x;
+	r.top = position.offset.y;
+	r.right = position.offset.x + position.extent.width;
+	r.bottom = position.offset.y + position.extent.height;
+	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+
 	mHwnd = CreateWindowExA(
 		NULL,
 		"Stratum",
 		mTitle.c_str(),
 		WS_OVERLAPPEDWINDOW,
-		position.offset.x,
-		position.offset.y,
-		position.extent.width,
-		position.extent.height,
+		r.left,
+		r.top,
+		r.right - r.left,
+		r.bottom - r.top,
 		NULL,
 		NULL,
 		mInstance.hInstance(),
@@ -142,24 +149,27 @@ void stm::Window::resolve(CommandBuffer& commandBuffer) {
 }
 void stm::Window::present(const vk::ArrayProxyNoTemporaries<const vk::Semaphore>& waitSemaphores) {
 	ProfilerRegion ps("Window::present");
-	auto result = mPresentQueueFamily->mQueues[0].presentKHR(vk::PresentInfoKHR(waitSemaphores, mSwapchain, mBackBufferIndex));
+	vk::PresentInfoKHR info(waitSemaphores, mSwapchain, mBackBufferIndex);
+	const vk::Result result = mPresentQueueFamily->mQueues[0].presentKHR(&info);
+	if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR)
+		mRecreateSwapchain = true;
 	mPresentCount++;
 }
 
-void stm::Window::resize(uint32_t w, uint32_t h) {
+void stm::Window::resize(const vk::Extent2D& extent) {
 #ifdef _WIN32
 	RECT r;
 	GetWindowRect(mHwnd, &r);
 	int x = r.left, y = r.top;
 	GetClientRect(mHwnd, &r);
-	r.right = r.left + w;
-	r.bottom = r.top + h;
+	r.right = r.left + extent.width;
+	r.bottom = r.top + extent.height;
 	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	SetWindowPos(mHwnd, HWND_TOPMOST, x, y, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
 #endif
 }
 
-void stm::Window::fullscreen(bool fs) {
+void stm::Window::fullscreen(const bool fs) {
 	#ifdef _WIN32
 	if (fs && !mFullscreen) {
 		GetWindowRect(mHwnd, &mWindowedRect);
@@ -222,14 +232,16 @@ void stm::Window::create_swapchain() {
 	mPresentQueueFamily = mInstance.device().find_queue_family(mSurface);
 	if (!mPresentQueueFamily) throw runtime_error("Device cannot present to the window surface!");
 
+	Device& device = mInstance.device();
+
 	// get the size of the swapchain
-	vk::SurfaceCapabilitiesKHR capabilities = mPresentQueueFamily->mDevice.physical().getSurfaceCapabilitiesKHR(mSurface);
+	vk::SurfaceCapabilitiesKHR capabilities = device.physical().getSurfaceCapabilitiesKHR(mSurface);
 	mSwapchainExtent = capabilities.currentExtent;
-	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > mPresentQueueFamily->mDevice.limits().maxImageDimension2D || mSwapchainExtent.height > mPresentQueueFamily->mDevice.limits().maxImageDimension2D)
+	if (mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0 || mSwapchainExtent.width > device.limits().maxImageDimension2D || mSwapchainExtent.height > device.limits().maxImageDimension2D)
 		return; // invalid swapchain size, window invalid
 
 	// select the format of the swapchain
-	auto formats = mPresentQueueFamily->mDevice.physical().getSurfaceFormatsKHR(mSurface);
+	auto formats = device.physical().getSurfaceFormatsKHR(mSurface);
 	mSurfaceFormat = formats.front();
 	for (const vk::SurfaceFormatKHR& format : formats)
 		if (format == mPreferredSurfaceFormat) {
@@ -238,7 +250,7 @@ void stm::Window::create_swapchain() {
 		}
 
 	mPresentMode = vk::PresentModeKHR::eFifo; // required to be supported
-	for (const vk::PresentModeKHR& mode : mPresentQueueFamily->mDevice.physical().getSurfacePresentModesKHR(mSurface))
+	for (const vk::PresentModeKHR& mode : device.physical().getSurfacePresentModesKHR(mSurface))
 		if (mode == mPreferredPresentMode) {
 			mPresentMode = mode;
 			break;
@@ -260,13 +272,13 @@ void stm::Window::create_swapchain() {
 	createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 	createInfo.presentMode = mPresentMode;
 	createInfo.clipped = VK_FALSE;
-	mSwapchain = mPresentQueueFamily->mDevice->createSwapchainKHR(createInfo);
-	mPresentQueueFamily->mDevice.set_debug_name(mSwapchain, "Window/Swapchain");
+	mSwapchain = device->createSwapchainKHR(createInfo);
+	device.set_debug_name(mSwapchain, "Window/Swapchain");
 
-	if (createInfo.oldSwapchain) mInstance.device()->destroySwapchainKHR(createInfo.oldSwapchain);
+	if (createInfo.oldSwapchain) device->destroySwapchainKHR(createInfo.oldSwapchain);
 
 	// create per-frame image views and semaphores
-	vector<vk::Image> images = mPresentQueueFamily->mDevice->getSwapchainImagesKHR(mSwapchain);
+	vector<vk::Image> images = device->getSwapchainImagesKHR(mSwapchain);
 	mSwapchainImages.clear();
 	mRenderTargets.clear();
 	mImageAvailableSemaphores.clear();
@@ -274,19 +286,21 @@ void stm::Window::create_swapchain() {
 	mRenderTargets.reserve(images.size());
 	mImageAvailableSemaphores.reserve(images.size());
 	for (uint32_t i = 0; i < images.size(); i++) {
-		mPresentQueueFamily->mDevice.set_debug_name(images[i], "swapchain " + to_string(i));
+		device.set_debug_name(images[i], "swapchain " + to_string(i));
 		mSwapchainImages.emplace_back(
-			make_shared<Image>(images[i], mPresentQueueFamily->mDevice, "swapchain " + to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
+			make_shared<Image>(images[i], device, "swapchain " + to_string(i), vk::Extent3D(mSwapchainExtent,1), createInfo.imageFormat, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, createInfo.imageUsage),
 			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
 		mRenderTargets.emplace_back(
-			make_shared<Image>(mPresentQueueFamily->mDevice, "render target " + to_string(i), vk::Extent3D(mSwapchainExtent,1), vk::Format::eR8G8B8A8Unorm, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eColorAttachment|vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled),
+			make_shared<Image>(device, "render target " + to_string(i), vk::Extent3D(mSwapchainExtent,1), vk::Format::eR8G8B8A8Unorm, createInfo.imageArrayLayers, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eColorAttachment|vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled),
 			0, 1, 0, 1, vk::ImageAspectFlagBits::eColor);
-		mImageAvailableSemaphores.emplace_back(make_shared<Semaphore>(mPresentQueueFamily->mDevice, "Swapchain/ImageAvaiableSemaphore" + to_string(i)));
+		mImageAvailableSemaphores.emplace_back(make_shared<Semaphore>(device, "Swapchain/ImageAvaiableSemaphore" + to_string(i)));
 	}
 
 	mBackBufferIndex = 0;
 	mImageAvailableSemaphoreIndex = 0;
 	mRecreateSwapchain = false;
+
+	device.create_query_pools(32);
 }
 
 #ifdef _WIN32

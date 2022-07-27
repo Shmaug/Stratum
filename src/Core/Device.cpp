@@ -144,6 +144,9 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 Device::~Device() {
 	flush();
 
+	for (auto[qp,count,labels] : mTimestamps)
+		mDevice.destroyQueryPool(qp);
+
 	auto queueFamilies = mQueueFamilies.lock();
 	for (auto& [idx, queueFamily] : *queueFamilies) {
 		for (auto&[tid, p] : queueFamily.mCommandBuffers) {
@@ -170,7 +173,21 @@ Device::~Device() {
 	mDevice.destroy();
 }
 
+void Device::create_query_pools(uint32_t queryCount) {
+	for (auto[qp,count,labels] : mTimestamps)
+		mDevice.destroyQueryPool(qp);
+
+	mTimestamps.resize(mInstance.window().back_buffer_count());
+	for (auto&[qp,count,labels] : mTimestamps) {
+		qp = mDevice.createQueryPool(vk::QueryPoolCreateInfo({}, vk::QueryType::eTimestamp, queryCount));
+		labels.clear();
+		count = queryCount;
+	}
+}
+tuple<vk::QueryPool,uint32_t,vector<string>>& Device::query_pool() { return mTimestamps[mInstance.window().back_buffer_index()]; }
+
 shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::QueueFlags queueFlags, vk::CommandBufferLevel level) {
+	ProfilerRegion ps("CommandBuffer::get_command_buffer");
 	// find most specific queue family
 	QueueFamily* queueFamily = nullptr;
 	auto queueFamilies = mQueueFamilies.lock();
@@ -197,11 +214,11 @@ shared_ptr<CommandBuffer> Device::get_command_buffer(const string& name, vk::Que
 				it++;
 		}
 	}
-	if (commandBuffer) {
+	if (commandBuffer)
 		commandBuffer->reset(name);
-		return commandBuffer;
-	} else
-		return make_shared<CommandBuffer>(*queueFamily, name, level);
+	else
+		commandBuffer = make_shared<CommandBuffer>(*queueFamily, name, level);
+	return commandBuffer;
 }
 void Device::submit(const shared_ptr<CommandBuffer>& commandBuffer) {
 	ProfilerRegion ps("CommandBuffer::submit");

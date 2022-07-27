@@ -39,7 +39,7 @@ public:
 
 	inline stm::Device& device() const { return *mDevice; }
 	inline stm::Window& window() const { return *mWindow; }
-	
+
 	inline optional<string> find_argument(const string& name) const {
 		auto it = mOptions.find(name);
 		if (it == mOptions.end()) return nullopt;

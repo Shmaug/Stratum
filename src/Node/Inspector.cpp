@@ -13,7 +13,14 @@ inline void inspector_gui_fn(Inspector& inspector, Instance* instance) {
 
 	ImGui::LabelText("Descriptor sets", "%u", instance->device().descriptor_set_count());
 
-	ImGui::LabelText("Window resolution", "%ux%u", instance->window().swapchain_extent().width, instance->window().swapchain_extent().height);
+	vk::Extent2D swapchain_extent = instance->window().swapchain_extent();
+	bool resize = false;
+	ImGui::InputScalar("Swapchain width", ImGuiDataType_U32, &swapchain_extent.width);
+	resize |= ImGui::IsItemDeactivatedAfterEdit();
+	ImGui::InputScalar("Swapchain height", ImGuiDataType_U32, &swapchain_extent.height);
+	resize |= ImGui::IsItemDeactivatedAfterEdit();
+	if (resize) instance->window().resize(swapchain_extent);
+
 	ImGui::LabelText("Render target format", to_string(instance->window().back_buffer().image()->format()).c_str());
 	ImGui::LabelText("Image count", to_string(instance->window().back_buffer_count()).c_str());
 
@@ -115,11 +122,11 @@ Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 			ImGui::SliderInt("Count", &profiler_n, 1, 256);
 			ImGui::SameLine();
 			if (ImGui::Button("Timeline"))
-				Profiler::reset_history(profiler_n);
+				Profiler::reset_history(Profiler::has_history() ? 0 : profiler_n);
 		}
 		ImGui::End();
 
-		if (!Profiler::history().empty()) {
+		if (Profiler::has_history()) {
 			if (ImGui::Begin("Timeline")) {
 				ProfilerRegion ps("Profiler::sample_timeline_gui");
 				Profiler::sample_timeline_gui();

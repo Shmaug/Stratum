@@ -123,6 +123,9 @@ public:
 	STRATUM_API void submit(const shared_ptr<CommandBuffer>& commandBuffer);
 	STRATUM_API void flush();
 
+	STRATUM_API void create_query_pools(uint32_t queryCount);
+	STRATUM_API tuple<vk::QueryPool,uint32_t,vector<string>>& query_pool();
+
 private:
 	friend class Instance;
 	friend class DescriptorSet;
@@ -149,6 +152,8 @@ private:
 	locked_object<unordered_map<uint32_t, QueueFamily>> mQueueFamilies;
 	locked_object<vk::DescriptorPool> mDescriptorPool;
 	uint32_t mDescriptorSetCount = 0;
+
+	vector<tuple<vk::QueryPool,uint32_t,vector<string>>> mTimestamps;
 };
 
 }

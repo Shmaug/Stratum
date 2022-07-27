@@ -268,7 +268,7 @@ class Window {
 public:
 	Instance& mInstance;
 
-	STRATUM_API Window(Instance& instance, const string& title, vk::Rect2D position);
+	STRATUM_API Window(Instance& instance, const string& title, const vk::Rect2D& position);
 	STRATUM_API ~Window();
 
 	inline const string& title() const { return mTitle; }
@@ -277,20 +277,25 @@ public:
 	inline vk::SwapchainKHR swapchain() const { return mSwapchain; }
 	inline vk::SurfaceFormatKHR surface_format() const { return mSurfaceFormat; }
 	inline vk::PresentModeKHR present_mode() const { return mPresentMode; }
-	inline const vk::Extent2D& swapchain_extent() const { return mSwapchainExtent; }
 	inline const shared_ptr<Semaphore>& image_available_semaphore() const { return mImageAvailableSemaphores[mImageAvailableSemaphoreIndex]; }
 	inline Device::QueueFamily* present_queue_family() const { return mPresentQueueFamily; }
 
 	inline void acquire_image_timeout(const chrono::nanoseconds& v) { mAcquireImageTimeout = v; }
 	inline const chrono::nanoseconds& acquire_image_timeout() const { return mAcquireImageTimeout; }
+
 	inline void min_image_count(const uint32_t v) { if (mMinImageCount != v) mRecreateSwapchain = true; mMinImageCount = v; }
 	inline const uint32_t& min_image_count() const { return mMinImageCount; }
+
 	inline void preferred_present_mode(const vk::PresentModeKHR& v) { if (mPreferredPresentMode != v) mRecreateSwapchain = true; mPreferredPresentMode = v; }
 	inline vk::PresentModeKHR preferred_present_mode() const { return mPreferredPresentMode; }
+
 	inline void preferred_surface_format(const vk::SurfaceFormatKHR& v) { if (mPreferredSurfaceFormat != v) mRecreateSwapchain = true; mPreferredSurfaceFormat = v; }
 	inline vk::SurfaceFormatKHR preferred_surface_format() const { return mPreferredSurfaceFormat; }
 
-	STRATUM_API void fullscreen(bool fs);
+	STRATUM_API void resize(const vk::Extent2D& extent);
+	inline const vk::Extent2D& swapchain_extent() const { return mSwapchainExtent; }
+
+	STRATUM_API void fullscreen(const bool fs);
 	inline bool fullscreen() const { return mFullscreen; }
 
 	inline bool wants_repaint() { return mRepaint; }
@@ -299,8 +304,6 @@ public:
 	inline uint32_t back_buffer_index() const { return mBackBufferIndex; }
 	inline const Image::View& back_buffer() const { return mRenderTargets[back_buffer_index()]; }
 	inline const Image::View& back_buffer(uint32_t i) const { return mRenderTargets[i]; }
-
-	STRATUM_API void resize(uint32_t w, uint32_t h);
 
 	STRATUM_API bool acquire_image();
 	STRATUM_API void resolve(CommandBuffer& commandBuffer);

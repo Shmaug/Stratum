@@ -30,16 +30,15 @@ public:
 	inline static void end_sample() {
 		if (!mCurrentSample) throw logic_error("cannot call end_sample without first calling begin_sample");
 		mCurrentSample->mDuration += chrono::high_resolution_clock::now() - mCurrentSample->mStartTime;
-		auto tmp = mCurrentSample;
+		if (!mCurrentSample->mParent && mSampleHistory.size() < mSampleHistoryCount)
+			mSampleHistory.emplace_back(mCurrentSample);
 		mCurrentSample = mCurrentSample->mParent;
-		if (!mCurrentSample) {
-			if (mSampleHistoryCount > 0) {
-				mSampleHistory.emplace_back(tmp);
-				mSampleHistoryCount--;
-			}
-		}
 	}
 
+	inline static void set_timestamps(const chrono::steady_clock::time_point& t0, const vector<pair<string,chrono::nanoseconds>>& gpuTimestamps) {
+		if (gpuTimestamps.size() && mTimestamps.size() < mSampleHistoryCount)
+			mTimestamps.emplace_back(t0, gpuTimestamps);
+	}
 	inline static void begin_frame() {
 		auto rn = chrono::high_resolution_clock::now();
 		if (mFrameStart && mFrameTimeCount > 0) {
@@ -50,22 +49,20 @@ public:
 		mFrameStart = rn;
 	}
 
-	inline static const auto& times() { return mFrameTimes; }
-	inline static const auto& history() { return mSampleHistory; }
-	inline static void clear_history() { mSampleHistory.clear(); }
-
+	inline static bool has_history() { return !mSampleHistory.empty(); }
 	inline static void reset_history(uint32_t n) {
-		if (mSampleHistory.empty())
-			mSampleHistoryCount = n;
-		else
-			mSampleHistory.clear();
+		mSampleHistoryCount = n;
+		mSampleHistory.clear();
+		mTimestamps.clear();
 	}
 
 	STRATUM_API static void frame_times_gui();
 	STRATUM_API static void sample_timeline_gui();
+	STRATUM_API static void gpu_timestamp_gui();
 
 private:
 	STRATUM_API static shared_ptr<sample_t> mCurrentSample;
+	STRATUM_API static vector<pair<chrono::steady_clock::time_point, vector<pair<string,chrono::nanoseconds>>>> mTimestamps;
 	STRATUM_API static vector<shared_ptr<sample_t>> mSampleHistory;
 	STRATUM_API static uint32_t mSampleHistoryCount;
 	STRATUM_API static optional<chrono::high_resolution_clock::time_point> mFrameStart;

@@ -179,6 +179,8 @@ void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 
 	ProfilerRegion ps("Gui::render", commandBuffer);
 
+	commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eVertexInput, "Gui::render");
+
 	RenderPass::SubpassDescription subpass {
 		{ "colorBuffer", {
 			AttachmentType::eColor, blend_mode_state(), vk::AttachmentDescription{ {},
@@ -233,4 +235,5 @@ void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
 	}
 
 	commandBuffer.end_render_pass();
+	commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eColorAttachmentOutput, "Gui::render done");
 }

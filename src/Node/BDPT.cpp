@@ -517,6 +517,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// presample lights
 	if (push_constants.gMaxPathVertices > 2 && (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)) {
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Presample_lights");
 		ProfilerRegion ps("Presample lights", commandBuffer);
 		commandBuffer.bind_pipeline(mPresampleLightPipeline->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
@@ -538,6 +539,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		lightExtent.depth = 1;
 
 		{
+			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample photons");
 			ProfilerRegion ps("Sample photons", commandBuffer);
 			commandBuffer.bind_pipeline(mSamplePhotonsPipeline->get_pipeline(mDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
@@ -545,6 +547,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 
 		if (push_constants.gMaxLightPathVertices > 2) {
+			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace light paths");
 			ProfilerRegion ps("Trace light paths", commandBuffer);
 			mIntegratorPipelines[mIntegratorType]->specialization_constant<uint32_t>("gSpecializationFlags") = (sampling_flags | BDPT_FLAG_TRACE_LIGHT) & ~BDPT_FLAG_RAY_CONES;
 			commandBuffer.bind_pipeline(mIntegratorPipelines[mIntegratorType]->get_pipeline(mDescriptorSetLayouts));
@@ -567,6 +570,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// trace visibility
 	{
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample visibility");
 		ProfilerRegion ps("Sample visibility", commandBuffer);
 		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
@@ -584,8 +588,9 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer.barrier({ mCurFrame->mPresampledLights }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 	mCurFrame->mPrevUVs.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 
-	// trace eye paths
+	// trace view paths
 	if (push_constants.gMaxPathVertices > 2) {
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace view paths");
 		ProfilerRegion ps("Trace view paths", commandBuffer);
 		commandBuffer.bind_pipeline(mIntegratorPipelines[mIntegratorType]->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
@@ -598,17 +603,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 			commandBuffer.dispatch_over(extent);
 		}
-	}
-
-	// copy selection data
-	{
-		Buffer::View<VisibilityInfo> v = mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>();
-		commandBuffer.barrier({ v }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
-		const float2 c = commandBuffer.mDevice.mInstance.window().input_state().cursor_pos();
-		const int2 cp = int2((int)c.x(), (int)c.y());
-		for (const auto&[view, transform] : views)
-			if (view.test_inside(cp))
-				commandBuffer.copy_buffer(Buffer::View<VisibilityInfo>(v, cp.y() * view.extent().x() + cp.x(), 1), mCurFrame->mSelectionData);
 	}
 
 	Image::View result = mCurFrame->mRadiance;
@@ -626,6 +620,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	}
 
 	if (mDenoise && denoiser) {
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Denoise");
 		if (changed && !reprojection) denoiser->reset_accumulation();
 		mCurFrame->mDenoiseResult = denoiser->denoise(commandBuffer, result, mCurFrame->mViews, mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>(), mCurFrame->mPrevUVs);
 		result = mCurFrame->mDenoiseResult;
@@ -633,6 +628,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// tone map
 	{
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Tonemap");
 		ProfilerRegion ps("Tonemap", commandBuffer);
 
 		if (gTonemapModeNeedsMax.contains((TonemapMode)mTonemapPipeline->specialization_constant<uint32_t>("gMode"))) {
@@ -671,6 +667,19 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer.copy_image(mCurFrame->mTonemapResult, renderTarget);
 	else
 		commandBuffer.blit_image(mCurFrame->mTonemapResult, renderTarget);
+
+	// copy selection data
+	{
+		Buffer::View<VisibilityInfo> v = mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>();
+		commandBuffer.barrier({ v }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
+		const float2 c = commandBuffer.mDevice.mInstance.window().input_state().cursor_pos();
+		const int2 cp = int2((int)c.x(), (int)c.y());
+		for (const auto&[view, transform] : views)
+			if (view.test_inside(cp))
+				commandBuffer.copy_buffer(Buffer::View<VisibilityInfo>(v, cp.y() * view.extent().x() + cp.x(), 1), mCurFrame->mSelectionData);
+	}
+
+	commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eTopOfPipe, "BDPT::render done");
 }
 
 }
