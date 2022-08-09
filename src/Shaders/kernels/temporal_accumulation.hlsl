@@ -59,7 +59,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	float2 extent;
 	gAccumColor.GetDimensions(extent.x, extent.y);
 
-  	const uint2 ipos = index.xy;
+	const uint2 ipos = index.xy;
 
 	float4 color_prev   = 0;
 	float2 moments_prev = 0;

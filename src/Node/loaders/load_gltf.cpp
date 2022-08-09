@@ -10,6 +10,8 @@ namespace stm {
 void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& filename) {
 	ProfilerRegion ps("load_gltf", commandBuffer);
 
+	cout << "Loading " << filename << endl;
+
 	tinygltf::Model model;
 	tinygltf::TinyGLTF loader;
 	string err, warn;
@@ -60,6 +62,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 		return img;
 	};
 
+	cout << "Loading buffers..." << endl;
+
 	vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eVertexBuffer|vk::BufferUsageFlagBits::eIndexBuffer|vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eTransferSrc;
 	#ifdef VK_KHR_buffer_device_address
 	bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
@@ -74,6 +78,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 		commandBuffer.barrier({dst}, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 		return dst.buffer();
 	});
+
+	cout << "Loading materials..." << endl;
 	Node& materialsNode = root.make_child("materials");
 	ranges::transform(model.materials, materials.begin(), [&](const tinygltf::Material& material) {
 		ImageValue3 emission = make_image_value3(get_image(material.emissiveTexture.index, true), double3::Map(material.emissiveFactor.data()).cast<float>());
@@ -87,8 +93,11 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
 		return materialsNode.make_child(material.name).make_component<Material>(m);
 	});
+
+	cout << "Loading meshes...";
 	Node& meshesNode = root.make_child("meshes");
 	for (uint32_t i = 0; i < model.meshes.size(); i++) {
+		cout << "\rLoading meshes " << (i+1) << "/" << model.meshes.size() << "     ";
 		meshes[i].resize(model.meshes[i].primitives.size());
 		for (uint32_t j = 0; j < model.meshes[i].primitives.size(); j++) {
 			const tinygltf::Primitive& prim = model.meshes[i].primitives[j];
@@ -202,33 +211,12 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				attribs[typeIndex] = {
 					VertexArrayObject::AttributeDescription(stride, attributeFormat, 0, vk::VertexInputRate::eVertex),
 					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset + accessor.byteOffset, stride*accessor.count) };
-
-				if (attributeType == VertexArrayObject::AttributeType::ePosition && topology == vk::PrimitiveTopology::eTriangleList) {
-					const byte* indices_ptr   = reinterpret_cast<const byte*>(model.buffers[indexBufferView.buffer].data.data()) + indexBufferView.byteOffset + indicesAccessor.byteOffset;
-					const byte* positions_ptr = reinterpret_cast<const byte*>(model.buffers[bv.buffer].data.data()) + bv.byteOffset + accessor.byteOffset;
-					area = 0.f;
-					for (int ii = 0; ii < indicesAccessor.count; ii += 3) {
-						uint32_t i0,i1,i2;
-						if (indexStride == sizeof(uint32_t)) {
-							i0 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii));
-							i1 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii+1));
-							i2 = *reinterpret_cast<const uint32_t*>(indices_ptr + indexStride*(ii+2));
-						} else {
-							i0 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii));
-							i1 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii+1));
-							i2 = *reinterpret_cast<const uint16_t*>(indices_ptr + indexStride*(ii+2));
-						}
-						const float3 v0 = *reinterpret_cast<const float3*>(positions_ptr + stride*i0);
-						const float3 v1 = *reinterpret_cast<const float3*>(positions_ptr + stride*i1);
-						const float3 v2 = *reinterpret_cast<const float3*>(positions_ptr + stride*i2);
-						area = *area + (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
-					}
-				}
 			}
 
 			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology, area);
 		}
 	}
+	cout << endl;
 
 	vector<Node*> nodes(model.nodes.size());
 	for (size_t n = 0; n < model.nodes.size(); n++) {

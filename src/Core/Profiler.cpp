@@ -46,25 +46,29 @@ void Profiler::sample_timeline_gui() {
 	const ImVec2 w_min = ImVec2(ImGui::GetWindowContentRegionMin().x + ImGui::GetWindowPos().x, ImGui::GetWindowContentRegionMin().y + ImGui::GetWindowPos().y);
 	const float x_max = w_min.x + ImGui::GetWindowContentRegionWidth();
 
-	float height = 28;
+	float height = 18;
+	float header_height = 24;
 	float pad = 4;
 
-	// timestamps
-	{
+	float y_min = w_min.y;
+
+	// gpu timestamps
+	if (!mTimestamps.empty()) {
+		const ImVec4 clipRect = ImVec4(w_min.x, w_min.y, x_max, y_min + header_height);
+		ImGui::GetWindowDrawList()->AddText(nullptr, 0, ImVec2(w_min.x, w_min.y), ImGui::GetColorU32(ImGuiCol_Text), "GPU Timestamps", nullptr, 0, &clipRect);
+		y_min += header_height;
+
 		chrono::nanoseconds gpu_t_min = mTimestamps[0].second[0].second;
 		chrono::nanoseconds gpu_t_max = gpu_t_min;
 		for (const auto&[ft0,f] : mTimestamps) {
-			cout << "T - " << chrono::duration_cast<chrono::duration<float, milli>>(chrono::high_resolution_clock::now() - ft0).count() << "ms" << endl;
 			for (uint32_t i = 0; i < f.size(); i++) {
 				const auto&[l,t] = f[i];
-				cout << "\t" << l << ":\t" << t.count() << "ns";
-				if (i > 0)
-					cout << "\t(" << chrono::duration_cast<chrono::duration<float, milli>>(t - f[i-1].second).count() << "ms)";
-				cout << endl;
 				if (t < gpu_t_min) gpu_t_min = t;
 				if (t > gpu_t_max) gpu_t_max = t;
 			}
 		}
+
+		float max_height = 0;
 		const double inv_gpu_dt = 1.0 / (gpu_t_max.count() - gpu_t_min.count());
 		for (const auto&[ft0,f] : mTimestamps)
 			for (uint32_t i = 1; i < f.size(); i++) {
@@ -74,27 +78,36 @@ void Profiler::sample_timeline_gui() {
 				tmp.mDuration = t1 - t0;
 				tmp.mColor = float4::Ones();
 				tmp.mLabel = label0;
-				draw_sample_timeline(tmp, t0.count()*inv_gpu_dt, t1.count()*inv_gpu_dt, w_min.x, x_max, w_min.y, height);
+				const float h = height*(1 + chrono::duration_cast<chrono::duration<float, milli>>(tmp.mDuration).count());
+				draw_sample_timeline(tmp, (t0 - gpu_t_min).count()*inv_gpu_dt, (t1 - gpu_t_min).count()*inv_gpu_dt, w_min.x, x_max, y_min, h);
+				max_height = max(max_height, h);
 			}
+
+		y_min += max_height + height;
 	}
 
 	// profiler sample history
 	{
-		stack<pair<shared_ptr<Profiler::sample_t>, uint32_t>> todo;
-		for (const auto& f : mSampleHistory) todo.push(make_pair(f, 1));
+		const ImVec4 clipRect = ImVec4(w_min.x, y_min, x_max, y_min + header_height);
+		ImGui::GetWindowDrawList()->AddText(nullptr, 0, ImVec2(w_min.x, y_min), ImGui::GetColorU32(ImGuiCol_Text), "CPU Profiler Samples");
+		y_min += header_height;
+
+		stack<pair<shared_ptr<Profiler::sample_t>, float>> todo;
+		for (const auto& f : mSampleHistory) todo.push(make_pair(f, 0.f));
 		while (!todo.empty()) {
 			auto[s,l] = todo.top();
 			todo.pop();
 
 			const float t0 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime - t_min).count() * inv_dt;
-			const float t1 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime + s->mDuration - t_min).count() * inv_dt;
-			auto r = draw_sample_timeline(*s, t0, t1, w_min.x, x_max, w_min.y + l*(height + pad), height);
+			const float t1 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime - t_min + s->mDuration).count() * inv_dt;
+			const float h = height*(1 + chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count());
+			auto r = draw_sample_timeline(*s, t0, t1, w_min.x, x_max, y_min + l, h);
 			if (!r) continue;
 
 			const auto[p_min,p_max] = *r;
 
 			for (const auto& c : s->mChildren)
-				todo.push(make_pair(c, l+1));
+				todo.push(make_pair(c, l + h + pad));
 		}
 	}
 }

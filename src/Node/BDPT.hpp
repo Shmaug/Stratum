@@ -23,8 +23,9 @@ private:
 	Node& mNode;
 
 	shared_ptr<ComputePipelineState> mSamplePhotonsPipeline;
-	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
 	shared_ptr<ComputePipelineState> mPresampleLightPipeline;
+	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
+	shared_ptr<ComputePipelineState> mTraceNEEPipeline;
 	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
 	IntegratorType mIntegratorType = IntegratorType::eMultiKernel;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
@@ -34,6 +35,7 @@ private:
 	array<shared_ptr<DescriptorSetLayout>, 2> mDescriptorSetLayouts;
 	BDPTPushConstants mPushConstants;
 
+	bool mPauseRendering = false;
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
 	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS;

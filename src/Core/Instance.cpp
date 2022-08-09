@@ -34,7 +34,8 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL DebugCallback(VkDebugUtilsMessageSeverityFlagBi
 #ifdef _WIN32
 LRESULT CALLBACK Instance::window_procedure(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	if (gInstance && gInstance->mWindow)
-			gInstance->mWindow->handle_message(message, wParam, lParam);
+		gInstance->mWindow->handle_message(message, wParam, lParam);
+
 	switch (message) {
 	default:
 		return DefWindowProcA(hwnd, message, wParam, lParam);
@@ -253,8 +254,11 @@ void Instance::poll_events() const {
 	mWindow->mInputState.clear();
 
 	#ifdef _WIN32
+
+    auto end = chrono::high_resolution_clock::now() + 10ms;
+
 	MSG msg = {};
-	while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+	while (chrono::high_resolution_clock::now() < end && PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
 		TranslateMessage(&msg);
 		DispatchMessageA(&msg);
 	}

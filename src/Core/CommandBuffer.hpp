@@ -41,6 +41,7 @@ public:
 		mCommandBuffer.endDebugUtilsLabelEXT();
 	}
 	inline void write_timestamp(vk::PipelineStageFlagBits stage, const string& label) const {
+		if (!mDevice.use_timestamps()) return;
 		auto&[pool,count,labels] = mDevice.query_pool();
 		const uint32_t num = labels.size();
 		labels.emplace_back(label);

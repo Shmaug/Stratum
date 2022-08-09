@@ -19,7 +19,7 @@ namespace stm {
 #define BDPT_FLAG_SAMPLE_BSDFS 				BIT(11)
 
 #define BDPT_FLAG_NEE 						BIT(16)
-#define BDPT_FLAG_NEE_MIS 					BIT(17)
+#define BDPT_FLAG_MIS 						BIT(17)
 #define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(18)
 #define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(19)
 #define BDPT_FLAG_PRESAMPLE_LIGHTS			BIT(20)
@@ -27,6 +27,7 @@ namespace stm {
 #define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(22)
 #define BDPT_FLAG_RESERVOIR_SPATIAL_REUSE	BIT(23)
 #define BDPT_FLAG_RESERVOIR_UNBIASED_REUSE	BIT(24)
+#define BDPT_FLAG_DEFER_NEE_RAYS			BIT(25)
 
 #define BDPT_FLAG_TRACE_LIGHT				BIT(26)
 #define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(27)
@@ -74,9 +75,9 @@ struct PathState {
 	float3 origin;
 	uint path_length_medium;
 	float3 beta;
-	float bsdf_pdf;
+	float prev_cos_theta;
 	float3 dir_in;
-	float pad;
+	float bsdf_pdf;
 
 	SLANG_MUTATING
 	inline void pack_path_length_medium(const uint path_length, const uint medium) {
@@ -86,16 +87,27 @@ struct PathState {
 	inline uint path_length() CONST_CPP { return BF_GET(path_length_medium,0,16); }
 	inline uint medium() CONST_CPP { return BF_GET(path_length_medium,16,16); }
 };
+struct PathState1 {
+	float d;
+};
 
 struct PresampledLightPoint {
 	float3 position;
 	uint packed_geometry_normal;
 	float3 Le;
-	uint pdfA;
+	float pdfA;
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 #endif
+};
 
+struct NEERayData {
+	float3 contribution;
+	uint rng_offset;
+	float3 ray_origin;
+	uint medium;
+	float3 ray_direction;
+	float dist;
 };
 
 #define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(0)
@@ -149,8 +161,7 @@ struct LightPathVertex2 {
 };
 
 struct LightPathVertex3 {
-	float pdf_fwd;
-	float pdf_rev;
+	float d;
 };
 
 // to_string of an IntegratorType must be the name of the entry point in the shader

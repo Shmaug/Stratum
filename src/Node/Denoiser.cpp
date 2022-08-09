@@ -185,12 +185,13 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 			commandBuffer.bind_pipeline(mTemporalAccumulationPipeline->get_pipeline(mDescriptorSetLayout));
 			commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
 			mTemporalAccumulationPipeline->push_constants(commandBuffer);
+			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Temporal accumulation");
 			commandBuffer.dispatch_over(extent);
 		}
 
 		if (mAtrousIterations > 0) {
 			{ // estimate variance
-				ProfilerRegion ps("Estimate Variance", commandBuffer);
+				ProfilerRegion ps("Estimate variance", commandBuffer);
 
 				mCurFrame->mTemp[0].transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 				mCurFrame->mAccumColor.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
@@ -199,6 +200,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 				commandBuffer.bind_pipeline(mEstimateVariancePipeline->get_pipeline(mDescriptorSetLayout));
 				commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
 				mTemporalAccumulationPipeline->push_constants(commandBuffer);
+				commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Estimate variance");
 				commandBuffer.dispatch_over(extent);
 			}
 
@@ -215,6 +217,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 				commandBuffer.push_constant<uint32_t>("gIteration", i);
 				commandBuffer.push_constant<uint32_t>("gStepSize", 1 << i);
 				if (i > 0) mAtrousPipeline->transition_images(commandBuffer);
+				commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Atrous filter");
 				commandBuffer.dispatch_over(extent);
 
 				if (i+1 == mHistoryTap) {
@@ -225,6 +228,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 					commandBuffer.bind_pipeline(mCopyRGBPipeline->get_pipeline(mDescriptorSetLayout));
 					commandBuffer.bind_descriptor_set(0, mCurFrame->mDescriptorSet);
 					mCopyRGBPipeline->transition_images(commandBuffer);
+					commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Copy RGB");
 					commandBuffer.dispatch_over(extent);
 
 					if (i+1 < mAtrousIterations) {

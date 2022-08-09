@@ -7,7 +7,7 @@ namespace stm {
 void Application::run() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
-	vector<chrono::steady_clock::time_point> submitTimes;
+	vector<chrono::steady_clock::time_point> submitTimes(mWindow.back_buffer_count());
 
 	auto t0 = chrono::high_resolution_clock::now();
 	while (true) {
@@ -15,24 +15,6 @@ void Application::run() {
 		if (!mWindow.handle()) break;
 		if (!mWindow.wants_repaint()) continue;
 		if (!mWindow.acquire_image()) continue;
-
-		submitTimes.resize(mWindow.back_buffer_count());
-
-		auto& [qp,queryCount,labels] = instance->device().query_pool();
-		vector<pair<string,chrono::nanoseconds>> timestamps(labels.size());
-		if (!labels.empty()) {
-			const uint32_t n = min(queryCount, (uint32_t)labels.size());
-			const vector<uint64_t> times = instance->device()->getQueryPoolResults<uint64_t>(qp, 0, n, 2*n*sizeof(uint64_t), sizeof(uint64_t), vk::QueryResultFlagBits::e64|vk::QueryResultFlagBits::eWithAvailability);
-			for (uint32_t i = 0; i < n; i++)
-				timestamps[i] = { labels[i], chrono::nanoseconds(times[i]) };
-			Profiler::set_timestamps(submitTimes[mWindow.back_buffer_index()], timestamps);
-
-			if (labels.size() > queryCount) {
-				queryCount = (uint32_t)labels.size();
-				instance->device()->destroyQueryPool(qp);
-				qp = instance->device()->createQueryPool(vk::QueryPoolCreateInfo({}, vk::QueryType::eTimestamp, queryCount));
-			}
-		}
 
 		Profiler::begin_frame();
 
@@ -47,8 +29,31 @@ void Application::run() {
 
 		auto commandBuffer = instance->device().get_command_buffer("Frame");
 
-		// reset timestamp query pool
-		{
+		{ // gpu timestamps
+			auto& [qp,queryCount,labels] = instance->device().query_pool();
+			vector<pair<string,chrono::nanoseconds>> timestamps(labels.size());
+			if (!labels.empty()) {
+				// get query results
+				const uint32_t n = min(queryCount, (uint32_t)labels.size());
+				const vector<uint64_t> times = instance->device()->getQueryPoolResults<uint64_t>(qp, 0, n, 2*n*sizeof(uint64_t), sizeof(uint64_t), vk::QueryResultFlagBits::e64|vk::QueryResultFlagBits::eWithAvailability);
+
+				// give timestamps to profiler
+				for (uint32_t i = 0; i < n; i++)
+					timestamps[i] = { labels[i], chrono::nanoseconds(times[i]) };
+				Profiler::set_timestamps(submitTimes[mWindow.back_buffer_index()], timestamps);
+
+				// increase query pool size if needed
+				if (labels.size() > queryCount) {
+					queryCount = (uint32_t)labels.size();
+					instance->device()->destroyQueryPool(qp);
+					qp = instance->device()->createQueryPool(vk::QueryPoolCreateInfo({}, vk::QueryType::eTimestamp, queryCount));
+				}
+			}
+
+			// enable timestamps when profiler history exists
+			instance->device().use_timestamps(Profiler::has_history());
+
+			// reset query pool
 			labels.clear();
 			(*commandBuffer)->resetQueryPool(qp, 0, queryCount);
 			commandBuffer->write_timestamp(vk::PipelineStageFlagBits::eTopOfPipe, "");

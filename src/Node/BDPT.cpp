@@ -17,30 +17,6 @@ BDPT::BDPT(Node& node) : mNode(node) {
 	app.node().find_in_descendants<Inspector>()->register_inspector_gui_fn(&inspector_gui_fn);
 	app->OnUpdate.add_listener(mNode, bind(&BDPT::update, this, std::placeholders::_1, std::placeholders::_2), Node::EventPriority::eAlmostLast);
 
-#ifdef STRATUM_ENABLE_OPENXR
-	auto xrnode = app.node().find_in_descendants<XR>();
-	if (xrnode) {
-		xrnode->OnRender.add_listener(mNode, [&, app](CommandBuffer& commandBuffer) {
-			vector<pair<ViewData,TransformData>> views;
-			views.reserve(xrnode->views().size());
-			for (const XR::View& v : xrnode->views())
-				views.emplace_back(v.mCamera.view(), node_to_world(v.mCamera.node()));
-			render(commandBuffer, xrnode->back_buffer(), views);
-			xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
-			});
-
-		app->OnRenderWindow.add_listener(mNode, [=](CommandBuffer& commandBuffer) {
-			commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
-			}, Node::EventPriority::eAlmostFirst);
-	} else
-#endif
-	{
-		auto scene = mNode.find_in_ancestor<Scene>();
-		app->OnRenderWindow.add_listener(mNode, [&, app, scene](CommandBuffer& commandBuffer) {
-			render(commandBuffer, app->window().back_buffer(), { { scene->mMainCamera->view(), node_to_world(scene->mMainCamera.node()) } });
-		});
-	}
-
 	create_pipelines();
 }
 
@@ -103,6 +79,7 @@ void BDPT::create_pipelines() {
 	process_shader(mSamplePhotonsPipeline, "../../src/Shaders/kernels/renderers/bdpt.hlsl", "sample_photons", { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" });
 	process_shader(mSampleVisibilityPipeline, "../../src/Shaders/kernels/renderers/bdpt.hlsl", "sample_visibility", { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" });
 	process_shader(mPresampleLightPipeline, "../../src/Shaders/kernels/renderers/bdpt.hlsl", "presample_lights", { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" });
+	process_shader(mTraceNEEPipeline, "../../src/Shaders/kernels/renderers/bdpt.hlsl", "trace_nee", { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" });
 	for (uint32_t i = 0; i < (uint32_t)IntegratorType::eIntegratorTypeCount; i++)
 		process_shader(mIntegratorPipelines[(IntegratorType)i], "../../src/Shaders/kernels/renderers/bdpt.hlsl", to_string((IntegratorType)i), { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" });
 
@@ -126,6 +103,8 @@ void BDPT::on_inspector_gui() {
 		mTonemapPipeline->stage(vk::ShaderStageFlagBits::eCompute)->mDevice->waitIdle();
 		create_pipelines();
 	}
+
+	ImGui::Checkbox("Pause Rendering", &mPauseRendering);
 
 	Gui::enum_dropdown("BDPT Debug Mode", mDebugMode, (uint32_t)BDPTDebugMode::eDebugModeCount, [](uint32_t i) { return to_string((BDPTDebugMode)i); });
 
@@ -174,6 +153,11 @@ void BDPT::on_inspector_gui() {
 		ImGui::PopItemWidth();
 
 		ImGui::CheckboxFlags("NEE", &mSamplingFlags, BDPT_FLAG_NEE);
+		if (((mSamplingFlags & BDPT_FLAG_SAMPLE_BSDFS) && (mSamplingFlags & BDPT_FLAG_NEE)) || (mSamplingFlags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS))) {
+			ImGui::Indent();
+			ImGui::CheckboxFlags("Multiple Importance", &mSamplingFlags, BDPT_FLAG_MIS);
+			ImGui::Unindent();
+		}
 		if (mSamplingFlags & BDPT_FLAG_NEE) {
 			ImGui::Indent();
 			if (mPushConstants.gEnvironmentMaterialAddress != -1 && mPushConstants.gLightCount > 0) {
@@ -181,13 +165,12 @@ void BDPT::on_inspector_gui() {
 				ImGui::DragFloat("Environment Sample Probability", &mPushConstants.gEnvironmentSampleProbability, .1f, 0, 1);
 				ImGui::PopItemWidth();
 			}
-			if (mSamplingFlags & BDPT_FLAG_SAMPLE_BSDFS)
-				ImGui::CheckboxFlags("Multiple Importance", &mSamplingFlags, BDPT_FLAG_NEE_MIS);
 			if (mPushConstants.gLightCount > 0) {
 				ImGui::CheckboxFlags("Sample Light Power", &mSamplingFlags, BDPT_FLAG_SAMPLE_LIGHT_POWER);
 				ImGui::CheckboxFlags("Uniform Sphere Sampling", &mSamplingFlags, BDPT_FLAG_UNIFORM_SPHERE_SAMPLING);
 			}
 
+			ImGui::CheckboxFlags("Defer NEE Rays", &mSamplingFlags, BDPT_FLAG_DEFER_NEE_RAYS);
 			ImGui::CheckboxFlags("Presample Lights", &mSamplingFlags, BDPT_FLAG_PRESAMPLE_LIGHTS);
 			if (mSamplingFlags & BDPT_FLAG_PRESAMPLE_LIGHTS) {
 				ImGui::Indent();
@@ -295,7 +278,6 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		}
 		mCurFrame.reset();
 
-		// reuse old frame resources
 		for (auto it = mFrameResourcePool.begin(); it != mFrameResourcePool.end(); it++) {
 			if (*it != mPrevFrame && (*it)->mFence->status() == vk::Result::eSuccess) {
 				mCurFrame = *it;
@@ -364,6 +346,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		return;
 	}
 
+	if (mPauseRendering) {
+		if (mCurFrame->mTonemapResult.image()->format() == renderTarget.image()->format())
+			commandBuffer.copy_image(mCurFrame->mTonemapResult, renderTarget);
+		else
+			commandBuffer.blit_image(mCurFrame->mTonemapResult, renderTarget);
+		return;
+	}
+
 	ProfilerRegion ps("BDPT::render", commandBuffer);
 
 	// Initialize buffers
@@ -383,14 +373,16 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		mCurFrame->mPathData = {
 			{ "gVisibility", 		 make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		   extent.width * extent.height * sizeof(VisibilityInfo), 													vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY) },
 			{ "gPathStates", 		 make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", 		   extent.width * extent.height * sizeof(PathState), 														vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gPathStates1", 		 make_shared<Buffer>(commandBuffer.mDevice, "gPathStates1",		   extent.width * extent.height * sizeof(PathState1), 														vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
 			{ "gRayDifferentials", 	 make_shared<Buffer>(commandBuffer.mDevice, "gRayDifferentials",   extent.width * extent.height * sizeof(RayDifferential), 													vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
 			{ "gReservoirs", 		 make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", 		   extent.width * extent.height * sizeof(Reservoir), 														vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
 			{ "gReservoirSamples",	 make_shared<Buffer>(commandBuffer.mDevice, "gReservoirSamples",   extent.width * extent.height * sizeof(uint4), 	    													vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
 			{ "gLightTraceSamples",  make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",  extent.width * extent.height * sizeof(float4), 															vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices0", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices0", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex0), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices1", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex1), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices2", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices2", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex2), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices3", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices3", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex3), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gLightPathVertices0", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices0", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex0),  vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gLightPathVertices1", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex1),  vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gLightPathVertices2", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices2", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex2),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gLightPathVertices3", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices3", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex3),  vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
+			{ "gNEERays", 			 make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", 		   extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData),         vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
 		};
 		mCurFrame->mFrameNumber = 0;
 	}
@@ -401,6 +393,8 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		mCurFrame->mPathData["gLightPathVertices2"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices2", extent.width * extent.height * mPushConstants.gMaxLightPathVertices * sizeof(LightPathVertex2), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 		mCurFrame->mPathData["gLightPathVertices3"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices3", extent.width * extent.height * mPushConstants.gMaxLightPathVertices * sizeof(LightPathVertex3), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 	}
+	if (mCurFrame->mPathData.at("gNEERays").size_bytes() < extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData))
+		mCurFrame->mPathData["gNEERays"] = make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 
 	if (!mCurFrame->mPresampledLights || mCurFrame->mPresampledLights.size() < max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize))
 		mCurFrame->mPresampledLights = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize) * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -475,6 +469,9 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		mSampleVisibilityPipeline->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
 		mSampleVisibilityPipeline->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 
+		mTraceNEEPipeline->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
+		mTraceNEEPipeline->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
+
 		for (uint32_t i = 0; i < (uint32_t)IntegratorType::eIntegratorTypeCount; i++) {
 			mIntegratorPipelines[(IntegratorType)i]->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
 			mIntegratorPipelines[(IntegratorType)i]->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
@@ -508,22 +505,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer->pushConstants(commandBuffer.bound_pipeline()->layout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(BDPTPushConstants), &push_constants);
 	};
 
-	commandBuffer.clear_color_image(mCurFrame->mRadiance, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
-	commandBuffer.clear_color_image(mCurFrame->mDebugImage, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
-	mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-	mCurFrame->mAlbedo.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-	mCurFrame->mPrevUVs.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-	mCurFrame->mDebugImage.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-
-	// presample lights
-	if (push_constants.gMaxPathVertices > 2 && (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)) {
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Presample_lights");
-		ProfilerRegion ps("Presample lights", commandBuffer);
-		commandBuffer.bind_pipeline(mPresampleLightPipeline->get_pipeline(mDescriptorSetLayouts));
-		bind_descriptors_and_push_constants();
-		commandBuffer.dispatch_over(mPushConstants.gLightPresampleTileSize * mPushConstants.gLightPresampleTileCount);
-	}
-
 	// trace light paths
 	if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
 		auto lv2 = mCurFrame->mPathData.at("gLightPathVertices2");
@@ -539,15 +520,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		lightExtent.depth = 1;
 
 		{
-			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample photons");
 			ProfilerRegion ps("Sample photons", commandBuffer);
 			commandBuffer.bind_pipeline(mSamplePhotonsPipeline->get_pipeline(mDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
+			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample photons");
 			commandBuffer.dispatch_over(extent);
 		}
 
-		if (push_constants.gMaxLightPathVertices > 2) {
-			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace light paths");
+		if (push_constants.gMaxLightPathVertices > 1) {
 			ProfilerRegion ps("Trace light paths", commandBuffer);
 			mIntegratorPipelines[mIntegratorType]->specialization_constant<uint32_t>("gSpecializationFlags") = (sampling_flags | BDPT_FLAG_TRACE_LIGHT) & ~BDPT_FLAG_RAY_CONES;
 			commandBuffer.bind_pipeline(mIntegratorPipelines[mIntegratorType]->get_pipeline(mDescriptorSetLayouts));
@@ -555,8 +535,10 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			const uint32_t n = mIntegratorType == IntegratorType::eMultiKernel ? push_constants.gMaxLightPathVertices + 1 : 3;
 			for (uint i = 2; i < n; i++) {
 				commandBuffer.barrier({
-					mCurFrame->mPathData["gPathStates"]
+					mCurFrame->mPathData.at("gPathStates"),
+					mCurFrame->mPathData.at("gPathStates1"),
 				}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+				commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace light paths");
 				commandBuffer.dispatch_over(extent);
 			}
 		}
@@ -568,15 +550,28 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		push_constants.gOutputExtent = uint2(extent.width, extent.height);
 	}
 
-	// trace visibility
-	{
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample visibility");
-		ProfilerRegion ps("Sample visibility", commandBuffer);
-		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mDescriptorSetLayouts));
+	// presample lights
+	if (push_constants.gMaxPathVertices > 2 && (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)) {
+		ProfilerRegion ps("Presample lights", commandBuffer);
+		commandBuffer.bind_pipeline(mPresampleLightPipeline->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
-		commandBuffer.dispatch_over(extent);
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Presample_lights");
+		commandBuffer.dispatch_over(mPushConstants.gLightPresampleTileSize * mPushConstants.gLightPresampleTileCount);
 	}
 
+	if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) {
+		auto v = mCurFrame->mPathData.at("gNEERays");
+		commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
+	}
+
+	commandBuffer.clear_color_image(mCurFrame->mRadiance, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
+	commandBuffer.clear_color_image(mCurFrame->mDebugImage, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
+	mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	mCurFrame->mAlbedo.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	mCurFrame->mPrevUVs.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	mCurFrame->mDebugImage.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	if (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)
+		commandBuffer.barrier({ mCurFrame->mPresampledLights }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 	if (sampling_flags & (BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE|BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)) {
 		commandBuffer.barrier({
 			mPrevFrame->mPathData.at("gVisibility"),
@@ -584,13 +579,29 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mPrevFrame->mPathData.at("gReservoirSamples"),
 		}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 	}
-	if (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)
-		commandBuffer.barrier({ mCurFrame->mPresampledLights }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+	if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS)
+		commandBuffer.barrier({ mCurFrame->mPathData.at("gNEERays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
+
+	if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
+		commandBuffer.barrier({
+			mCurFrame->mPathData.at("gPathStates"),
+			mCurFrame->mPathData.at("gPathStates1")
+		}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+	}
+
+	// trace visibility
+	{
+		ProfilerRegion ps("Sample visibility", commandBuffer);
+		commandBuffer.bind_pipeline(mSampleVisibilityPipeline->get_pipeline(mDescriptorSetLayouts));
+		bind_descriptors_and_push_constants();
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample visibility");
+		commandBuffer.dispatch_over(extent);
+	}
+
 	mCurFrame->mPrevUVs.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead);
 
 	// trace view paths
 	if (push_constants.gMaxPathVertices > 2) {
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace view paths");
 		ProfilerRegion ps("Trace view paths", commandBuffer);
 		commandBuffer.bind_pipeline(mIntegratorPipelines[mIntegratorType]->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
@@ -598,11 +609,24 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		for (uint i = 2; i < n; i++) {
 			mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
 			commandBuffer.barrier({
-				mCurFrame->mPathData["gPathStates"],
-				mCurFrame->mPathData["gRayDifferentials"],
+				mCurFrame->mPathData.at("gPathStates"),
+				mCurFrame->mPathData.at("gPathStates1"),
+				mCurFrame->mPathData.at("gRayDifferentials")
 			}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace view paths");
 			commandBuffer.dispatch_over(extent);
 		}
+	}
+
+	// trace nee rays
+	if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) {
+		mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
+		commandBuffer.barrier({ mCurFrame->mPathData.at("gNEERays") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		ProfilerRegion ps("Trace NEE rays", commandBuffer);
+		commandBuffer.bind_pipeline(mTraceNEEPipeline->get_pipeline(mDescriptorSetLayouts));
+		bind_descriptors_and_push_constants();
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Trace NEE rays");
+		commandBuffer.dispatch_over(extent);
 	}
 
 	Image::View result = mCurFrame->mRadiance;
@@ -620,7 +644,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	}
 
 	if (mDenoise && denoiser) {
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Denoise");
 		if (changed && !reprojection) denoiser->reset_accumulation();
 		mCurFrame->mDenoiseResult = denoiser->denoise(commandBuffer, result, mCurFrame->mViews, mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>(), mCurFrame->mPrevUVs);
 		result = mCurFrame->mDenoiseResult;

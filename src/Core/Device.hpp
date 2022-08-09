@@ -119,12 +119,14 @@ public:
 		mDevice.setDebugUtilsObjectNameEXT(info);
 	}
 
+	inline bool use_timestamps() const { return mEnableTimestamps; }
+	inline void use_timestamps(bool v) { mEnableTimestamps = v; }
+	STRATUM_API void create_query_pools(uint32_t queryCount);
+	STRATUM_API tuple<vk::QueryPool,uint32_t,vector<string>>& query_pool();
+
 	STRATUM_API shared_ptr<CommandBuffer> get_command_buffer(const string& name, vk::QueueFlags queueFlags = vk::QueueFlagBits::eGraphics, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
 	STRATUM_API void submit(const shared_ptr<CommandBuffer>& commandBuffer);
 	STRATUM_API void flush();
-
-	STRATUM_API void create_query_pools(uint32_t queryCount);
-	STRATUM_API tuple<vk::QueryPool,uint32_t,vector<string>>& query_pool();
 
 private:
 	friend class Instance;
@@ -154,6 +156,7 @@ private:
 	uint32_t mDescriptorSetCount = 0;
 
 	vector<tuple<vk::QueryPool,uint32_t,vector<string>>> mTimestamps;
+	bool mEnableTimestamps = false;
 };
 
 }

@@ -63,14 +63,12 @@ inline void inspector_gui_fn(Inspector& inspector, MeshPrimitive* mesh) {
 	if (mesh->mMesh) {
 		ImGui::Text("%s", type_index(typeid(Mesh)).name());
 		ImGui::SameLine();
-		if (ImGui::Button(mesh->mMesh.node().name().c_str()))
-			inspector.select(&mesh->mMesh.node());
+		inspector.component_ptr_field(mesh->mMesh);
 	}
 	if (mesh->mMaterial) {
 		ImGui::Text("%s", type_index(typeid(Material)).name());
 		ImGui::SameLine();
-		if (ImGui::Button(mesh->mMaterial.node().name().c_str()))
-			inspector.select(&mesh->mMaterial.node());
+		inspector.component_ptr_field(mesh->mMaterial);
 	}
 }
 inline void inspector_gui_fn(Inspector& inspector, SpherePrimitive* sphere) {
@@ -78,8 +76,7 @@ inline void inspector_gui_fn(Inspector& inspector, SpherePrimitive* sphere) {
 	if (sphere->mMaterial) {
 		ImGui::Text("%s", type_index(typeid(Material)).name());
 		ImGui::SameLine();
-		if (ImGui::Button(sphere->mMaterial.node().name().c_str()))
-			inspector.select(&sphere->mMaterial.node());
+		inspector.component_ptr_field(sphere->mMaterial);
 	}
 }
 inline void inspector_gui_fn(Inspector& inspector, Environment* v) { v->inspector_gui(); }
@@ -215,55 +212,11 @@ Scene::Scene(Node& node) : mNode(node) {
 
 	gAnimatedTransform = nullptr;
 
-	mCopyVerticesPipeline 					= make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "Shaders/copy_vertices.spv"));
-	mConvertDiffuseSpecularPipeline 		= make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_diffuse_specular.spv"));
-	mConvertPbrPipeline 					= make_shared<ComputePipelineState>("material_convert_from_gltf_pbr", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_gltf_pbr.spv"));
-	mConvertAlphaToRoughnessPipeline 		= make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
-	mConvertShininessToRoughnessPipeline 	= make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_shininess_to_roughness.spv"));
-
-	auto mainCamera = mNode.make_child("Default Camera").make_component<Camera>(make_perspective(radians(70.f), 1.f, float2::Zero(), -1 / 1024.f));
-	mainCamera.node().make_component<TransformData>(make_transform(float3(0, 1, 0), quatf_identity(), float3::Ones()));
-	mMainCamera = mainCamera;
-	if (!mNode.find_in_ancestor<Instance>()->find_argument("--xr")) {
-		app->OnUpdate.add_listener(mNode, [=](CommandBuffer& commandBuffer, float deltaTime) {
-			ProfilerRegion ps("Camera Controls");
-			const MouseKeyboardState& input = app->window().input_state();
-			auto cameraTransform = mainCamera.node().find_in_ancestor<TransformData>();
-			float fwd = (mainCamera->mProjection.near_plane < 0) ? -1 : 1;
-			static float speed = 1;
-			if (!ImGui::GetIO().WantCaptureMouse) {
-				static float2 euler = float2::Zero();
-				if (input.pressed(KeyCode::eMouse2)) {
-					if (input.scroll_delta() != 0)
-						speed *= (1 + input.scroll_delta() / 8);
-
-					static const float gMouseSensitivity = 0.002f;
-					euler.y() += input.cursor_delta().x() * fwd * gMouseSensitivity;
-					euler.x() = clamp(euler.x() + input.cursor_delta().y() * gMouseSensitivity, -((float)M_PI) / 2, ((float)M_PI) / 2);
-					quatf r = angle_axis(euler.x(), float3(fwd, 0, 0));
-					r = qmul(angle_axis(euler.y(), float3(0, 1, 0)), r);
-					cameraTransform->m.block<3, 3>(0, 0) = Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
-				}
-			}
-			if (!ImGui::GetIO().WantCaptureKeyboard) {
-				float3 mv = float3(0, 0, 0);
-				if (input.pressed(KeyCode::eKeyD)) mv += float3(1, 0, 0);
-				if (input.pressed(KeyCode::eKeyA)) mv += float3(-1, 0, 0);
-				if (input.pressed(KeyCode::eKeyW)) mv += float3(0, 0, fwd);
-				if (input.pressed(KeyCode::eKeyS)) mv += float3(0, 0, -fwd);
-				if (input.pressed(KeyCode::eKeySpace)) mv += float3(0, 1, 0);
-				if (input.pressed(KeyCode::eKeyShift)) mv += float3(0, -1, 0);
-				*cameraTransform = tmul(*cameraTransform, make_transform(mv * speed * deltaTime, quatf_identity(), float3::Ones()));
-			}
-
-			mainCamera->mImageRect = vk::Rect2D{ { 0, 0 }, app->window().swapchain_extent() };
-			const float aspect = app->window().swapchain_extent().height / (float)app->window().swapchain_extent().width;
-			if (abs(mainCamera->mProjection.scale[0] / mainCamera->mProjection.scale[1] - aspect) > 1e-5) {
-				const float fovy = 2 * atan(1 / mainCamera->mProjection.scale[1]);
-				mainCamera->mProjection = make_perspective(fovy, aspect, float2::Zero(), mainCamera->mProjection.near_plane);
-			}
-		});
-	}
+	mCopyVerticesPipeline 				 = make_shared<ComputePipelineState>("copy_vertices", make_shared<Shader>(app->window().mInstance.device(), "Shaders/copy_vertices.spv"));
+	mConvertDiffuseSpecularPipeline 	 = make_shared<ComputePipelineState>("material_convert_from_diffuse_specular", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_diffuse_specular.spv"));
+	mConvertPbrPipeline 				 = make_shared<ComputePipelineState>("material_convert_from_gltf_pbr", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_gltf_pbr.spv"));
+	mConvertAlphaToRoughnessPipeline 	 = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
+	mConvertShininessToRoughnessPipeline = make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_shininess_to_roughness.spv"));
 }
 
 void Scene::on_inspector_gui() {

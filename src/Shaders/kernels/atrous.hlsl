@@ -99,9 +99,9 @@ struct TapData {
 
 		const float4 color_p  = gInput[p];
 		const float l_p = luminance(color_p.rgb);
+		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
 
 		const VisibilityInfo vis_p = gVisibility[p.y*screen_width + p.x];
-		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
 		const float w_z = 3 * abs(vis_p.z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
 		const float w_n = pow(max(0, dot(vis_p.normal(), center_normal)), 256);
 

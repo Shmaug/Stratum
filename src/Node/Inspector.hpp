@@ -20,6 +20,11 @@ public:
 		mInspectorGuiFns.erase(t);
 	}
 
+	inline void component_ptr_field(const auto& p) {
+		if (ImGui::Button(p.node().name().c_str()))
+			select(&p.node());
+	}
+
 private:
     Node& mNode;
 	Node* mSelected;

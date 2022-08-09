@@ -16,6 +16,8 @@ namespace stm {
 #include <Shaders/materials/medium.h>
 #pragma pack(pop)
 
+// Note: Scene provides inspector gui callbacks for these classes and ones in scene.h
+
 struct Camera {
 	ProjectionData mProjection;
 	vk::Rect2D mImageRect;
@@ -31,7 +33,6 @@ struct Camera {
 		return v;
 	}
 };
-
 struct MeshPrimitive {
 	component_ptr<Material> mMaterial;
 	component_ptr<Mesh> mMesh;
@@ -144,8 +145,6 @@ public:
 	STRATUM_API ImageValue1 shininess_to_roughness(CommandBuffer& commandBuffer, const ImageValue1& alpha);
 	STRATUM_API Material make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission);
 	STRATUM_API Material make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission);
-
-	component_ptr<Camera> mMainCamera;
 
 private:
 	Node& mNode;

@@ -8,11 +8,12 @@
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry sample_photons
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry multi_kernel
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry single_kernel
+#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry trace_nee
 #pragma compile slangc -profile sm_6_6 -lang slang -entry presample_lights
 #endif
 
-#include "../../scene.h"
-#include "../../bdpt.h"
+#include "scene.h"
+#include "bdpt.h"
 
 #ifdef __SLANG__
 #ifndef gSpecializationFlags
@@ -37,7 +38,7 @@ static const bool gDemodulateAlbedo		 	= (gSpecializationFlags & BDPT_FLAG_DEMOD
 static const bool gUseRayCones 			 	= (gSpecializationFlags & BDPT_FLAG_RAY_CONES);
 static const bool gSampleBSDFs	 		 	= (gSpecializationFlags & BDPT_FLAG_SAMPLE_BSDFS);
 static const bool gUseNEE		 		 	= (gSpecializationFlags & BDPT_FLAG_NEE);
-static const bool gUseNEEMIS 				= (gSpecializationFlags & BDPT_FLAG_NEE_MIS);
+static const bool gUseMIS 					= (gSpecializationFlags & BDPT_FLAG_MIS);
 static const bool gSampleLightPower			= (gSpecializationFlags & BDPT_FLAG_SAMPLE_LIGHT_POWER);
 static const bool gUniformSphereSampling 	= (gSpecializationFlags & BDPT_FLAG_UNIFORM_SPHERE_SAMPLING);
 static const bool gReservoirNEE 			= (gSpecializationFlags & BDPT_FLAG_RESERVOIR_NEE);
@@ -48,6 +49,7 @@ static const bool gReservoirUnbiasedReuse	= (gSpecializationFlags & BDPT_FLAG_RE
 static const bool gTraceLight 				= (gSpecializationFlags & BDPT_FLAG_TRACE_LIGHT);
 static const bool gConnectToViews 			= (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_VIEWS);
 static const bool gConnectToLightPaths		= (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS);
+static const bool gDeferNEERays				= (gSpecializationFlags & BDPT_FLAG_DEFER_NEE_RAYS);
 static const bool gCountRays 			 	= (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS);
 
 #define gOutputExtent					gPushConstants.gOutputExtent
@@ -98,19 +100,21 @@ static const bool gCountRays 			 	= (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS
 [[vk::binding(10,1)]] RWTexture2D<float2> gPrevUVs;
 [[vk::binding(11,1)]] StructuredBuffer<VisibilityInfo> gPrevVisibility;
 [[vk::binding(12,1)]] RWStructuredBuffer<PathState> gPathStates;
-[[vk::binding(13,1)]] RWStructuredBuffer<RayDifferential> gRayDifferentials;
-[[vk::binding(14,1)]] RWStructuredBuffer<Reservoir> gReservoirs;
-[[vk::binding(15,1)]] RWStructuredBuffer<uint4> gReservoirSamples;
-[[vk::binding(16,1)]] RWStructuredBuffer<Reservoir> gPrevReservoirs;
-[[vk::binding(17,1)]] RWStructuredBuffer<uint4> gPrevReservoirSamples;
-[[vk::binding(18,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
-[[vk::binding(19,1)]] RWByteAddressBuffer gLightTraceSamples;
-[[vk::binding(20,1)]] RWStructuredBuffer<LightPathVertex0> gLightPathVertices0;
-[[vk::binding(21,1)]] RWStructuredBuffer<LightPathVertex1> gLightPathVertices1;
-[[vk::binding(22,1)]] RWStructuredBuffer<LightPathVertex2> gLightPathVertices2;
-[[vk::binding(23,1)]] RWStructuredBuffer<LightPathVertex3> gLightPathVertices3;
+[[vk::binding(13,1)]] RWStructuredBuffer<PathState1> gPathStates1;
+[[vk::binding(14,1)]] RWStructuredBuffer<RayDifferential> gRayDifferentials;
+[[vk::binding(15,1)]] RWStructuredBuffer<Reservoir> gReservoirs;
+[[vk::binding(16,1)]] RWStructuredBuffer<uint4> gReservoirSamples;
+[[vk::binding(17,1)]] RWStructuredBuffer<Reservoir> gPrevReservoirs;
+[[vk::binding(18,1)]] RWStructuredBuffer<uint4> gPrevReservoirSamples;
+[[vk::binding(19,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
+[[vk::binding(20,1)]] RWByteAddressBuffer gLightTraceSamples;
+[[vk::binding(21,1)]] RWStructuredBuffer<LightPathVertex0> gLightPathVertices0;
+[[vk::binding(22,1)]] RWStructuredBuffer<LightPathVertex1> gLightPathVertices1;
+[[vk::binding(23,1)]] RWStructuredBuffer<LightPathVertex2> gLightPathVertices2;
+[[vk::binding(24,1)]] RWStructuredBuffer<LightPathVertex3> gLightPathVertices3;
+[[vk::binding(25,1)]] RWStructuredBuffer<NEERayData> gNEERays;
 
-#include "../common/path.hlsli"
+#include "common/path.hlsli"
 
 #define GROUPSIZE_X 8
 #define GROUPSIZE_Y 4
@@ -128,11 +132,11 @@ uint map_thread_index(const uint2 pixel_coord, const uint2 group_id, const uint 
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void sample_photons(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	PathIntegrator path;
-	path.path_index = map_thread_index(pixel_coord.xy, group_id.xy, group_thread_index);
+	path.path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
 	if (path.path_index == -1) return;
-	path.pixel_coord = pixel_coord.xy;
+	path.pixel_coord = index.xy;
 	path.path_length = 1;
 
 	path.init_rng();
@@ -145,6 +149,7 @@ void sample_photons(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_i
 
 	path._beta = ls.radiance/ls.pdf;
 	path.bsdf_pdf = ls.pdf;
+	path.d = gMaxLightPathVertices / ls.pdf;
 	path._medium = -1;
 	path._isect.sd.position = ls.position;
 	path._isect.sd.packed_geometry_normal = pack_normal_octahedron(ls.normal);
@@ -161,6 +166,8 @@ void sample_photons(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_i
 	// cosine term from light surface
 	path._beta *= local_dir_out.z;
 
+	path.prev_cos_theta = local_dir_out.z;
+
 	float3 T,B;
 	make_orthonormal(ls.normal, T, B);
 	path.direction = T*local_dir_out.x + B*local_dir_out.y + ls.normal*local_dir_out.z;
@@ -173,34 +180,26 @@ void sample_photons(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_i
 	path.store_light_vertex();
 
 	if (any(path._beta > 0)) {
-		PathState ps;
-		ps.p.local_position = path.local_position;
-		ps.p.instance_primitive_index = path._isect.instance_primitive_index;
-		ps.origin = path.origin;
-		ps.pack_path_length_medium(2, path._medium);
-		ps.beta = path._beta;
-		ps.bsdf_pdf = path.bsdf_pdf;
-		ps.dir_in = path.direction;
-		gPathStates[path.path_index] = ps;
+		gPathStates[path.path_index] = path.store_state();
+		gPathStates1[path.path_index] = path.store_state1();
 	} else
 		gPathStates[path.path_index].beta = 0;
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void sample_visibility(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint view_index = get_view_index(pixel_coord.xy, gViews, gViewCount);
+void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+	const uint view_index = get_view_index(index.xy, gViews, gViewCount);
 	if (view_index == -1) return;
 
 	PathIntegrator path;
-	path.path_index = map_thread_index(pixel_coord.xy, group_id.xy, group_thread_index);
+	path.path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
 	if (path.path_index == -1) return;
-	path.pixel_coord = pixel_coord.xy;
-	path.path_length = 1;
-	path._beta = 1;
+	path.pixel_coord = index.xy;
 
 	if ((BDPTDebugMode) gDebugMode == BDPTDebugMode::ePathLengthContribution) gDebugImage[path.pixel_coord] = float4(0,0,0,1);
 
+	// initialize radiance with light trace sample
 	float3 c = 0;
 	if (gConnectToViews) {
 		c = ViewConnection::load_sample(path.pixel_coord);
@@ -233,6 +232,10 @@ void sample_visibility(uint3 pixel_coord : SV_DispatchThreadID, uint group_threa
 		gViewTransforms[view_index].m[2][3] );
 	path._medium = gViewMediumInstances[view_index];
 
+	path.path_length = 1;
+	path._beta = 1;
+	path.bsdf_pdf = 1;
+
 	path.init_rng();
 
 	// trace visibility ray
@@ -261,6 +264,9 @@ void sample_visibility(uint3 pixel_coord : SV_DispatchThreadID, uint group_threa
 	}
 
 	const float z = length(path.origin - path._isect.sd.position);
+	const float G = abs(dot(path.direction, path._isect.sd.geometry_normal())) / (z*z);
+	const float pdfA = pdfWtoA(1/(gViews[view_index].projection.sensor_area * pow3(abs(local_dir_out.z))), G);
+	path.d = 1 / pdfA;
 
 	uint material_address;
 	// store visibility packed_dz
@@ -319,32 +325,43 @@ void sample_visibility(uint3 pixel_coord : SV_DispatchThreadID, uint group_threa
 	}
 
 	if (any(path._beta > 0)) {
-		PathState ps;
-		ps.p.local_position = path.local_position;
-		ps.p.instance_primitive_index = path._isect.instance_primitive_index;
-		ps.origin = path.origin;
-		ps.pack_path_length_medium(2, path._medium);
-		ps.beta = path._beta;
-		ps.bsdf_pdf = path.bsdf_pdf;
-		ps.dir_in = path.direction;
-		gPathStates[path.path_index] = ps;
+		gPathStates[path.path_index] = path.store_state();
+		gPathStates1[path.path_index] = path.store_state1();
 	} else
 		gPathStates[path.path_index].beta = 0;
+}
+
+SLANG_SHADER("compute")
+[numthreads(64,1,1)]
+void presample_lights(uint3 index : SV_DispatchThreadID) {
+	if (index.x >= gLightPresampleTileSize*gLightPresampleTileCount) return;
+
+	rng_state_t _rng = rng_init(-1, index.x);
+	LightSampleRecord ls;
+	sample_point_on_light(ls, float4(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng)), 0);
+
+	PresampledLightPoint l;
+	l.position = ls.position;
+	l.packed_geometry_normal = pack_normal_octahedron(ls.normal);
+	l.Le = ls.radiance;
+	l.pdfA = ls.is_environment() ? -ls.pdf : ls.pdf;
+	gPresampledLights[index.x] = l;
 }
 
 #define _path_state gPathStates[path_index]
 void load_path_state(inout PathIntegrator path, const uint path_index, const uint2 pixel_coord) {
 	path.pixel_coord = pixel_coord.xy;
 	path.path_index = path_index;
+	path.origin = _path_state.origin;
 	path.path_length = _path_state.path_length();
 	path._medium = _path_state.medium();
 	path._beta = _path_state.beta;
 	path.bsdf_pdf = _path_state.bsdf_pdf;
-	path.origin = _path_state.origin;
 	path.direction = _path_state.dir_in;
+	path.d = gPathStates1[path_index].d;
 	path.local_position = _path_state.p.local_position;
 	path._isect.instance_primitive_index = _path_state.p.instance_primitive_index;
-	make_shading_data(path._isect.sd, _path_state.p.instance_index(), _path_state.p.primitive_index(), _path_state.p.local_position);
+	make_shading_data(path._isect.sd, _path_state.p.instance_index(), _path_state.p.primitive_index(), path.local_position);
 	path._isect.shape_pdf = shape_pdf(path.origin, path._isect.sd.shape_area, _path_state.p, path._isect.shape_pdf_area_measure);
 
 	path.T_nee_pdf = 1;
@@ -385,74 +402,67 @@ void load_path_state(inout PathIntegrator path, const uint path_index, const uin
 }
 
 SLANG_SHADER("compute")
-[numthreads(64,1,1)]
-void presample_lights(uint3 index : SV_DispatchThreadID) {
-	if (index.x >= gLightPresampleTileSize*gLightPresampleTileCount) return;
-
-	rng_state_t _rng = rng_init(-1, index.x);
-	LightSampleRecord ls;
-	sample_point_on_light(ls, float4(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng)), 0);
-
-	PresampledLightPoint l;
-	l.position = ls.position;
-	l.packed_geometry_normal = pack_normal_octahedron(ls.normal);
-	l.Le = ls.radiance;
-	l.pdfA = ls.pdf;
-	gPresampledLights[index.x] = l;
-}
-
-SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void multi_kernel(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_thread_index(pixel_coord.xy, group_id.xy, group_thread_index);
+void multi_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
 
 	PathIntegrator path;
-
-	load_path_state(path, path_index, pixel_coord.xy);
+	load_path_state(path, path_index, index.xy);
 	if (path.path_length > PathIntegrator::gMaxVertices || all(path._beta <= 0)) return;
 
 	path.next_vertex();
 
 	// store path state for next bounce
 	if (any(path._beta > 0)) {
-		PathState ps;
-		ps.p.local_position = path.local_position;
-		ps.p.instance_primitive_index = path._isect.instance_primitive_index;
-		ps.origin = path.origin;
-		ps.pack_path_length_medium(path.path_length, path._medium);
-		ps.beta = path._beta;
-		ps.bsdf_pdf = path.bsdf_pdf;
-		ps.dir_in = path.direction;
-		gPathStates[path.path_index] = ps;
+		gPathStates[path.path_index] = path.store_state();
+		gPathStates1[path.path_index] = path.store_state1();
 	} else
 		gPathStates[path.path_index].beta = 0;
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void single_kernel(uint3 pixel_coord : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_thread_index(pixel_coord.xy, group_id.xy, group_thread_index);
+void single_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
 
 	PathIntegrator path;
-
-	load_path_state(path, path_index, pixel_coord.xy);
+	load_path_state(path, path_index, index.xy);
 
 	while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0))
 		path.next_vertex();
 
+	/*
 	// store path state for next bounce
 	if (any(path._beta > 0)) {
-		PathState ps;
-		ps.p.local_position = path.local_position;
-		ps.p.instance_primitive_index = path._isect.instance_primitive_index;
-		ps.origin = path.origin;
-		ps.pack_path_length_medium(path.path_length, path._medium);
-		ps.beta = path._beta;
-		ps.bsdf_pdf = path.bsdf_pdf;
-		ps.dir_in = path.direction;
-		gPathStates[path.path_index] = ps;
+		gPathStates[path.path_index] = path.store_state();
+		gPathStates1[path.path_index] = path.store_state1();
 	} else
 		gPathStates[path.path_index].beta = 0;
+	*/
+}
+
+SLANG_SHADER("compute")
+[numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
+void trace_nee(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	if (path_index == -1) return;
+
+	Spectrum c = 0;
+	for (int path_length = 2; path_length < gMaxPathVertices; path_length++) {
+		const NEERayData rd = gNEERays[PathIntegrator::nee_vertex_index(path_index, path_length)];
+		if (all(rd.contribution <= 0)) continue;
+
+		rng_state_t _rng = rng_init(pixel_coord, rd.rng_offset);
+
+		Spectrum beta = 1;
+		Real T_dir_pdf = 1;
+		Real T_nee_pdf = 1;
+		trace_visibility_ray(_rng, rd.ray_origin, rd.ray_direction, rd.dist, rd.medium, beta, T_dir_pdf, T_nee_pdf);
+		if (T_nee_pdf > 0) beta /= T_nee_pdf;
+		c += rd.contribution * beta;
+	}
+
+	gRadiance[pixel_coord] += float4(c, 0);
 }

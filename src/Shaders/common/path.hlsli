@@ -3,10 +3,11 @@
 
 #include "rng.hlsli"
 #include "intersection.hlsli"
-#include "../../materials/environment.h"
+#include "materials/environment.h"
 #include "light.hlsli"
 
-static Real path_weight(const uint path_length) {
+static Real path_weight(const uint view_length, const uint light_length) {
+	const uint path_length = view_length + light_length;
 	if (path_length <= 2)
 		return 1; // light is directly visible
 	// E E ... E E   regular path tracing
@@ -126,10 +127,10 @@ struct ViewConnection {
 		const Real sensor_cos_theta = -dot(to_view, normal);
 		if (sensor_cos_theta < 0) { contribution = 0; return; }
 
-		const float lens_radius = 0;
-		const float lens_area = lens_radius != 0 ? (M_PI * lens_radius * lens_radius) : 1;
-		const float sensor_pdf = pow2(dist) / (sensor_cos_theta * lens_area);
-		const float sensor_importance = 1 / (gViews[view_index].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
+		const Real lens_radius = 0;
+		const Real lens_area = lens_radius > 0 ? (M_PI * lens_radius * lens_radius) : 1;
+		const Real sensor_pdf = pdfAtoW(1/lens_area, sensor_cos_theta / pow2(dist));
+		const Real sensor_importance = 1 / (gViews[view_index].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
 
 		contribution = beta * sensor_importance / sensor_pdf;
 
@@ -175,7 +176,7 @@ struct ViewConnection {
 			if (abs(denom) > 1e-5) c *= abs(num / denom);
 		}
 
-		const Real weight = path_weight(path_length + 1);
+		const Real weight = path_weight(1, path_length);
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1) {
 			if (gPushConstants.gDebugLightPathLength == path_length)
 				accumulate_contribution(output_index, c);
@@ -194,11 +195,12 @@ struct NEE {
 	Real dist;
 
 	static Real mis(const Real a, const Real b) {
-		if (!gUseNEEMIS) return 0.5;
+		if (!gUseMIS) return 0.5;
 		const Real a2 = pow2(a);
 		return a2 / (a2 + pow2(b));
 	}
 	static Real bsdf_mis(const Real bsdf_pdf, const Real T_nee_pdf, const IntersectionVertex _isect, const Real G) {
+		if (!gUseMIS) return 0.5;
 		Real l_pdf = T_nee_pdf;
 		bool area_measure;
 		point_on_light_pdf(l_pdf, area_measure, _isect);
@@ -220,6 +222,7 @@ struct NEE {
 
 		dist = ls.dist;
 		ray_direction = ls.to_light;
+		Le = ls.radiance;
 
 		if (ls.is_environment())
 			G = 1;
@@ -228,16 +231,15 @@ struct NEE {
 			if (cos_theta < 1e-4) { Le = 0; return; }
 			G = abs(cos_theta) / pow2(ls.dist);
 		}
-		Le = ls.radiance;
 		pdfA = ls.pdf_area_measure ? ls.pdf : pdfWtoA(ls.pdf, G);
 
 		if (gHasMedia && _isect.sd.shape_area == 0) {
-			local_to_light = ls.to_light;
+			local_to_light = ray_direction;
 			ray_origin = _isect.sd.position;
 		} else {
-			local_to_light = normalize(_isect.sd.to_local(ls.to_light));
+			local_to_light = normalize(_isect.sd.to_local(ray_direction));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			ray_origin = ray_offset(_isect.sd.position, dot(geometry_normal, ls.to_light) > 0 ? geometry_normal : -geometry_normal);
+			ray_origin = ray_offset(_isect.sd.position, dot(geometry_normal, ray_direction) > 0 ? geometry_normal : -geometry_normal);
 		}
 		T_dir_pdf = 1;
 		T_nee_pdf = 1;
@@ -248,20 +250,30 @@ struct NEE {
 		const PresampledLightPoint ls = gPresampledLights[index];
 		Le = ls.Le;
 		pdfA = ls.pdfA;
-		ray_direction = ls.position - _isect.sd.position;
-		const Real dist2 = dot(ray_direction, ray_direction);
-		G = 1/dist2;
-		dist = sqrt(dist2);
-		ray_direction /= dist;
+
+		if (pdfA < 0) { // environment map sample
+			pdfA = -pdfA;
+			ray_direction = ls.position;
+			dist = POS_INFINITY;
+			G = 1;
+		} else {
+			ray_direction = ls.position - _isect.sd.position;
+			const Real dist2 = dot(ray_direction, ray_direction);
+			dist = sqrt(dist2);
+			ray_direction /= dist;
+
+			const Real cos_theta = -dot(ray_direction, ls.geometry_normal());
+			if (cos_theta < 1e-4) { Le = 0; return; }
+			G = abs(cos_theta)/dist2;
+		}
+
 		if (gHasMedia && _isect.sd.shape_area <= 0) {
 			local_to_light = ray_direction;
 			ray_origin = _isect.sd.position;
 		} else {
 			local_to_light = normalize(_isect.sd.to_local(ray_direction));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			const Real cos_theta = dot(ray_direction, geometry_normal);
-			G *= abs(cos_theta);
-			ray_origin = ray_offset(_isect.sd.position, cos_theta > 0 ? geometry_normal : -geometry_normal);
+			ray_origin = ray_offset(_isect.sd.position, dot(geometry_normal, ray_direction) > 0 ? geometry_normal : -geometry_normal);
 		}
 		T_dir_pdf = 1;
 		T_nee_pdf = 1;
@@ -296,13 +308,17 @@ struct PathIntegrator {
 	uint path_index;
 	uint path_length;
 	Spectrum _beta;
+
 	Real bsdf_pdf; // solid angle measure
+	Real d; // dE for view paths, dL for light paths
 
 	rng_state_t _rng;
 
 	// the ray that was traced to get here
 	// also the ray traced by trace()
 	Vector3 origin, direction;
+	Real prev_cos_theta; // at origin, towards current vertex
+
 	IntersectionVertex _isect;
 	Vector3 local_position;
 	uint _medium;
@@ -314,13 +330,31 @@ struct PathIntegrator {
 	static const uint gMaxVertices = gTraceLight ? gMaxLightPathVertices : gMaxPathVertices;
 
 	static const uint light_vertex_index(const uint path_index, const uint path_length) { return path_index*gMaxLightPathVertices + path_length-1; }
+	static const uint nee_vertex_index  (const uint path_index, const uint path_length) { return gOutputExtent.x*gOutputExtent.y*(path_length-2)*(gMaxPathVertices-2) + path_index; }
 
 	SLANG_MUTATING
 	void init_rng() {
 		_rng = rng_init(pixel_coord, (gTraceLight ? 0xFFFFFF : 0) + (path_length-1)*gVertexRNGOffset);
 	}
 
-	// to be called after trace()
+	PathState store_state() {
+		PathState ps;
+		ps.p.local_position = local_position;
+		ps.p.instance_primitive_index = _isect.instance_primitive_index;
+		ps.origin = origin;
+		ps.pack_path_length_medium(path_length, _medium);
+		ps.beta = _beta;
+		ps.prev_cos_theta = prev_cos_theta;
+		ps.dir_in = direction;
+		ps.bsdf_pdf = bsdf_pdf;
+		return ps;
+	}
+	PathState1 store_state1() {
+		PathState1 ps;
+		ps.d = d;
+		return ps;
+	}
+
 	void store_light_vertex() {
 		uint flags = 0;
 		if (gHasMedia && _isect.sd.shape_area == 0) flags |= PATH_VERTEX_FLAG_IS_MEDIUM;
@@ -340,21 +374,20 @@ struct PathIntegrator {
 		gLightPathVertices1[i].packed_tangent = _isect.sd.packed_tangent;
 		gLightPathVertices2[i].uv = _isect.sd.uv;
 		gLightPathVertices2[i].pack_beta(_beta);
-		//gLightPathVertices3[i].pdf_fwd = _pdf_fwd;
-		//gLightPathVertices3[i].pdf_rev = _pdf_rev;
+		gLightPathVertices3[i].d = d;
 	}
 
 	void eval_emission(BSDF m) {
 		Real weight = 1;
 		if (path_length > 2) {
-			if (gConnectToLightPaths || gConnectToViews)
-				weight = path_weight(path_length);
 			if (gUseNEE) {
 				if (gReservoirNEE)
 					weight = NEE::reservoir_bsdf_mis();
 				else
 					weight = NEE::bsdf_mis(bsdf_pdf, T_nee_pdf, _isect, G);
 			}
+			if (gConnectToLightPaths || gConnectToViews)
+				weight = path_weight(path_length, 0);
 		}
 
 		if (_isect.instance_index() == INVALID_INSTANCE) {
@@ -379,6 +412,26 @@ struct PathIntegrator {
 	}
 
 	SLANG_MUTATING
+	void eval_nee(NEE c, Spectrum contrib, const Real weight) {
+		if (gDeferNEERays) {
+			NEERayData rd;
+			rd.contribution = contrib * weight;
+			rd.rng_offset = _rng.w;
+			rd.ray_origin = c.ray_origin;
+			rd.medium = _medium;
+			rd.ray_direction = c.ray_direction;
+			rd.dist = c.dist;
+			gNEERays[nee_vertex_index(path_index, path_length)] = rd;
+		} else {
+			gRadiance[pixel_coord].rgb += contrib * weight;
+		}
+
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength) {
+			if (gDeferNEERays) c.eval_visibility(_rng, _medium, contrib);
+			gDebugImage[pixel_coord].rgb += contrib;
+		}
+	}
+	SLANG_MUTATING
 	void sample_nee(BSDF m) {
 		NEE c;
 		if (gPresampleLights) {
@@ -389,25 +442,22 @@ struct PathIntegrator {
 		} else
 			c.sample(_rng, _isect);
 
-		c.eval_visibility(_rng, _medium);
+		if (!gDeferNEERays)
+			c.eval_visibility(_rng, _medium);
 
 		if (any(c.Le > 0) && c.pdfA > 1e-6) {
-			Real bsdf_pdf;
-			Spectrum contrib = c.eval(m, local_dir_in, bsdf_pdf);
+			Real nee_bsdf_pdf;
+			Spectrum contrib = c.eval(m, local_dir_in, nee_bsdf_pdf);
 
 			// mis between nee and bsdf sampling
-			Real weight = gSampleBSDFs ? NEE::mis(c.pdfA, pdfWtoA(c.T_dir_pdf*bsdf_pdf, c.G)) : 1;
+			Real weight = gSampleBSDFs ? NEE::mis(c.pdfA, pdfWtoA(c.T_dir_pdf*nee_bsdf_pdf, c.G)) : 1;
 			// bdpt weight overrides nee/bsdf mis weight
-			if (gConnectToLightPaths || gConnectToViews) weight = path_weight(path_length + 1);
+			if (gConnectToLightPaths || gConnectToViews) weight = path_weight(path_length, 1);
 
 			contrib /= c.pdfA;
-
-			gRadiance[pixel_coord].rgb += contrib * _beta * weight;
-			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
-				gDebugImage[pixel_coord].rgb += contrib * _beta;
+			eval_nee(c, contrib * _beta, weight);
 		}
 	}
-
 	SLANG_MUTATING
 	void sample_prev_reservoir(BSDF m, inout Reservoir r, const uint reservoir_index, const float2 coord, inout Spectrum contrib, inout Real r_target_pdf, inout uint M, inout Real sum_src_pdf) {
 		if (any(coord < 0) || any(coord >= gOutputExtent) || any(coord != coord)) return;
@@ -447,7 +497,6 @@ struct PathIntegrator {
 			}
 		}
 	}
-
 	SLANG_MUTATING
 	void sample_reservoir_nee(BSDF m) {
 		Spectrum contrib;
@@ -495,6 +544,7 @@ struct PathIntegrator {
 				r.W = r.total_weight / (r.M * r_target_pdf);
 
 			if (r.W > 0) c.eval_visibility(_rng, _medium, contrib);
+
 				// zero weight from shadowed sample
 			if (all(contrib <= 0) || any(contrib != contrib)) r.W = 0;
 		}
@@ -527,19 +577,18 @@ struct PathIntegrator {
 		}
 
 		if (r.W > 1e-6) {
-			// average nee and bsdf sampling
-			Real weight = gSampleBSDFs ? (1 - NEE::reservoir_bsdf_mis()) : 1;
-			// bdpt weight overrides nee/bsdf mis weight
-			if (gConnectToLightPaths || gConnectToViews) weight = path_weight(path_length + 1);
-
 			contrib *= r.W;
-
 			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eReservoirWeight)
 				gDebugImage[pixel_coord].rgb += r.W;
 
-			gRadiance[pixel_coord].rgb += contrib * _beta * weight;
+			// average nee and bsdf sampling
+			Real weight = gSampleBSDFs ? (1 - NEE::reservoir_bsdf_mis()) : 1;
+			// bdpt weight overrides nee/bsdf mis weight
+			if (gConnectToLightPaths || gConnectToViews) weight = path_weight(path_length, 1);
+
+			gRadiance[pixel_coord].rgb += _beta * contrib * weight;
 			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
-				gDebugImage[pixel_coord].rgb += contrib * _beta;
+				gDebugImage[pixel_coord].rgb += _beta * contrib;
 		}
 	}
 
@@ -577,7 +626,7 @@ struct PathIntegrator {
 
 					// c.f includes 1/dist2 and cosine term from the light path vertex
 					const Spectrum contrib = _beta * _eval.f * abs(c.local_to_light.z) * c.f;
-					const Real weight = path_weight(path_length + light_length);
+					const Real weight = path_weight(path_length, light_length);
 
 					if (weight > 0 && any(contrib > 0)) {
 						gRadiance[pixel_coord].rgb += contrib * weight;
@@ -596,7 +645,13 @@ struct PathIntegrator {
 		MaterialSampleRecord _material_sample;
 		m.sample(_material_sample, rnd, local_dir_in, _beta, gTraceLight);
 
-		bsdf_pdf = _material_sample.pdf_fwd;
+		if (gUseMIS) {
+			// TODO: light vertex 2 will not have d computed properly, as sample_next_direction is not called on light vertex 1
+			// does the computation of d line up with when store_light_vertex is called?
+			const Vector3 dp = _isect.sd.position - origin;
+			d = (1 + d*pdfWtoA(_material_sample.pdf_rev, prev_cos_theta/dot(dp, dp))) / pdfWtoA(bsdf_pdf, G);
+			bsdf_pdf = _material_sample.pdf_fwd;
+		}
 
 		if (_material_sample.pdf_fwd < 1e-6) {
 			_beta = 0;
@@ -620,17 +675,21 @@ struct PathIntegrator {
 				const Real denom = ndotout * dot(geometry_normal, -direction);
 				if (abs(denom) > 1e-5) _beta *= abs(num / denom);
 			}
-		} else
+
+			prev_cos_theta = ngdotout;
+		} else {
 			origin = _isect.sd.position;
+			prev_cos_theta = 1;
+		}
 
 		direction = _material_sample.dir_out;
 
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eDirOut) gDebugImage[pixel_coord] = float4(direction*.5+.5, 1);
 	}
 
-	// add radiance contribution from surface, sample NEE/BDPT connections, do russian roullette sample next direction
+	// add radiance contribution from surface, sample NEE/BDPT connections, terminate with russian roullette, sample next direction
 	SLANG_MUTATING
-	void advance(BSDF m) {
+	void sample_directions(BSDF m) {
 		if (path_length > 2) {
 			if (gTraceLight)
 				store_light_vertex();
@@ -645,16 +704,19 @@ struct PathIntegrator {
 		if (!gSampleBSDFs) { _beta = 0; return; }
 
 		if (path_length >= gMinPathVertices) {
-			const Real p = min(luminance(_beta), 0.95);
-			if (rng_next_float(_rng) > p) {
-				_beta = 0;
-				return;
-			} else
-				_beta /= p;
+			const Real p = max(max(_beta.r, _beta.g), _beta.b) * 0.95;
+			if (p < 1) {
+				if (rng_next_float(_rng) > p) {
+					_beta = 0;
+					return;
+				} else
+					_beta /= p;
+			}
 		}
 
 		sample_next_direction(m);
 	}
+
 	// expects _medium, origin and direction to bet set
 	// sets local_dir_in, G and T_nee_pdf. increments path_length
 	SLANG_MUTATING
@@ -664,7 +726,7 @@ struct PathIntegrator {
 		trace_ray(_rng, origin, direction, _medium, _beta, T_dir_pdf, T_nee_pdf, _isect, local_position);
 		if (T_dir_pdf <= 0 || all(_beta <= 0)) { _beta = 0; return; }
 		_beta /= T_dir_pdf;
-		bsdf_pdf *= T_dir_pdf;
+		if (gUseMIS) bsdf_pdf *= T_dir_pdf;
 
 		path_length++;
 
@@ -696,6 +758,7 @@ struct PathIntegrator {
 			local_dir_in = direction;
 	}
 
+	// calls sample_directions() and trace()
 	SLANG_MUTATING
 	void next_vertex() {
 		init_rng();
@@ -707,11 +770,11 @@ struct PathIntegrator {
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			Medium m;
 			m.load(material_address);
-			advance(m);
+			sample_directions(m);
 		} else {
 			Material m;
 			m.load_and_sample(material_address, _isect.sd.uv, _isect.sd.uv_screen_size);
-			advance(m);
+			sample_directions(m);
 		}
 
 		if (any(_beta > 0))
