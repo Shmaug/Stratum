@@ -77,12 +77,20 @@ function(stm_compile_shader SRC_PATH DST_FOLDER)
 			list(APPEND COMPILE_CMD "-o" "${SPV_PATH}")
 		endif()
 
+		if (WIN32)
+			set(SPIRV_CROSS_CMD "$ENV{VULKAN_SDK}/Bin/spirv-cross")
+		else()
+			set(SPIRV_CROSS_CMD "spirv-cross")
+		endif()
+
+		# add commands
+
 		add_custom_command(OUTPUT "${SPV_PATH}"
 			COMMAND ${COMPILE_CMD} ${SRC_PATH}
 			DEPENDS "${SRC_PATH}" IMPLICIT_DEPENDS CXX "${SRC_PATH}")
 
 		add_custom_command(OUTPUT "${SPV_JSON_PATH}"
-			COMMAND spirv-cross ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect
+			COMMAND ${SPIRV_CROSS_CMD} ${SPV_PATH} --output ${SPV_JSON_PATH} --reflect
 			DEPENDS "${SPV_PATH}")
 
 		add_custom_target(${DST_NAME} ALL DEPENDS "${SPV_PATH}" "${SPV_JSON_PATH}")
