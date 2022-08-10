@@ -356,68 +356,34 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	ProfilerRegion ps("BDPT::render", commandBuffer);
 
-	// Initialize buffers
-
 	const vk::Extent3D extent = renderTarget.extent();
-	if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != extent) {
-		ProfilerRegion ps("create images");
 
-		mCurFrame->mRadiance 		= make_shared<Image>(commandBuffer.mDevice, "gRadiance",   extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
-		mCurFrame->mAlbedo 			= make_shared<Image>(commandBuffer.mDevice, "gAlbedo",     extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
-		mCurFrame->mPrevUVs 		= make_shared<Image>(commandBuffer.mDevice, "gPrevUVs",    extent, vk::Format::eR32G32Sfloat,       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
-		mCurFrame->mDebugImage 		= make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
-		mCurFrame->mTonemapResult 	= make_shared<Image>(commandBuffer.mDevice, "gOutput",     extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
-
-		mCurFrame->mTonemapMax = make_shared<Buffer>(commandBuffer.mDevice, "gMax", sizeof(uint4), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY),
-		mCurFrame->mSelectionData = make_shared<Buffer>(commandBuffer.mDevice, "gSelectionData", sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU),
-		mCurFrame->mPathData = {
-			{ "gVisibility", 		 make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		   extent.width * extent.height * sizeof(VisibilityInfo), 													vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gPathStates", 		 make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", 		   extent.width * extent.height * sizeof(PathState), 														vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gPathStates1", 		 make_shared<Buffer>(commandBuffer.mDevice, "gPathStates1",		   extent.width * extent.height * sizeof(PathState1), 														vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gRayDifferentials", 	 make_shared<Buffer>(commandBuffer.mDevice, "gRayDifferentials",   extent.width * extent.height * sizeof(RayDifferential), 													vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gReservoirs", 		 make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", 		   extent.width * extent.height * sizeof(Reservoir), 														vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gReservoirSamples",	 make_shared<Buffer>(commandBuffer.mDevice, "gReservoirSamples",   extent.width * extent.height * sizeof(uint4), 	    													vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightTraceSamples",  make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",  extent.width * extent.height * sizeof(float4), 															vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices",  make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex),   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gLightPathVertices1", make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", extent.width * extent.height * max(mPushConstants.gMaxLightPathVertices,1u) * sizeof(LightPathVertex1),  vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY) },
-			{ "gNEERays", 			 make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", 		   extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData),         vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY) },
-		};
-		mCurFrame->mFrameNumber = 0;
-	}
-
-	if (mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < extent.width * extent.height * mPushConstants.gMaxLightPathVertices * sizeof(LightPathVertex)) {
-		mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  extent.width * extent.height * mPushConstants.gMaxLightPathVertices * sizeof(LightPathVertex),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-		mCurFrame->mPathData["gLightPathVertices1"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", extent.width * extent.height * mPushConstants.gMaxLightPathVertices * sizeof(LightPathVertex1), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-	}
-	if (mCurFrame->mPathData.at("gNEERays").size_bytes() < extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData))
-		mCurFrame->mPathData["gNEERays"] = make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", extent.width * extent.height * (max(mPushConstants.gMaxPathVertices,3u)-2) * sizeof(NEERayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-
-	if (!mCurFrame->mPresampledLights || mCurFrame->mPresampledLights.size() < max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize))
-		mCurFrame->mPresampledLights = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize) * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	// upload viewdatas
-	mCurFrame->mViews = make_shared<Buffer>(commandBuffer.mDevice, "gViews", views.size() * sizeof(ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	mCurFrame->mViewTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gViewTransforms", views.size() * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	mCurFrame->mViewInverseTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gViewInverseTransforms", views.size() * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	for (uint32_t i = 0; i < views.size(); i++) {
-		mCurFrame->mViews[i] = views[i].first;
-		mCurFrame->mViewTransforms[i] = views[i].second;
-		mCurFrame->mViewInverseTransforms[i] = views[i].second.inverse();
-	}
-
-	// find if views are inside a volume
-	mCurFrame->mViewMediumIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewMediumInstances", views.size() * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	ranges::fill(mCurFrame->mViewMediumIndices, INVALID_INSTANCE);
 	bool has_volumes = false;
-	mNode.for_each_descendant<Medium>([&](const component_ptr<Medium>& vol) {
-		has_volumes = true;
+
+	// upload views, compute gViewMediumInstances
+	{
+		// upload viewdatas
+		mCurFrame->mViews = make_shared<Buffer>(commandBuffer.mDevice, "gViews", views.size() * sizeof(ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		mCurFrame->mViewTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gViewTransforms", views.size() * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		mCurFrame->mViewInverseTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gViewInverseTransforms", views.size() * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		for (uint32_t i = 0; i < views.size(); i++) {
-			const float3 view_pos = mCurFrame->mViewTransforms[i].transform_point(float3::Zero());
-			const float3 local_view_pos = node_to_world(vol.node()).inverse().transform_point(view_pos);
-			if (vol->density_grid->grid<float>()->worldBBox().isInside(nanovdb::Vec3R(local_view_pos[0], local_view_pos[1], local_view_pos[2])))
-				mCurFrame->mViewMediumIndices[i] = mCurFrame->mSceneData->mInstanceTransformMap.at(vol.get()).second;
+			mCurFrame->mViews[i] = views[i].first;
+			mCurFrame->mViewTransforms[i] = views[i].second;
+			mCurFrame->mViewInverseTransforms[i] = views[i].second.inverse();
 		}
-	});
+
+		// find if views are inside a volume
+		mCurFrame->mViewMediumIndices = make_shared<Buffer>(commandBuffer.mDevice, "gViewMediumInstances", views.size() * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		ranges::fill(mCurFrame->mViewMediumIndices, INVALID_INSTANCE);
+		mNode.for_each_descendant<Medium>([&](const component_ptr<Medium>& vol) {
+			has_volumes = true;
+			for (uint32_t i = 0; i < views.size(); i++) {
+				const float3 local_view_pos = node_to_world(vol.node()).inverse().transform_point( views[i].second.transform_point(float3::Zero()) );
+				if (vol->density_grid->grid<float>()->worldBBox().isInside(nanovdb::Vec3R(local_view_pos[0], local_view_pos[1], local_view_pos[2])))
+					mCurFrame->mViewMediumIndices[i] = mCurFrame->mSceneData->mInstanceTransformMap.at(vol.get()).second;
+			}
+		});
+	}
 
 	// per-frame push constants
 	BDPTPushConstants push_constants = mPushConstants;
@@ -425,6 +391,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	push_constants.gViewCount = (uint32_t)views.size();
 	if (mRandomPerFrame) push_constants.gRandomSeed = rand();
 
+	// determine sampling flags
 	uint32_t sampling_flags = mSamplingFlags;
 	{
 		if (push_constants.gEnvironmentMaterialAddress == -1) {
@@ -472,6 +439,46 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mIntegratorPipelines[(IntegratorType)i]->specialization_constant<uint32_t>("gSpecializationFlags") = sampling_flags;
 			mIntegratorPipelines[(IntegratorType)i]->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 		}
+	}
+
+	const uint32_t pixel_count        = extent.width * extent.height;
+	const uint32_t light_vertex_count = (sampling_flags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS) ? pixel_count * max(mPushConstants.gMaxLightPathVertices,1u) : 1;
+	const uint32_t nee_ray_count      = (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS)         ? pixel_count * (max(mPushConstants.gMaxPathVertices,3u)-2)  : 1;
+
+	// allocate data
+	{
+		if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != extent) {
+			ProfilerRegion ps("Allocate data");
+
+			mCurFrame->mRadiance 	  = make_shared<Image>(commandBuffer.mDevice, "gRadiance",   extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+			mCurFrame->mAlbedo 		  = make_shared<Image>(commandBuffer.mDevice, "gAlbedo",     extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+			mCurFrame->mPrevUVs 	  = make_shared<Image>(commandBuffer.mDevice, "gPrevUVs",    extent, vk::Format::eR32G32Sfloat,       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+			mCurFrame->mDebugImage 	  = make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
+			mCurFrame->mTonemapResult = make_shared<Image>(commandBuffer.mDevice, "gOutput",     extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
+
+			mCurFrame->mTonemapMax = make_shared<Buffer>(commandBuffer.mDevice, "gMax", sizeof(uint4), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY),
+			mCurFrame->mSelectionData = make_shared<Buffer>(commandBuffer.mDevice, "gSelectionData", sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU),
+			mCurFrame->mPathData.clear();
+			mCurFrame->mPathData["gVisibility"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		pixel_count * sizeof(VisibilityInfo), 		   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gPathStates"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", 		pixel_count * sizeof(PathState), 			   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gPathStates1"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gPathStates1",		pixel_count * sizeof(PathState1), 			   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gRayDifferentials"] 	= make_shared<Buffer>(commandBuffer.mDevice, "gRayDifferentials",   pixel_count * sizeof(RayDifferential), 		   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gReservoirs"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gReservoirs", 		pixel_count * sizeof(Reservoir), 			   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gReservoirSamples"]	= make_shared<Buffer>(commandBuffer.mDevice, "gReservoirSamples",   pixel_count * sizeof(uint4), 	    		   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gLightTraceSamples"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",  pixel_count * sizeof(float4), 				   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(LightPathVertex),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gLightPathVertices1"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", light_vertex_count * sizeof(LightPathVertex1), vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gNEERays"] 			= make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", 		    nee_ray_count * sizeof(NEERayData),            vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mFrameNumber = 0;
+		}
+		if (mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(LightPathVertex)) {
+			mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(LightPathVertex),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+			mCurFrame->mPathData["gLightPathVertices1"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", light_vertex_count * sizeof(LightPathVertex1), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+		}
+		if (mCurFrame->mPathData.at("gNEERays").size_bytes() < nee_ray_count * sizeof(NEERayData))
+			mCurFrame->mPathData["gNEERays"] = make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", nee_ray_count * sizeof(NEERayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+		if (!mCurFrame->mPresampledLights || mCurFrame->mPresampledLights.size() < max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize))
+			mCurFrame->mPresampledLights = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize) * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	}
 
 	// set descriptors
@@ -562,25 +569,28 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer.dispatch_over(mPushConstants.gLightPresampleTileSize * mPushConstants.gLightPresampleTileCount);
 	}
 
-	if (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)
-		commandBuffer.barrier({ mCurFrame->mPresampledLights }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-	if (sampling_flags & (BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE|BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)) {
-		commandBuffer.barrier({
-			mPrevFrame->mPathData.at("gVisibility"),
-			mPrevFrame->mPathData.at("gReservoirs"),
-			mPrevFrame->mPathData.at("gReservoirSamples"),
-		}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-	}
-	if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
-		commandBuffer.barrier({
-			mCurFrame->mPathData.at("gPathStates"),
-			mCurFrame->mPathData.at("gPathStates1")
-		}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
-	}
-	if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) {
-		auto v = mCurFrame->mPathData.at("gNEERays");
-		commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
-		commandBuffer.barrier({ mCurFrame->mPathData.at("gNEERays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
+	// barriers + clearing
+	{
+		if (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)
+			commandBuffer.barrier({ mCurFrame->mPresampledLights }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		if (sampling_flags & (BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE|BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)) {
+			commandBuffer.barrier({
+				mPrevFrame->mPathData.at("gVisibility"),
+				mPrevFrame->mPathData.at("gReservoirs"),
+				mPrevFrame->mPathData.at("gReservoirSamples"),
+			}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		}
+		if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
+			commandBuffer.barrier({
+				mCurFrame->mPathData.at("gPathStates"),
+				mCurFrame->mPathData.at("gPathStates1")
+			}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		}
+		if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) {
+			auto v = mCurFrame->mPathData.at("gNEERays");
+			commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
+			commandBuffer.barrier({ mCurFrame->mPathData.at("gNEERays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
+		}
 	}
 
 	// trace view paths
@@ -626,9 +636,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 	}
 
-	Image::View result = mCurFrame->mRadiance;
-	if (mDebugMode != BDPTDebugMode::eNone)
-		result = mCurFrame->mDebugImage;
+	Image::View result = (mDebugMode == BDPTDebugMode::eNone)  ? mCurFrame->mRadiance : mCurFrame->mDebugImage;
 
 	// accumulate/denoise
 	{

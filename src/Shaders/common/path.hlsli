@@ -766,7 +766,7 @@ struct PathIntegrator {
 	void next_vertex() {
 		init_rng();
 
-		if (gTraceLight) store_light_vertex();
+		if (gTraceLight && gConnectToLightPaths) store_light_vertex();
 
 		const uint material_address = gInstances[_isect.instance_index()].material_address();
 

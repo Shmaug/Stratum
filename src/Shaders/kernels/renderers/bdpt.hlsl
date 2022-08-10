@@ -169,7 +169,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	path._isect.sd.position = ls.position;
 	path._isect.sd.packed_geometry_normal = pack_normal_octahedron(ls.normal);
 
-	path.store_light_vertex();
+	if (gConnectToLightPaths) path.store_light_vertex();
 
 	if (gMaxLightPathVertices < 2) return;
 
