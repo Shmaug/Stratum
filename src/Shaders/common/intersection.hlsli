@@ -1,8 +1,8 @@
 #ifndef INTERSECTION_H
 #define INTERSECTION_H
 
-#include "shading_data.h"
-#include "materials/medium.hlsli"
+#include "../shading_data.h"
+#include "../materials/medium.hlsli"
 
 struct IntersectionVertex {
 	ShadingData sd;

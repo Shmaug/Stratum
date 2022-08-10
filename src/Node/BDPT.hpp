@@ -27,7 +27,7 @@ private:
 	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
 	shared_ptr<ComputePipelineState> mTraceNEEPipeline;
 	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
-	IntegratorType mIntegratorType = IntegratorType::eMultiKernel;
+	IntegratorType mIntegratorType = IntegratorType::eSingleKernel;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
 	shared_ptr<ComputePipelineState> mTonemapReducePipeline;
 

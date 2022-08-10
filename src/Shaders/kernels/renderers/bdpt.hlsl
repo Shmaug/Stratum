@@ -12,8 +12,8 @@
 #pragma compile slangc -profile sm_6_6 -lang slang -entry presample_lights
 #endif
 
-#include "scene.h"
-#include "bdpt.h"
+#include "../../scene.h"
+#include "../../bdpt.h"
 
 #ifdef __SLANG__
 #ifndef gSpecializationFlags
@@ -108,17 +108,15 @@ static const bool gCountRays 			 	= (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS
 [[vk::binding(18,1)]] RWStructuredBuffer<uint4> gPrevReservoirSamples;
 [[vk::binding(19,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
 [[vk::binding(20,1)]] RWByteAddressBuffer gLightTraceSamples;
-[[vk::binding(21,1)]] RWStructuredBuffer<LightPathVertex0> gLightPathVertices0;
+[[vk::binding(21,1)]] RWStructuredBuffer<LightPathVertex> gLightPathVertices;
 [[vk::binding(22,1)]] RWStructuredBuffer<LightPathVertex1> gLightPathVertices1;
-[[vk::binding(23,1)]] RWStructuredBuffer<LightPathVertex2> gLightPathVertices2;
-[[vk::binding(24,1)]] RWStructuredBuffer<LightPathVertex3> gLightPathVertices3;
-[[vk::binding(25,1)]] RWStructuredBuffer<NEERayData> gNEERays;
+[[vk::binding(23,1)]] RWStructuredBuffer<NEERayData> gNEERays;
 
-#include "common/path.hlsli"
+#include "../../common/path.hlsli"
 
 #define GROUPSIZE_X 8
 #define GROUPSIZE_Y 4
-uint map_thread_index(const uint2 pixel_coord, const uint2 group_id, const uint group_thread_index) {
+uint map_pixel_coord(const uint2 pixel_coord, const uint2 group_id, const uint group_thread_index) {
 	uint path_index;
 	if (gRemapThreadIndex) {
 		const uint dispatch_w = (gOutputExtent.x + GROUPSIZE_X - 1) / GROUPSIZE_X;
@@ -131,10 +129,27 @@ uint map_thread_index(const uint2 pixel_coord, const uint2 group_id, const uint 
 }
 
 SLANG_SHADER("compute")
+[numthreads(64,1,1)]
+void presample_lights(uint3 index : SV_DispatchThreadID) {
+	if (index.x >= gLightPresampleTileSize*gLightPresampleTileCount) return;
+
+	rng_state_t _rng = rng_init(-1, index.x);
+	LightSampleRecord ls;
+	sample_point_on_light(ls, float4(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng)), 0);
+
+	PresampledLightPoint l;
+	l.position = ls.position;
+	l.packed_geometry_normal = pack_normal_octahedron(ls.normal);
+	l.Le = ls.radiance;
+	l.pdfA = ls.is_environment() ? -ls.pdf : ls.pdf;
+	gPresampledLights[index.x] = l;
+}
+
+SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	PathIntegrator path;
-	path.path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	path.path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path.path_index == -1) return;
 	path.pixel_coord = index.xy;
 	path.path_length = 1;
@@ -147,7 +162,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	sample_point_on_light(ls, float4(rng_next_float(path._rng), rng_next_float(path._rng), rng_next_float(path._rng), rng_next_float(path._rng)), 0);
 	if (ls.pdf <= 0 || all(ls.radiance <= 0)) { gPathStates[path.path_index].beta = 0; return; }
 
-	path._beta = ls.radiance/ls.pdf;
+	path._beta = ls.radiance / ls.pdf;
 	path.bsdf_pdf = ls.pdf;
 	path.d = gMaxLightPathVertices / ls.pdf;
 	path._medium = -1;
@@ -177,13 +192,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 
 	if (path._isect.instance_index() == INVALID_INSTANCE) { gPathStates[path.path_index].beta = 0; return; }
 
-	path.store_light_vertex();
-
-	if (any(path._beta > 0)) {
-		gPathStates[path.path_index] = path.store_state();
-		gPathStates1[path.path_index] = path.store_state1();
-	} else
-		gPathStates[path.path_index].beta = 0;
+	path.store_state();
 }
 
 SLANG_SHADER("compute")
@@ -193,7 +202,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	if (view_index == -1) return;
 
 	PathIntegrator path;
-	path.path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	path.path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path.path_index == -1) return;
 	path.pixel_coord = index.xy;
 
@@ -324,28 +333,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEmission) 	gDebugImage[path.pixel_coord] = float4(_material.emission, 1);
 	}
 
-	if (any(path._beta > 0)) {
-		gPathStates[path.path_index] = path.store_state();
-		gPathStates1[path.path_index] = path.store_state1();
-	} else
-		gPathStates[path.path_index].beta = 0;
-}
-
-SLANG_SHADER("compute")
-[numthreads(64,1,1)]
-void presample_lights(uint3 index : SV_DispatchThreadID) {
-	if (index.x >= gLightPresampleTileSize*gLightPresampleTileCount) return;
-
-	rng_state_t _rng = rng_init(-1, index.x);
-	LightSampleRecord ls;
-	sample_point_on_light(ls, float4(rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng), rng_next_float(_rng)), 0);
-
-	PresampledLightPoint l;
-	l.position = ls.position;
-	l.packed_geometry_normal = pack_normal_octahedron(ls.normal);
-	l.Le = ls.radiance;
-	l.pdfA = ls.is_environment() ? -ls.pdf : ls.pdf;
-	gPresampledLights[index.x] = l;
+	path.store_state();
 }
 
 #define _path_state gPathStates[path_index]
@@ -404,50 +392,40 @@ void load_path_state(inout PathIntegrator path, const uint path_index, const uin
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void multi_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
 
 	PathIntegrator path;
 	load_path_state(path, path_index, index.xy);
-	if (path.path_length > PathIntegrator::gMaxVertices || all(path._beta <= 0)) return;
 
-	path.next_vertex();
-
-	// store path state for next bounce
-	if (any(path._beta > 0)) {
-		gPathStates[path.path_index] = path.store_state();
-		gPathStates1[path.path_index] = path.store_state1();
-	} else
-		gPathStates[path.path_index].beta = 0;
+	if (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta))) {
+		path.next_vertex();
+		path.store_state();
+	}
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void single_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
 
 	PathIntegrator path;
 	load_path_state(path, path_index, index.xy);
 
-	while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0))
+	while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta)))
 		path.next_vertex();
 
-	/*
-	// store path state for next bounce
-	if (any(path._beta > 0)) {
-		gPathStates[path.path_index] = path.store_state();
-		gPathStates1[path.path_index] = path.store_state1();
-	} else
-		gPathStates[path.path_index].beta = 0;
-	*/
+	//path.store_state();
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void trace_nee(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_thread_index(index.xy, group_id.xy, group_thread_index);
+	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
+
+	const uint2 pixel_coord = index.xy;
 
 	Spectrum c = 0;
 	for (int path_length = 2; path_length < gMaxPathVertices; path_length++) {

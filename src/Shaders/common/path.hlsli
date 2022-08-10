@@ -3,7 +3,7 @@
 
 #include "rng.hlsli"
 #include "intersection.hlsli"
-#include "materials/environment.h"
+#include "../materials/environment.h"
 #include "light.hlsli"
 
 static Real path_weight(const uint view_length, const uint light_length) {
@@ -28,13 +28,11 @@ struct LightPathConnection {
 
 	SLANG_MUTATING
 	bool connect(inout rng_state_t _rng, const uint li, const bool eval_bsdf, const IntersectionVertex _isect, const uint cur_medium) {
-		const LightPathVertex2 lv2 = gLightPathVertices2[li];
-		f = lv2.beta();
+		const LightPathVertex lv = gLightPathVertices[li];
+		f = lv.beta();
 		if (all(f <= 0)) return false; // invalid vertex
 
-		const LightPathVertex0 lv0 = gLightPathVertices0[li];
-
-		Vector3 to_light = lv0.position - _isect.sd.position;
+		Vector3 to_light = lv.position - _isect.sd.position;
 		Real dist = length(to_light);
 		const Real rcp_dist = 1/dist;
 		to_light *= rcp_dist;
@@ -42,20 +40,19 @@ struct LightPathConnection {
 		f *= pow2(rcp_dist);
 
 		if (!eval_bsdf) // dont evaluate bsdf for first vertex
-			f *= max(0, -dot(lv0.geometry_normal(), to_light)); // cosine term from light surface
+			f *= max(0, -dot(lv.geometry_normal(), to_light)); // cosine term from light surface
 		else {
-			const LightPathVertex1 lv1 = gLightPathVertices1[li];
 			MaterialEvalRecord _eval;
-			if (lv1.is_medium()) {
+			if (lv.is_medium()) {
 				Medium m;
-				m.load(lv1.material_address());
-				m.eval(_eval, lv1.local_dir_in(), -to_light);
+				m.load(lv.material_address());
+				m.eval(_eval, lv.local_dir_in(), -to_light);
 			} else {
-				const Vector3 local_geometry_normal = lv1.to_local(lv0.geometry_normal());
-				const Vector3 local_dir_out = normalize(lv1.to_local(-to_light));
-				const Vector3 local_dir_in = lv1.local_dir_in();
+				const Vector3 local_geometry_normal = lv.to_local(lv.geometry_normal());
+				const Vector3 local_dir_out = normalize(lv.to_local(-to_light));
+				const Vector3 local_dir_in = lv.local_dir_in();
 				Material m;
-				m.load_and_sample(lv1.material_address(), lv2.uv, 0);
+				m.load_and_sample(lv.material_address(), lv.uv, 0);
 				m.eval(_eval, local_dir_in, local_dir_out, true);
 				_eval.f *= abs(local_dir_out.z);
 
@@ -303,22 +300,25 @@ struct NEE {
 	}
 };
 
+// after initialization, simply call next_vertex() until _beta is 0
+// for view paths: radiance is accumulated directly into gRadiance[pixel_coord]
 struct PathIntegrator {
 	uint2 pixel_coord;
 	uint path_index;
 	uint path_length;
 	Spectrum _beta;
+	rng_state_t _rng;
 
 	Real bsdf_pdf; // solid angle measure
 	Real d; // dE for view paths, dL for light paths
 
-	rng_state_t _rng;
-
 	// the ray that was traced to get here
 	// also the ray traced by trace()
+	// computed in sample_next_direction()
 	Vector3 origin, direction;
-	Real prev_cos_theta; // at origin, towards current vertex
+	Real prev_cos_theta; // abs(dot(direction, prev_geometry_normal))
 
+	// current intersection, computed by trace()
 	IntersectionVertex _isect;
 	Vector3 local_position;
 	uint _medium;
@@ -329,7 +329,7 @@ struct PathIntegrator {
 	static const uint gVertexRNGOffset = 16 + (gHasMedia ? 2*gMaxNullCollisions : 0);
 	static const uint gMaxVertices = gTraceLight ? gMaxLightPathVertices : gMaxPathVertices;
 
-	static const uint light_vertex_index(const uint path_index, const uint path_length) { return path_index*gMaxLightPathVertices + path_length-1; }
+	static const uint light_vertex_index(const uint path_index, const uint path_length) { return gOutputExtent.x*gOutputExtent.y*(path_length-1) + path_index; }
 	static const uint nee_vertex_index  (const uint path_index, const uint path_length) { return gOutputExtent.x*gOutputExtent.y*(path_length-2)*(gMaxPathVertices-2) + path_index; }
 
 	SLANG_MUTATING
@@ -337,7 +337,12 @@ struct PathIntegrator {
 		_rng = rng_init(pixel_coord, (gTraceLight ? 0xFFFFFF : 0) + (path_length-1)*gVertexRNGOffset);
 	}
 
-	PathState store_state() {
+	void store_state() {
+		if (all(_beta <= 0) || any(isnan(_beta))) {
+			gPathStates[path_index].beta = 0;
+			return;
+		}
+
 		PathState ps;
 		ps.p.local_position = local_position;
 		ps.p.instance_primitive_index = _isect.instance_primitive_index;
@@ -347,12 +352,11 @@ struct PathIntegrator {
 		ps.prev_cos_theta = prev_cos_theta;
 		ps.dir_in = direction;
 		ps.bsdf_pdf = bsdf_pdf;
-		return ps;
-	}
-	PathState1 store_state1() {
-		PathState1 ps;
-		ps.d = d;
-		return ps;
+		gPathStates[path_index] = ps;
+
+		PathState1 ps1;
+		ps1.d = d;
+		gPathStates1[path_index] = ps1;
 	}
 
 	void store_light_vertex() {
@@ -365,16 +369,18 @@ struct PathIntegrator {
 		} else
 			BF_SET(flags, -1, 4, 28);
 
+		LightPathVertex lv;
+		lv.position = _isect.sd.position;
+		lv.packed_geometry_normal = _isect.sd.packed_geometry_normal;
+		lv.material_address_flags = flags;
+		lv.packed_local_dir_in = pack_normal_octahedron(local_dir_in);
+		lv.packed_shading_normal = _isect.sd.packed_shading_normal;
+		lv.packed_tangent = _isect.sd.packed_tangent;
+		lv.uv = _isect.sd.uv;
+		lv.pack_beta(_beta);
 		const uint i = light_vertex_index(path_index, path_length);
-		gLightPathVertices0[i].position = _isect.sd.position;
-		gLightPathVertices0[i].packed_geometry_normal = _isect.sd.packed_geometry_normal;
-		gLightPathVertices1[i].material_address_flags = flags;
-		gLightPathVertices1[i].packed_local_dir_in = pack_normal_octahedron(local_dir_in);
-		gLightPathVertices1[i].packed_shading_normal = _isect.sd.packed_shading_normal;
-		gLightPathVertices1[i].packed_tangent = _isect.sd.packed_tangent;
-		gLightPathVertices2[i].uv = _isect.sd.uv;
-		gLightPathVertices2[i].pack_beta(_beta);
-		gLightPathVertices3[i].d = d;
+		gLightPathVertices[i] = lv;
+		gLightPathVertices1[i].d = d;
 	}
 
 	void eval_emission(BSDF m) {
@@ -595,7 +601,7 @@ struct PathIntegrator {
 	// NEE, BDPT, and light tracing connection strategies
 	SLANG_MUTATING
 	void sample_connections(BSDF m) {
-		if (path_length >= gMaxPathVertices || !m.can_eval()) return;
+		if (!m.can_eval()) return;
 
 		if (gTraceLight) {
 			// add light trace contribution
@@ -690,18 +696,15 @@ struct PathIntegrator {
 	// add radiance contribution from surface, sample NEE/BDPT connections, terminate with russian roullette, sample next direction
 	SLANG_MUTATING
 	void sample_directions(BSDF m) {
-		if (path_length > 2) {
-			if (gTraceLight)
-				store_light_vertex();
-			else
-				eval_emission(m);
-		}
+		// emission from vertex 2 is accumulated in sample_visibility
+		if (path_length > 2 && !gTraceLight)
+			eval_emission(m);
 
-		if (path_length >= gMaxVertices || _isect.instance_index() == INVALID_INSTANCE) { _beta = 0; return; }
+		if (path_length >= gMaxPathVertices || _isect.instance_index() == INVALID_INSTANCE) { _beta = 0; return; }
 
 		sample_connections(m);
 
-		if (!gSampleBSDFs) { _beta = 0; return; }
+		if (path_length >= gMaxVertices || !gSampleBSDFs) { _beta = 0; return; }
 
 		if (path_length >= gMinPathVertices) {
 			const Real p = max(max(_beta.r, _beta.g), _beta.b) * 0.95;
@@ -763,6 +766,8 @@ struct PathIntegrator {
 	void next_vertex() {
 		init_rng();
 
+		if (gTraceLight) store_light_vertex();
+
 		const uint material_address = gInstances[_isect.instance_index()].material_address();
 
 		// sample light and next direction
@@ -777,7 +782,7 @@ struct PathIntegrator {
 			sample_directions(m);
 		}
 
-		if (any(_beta > 0))
+		if (any(_beta > 0) && !any(isnan(_beta)))
 			trace();
 	}
 };

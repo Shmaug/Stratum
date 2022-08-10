@@ -56,6 +56,7 @@ struct BDPTPushConstants {
 	uint gNEEReservoirSpatialSamples;
 	uint gNEEReservoirSpatialRadius;
 	uint gReservoirMaxM;
+
 	uint gLightPresampleTileSize;
 	uint gLightPresampleTileCount;
 
@@ -113,20 +114,24 @@ struct NEERayData {
 #define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(0)
 #define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(1)
 
-struct LightPathVertex0 {
+struct LightPathVertex {
 	float3 position;
 	uint packed_geometry_normal;
-#ifdef __HLSL__
-	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
-#endif
-};
-
-struct LightPathVertex1 {
 	uint material_address_flags;
 	uint packed_local_dir_in;
 	uint packed_shading_normal;
 	uint packed_tangent;
+	float2 uv;
+	uint2 packed_beta;
 #ifdef __HLSL__
+	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
+	SLANG_MUTATING
+	inline void pack_beta(const float3 beta) {
+		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]));
+	}
+	inline float3 beta() {
+		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
+	}
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
 	inline uint material_address() CONST_CPP { return BF_GET(material_address_flags, 4, 28); }
 
@@ -146,21 +151,7 @@ struct LightPathVertex1 {
 #endif
 };
 
-struct LightPathVertex2 {
-	float2 uv;
-	uint2 packed_beta;
-#ifdef __HLSL__
-	SLANG_MUTATING
-	inline void pack_beta(const float3 beta) {
-		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]));
-	}
-	inline float3 beta() {
-		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
-	}
-#endif
-};
-
-struct LightPathVertex3 {
+struct LightPathVertex1 {
 	float d;
 };
 
