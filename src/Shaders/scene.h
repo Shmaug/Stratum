@@ -125,8 +125,8 @@ struct ViewData {
 };
 
 struct VisibilityInfo {
-	uint packed_normal;
 	uint instance_primitive_index;
+	uint packed_normal;
 	uint packed_z;
 	uint packed_dz;
 

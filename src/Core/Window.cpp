@@ -10,6 +10,16 @@ using namespace stm;
 stm::Window::Window(Instance& instance, const string& title, const vk::Rect2D& position) : mInstance(instance), mTitle(title) {
 	#ifdef _WIN32
 
+	if (auto mode = mInstance.find_argument("presentMode")) {
+      if      (*mode == "Immediate")               mPreferredPresentMode = vk::PresentModeKHR::eImmediate;
+      else if (*mode == "Mailbox")                 mPreferredPresentMode = vk::PresentModeKHR::eMailbox;
+      else if (*mode == "Fifo")                    mPreferredPresentMode = vk::PresentModeKHR::eFifo;
+      else if (*mode == "FifoRelaxed")             mPreferredPresentMode = vk::PresentModeKHR::eFifoRelaxed;
+      else if (*mode == "SharedDemandRefresh") 	   mPreferredPresentMode = vk::PresentModeKHR::eSharedDemandRefresh;
+      else if (*mode == "SharedContinuousRefresh") mPreferredPresentMode = vk::PresentModeKHR::eSharedContinuousRefresh;
+	  else cout << "Warning: Unknown present mode " << *mode << endl;
+	}
+
 	mWindowedRect = {};
 
 	SetProcessDPIAware();
@@ -117,12 +127,11 @@ stm::Window::~Window() {
 bool stm::Window::acquire_image() {
 	ProfilerRegion ps("Window::acquire_image");
 
-	if (mRecreateSwapchain || !mSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
+	if (!mSwapchain || mRecreateSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0)
 		create_swapchain();
 	if (!mSwapchain || mSwapchainExtent.width == 0 || mSwapchainExtent.height == 0) return false; // minimized ?
 
 	const uint32_t semaphore_index = (mImageAvailableSemaphoreIndex + 1) % mImageAvailableSemaphores.size();
-
 	vk::Result result = mInstance.device()->acquireNextImageKHR(mSwapchain, mAcquireImageTimeout.count(), **mImageAvailableSemaphores[semaphore_index], {}, &mBackBufferIndex);
 	if (result == vk::Result::eNotReady || result == vk::Result::eTimeout)
 		return false;
@@ -138,9 +147,7 @@ bool stm::Window::acquire_image() {
 
 	if (result != vk::Result::eSuccess)
 		throw runtime_error("Failed to acquire next image");
-
 	mImageAvailableSemaphoreIndex = semaphore_index;
-
 	return true;
 }
 void stm::Window::resolve(CommandBuffer& commandBuffer) {
@@ -304,7 +311,12 @@ void stm::Window::create_swapchain() {
 }
 
 #ifdef _WIN32
+#include <imgui/imgui_impl_win32.h>
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void Window::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(mHwnd, message, wParam, lParam))
+        return;
+
 	vector<byte> lpb;
 	switch (message) {
 	case WM_DESTROY:

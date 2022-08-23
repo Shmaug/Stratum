@@ -143,13 +143,13 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 
 		if (ls.pdf > 0) {
 			Material m;
-			m.load_and_sample(ls.material_address, uv, 0);
+			m.load(ls.material_address, uv, 0);
 			ls.radiance = m.emission;
 		}
 	}
 }
 
-inline void point_on_light_pdf(inout float pdf, inout bool pdf_area_measure, const IntersectionVertex _isect) {
+inline void point_on_light_pdf(inout float pdf, out bool pdf_area_measure, const IntersectionVertex _isect) {
 	if (_isect.instance_index() == INVALID_INSTANCE) {
 		if (!gHasEnvironment) { pdf = 0; return; }
 		if (gHasEmissives) pdf *= gEnvironmentSampleProbability;

@@ -13,6 +13,9 @@ public:
 
 	inline Node& node() const { return mNode; }
 
+	inline Image::View prev_radiance_image() { return mPrevFrame ? mPrevFrame->mRadiance : Image::View(); }
+	inline Image::View radiance_image()      { return mCurFrame  ? mCurFrame->mRadiance  : Image::View(); }
+
 	STRATUM_API void create_pipelines();
 
 	STRATUM_API void on_inspector_gui();
@@ -26,20 +29,22 @@ private:
 	shared_ptr<ComputePipelineState> mPresampleLightPipeline;
 	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
 	shared_ptr<ComputePipelineState> mTraceNEEPipeline;
-	unordered_map<IntegratorType, shared_ptr<ComputePipelineState>> mIntegratorPipelines;
-	IntegratorType mIntegratorType = IntegratorType::eSingleKernel;
+	shared_ptr<ComputePipelineState> mPathTraceLoopPipeline;
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
-	shared_ptr<ComputePipelineState> mTonemapReducePipeline;
+	shared_ptr<ComputePipelineState> mTonemapMaxReducePipeline;
 
 	array<unordered_map<string, uint32_t>, 2> mDescriptorMap;
 	array<shared_ptr<DescriptorSetLayout>, 2> mDescriptorSetLayouts;
 	BDPTPushConstants mPushConstants;
 
+	bool mHalfColorPrecision = false;
 	bool mPauseRendering = false;
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
-	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS;
+	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS | BDPT_FLAG_COHERENT_RR;
 	BDPTDebugMode mDebugMode = BDPTDebugMode::eNone;
+	uint32_t mPathTraceKernelIterations = 0;
+	uint32_t mLightTraceQuantization = 65536;
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
@@ -61,6 +66,7 @@ private:
 
 		unordered_map<string, Buffer::View<byte>> mPathData;
 		Buffer::View<VisibilityInfo> mSelectionData;
+		bool mSelectionDataValid;
 
 		Image::View mDenoiseResult;
 		Buffer::View<uint4> mTonemapMax;

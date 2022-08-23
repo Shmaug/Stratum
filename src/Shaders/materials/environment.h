@@ -36,7 +36,7 @@ struct Environment {
 
 	SLANG_MUTATING
 	inline void load(uint address) {
-		emission = load_image_value3(address);
+		emission.load(address);
 		if (emission.has_image()) {
 			const uint4 data = gMaterialData.Load4(address);
 			marginal_pdf = data[0];

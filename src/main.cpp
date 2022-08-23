@@ -3,6 +3,7 @@
 #include "Node/BDPT.hpp"
 #include "Node/XR.hpp"
 #include "Node/FlyCamera.hpp"
+#include "Node/ImageComparer.hpp"
 
 using namespace stm;
 
@@ -67,6 +68,7 @@ int main(int argc, char** argv) {
 	Node& renderer_node = app_node.make_child("Renderer");
 	const auto renderer = renderer_node.make_component<BDPT>();
 	const auto denoiser = renderer_node.make_component<Denoiser>();
+	renderer_node.make_component<ImageComparer>();
 
 	for (const string& plugin_info : instance->find_arguments("plugin"))
 		load_plugins(plugin_info, app.node());

@@ -13,15 +13,17 @@ namespace stm {
 #define BDPT_FLAG_HAS_EMISSIVES 			BIT(1)
 #define BDPT_FLAG_HAS_MEDIA 				BIT(2)
 
-#define BDPT_FLAG_REMAP_THREADS				BIT(8)
-#define BDPT_FLAG_DEMODULATE_ALBEDO			BIT(9)
-#define BDPT_FLAG_RAY_CONES 				BIT(10)
-#define BDPT_FLAG_SAMPLE_BSDFS 				BIT(11)
+#define BDPT_FLAG_REMAP_THREADS				BIT(3)
+#define BDPT_FLAG_COHERENT_RR 				BIT(4)
+#define BDPT_FLAG_COHERENT_RNG 				BIT(5)
 
-#define BDPT_FLAG_NEE 						BIT(16)
-#define BDPT_FLAG_MIS 						BIT(17)
-#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(18)
-#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(19)
+#define BDPT_FLAG_RAY_CONES 				BIT(14)
+#define BDPT_FLAG_SAMPLE_BSDFS 				BIT(15)
+#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(16)
+#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(17)
+#define BDPT_FLAG_MIS 						BIT(18)
+
+#define BDPT_FLAG_NEE 						BIT(19)
 #define BDPT_FLAG_PRESAMPLE_LIGHTS			BIT(20)
 #define BDPT_FLAG_RESERVOIR_NEE				BIT(21)
 #define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(22)
@@ -76,7 +78,7 @@ struct PathState {
 	float3 origin;
 	uint path_length_medium;
 	float3 beta;
-	float prev_cos_theta;
+	float prev_cos_out;
 	float3 dir_in;
 	float bsdf_pdf;
 
@@ -129,7 +131,7 @@ struct LightPathVertex {
 	inline void pack_beta(const float3 beta) {
 		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]));
 	}
-	inline float3 beta() {
+	inline float3 beta() CONST_CPP {
 		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
 	}
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
@@ -150,17 +152,13 @@ struct LightPathVertex {
 	}
 #endif
 };
-
 struct LightPathVertex1 {
-	float d;
+	float dL_prev; // dL at previous light vertex (dL_{s+2})
+	float G_rev; // G(s+1 -> s+2)
+	float pdfA_fwd_prev; // P(s+1 <- s+2)
+	float pad;
 };
 
-// to_string of an IntegratorType must be the name of the entry point in the shader
-enum class IntegratorType {
-	eMultiKernel,
-	eSingleKernel,
-	eIntegratorTypeCount
-};
 enum class BDPTDebugMode {
 	eNone,
 	eAlbedo,
@@ -173,8 +171,10 @@ enum class BDPTDebugMode {
 	eGeometryNormal,
 	eDirOut,
 	ePrevUV,
-	ePathLengthContribution,
 	eReservoirWeight,
+	ePathLengthContribution,
+	eLightTraceContribution,
+	eViewTraceContribution,
 	eDebugModeCount
 };
 
@@ -183,14 +183,6 @@ enum class BDPTDebugMode {
 #pragma pack(pop)
 
 namespace std {
-inline string to_string(const stm::IntegratorType& m) {
-	switch (m) {
-		default: return "Unknown";
-		case stm::IntegratorType::eMultiKernel: return "multi_kernel";
-		case stm::IntegratorType::eSingleKernel: return "single_kernel";
-		case stm::IntegratorType::eIntegratorTypeCount: return "IntegratorTypeCount";
-	}
-};
 inline string to_string(const stm::BDPTDebugMode& m) {
 	switch (m) {
 		default: return "Unknown";
@@ -205,8 +197,10 @@ inline string to_string(const stm::BDPTDebugMode& m) {
 		case stm::BDPTDebugMode::eGeometryNormal: return "Geometry Normal";
 		case stm::BDPTDebugMode::eDirOut: return "Bounce Direction";
 		case stm::BDPTDebugMode::ePrevUV: return "Prev UV";
-		case stm::BDPTDebugMode::ePathLengthContribution: return "Path Contribution (per length)";
 		case stm::BDPTDebugMode::eReservoirWeight: return "Reservoir Weight";
+		case stm::BDPTDebugMode::ePathLengthContribution: return "Path Contribution (per length)";
+		case stm::BDPTDebugMode::eLightTraceContribution: return "Light Trace Contribution";
+		case stm::BDPTDebugMode::eViewTraceContribution: return "View Trace Contribution";
 		case stm::BDPTDebugMode::eDebugModeCount: return "DebugModeCount";
 	}
 };

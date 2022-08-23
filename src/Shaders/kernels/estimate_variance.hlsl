@@ -25,7 +25,8 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #if 0
-#pragma compile dxc -spirv -T cs_6_7 -E main
+//#pragma compile dxc -spirv -T cs_6_7 -E main
+#pragma compile slangc -profile sm_6_6 -lang slang -entry main
 #endif
 
 #include "../denoiser.h"
@@ -54,7 +55,6 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	gFilterImages[0].GetDimensions(extent.x, extent.y);
 	const uint index_1d = index.y*extent.x + index.x;
 
-
 	float4 c = gAccumColor[index.xy];
 	float2 m = gAccumMoments[index.xy];
 
@@ -62,7 +62,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 
 	const float histlen = c.a;
 	if (vis.instance_index() == INVALID_INSTANCE || histlen >= gPushConstants.gHistoryLimit) {
-		gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x));
+		gFilterImages[0][index.xy] = float4(c.rgb, abs(m.y - pow2(m.x)));
 		return;
 	}
 
@@ -76,8 +76,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			const int2 p = int2(index.xy) + int2(xx, yy);
 			if (!gViews[view_index].test_inside(p)) continue;
 
-			const uint p_1d = p.y*extent.x + p.x;
-			const VisibilityInfo vis_p = gVisibility[p_1d];
+			const VisibilityInfo vis_p = gVisibility[p.y*extent.x + p.x];
 			if (gInstanceIndexMap[vis.instance_index()] != vis_p.instance_index()) continue;
 
 			const float w_z = abs(vis_p.z() - vis.z()) / (length(vis.dz_dxy() * float2(xx, yy)) + 1e-2);
@@ -94,5 +93,5 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	m *= sum_w;
 	c.rgb *= sum_w;
 
-	gFilterImages[0][index.xy] = float4(c.rgb, max(0, m.y - m.x*m.x)*(1 + 3*(1 - histlen/gPushConstants.gHistoryLimit)));
+	gFilterImages[0][index.xy] = float4(c.rgb, abs(m.y - pow2(m.x)));
 }

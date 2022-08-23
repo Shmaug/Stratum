@@ -1,5 +1,5 @@
 #pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -T cs_6_7 -E main
-#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -T cs_6_7 -E reduce
+#pragma compile dxc -spirv -fspv-target-env=vulkan1.2 -T cs_6_7 -E reduce_max
 
 #include <common.h>
 #include <tonemap.h>
@@ -11,15 +11,12 @@
 Texture2D<float4> gInput;
 RWTexture2D<float4> gOutput;
 Texture2D<float4> gAlbedo;
-RWStructuredBuffer<uint4> gMax;
-
-#define gMaxQuantization 1024.0
-// extended Reinhard
-#define gMaxRGB (gMax[0].rgb/gMaxQuantization)
-#define gMaxLuminance (gMax[0].w/gMaxQuantization)
+RWByteAddressBuffer gMax;
+RWByteAddressBuffer gPrevMax;
 
 [[vk::push_constant]] const struct {
 	float gExposure;
+	float gExposureAlpha;
 } gPushConstants;
 
 float3 tonemap_reinhard(const float3 c) {
@@ -27,8 +24,8 @@ float3 tonemap_reinhard(const float3 c) {
 	const float l1 = l / (1 + l);
 	return c * (1 + c);
 }
-float3 tonemap_reinhard_extended(const float3 c) {
-	return c * (1 + c / pow2(gMaxRGB)) / (1 + c);
+float3 tonemap_reinhard_extended(const float3 c, const float3 max_c) {
+	return c * (1 + c / pow2(lerp(max_c, 1, max_c == 0))) / (1 + c);
 }
 
 float3 tonemap_reinhard_luminance(const float3 c) {
@@ -36,12 +33,21 @@ float3 tonemap_reinhard_luminance(const float3 c) {
 	const float l1 = l / (1 + l);
 	return c * (l1 / l);
 }
-float3 tonemap_reinhard_luminance_extended(const float3 c) {
+float3 tonemap_reinhard_luminance_extended(const float3 c, const float max_l) {
 	const float l = luminance(c);
-	const float l1 = l * (1 + l / pow2(gMaxLuminance)) / (1 + l);
+	const float l1 = l * (1 + l / pow2(max_l == 0 ? 1 : max_l)) / (1 + l);
 	return c * (l1 / l);
 }
 
+float tonemap_uncharted2_partial1(const float x) {
+  	static const float A = 0.15;
+  	static const float B = 0.50;
+  	static const float C = 0.10;
+  	static const float D = 0.20;
+  	static const float E = 0.02;
+  	static const float F = 0.30;
+	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
 float3 tonemap_uncharted2_partial(const float3 x) {
   	static const float A = 0.15;
   	static const float B = 0.50;
@@ -51,8 +57,8 @@ float3 tonemap_uncharted2_partial(const float3 x) {
   	static const float F = 0.30;
 	return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
-float3 tonemap_uncharted2(float3 c) {
-	return tonemap_uncharted2_partial(c) / tonemap_uncharted2_partial(gMaxLuminance);
+float3 tonemap_uncharted2(const float3 c, const float max_l) {
+	return tonemap_uncharted2_partial(c) / tonemap_uncharted2_partial1(max_l == 0 ? 1 : max_l);
 }
 
 float3 tonemap_filmic(float3 c) {
@@ -93,48 +99,55 @@ float3 aces_approx(float3 v) {
     return saturate((v*(a*v+b))/(v*(c*v+d)+e));
 }
 
-#define gReductionSize 32
+#define gMaxQuantization 16384
 
-groupshared float4 gSharedMax[gReductionSize * gReductionSize / 32];
-float4 reduce_shared(float4 v, const uint group_index) {
-	v = WaveActiveMax(v);
-	if (WaveIsFirstLane()) gSharedMax[group_index / WaveGetLaneCount()] = v;
-
-	uint n = gReductionSize*gReductionSize / WaveGetLaneCount();
-	while (group_index < n) {
-		GroupMemoryBarrierWithGroupSync();
-		v = gSharedMax[group_index];
-		v = WaveActiveMax(v);
-		if (WaveIsFirstLane()) gSharedMax[group_index / WaveGetLaneCount()] = v;
-		n /= WaveGetLaneCount();
-	}
-
-	GroupMemoryBarrierWithGroupSync();
-	return gSharedMax[0];
-}
-
-[numthreads(gReductionSize, gReductionSize, 1)]
-void reduce(uint3 index : SV_DispatchThreadID, uint group_index : SV_GroupIndex) {
+[numthreads(8, 8, 1)]
+void reduce_max(uint3 index : SV_DispatchThreadID, uint group_index : SV_GroupIndex) {
 	uint2 resolution;
 	gInput.GetDimensions(resolution.x, resolution.y);
+    if (any(index.xy >= resolution)) return;
 
-    float4 v = 0;
-    if (all(index.xy < resolution)) {
-		v.rgb = gInput[index.xy].rgb;
-		if (gModulateAlbedo) v.rgb *= gAlbedo[index.xy].rgb;
-		v.w = luminance(v.rgb);
-	}
+	float4 v = float4(gInput[index.xy].rgb, 0);
+	if (gModulateAlbedo) v.rgb *= gAlbedo[index.xy].rgb;
+	v.w = luminance(v.rgb);
 
-	v = reduce_shared(v, group_index);
+	/*
+	static const int r = 2;
+	float2 moments = float2(v.w, pow2(v.w));
+	float4 avg = v;
+	float4 mn = v;
+	for (int x = -r; x <= r; x++)
+		for (int y = -r; y <= r; y++) {
+			if (x == 0 && y == 0) continue;
+			const int2 p = int2(index.xy) + int2(x,y);
+    		if (any(p < 0) || any(p >= resolution)) continue;
 
-	// first thread in the group writes the output to gmem
-	if (group_index == 0) {
-		const uint4 vi = clamp(v*gMaxQuantization,0,~0);
-		InterlockedMax(gMax[0].x, vi.x);
-		InterlockedMax(gMax[0].y, vi.y);
-		InterlockedMax(gMax[0].z, vi.z);
-		InterlockedMax(gMax[0].w, vi.w);
-	}
+			float4 vp = float4(gInput[p].rgb, 0);
+			if (gModulateAlbedo) vp.rgb *= gAlbedo[p].rgb;
+			vp.w = luminance(vp.rgb);
+
+			avg += vp;
+			moments += float2(vp.w, pow2(vp.w));
+			mn = min(vp, mn);
+		}
+	avg     /= pow2(2*r+1);
+	moments /= pow2(2*r+1);
+
+	v = avg;
+	*/
+
+	if (any(v != v) || v.w <= 0) return;
+
+	const uint4 vi = clamp(v*gMaxQuantization, 0, float(0xFFFFFFFF));
+	uint4 prev;
+	gMax.InterlockedMax(0 , vi.x);
+	gMax.InterlockedMax(4 , vi.y);
+	gMax.InterlockedMax(8 , vi.z);
+	gMax.InterlockedMax(12, vi.w);
+	//if (vi.x > 0xFFFFFFFF - prev.x) gMax.InterlockedOr(40, (1 << 0));
+	//if (vi.y > 0xFFFFFFFF - prev.y) gMax.InterlockedOr(40, (1 << 1));
+	//if (vi.z > 0xFFFFFFFF - prev.z) gMax.InterlockedOr(40, (1 << 2));
+	//if (vi.w > 0xFFFFFFFF - prev.w) gMax.InterlockedOr(40, (1 << 3));
 }
 
 [numthreads(8,8,1)]
@@ -142,6 +155,30 @@ void main(uint3 index : SV_DispatchThreadID) {
 	uint2 resolution;
 	gOutput.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
+
+	float4 cur_max = gMax.Load<uint4>(0)/(float)gMaxQuantization;
+
+	//const uint overflow = gMax.Load(40);
+	//if (overflow & (1 << 0)) cur_max.x = 0xFFFFFFFF/(float)gMaxQuantization;
+	//if (overflow & (1 << 1)) cur_max.y = 0xFFFFFFFF/(float)gMaxQuantization;
+	//if (overflow & (1 << 2)) cur_max.z = 0xFFFFFFFF/(float)gMaxQuantization;
+	//if (overflow & (1 << 3)) cur_max.w = 0xFFFFFFFF/(float)gMaxQuantization;
+
+	float2 cur_moments = float2(cur_max.w, pow2(cur_max.w));
+	if (gPushConstants.gExposureAlpha > 0 && gPushConstants.gExposureAlpha < 1) {
+		const float2 prev_moments = gPrevMax.Load<float2>(32);
+		if (all(prev_moments == prev_moments) && prev_moments.x > 0)
+			cur_moments = lerp(prev_moments, cur_moments, sqrt(gPushConstants.gExposureAlpha));
+
+		const float4 prev_max = gPrevMax.Load<float4>(16);
+		if (all(prev_max == prev_max) && prev_max.w > 0)
+			cur_max = lerp(prev_max, cur_max, gPushConstants.gExposureAlpha);
+	}
+	if (all(index == 0)) {
+		gMax.Store<float4>(16, cur_max);
+		gMax.Store<float2>(32, cur_moments);
+	}
+	//cur_max += abs(sqrt(cur_moments.y) - cur_moments.x);
 
 	float3 radiance = gInput[index.xy].rgb;
 	const float3 albedo = gAlbedo[index.xy].rgb;
@@ -157,16 +194,16 @@ void main(uint3 index : SV_DispatchThreadID) {
 		radiance = tonemap_reinhard(radiance);
 		break;
 	case (uint)TonemapMode::eReinhardExtended:
-		radiance = tonemap_reinhard_extended(radiance);
+		radiance = tonemap_reinhard_extended(radiance, cur_max.rgb);
 		break;
 	case (uint)TonemapMode::eReinhardLuminance:
 		radiance = tonemap_reinhard_luminance(radiance);
 		break;
 	case (uint)TonemapMode::eReinhardLuminanceExtended:
-		radiance = tonemap_reinhard_luminance_extended(radiance);
+		radiance = tonemap_reinhard_luminance_extended(radiance, cur_max.w);
 		break;
 	case (uint)TonemapMode::eUncharted2:
-		radiance = tonemap_uncharted2(radiance);
+		radiance = tonemap_uncharted2(radiance, cur_max.w);
 		break;
 	case (uint)TonemapMode::eFilmic:
 		radiance = tonemap_filmic(radiance);
@@ -178,11 +215,14 @@ void main(uint3 index : SV_DispatchThreadID) {
 		radiance = aces_approx(radiance);
 		break;
 	case (uint)TonemapMode::eViridisR:
-		radiance = viridis_quintic(radiance.r/gMaxRGB.r);
+		radiance = viridis_quintic(saturate(luminance(radiance)));
 		break;
-	case (uint)TonemapMode::eViridisLengthRGB:
-		radiance = viridis_quintic(saturate(length(radiance.rgb)));
+	case (uint)TonemapMode::eViridisLengthRGB: {
+		float m = cur_max.w;
+		if (m == 0) m = 1;
+		radiance = viridis_quintic(saturate(luminance(radiance) / m));
 		break;
+	}
 	}
 	if (gGammaCorrection) radiance = rgb_to_srgb(radiance);
 

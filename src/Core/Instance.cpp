@@ -55,20 +55,18 @@ Instance::Instance(const vector<string>& args) : mCommandLine(args) {
 	#endif
 
 	for (const string& arg : mCommandLine) {
-		size_t o = string::npos;
+		size_t o = 0;
 		if (arg.starts_with("--"))
 			o = 2;
 		else if (arg.starts_with("-") || arg.starts_with("/"))
 			o = 1;
-		if (o != string::npos) {
-			size_t sep;
-			if ((sep = arg.find('=')) != string::npos)
-				mOptions.emplace(arg.substr(o,sep-o), arg.substr(sep+1));
-			else if ((sep = arg.find(':')) != string::npos)
-				mOptions.emplace(arg.substr(o,sep-o), arg.substr(sep+1));
-			else
-				mOptions.emplace(arg.substr(o), "");
-		}
+
+		if (size_t sep = arg.find('='); sep != string::npos)
+			mOptions.emplace(arg.substr(o,sep-o), arg.substr(sep+1));
+		else if (size_t sep = arg.find(':'); sep != string::npos)
+			mOptions.emplace(arg.substr(o,sep-o), arg.substr(sep+1));
+		else
+			mOptions.emplace(arg.substr(o), "");
 	}
 
 	bool debugMessenger = find_argument("debugMessenger").has_value();

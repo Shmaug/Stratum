@@ -140,13 +140,13 @@ Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 
 		if (ImGui::Begin("Inspector")) {
 			if (mSelected) {
-				bool del = ImGui::Button("X");
+				const bool del = ImGui::Button("x");
 				ImGui::SameLine();
 				ImGui::Text(mSelected->name().c_str());
 				ImGui::SetNextItemWidth(40);
 
 				if (del) {
-					if (app->window().input_state().pressed(KeyCode::eKeyShift))
+					if (ImGui::GetIO().KeyAlt)
 						mNode.node_graph().erase_recurse(*mSelected);
 					else
 						mNode.node_graph().erase(*mSelected);
@@ -156,7 +156,9 @@ Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 						mSelected->make_component<TransformData>(make_transform(float3::Zero(), quatf_identity(), float3::Ones()));
 					type_index to_erase = typeid(nullptr_t);
 					for (type_index type : mSelected->components()) {
-						bool d = ImGui::Button("X");
+						ImGui::PushID(type.hash_code());
+						const bool d = ImGui::Button("x");
+						ImGui::PopID();
 						ImGui::SameLine();
 						if (ImGui::CollapsingHeader(type.name())) {
 							auto it = mInspectorGuiFns.find(type);

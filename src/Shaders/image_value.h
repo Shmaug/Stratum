@@ -71,13 +71,34 @@ inline uint4 channel_mapping_swizzle(vk::ComponentMapping m) {
 
 #endif // __cplusplus
 
+#ifdef __HLSL__
+inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
+	float w, h;
+	img.GetDimensions(w, h);
+	float lod = 0;
+	if (gUseRayCones && uv_screen_size > 0)
+		lod = log2(max(uv_screen_size * min(w, h), 1e-6f));
+	return img.SampleLevel(gSampler, uv, lod);
+}
+#endif
+
 struct ImageValue1 {
 	float value;
 #ifdef __HLSL__
 	uint image_index_channel;
-	inline bool has_image() { return BF_GET(image_index_channel,0,30) < gImageCount; }
-	inline uint channel() { return BF_GET(image_index_channel,30,2); }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_channel,0,30))]; }
+	bool has_image() { return BF_GET(image_index_channel,0,30) < gImageCount; }
+	uint channel() { return BF_GET(image_index_channel,30,2); }
+	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_channel,0,30))]; }
+	float eval(const float2 uv, const float uv_screen_size) {
+		if (value <= 0) return 0;
+		if (!has_image()) return value;
+		return value * sample_image(image(), uv, uv_screen_size)[channel()];
+	}
+	SLANG_MUTATING
+	void load(inout uint address) {
+		value               = gMaterialData.Load<float>(address); address += 4;
+		image_index_channel = gMaterialData.Load<uint>(address); address += 4;
+	}
 #endif
 #ifdef __cplusplus
 	Image::View image;
@@ -97,8 +118,18 @@ struct ImageValue2 {
 	float2 value;
 #ifdef __HLSL__
 	uint image_index;
-	inline bool has_image() { return image_index < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	bool has_image() { return image_index < gImageCount; }
+	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	SLANG_MUTATING
+	void load(inout uint address) {
+		value       = gMaterialData.Load<float2>(address); address += 8;
+		image_index = gMaterialData.Load<uint>(address); address += 4;
+	}
+	float2 eval(const float2 uv, const float uv_screen_size) {
+		if (!has_image()) return value;
+		if (!any(value > 0)) return 0;
+		return value * sample_image(image(), uv, uv_screen_size).rg;
+	}
 #endif
 #ifdef __cplusplus
 	Image::View image;
@@ -113,8 +144,18 @@ struct ImageValue3 {
 	float3 value;
 #ifdef __HLSL__
 	uint image_index;
-	inline bool has_image() { return image_index < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	bool has_image() { return image_index < gImageCount; }
+	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	SLANG_MUTATING
+	void load(inout uint address) {
+		value       = gMaterialData.Load<float3>(address); address += 12;
+		image_index = gMaterialData.Load<uint>(address); address += 4;
+	}
+	float3 eval(const float2 uv, const float uv_screen_size) {
+		if (!has_image()) return value;
+		if (!any(value > 0)) return 0;
+		return value * sample_image(image(), uv, uv_screen_size).rgb;
+	}
 #endif
 #ifdef __cplusplus
 	Image::View image;
@@ -129,8 +170,18 @@ struct ImageValue4 {
 	float4 value;
 #ifdef __HLSL__
 	uint image_index;
-	inline bool has_image() { return image_index < gImageCount; }
-	inline Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	bool has_image() { return image_index < gImageCount; }
+	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	SLANG_MUTATING
+	void load(inout uint address) {
+		value       = gMaterialData.Load<float4>(address); address += 16;
+		image_index = gMaterialData.Load<uint>(address); address += 4;
+	}
+	float4 eval(const float2 uv, const float uv_screen_size) {
+		if (!has_image()) return value;
+		if (!any(value > 0)) return 0;
+		return value * sample_image(image(), uv, uv_screen_size);
+	}
 #endif
 #ifdef __cplusplus
 	Image::View image;
@@ -140,6 +191,29 @@ struct ImageValue4 {
 	}
 #endif
 };
+
+#ifdef __HLSL__
+float eval_image_value1(inout uint address, const float2 uv, const float uv_screen_size) {
+	ImageValue1 img;
+	img.load(address);
+	return img.eval(uv, uv_screen_size);
+}
+float2 eval_image_value2(inout uint address, const float2 uv, const float uv_screen_size) {
+	ImageValue2 img;
+	img.load(address);
+	return img.eval(uv, uv_screen_size);
+}
+float3 eval_image_value3(inout uint address, const float2 uv, const float uv_screen_size) {
+	ImageValue3 img;
+	img.load(address);
+	return img.eval(uv, uv_screen_size);
+}
+float4 eval_image_value4(inout uint address, const float2 uv, const float uv_screen_size) {
+	ImageValue4 img;
+	img.load(address);
+	return img.eval(uv, uv_screen_size);
+}
+#endif
 
 #ifdef __cplusplus
 
@@ -201,7 +275,10 @@ inline void image_value_field(const char* label, ImageValue3& v) {
 inline void image_value_field(const char* label, ImageValue4& v) {
 	ImGui::ColorEdit4(label, v.value.data(), ImGuiColorEditFlags_Float);
 	if (v.image) {
-		if (ImGui::Button("Remove")) v.image = {};
+		ImGui::PushID(&v);
+		const bool d = ImGui::Button("x");
+		ImGui::PopID();
+		if (d) v.image = {};
 		else {
 			const uint32_t w = ImGui::GetWindowSize().x;
 			ImGui::Image(&v.image, ImVec2(w, w * (float)v.image.extent().height / (float)v.image.extent().width));
@@ -210,64 +287,5 @@ inline void image_value_field(const char* label, ImageValue4& v) {
 }
 
 #endif // __cplusplus
-
-#ifdef __HLSL__
-
-inline ImageValue1 load_image_value1(inout uint address) {
-	ImageValue1 r;
-	r.value = gMaterialData.Load<float>(address); address += 4;
-	r.image_index_channel = gMaterialData.Load(address); address += 4;
-	return r;
-}
-inline ImageValue2 load_image_value2(inout uint address) {
-	ImageValue2 r;
-	r.value = gMaterialData.Load<float2>(address); address += 8;
-	r.image_index = gMaterialData.Load(address); address += 4;
-	return r;
-}
-inline ImageValue3 load_image_value3(inout uint address) {
-	ImageValue3 r;
-	r.value = gMaterialData.Load<float3>(address); address += 12;
-	r.image_index = gMaterialData.Load(address); address += 4;
-	return r;
-}
-inline ImageValue4 load_image_value4(inout uint address) {
-	ImageValue4 r;
-	r.value = gMaterialData.Load<float4>(address); address += 16;
-	r.image_index = gMaterialData.Load(address); address += 4;
-	return r;
-}
-
-inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
-	float w, h;
-	img.GetDimensions(w, h);
-	float lod = 0;
-	if (gUseRayCones && uv_screen_size > 0)
-		lod = log2(max(uv_screen_size * min(w, h), 1e-6f));
-	return img.SampleLevel(gSampler, uv, lod);
-}
-
-inline float sample_image(const ImageValue1 img, const float2 uv, const float uv_screen_size) {
-	if (!img.has_image()) return img.value;
-	if (!any(img.value > 0)) return 0;
-	return img.value * sample_image(img.image(), uv, uv_screen_size)[img.channel()];
-}
-inline float2 sample_image(const ImageValue2 img, const float2 uv, const float uv_screen_size) {
-	if (!img.has_image()) return img.value;
-	if (!any(img.value > 0)) return 0;
-	return img.value * sample_image(img.image(), uv, uv_screen_size).rg;
-}
-inline float3 sample_image(const ImageValue3 img, const float2 uv, const float uv_screen_size) {
-	if (!img.has_image()) return img.value;
-	if (!any(img.value > 0)) return 0;
-	return img.value * sample_image(img.image(), uv, uv_screen_size).rgb;
-}
-inline float4 sample_image(const ImageValue4 img, const float2 uv, const float uv_screen_size) {
-	if (!img.has_image()) return img.value;
-	if (!any(img.value > 0)) return 0;
-	return img.value * sample_image(img.image(), uv, uv_screen_size);
-}
-
-#endif // __HLSL__
 
 #endif

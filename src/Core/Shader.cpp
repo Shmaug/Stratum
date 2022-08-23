@@ -221,7 +221,7 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
 			mWorkgroupSize.depth  = (uint32_t)sz[2];
 		}
 
-		for(uint32_t parameter_index = 0; parameter_index < shaderReflection->getParameterCount(); parameter_index++) {
+		for (uint32_t parameter_index = 0; parameter_index < shaderReflection->getParameterCount(); parameter_index++) {
 			slang::VariableLayoutReflection* parameter = shaderReflection->getParameterByIndex(parameter_index);
 			slang::ParameterCategory category = parameter->getCategory();
 			slang::TypeReflection* type = parameter->getType();
@@ -275,25 +275,36 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
 				cerr << "Warning: Unsupported resource category: " << category_name_map.at((SlangParameterCategory)category) << endl;
 		}
 
+		slang::IBlob* blob;
+		r = spGetEntryPointCodeBlob(request, entryPointIndex, targetIndex, &blob);
+		if (SLANG_FAILED(r)) throw runtime_error(to_string(r));
+
+		vector<uint32_t> spirv(blob->getBufferSize()/sizeof(uint32_t));
+		memcpy(spirv.data(), blob->getBufferPointer(), blob->getBufferSize());
+
+		delete blob;
+
 		spDestroyCompileRequest(request);
 		spDestroySession(session);
+
+		return spirv;
+	} else {
+		const fs::path spvpath = (fs::temp_directory_path().string() / mShaderFile.stem()).string() + "_" + mEntryPoint + ".spv";
+
+		string compile_cmd = "..\\..\\extern\\slang\\bin\\windows-x64\\release\\slangc.exe " + mShaderFile.string() + " -entry " + mEntryPoint;
+		compile_cmd += " -profile sm_6_6 -lang slang -target spirv -o " + spvpath.string();
+		for (const string& arg : mCompileArgs)
+			compile_cmd += " " + arg;
+		compile_cmd += " -D__HLSL__ -D__SLANG__";
+		for (const auto&[n,d] : defines)
+			if (d.index() == 0)
+				compile_cmd += " -D" + n + "=" + to_string(std::get<uint32_t>(d));
+			else
+				compile_cmd += " -D" + n + "=" + std::get<string>(d);
+		system(compile_cmd.c_str());
+
+		return read_file<vector<uint32_t>>(spvpath);
 	}
-
-	const fs::path spvpath = (fs::temp_directory_path().string() / mShaderFile.stem()).string() + "_" + mEntryPoint + ".spv";
-
-	string compile_cmd = "..\\..\\extern\\slang\\bin\\windows-x64\\release\\slangc.exe " + mShaderFile.string() + " -entry " + mEntryPoint;
-	compile_cmd += " -profile sm_6_6 -lang slang -target spirv -o " + spvpath.string();
-	for (const string& arg : mCompileArgs)
-		compile_cmd += " " + arg;
-	compile_cmd += " -D__HLSL__ -D__SLANG__";
-	for (const auto&[n,d] : defines)
-		if (d.index() == 0)
-			compile_cmd += " -D" + n + "=" + to_string(std::get<uint32_t>(d));
-		else
-			compile_cmd += " -D" + n + "=" + std::get<string>(d);
-	system(compile_cmd.c_str());
-
-	return read_file<vector<uint32_t>>(spvpath);
 }
 
 void Shader::load_reflection(const fs::path& json_path) {

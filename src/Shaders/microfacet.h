@@ -73,7 +73,7 @@ inline Real smith_masking_gtr2(const Vector3 w, const Real alpha) {
 
 /// See "Sampling the GGX Distribution of Visible Normals", Heitz, 2018.
 /// https://jcgt.org/published/0007/04/01/
-inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha, const float2 rnd_param) {
+inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha_x, const Real alpha_y, const float2 rnd_param) {
     // The incoming direction is in the "ellipsodial configuration" in Heitz's paper
     if (local_dir_in[2] < 0) {
         // Ensure the input is on top of the surface.
@@ -81,7 +81,7 @@ inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha, co
     }
 
     // Transform the incoming direction to the "hemisphere configuration".
-    const Vector3 hemi_dir_in = normalize(Vector3(alpha * local_dir_in[0], alpha * local_dir_in[1], local_dir_in[2]));
+    const Vector3 hemi_dir_in = normalize(Vector3(alpha_x * local_dir_in[0], alpha_y * local_dir_in[1], local_dir_in[2]));
 
     // Parameterization of the projected area of a hemisphere.
     // First, sample a disk.
@@ -101,7 +101,7 @@ inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha, co
     const Vector3 hemi_N = disk_N[0]*T1 + disk_N[1]*T2 + disk_N[2]*hemi_dir_in;
 
     // Transforming the normal back to the ellipsoid configuration
-    Vector3 N = normalize(Vector3(alpha * hemi_N[0], alpha * hemi_N[1], max(0.f, hemi_N[2])));
+    Vector3 N = normalize(Vector3(alpha_x * hemi_N[0], alpha_y * hemi_N[1], max(0.f, hemi_N[2])));
     if (local_dir_in[2] < 0) N = -N;
     return N;
 }

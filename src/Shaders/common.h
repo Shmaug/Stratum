@@ -179,6 +179,13 @@ inline float2 ray_aabb(const float3 origin, const float3 inv_dir, const float3 m
 	#endif
 	return float2(max3(min(t0, t1)), min3(max(t0, t1)));
 }
+inline float ray_plane(const float3 origin, const float3 dir, const float3 normal) {
+	const float denom = dot(normal, dir);
+	if (abs(denom) > 0)
+		return -dot(origin, normal) / denom;
+	else
+		return POS_INFINITY;
+}
 
 inline float average(const float2 x) { return (x[0] + x[1])/2; }
 inline float average(const float3 x) { return (x[0] + x[1] + x[2])/3; }

@@ -171,6 +171,7 @@ private:
 	vector<string> mToLoad;
 
 	bool mAlwaysUpdate = false;
+	bool mUpdateOnce = false;
 };
 
 }

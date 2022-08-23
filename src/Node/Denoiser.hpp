@@ -17,10 +17,11 @@ public:
 
 	STRATUM_API void on_inspector_gui();
 
-	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs);
+	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs);
 
 	inline void reset_accumulation() { mResetAccumulation = true; }
 	inline bool reprojection() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection"); }
+	inline bool demodulate_albedo() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gDemodulateAlbedo"); }
 
 private:
 	Node& mNode;
@@ -37,6 +38,7 @@ private:
 		shared_ptr<Fence> mFence;
 		Buffer::View<ViewData> mViews;
 		Image::View mRadiance;
+		Image::View mAlbedo;
 		Buffer::View<VisibilityInfo> mVisibility;
 		Image::View mAccumColor;
 		Image::View mAccumMoments;

@@ -26,8 +26,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #if 0
-#pragma compile dxc -spirv -T cs_6_7 -E main
-#pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
+//#pragma compile dxc -spirv -T cs_6_7 -E main
+//#pragma compile dxc -spirv -T cs_6_7 -E copy_rgb
+#pragma compile slangc -profile sm_6_6 -lang slang -entry main
+#pragma compile slangc -profile sm_6_6 -lang slang -entry copy_rgb
 #endif
 
 #ifdef __SLANG__
@@ -65,11 +67,12 @@ struct TapData {
 	uint view_index;
 	uint screen_width;
 	int2 index;
-	uint2 s_mem_index;
+
 	float3 center_normal;
 	float z_center;
 	float2 dz_center;
 	float l_center;
+
 	float sigma_l;
 
 	float4 sum_color;
@@ -102,10 +105,10 @@ struct TapData {
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
 
 		const VisibilityInfo vis_p = gVisibility[p.y*screen_width + p.x];
-		const float w_z = 3 * abs(vis_p.z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
+		const float w_z = abs(vis_p.z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
 		const float w_n = pow(max(0, dot(vis_p.normal(), center_normal)), 256);
 
-		float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
+		const float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
 		if (isinf(w) || isnan(w)) return;
 
 		sum_color  += color_p * float4(w, w, w, w*w);
@@ -253,7 +256,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	}
 
 	const float inv_w = 1/t.sum_weight;
-	gOutput[t.index] = t.sum_color*float4(inv_w, inv_w, inv_w, inv_w*inv_w);
+	gOutput[t.index] = t.sum_color*float4(inv_w, inv_w, inv_w, pow2(inv_w));
 }
 
 SLANG_SHADER("compute")

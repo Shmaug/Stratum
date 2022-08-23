@@ -7,9 +7,20 @@ namespace stm {
 void inspector_gui_fn(Inspector& inspector, FlyCamera* v) {
 	ImGui::DragFloat("Move Speed", &v->mMoveSpeed, 0.1f, 0);
 	if (v->mMoveSpeed < 0) v->mMoveSpeed = 0;
-	ImGui::DragFloat("Rotate", &v->mRotateSpeed, 0.001f, 0);
+	ImGui::DragFloat("Rotate Speed", &v->mRotateSpeed, 0.001f, 0);
 	if (v->mRotateSpeed < 0) v->mRotateSpeed = 0;
 	ImGui::Checkbox("Match Window Rect", &v->mMatchWindowRect);
+
+	if (ImGui::DragFloat2("Rotation", v->mRotation.data(), 0.01f, 0)) {
+		v->mRotation.x() = clamp(v->mRotation.x(), -((float)M_PI) / 2, ((float)M_PI) / 2);
+
+		const auto& camera = v->mNode.find<Camera>();
+		auto transform = v->mNode.find<TransformData>();
+		const quatf r = qmul(
+			angle_axis(v->mRotation.y(), float3(0, 1, 0)),
+			angle_axis(v->mRotation.x(), float3((camera->mProjection.near_plane < 0) ? -1 : 1, 0, 0)) );
+		transform->m.block<3, 3>(0, 0) = Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
+	}
 }
 
 FlyCamera::FlyCamera(Node& node) : mNode(node) {
@@ -17,15 +28,16 @@ FlyCamera::FlyCamera(Node& node) : mNode(node) {
 	gui->register_inspector_gui_fn<FlyCamera>(&inspector_gui_fn);
 	mNode.find_in_ancestor<Application>()->OnUpdate.add_listener(mNode, [&](CommandBuffer& commandBuffer, const float deltaTime) {
 		ProfilerRegion ps("FlyCamera::update");
-		const auto camera = mNode.find<Camera>();
-		const auto app = mNode.find_in_ancestor<Application>();
+		const auto& camera = mNode.find<Camera>();
+		const auto& app = mNode.find_in_ancestor<Application>();
 
 		if (mMatchWindowRect) camera->mImageRect = vk::Rect2D{ { 0, 0 }, app->window().swapchain_extent() };
 
+		// force projection aspect ratio to match image rect extent
 		const float aspect = camera->mImageRect.extent.height / (float)camera->mImageRect.extent.width;
 		if (abs(camera->mProjection.scale[0] / camera->mProjection.scale[1] - aspect) > 1e-5) {
 			const float fovy = 2 * atan(1 / camera->mProjection.scale[1]);
-			camera->mProjection = make_perspective(fovy, aspect, float2::Zero(), camera->mProjection.near_plane);
+			camera->mProjection = make_perspective(fovy, aspect, camera->mProjection.offset, camera->mProjection.near_plane);
 		}
 		const float fwd = (camera->mProjection.near_plane < 0) ? -1 : 1;
 

@@ -8,14 +8,14 @@ struct Material : BSDF {
 	Real spec_weight;
 
 	SLANG_MUTATING
-	inline void load_and_sample(uint address, const float2 uv, const float uv_screen_size) {
-		const float4 diffuse_roughness = sample_image(load_image_value4(address), uv, uv_screen_size);
+	inline void load(uint address, const float2 uv, const float uv_screen_size) {
+		const float4 diffuse_roughness = eval_image_value4(address, uv, uv_screen_size);
 		diffuse_reflectance = diffuse_roughness.rgb;
 		alpha = pow2(max(gMinRoughness, diffuse_roughness.a));
-		const float4 specular_transmission = sample_image(load_image_value4(address), uv, uv_screen_size);
+		const float4 specular_transmission = eval_image_value4(address, uv, uv_screen_size);
 		specular_reflectance = specular_transmission.rgb;
 		specular_transmittance = specular_transmission.a;
-		emission = sample_image(load_image_value3(address), uv, uv_screen_size);
+		emission = eval_image_value3(address, uv, uv_screen_size);
 		eta = gMaterialData.Load<float>(address);
 
 		const float lR = luminance(diffuse_reflectance);
@@ -84,8 +84,8 @@ struct Material : BSDF {
 	inline void sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		Vector3 half_vector;
 		if (rnd.z <= spec_weight) {
-			half_vector = sample_visible_normals(dir_in, alpha, rnd.xy);
-			r.dir_out = normalize(-dir_in + 2 * dot(dir_in, half_vector) * half_vector);
+			half_vector = sample_visible_normals(dir_in, alpha, alpha, rnd.xy);
+			r.dir_out = normalize(reflect(-dir_in, half_vector));
 			r.roughness = sqrt(alpha);
 		} else {
 			r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);

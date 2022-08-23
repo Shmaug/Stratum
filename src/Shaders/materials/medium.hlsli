@@ -46,7 +46,7 @@ struct Medium : BSDF {
 
 		const Spectrum majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor.root));
 		const uint channel = rng_next_uint(rng_state)%3;
-		if (majorant[channel] == 0) return 0/0;
+		if (majorant[channel] == 0) return POS_INFINITY;
 
 		origin    = pnanovdb_grid_world_to_indexf(gVolumes[density_volume_index], grid_handle, origin);
 		direction = pnanovdb_grid_world_to_index_dirf(gVolumes[density_volume_index], grid_handle, direction);
@@ -57,13 +57,17 @@ struct Medium : BSDF {
 			if (t < t_max) {
 				origin += direction*t;
 				t_max -= t;
+
 				const Spectrum local_density = density_scale * read_density(density_accessor, origin);
 				const Spectrum local_albedo  = albedo_scale * read_albedo(albedo_accessor, origin);
+
 				const Spectrum local_sigma_s = local_density * local_albedo;
 				const Spectrum local_sigma_a = local_density * (1 - local_albedo);
 				const Spectrum local_sigma_t = local_sigma_s + local_sigma_a;
+
 				const Spectrum real_prob = local_sigma_t / majorant;
 				const Spectrum tr = exp(-majorant * t) / max3(majorant);
+
 				if (can_scatter && rnd.y < real_prob[channel]) {
 					// real particle
 					beta *= tr * local_sigma_s;
@@ -74,7 +78,7 @@ struct Medium : BSDF {
 					beta *= tr * (majorant - local_sigma_t);
 					dir_pdf *= tr * majorant * (1 - real_prob);
 					nee_pdf *= tr * majorant;
-					return 0/0;
+					return POS_INFINITY;
 				}
 			} else {
 				// transmitted without scattering

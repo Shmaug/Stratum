@@ -12,11 +12,11 @@ static TransformData* gAnimatedTransform = nullptr;
 
 inline void inspector_gui_fn(Inspector& inspector, Scene* scene) { scene->on_inspector_gui(); }
 inline void inspector_gui_fn(Inspector& inspector, Camera* cam) {
+	ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&cam->mProjection.orthographic));
 	ImGui::DragFloat("Near Plane", &cam->mProjection.near_plane, 0.01f, -1, 1);
 	if (cam->mProjection.orthographic) {
 		ImGui::DragFloat("Far Plane", &cam->mProjection.far_plane, 0.01f, -1, 1);
-
-		ImGui::DragFloat2("Scale", cam->mProjection.scale.data(), 0.01f, -1, 1);
+		ImGui::DragFloat2("Projection Scale", cam->mProjection.scale.data(), 0.01f, -1, 1);
 	} else {
 		float fovy = degrees(2 * atan(1 / cam->mProjection.scale[1]));
 		if (ImGui::DragFloat("Vertical FoV", &fovy, 0.01f, 1, 179)) {
@@ -26,7 +26,6 @@ inline void inspector_gui_fn(Inspector& inspector, Camera* cam) {
 		}
 	}
 	ImGui::DragFloat2("Projection Offset", cam->mProjection.offset.data(), 0.01f, -1, 1);
-	ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&cam->mProjection.orthographic));
 	ImGui::InputInt2("ImageRect Offset", &cam->mImageRect.offset.x);
 	ImGui::InputInt2("ImageRect Extent", reinterpret_cast<int32_t*>(&cam->mImageRect.extent.width));
 }
@@ -242,7 +241,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(float3::Zero(), angle_axis(r * deltaTime, gAnimateRotate / r), float3::Ones()));
 	}
 
-	bool update = mAlwaysUpdate;
+	bool update = mAlwaysUpdate || mUpdateOnce;
 
 	if (commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyControl) &&
 		commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyO) &&
@@ -254,12 +253,14 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	for (const string& file : commandBuffer.mDevice.mInstance.window().input_state().files())
 		mToLoad.emplace_back(file);
 
+	bool loaded = false;
 	for (const string& file : mToLoad) {
 		const fs::path filepath = file;
 		const string name = filepath.filename().string();
 		Node& n = mNode.make_child(name);
 		try {
 			load(n, commandBuffer, filepath);
+			loaded = true;
 			update = true;
 		} catch (exception e) {
 			cout << "Failed to load " << filepath << ": " << e.what() << endl;
@@ -269,6 +270,8 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mToLoad.clear();
 
 	if (!update) return;
+
+	mUpdateOnce = loaded && !mAlwaysUpdate;
 
 	uint32_t totalVertexCount = 0;
 	uint32_t totalIndexBufferSize = 0;

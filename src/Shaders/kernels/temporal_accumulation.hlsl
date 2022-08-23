@@ -26,7 +26,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #if 0
-#pragma compile dxc -spirv -T cs_6_7 -E main
+//#pragma compile dxc -spirv -T cs_6_7 -E main
+#pragma compile slangc -profile sm_6_6 -lang slang -entry main
 #endif
 
 #include "../denoiser.h"
@@ -38,7 +39,10 @@ struct PushConstants {
 
 #ifdef __SLANG__
 #ifndef gReprojection
-#define gReprojection (false)
+#define gReprojection 0
+#endif
+#ifndef gDemodulateAlbedo
+#define gDemodulateAlbedo 0
 #endif
 #ifndef gDebugMode
 #define gDebugMode 0
@@ -46,7 +50,8 @@ struct PushConstants {
 [[vk::push_constant]] ConstantBuffer<PushConstants> gPushConstants;
 #else // __SLANG___
 [[vk::constant_id(0)]] const bool gReprojection = false;
-[[vk::constant_id(1)]] const uint gDebugMode = 0;
+[[vk::constant_id(1)]] const bool gDemodulateAlbedo = false;
+[[vk::constant_id(2)]] const uint gDebugMode = 0;
 [[vk::push_constant]] const PushConstants gPushConstants;
 #endif
 
@@ -67,9 +72,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (gReprojection) {
 		const VisibilityInfo vis = gVisibility[ipos.y*extent.x + ipos.x];
 		if (vis.instance_index() != INVALID_INSTANCE) {
-			const float2 pos_prev = gViews[view_index].image_min + gPrevUVs[ipos] * float2(gViews[view_index].image_max - gViews[view_index].image_min);
-			const int2 p = pos_prev - 0.5;
-			const float2 w = frac(pos_prev - 0.5);
+			const float2 pos_prev = gViews[view_index].image_min + gPrevUVs[ipos] * float2(gViews[view_index].image_max - gViews[view_index].image_min) - 0.5;
+			const int2 p = pos_prev;
+			const float2 w = frac(pos_prev);
 			// bilinear interpolation, check each tap individually, renormalize afterwards
 			for (int yy = 0; yy <= 1; yy++) {
 				for (int xx = 0; xx <= 1; xx++) {
@@ -78,14 +83,15 @@ void main(uint3 index : SV_DispatchThreadId) {
 
 					const VisibilityInfo prev_vis = gPrevVisibility[ipos_prev.y*extent.x + ipos_prev.x];
 					if (gInstanceIndexMap[vis.instance_index()] != prev_vis.instance_index()) continue;
-					if (dot(vis.normal(), prev_vis.normal()) < cos(degrees(5))) continue;
-					if (abs(vis.prev_z() - prev_vis.z()) >= (length(prev_vis.dz_dxy())*1.25 + 1e-2)) continue;
+					if (dot(vis.normal(), prev_vis.normal()) < cos(degrees(2))) continue;
+					if (abs(vis.prev_z() - prev_vis.z()) >= 1.5*length(prev_vis.dz_dxy())) continue;
 
 					const float4 c = gPrevAccumColor[ipos_prev];
 
 					if (c.a <= 0 || any(isnan(c)) || any(isinf(c)) || any(c != c)) continue;
 
-					const float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
+					float wc = (xx == 0 ? (1 - w.x) : w.x) * (yy == 0 ? (1 - w.y) : w.y);
+					//wc *= wc;
 					color_prev   += c * wc;
 					moments_prev += gPrevAccumMoments[ipos_prev] * wc;
 					sum_w        += wc;
@@ -102,6 +108,13 @@ void main(uint3 index : SV_DispatchThreadId) {
 	}
 
 	float4 color_curr = gRadiance[ipos];
+	if (gDemodulateAlbedo) {
+		const float3 albedo = gAlbedo[ipos].rgb;
+		if (albedo.r > 1e-3) color_curr.r /= albedo.r;
+		if (albedo.g > 1e-3) color_curr.g /= albedo.g;
+		if (albedo.b > 1e-3) color_curr.b /= albedo.b;
+	}
+
 	if (any(isinf(color_curr.rgb)) || any(color_curr.rgb != color_curr.rgb)) color_curr = 0;
 	if (any(isinf(moments_prev)) || any(moments_prev != moments_prev)) moments_prev = 0;
 
@@ -119,15 +132,20 @@ void main(uint3 index : SV_DispatchThreadId) {
 		if (gPushConstants.gHistoryLimit > 0 && n > gPushConstants.gHistoryLimit)
 			n = gPushConstants.gHistoryLimit;
 
-		if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eSampleCount) gDebugImage[ipos] = float4(viridis_quintic(saturate(n / (gPushConstants.gHistoryLimit ? gPushConstants.gHistoryLimit : 1024))), 1);
-
 		const float alpha = saturate(color_curr.a / n);
 
 		gAccumColor[ipos] = float4(lerp(color_prev.rgb, color_curr.rgb, alpha), n);
-		gAccumMoments[ipos] = lerp(moments_prev, float2(l, l*l), max(0.6, alpha));
+		gAccumMoments[ipos] = lerp(moments_prev, float2(l, l*l), alpha);
+
+		if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eSampleCount) gDebugImage[ipos] = float4(viridis_quintic(saturate(n / (gPushConstants.gHistoryLimit ? gPushConstants.gHistoryLimit : 1024))), 1);
 	} else {
 		gAccumColor[ipos] = color_curr;
 		gAccumMoments[ipos] = float2(l, l*l);
 		if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eSampleCount) gDebugImage[ipos] = float4(viridis_quintic(0), 1);
+	}
+
+	if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eVariance) {
+		const float2 m = gAccumMoments[ipos];
+		gDebugImage[ipos] = float4(viridis_quintic(saturate(abs(m.y - pow2(m.x)))), 1);
 	}
 }

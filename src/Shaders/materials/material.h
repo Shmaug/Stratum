@@ -65,6 +65,7 @@ interface BSDF {
 };
 
 #include "material.hlsli"
+#include "disney_material.hlsli"
 #endif
 
 #endif

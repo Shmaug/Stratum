@@ -2,6 +2,9 @@
 #include "Application.hpp"
 
 #include <imgui/imgui_internal.h>
+#ifdef _WIN32
+#include <imgui/imgui_impl_win32.h>
+#endif
 #include <stb_image_write.h>
 
 #include <Core/Window.hpp>
@@ -23,10 +26,15 @@ Gui::Gui(Node& node) : mNode(node) {
 
 	mContext = ImGui::CreateContext();
 
+	#ifdef _WIN32
+	ImGui_ImplWin32_Init(app->window().handle());
+	#endif
+
 	ImGuiIO& io = ImGui::GetIO();
 	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 	io.ConfigFlags |= ImGuiConfigFlags_IsSRGB;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
+	/*
 	io.KeyMap[ImGuiKey_Tab] = (int)KeyCode::eKeyTab;
 	io.KeyMap[ImGuiKey_LeftArrow] = (int)KeyCode::eKeyLeft;
 	io.KeyMap[ImGuiKey_RightArrow] = (int)KeyCode::eKeyRight;
@@ -49,8 +57,11 @@ Gui::Gui(Node& node) : mNode(node) {
 	io.KeyMap[ImGuiKey_X] = (int)KeyCode::eKeyX;
 	io.KeyMap[ImGuiKey_Y] = (int)KeyCode::eKeyY;
 	io.KeyMap[ImGuiKey_Z] = (int)KeyCode::eKeyZ;
+	*/
 
 	io.Fonts->AddFontFromFileTTF("DroidSans.ttf", 16.f);
+
+	ImGui::StyleColorsDark();
 
 	ImGuiStyle& style = ImGui::GetStyle();
 	style.WindowRounding = 5;
@@ -82,6 +93,9 @@ Gui::Gui(Node& node) : mNode(node) {
 	mPipeline->descriptor_binding_flag("gImages", vk::DescriptorBindingFlagBits::ePartiallyBound);
 }
 Gui::~Gui() {
+	#ifdef _WIN32
+    ImGui_ImplWin32_Shutdown();
+	#endif
 	ImGui::DestroyContext(mContext);
 }
 
@@ -107,11 +121,11 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 	if (imagesDescriptor.index() != 0 || !get<Image::View>(imagesDescriptor))
 		create_font_image(commandBuffer);
 
+	/*
 	Window& window = commandBuffer.mDevice.mInstance.window();
 	io.DisplaySize = ImVec2((float)window.swapchain_extent().width, (float)window.swapchain_extent().height);
 	io.DisplayFramebufferScale = ImVec2(1.f, 1.f);
 	io.DeltaTime = deltaTime;
-
 	const MouseKeyboardState& input = window.input_state();
 	io.MousePos = ImVec2(input.cursor_pos().x(), input.cursor_pos().y());
 	io.MouseWheel = input.scroll_delta();
@@ -127,7 +141,11 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 	for (KeyCode key : input.buttons())
 		io.KeysDown[size_t(key)] = 1;
 	io.AddInputCharactersUTF8(input.input_characters().c_str());
+	*/
 
+	#ifdef _WIN32
+	ImGui_ImplWin32_NewFrame();
+	#endif
 	ImGui::NewFrame();
 }
 

@@ -1,13 +1,12 @@
 #if 0
 //#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_visibility
 //#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_photons
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E multi_kernel
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E single_kernel
+//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E path_trace_loop
+//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E trace_nee
 //#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -T cs_6_7 -HV 2021 -E presample_lights
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry sample_visibility
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry sample_photons
-#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry multi_kernel
-#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry single_kernel
+#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry path_trace_loop
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry trace_nee
 #pragma compile slangc -profile sm_6_6 -lang slang -entry presample_lights
 #endif
@@ -22,55 +21,63 @@
 #ifndef gDebugMode
 #define gDebugMode 0
 #endif
+#ifndef gKernelIterationCount
+#define gKernelIterationCount 0
+#endif
+#ifndef gLightTraceQuantization
+#define gLightTraceQuantization 16384
+#endif
 [[vk::push_constant]] ConstantBuffer<BDPTPushConstants> gPushConstants;
-#else // __SLANG__
-#define SLANG_SHADER("compute")
+#else // !defined(__SLANG__)
 [[vk::constant_id(0)]] const uint gSpecializationFlags = 0;
 [[vk::constant_id(1)]] const uint gDebugMode = 0;
+[[vk::constant_id(2)]] const uint gKernelIterationCount = 0;
+[[vk::constant_id(3)]] const uint gLightTraceQuantization = 65536;
 [[vk::push_constant]] const BDPTPushConstants gPushConstants;
 #endif
 
-static const bool gHasEnvironment		 	= (gSpecializationFlags & BDPT_FLAG_HAS_ENVIRONMENT);
-static const bool gHasEmissives 		 	= (gSpecializationFlags & BDPT_FLAG_HAS_EMISSIVES);
-static const bool gHasMedia 			 	= (gSpecializationFlags & BDPT_FLAG_HAS_MEDIA);
-static const bool gRemapThreadIndex		 	= (gSpecializationFlags & BDPT_FLAG_REMAP_THREADS);
-static const bool gDemodulateAlbedo		 	= (gSpecializationFlags & BDPT_FLAG_DEMODULATE_ALBEDO);
-static const bool gUseRayCones 			 	= (gSpecializationFlags & BDPT_FLAG_RAY_CONES);
-static const bool gSampleBSDFs	 		 	= (gSpecializationFlags & BDPT_FLAG_SAMPLE_BSDFS);
-static const bool gUseNEE		 		 	= (gSpecializationFlags & BDPT_FLAG_NEE);
-static const bool gUseMIS 					= (gSpecializationFlags & BDPT_FLAG_MIS);
-static const bool gSampleLightPower			= (gSpecializationFlags & BDPT_FLAG_SAMPLE_LIGHT_POWER);
-static const bool gUniformSphereSampling 	= (gSpecializationFlags & BDPT_FLAG_UNIFORM_SPHERE_SAMPLING);
-static const bool gReservoirNEE 			= (gSpecializationFlags & BDPT_FLAG_RESERVOIR_NEE);
-static const bool gPresampleLights			= (gSpecializationFlags & BDPT_FLAG_PRESAMPLE_LIGHTS);
-static const bool gReservoirTemporalReuse	= (gSpecializationFlags & BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE);
-static const bool gReservoirSpatialReuse	= (gSpecializationFlags & BDPT_FLAG_RESERVOIR_SPATIAL_REUSE);
-static const bool gReservoirUnbiasedReuse	= (gSpecializationFlags & BDPT_FLAG_RESERVOIR_UNBIASED_REUSE);
-static const bool gTraceLight 				= (gSpecializationFlags & BDPT_FLAG_TRACE_LIGHT);
-static const bool gConnectToViews 			= (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_VIEWS);
-static const bool gConnectToLightPaths		= (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS);
-static const bool gDeferNEERays				= (gSpecializationFlags & BDPT_FLAG_DEFER_NEE_RAYS);
-static const bool gCountRays 			 	= (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS);
+#define gHasEnvironment         (gSpecializationFlags & BDPT_FLAG_HAS_ENVIRONMENT)
+#define gHasEmissives           (gSpecializationFlags & BDPT_FLAG_HAS_EMISSIVES)
+#define gHasMedia               (gSpecializationFlags & BDPT_FLAG_HAS_MEDIA)
+#define gRemapThreadIndex       (gSpecializationFlags & BDPT_FLAG_REMAP_THREADS)
+#define gCoherentRR             (gSpecializationFlags & BDPT_FLAG_COHERENT_RR)
+#define gCoherentRNG            (gSpecializationFlags & BDPT_FLAG_COHERENT_RNG)
+#define gUseRayCones            (gSpecializationFlags & BDPT_FLAG_RAY_CONES)
+#define gSampleBSDFs            (gSpecializationFlags & BDPT_FLAG_SAMPLE_BSDFS)
+#define gSampleLightPower       (gSpecializationFlags & BDPT_FLAG_SAMPLE_LIGHT_POWER)
+#define gUniformSphereSampling  (gSpecializationFlags & BDPT_FLAG_UNIFORM_SPHERE_SAMPLING)
+#define gUseMIS                 (gSpecializationFlags & BDPT_FLAG_MIS)
+#define gUseNEE                 (gSpecializationFlags & BDPT_FLAG_NEE)
+#define gPresampleLights        (gSpecializationFlags & BDPT_FLAG_PRESAMPLE_LIGHTS)
+#define gReservoirNEE           (gSpecializationFlags & BDPT_FLAG_RESERVOIR_NEE)
+#define gReservoirTemporalReuse (gSpecializationFlags & BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE)
+#define gReservoirSpatialReuse  (gSpecializationFlags & BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)
+#define gReservoirUnbiasedReuse (gSpecializationFlags & BDPT_FLAG_RESERVOIR_UNBIASED_REUSE)
+#define gDeferNEERays           (gSpecializationFlags & BDPT_FLAG_DEFER_NEE_RAYS)
+#define gTraceLight             (gSpecializationFlags & BDPT_FLAG_TRACE_LIGHT)
+#define gConnectToViews         (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_VIEWS)
+#define gConnectToLightPaths    (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)
+#define gCountRays              (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS)
 
-#define gOutputExtent					gPushConstants.gOutputExtent
-#define gViewCount 						gPushConstants.gViewCount
-#define gLightCount 					gPushConstants.gLightCount
-#define gLightDistributionPDF			gPushConstants.gLightDistributionPDF
-#define gLightDistributionCDF			gPushConstants.gLightDistributionCDF
-#define gEnvironmentMaterialAddress 	gPushConstants.gEnvironmentMaterialAddress
-#define gEnvironmentSampleProbability 	gPushConstants.gEnvironmentSampleProbability
-#define gRandomSeed 					gPushConstants.gRandomSeed
-#define gMinPathVertices 				gPushConstants.gMinPathVertices
-#define gMaxPathVertices 				gPushConstants.gMaxPathVertices
-#define gMaxLightPathVertices 			gPushConstants.gMaxLightPathVertices
-#define gMaxNullCollisions 				gPushConstants.gMaxNullCollisions
-#define gLightPathCount 				gPushConstants.gLightPathCount
-#define gNEEReservoirM 					gPushConstants.gNEEReservoirM
-#define gNEEReservoirSpatialSamples 	gPushConstants.gNEEReservoirSpatialSamples
-#define gNEEReservoirSpatialRadius 		gPushConstants.gNEEReservoirSpatialRadius
-#define gReservoirMaxM 					gPushConstants.gReservoirMaxM
-#define gLightPresampleTileSize			gPushConstants.gLightPresampleTileSize
-#define gLightPresampleTileCount		gPushConstants.gLightPresampleTileCount
+#define gOutputExtent				  gPushConstants.gOutputExtent
+#define gViewCount 					  gPushConstants.gViewCount
+#define gLightCount 				  gPushConstants.gLightCount
+#define gLightDistributionPDF		  gPushConstants.gLightDistributionPDF
+#define gLightDistributionCDF		  gPushConstants.gLightDistributionCDF
+#define gEnvironmentMaterialAddress   gPushConstants.gEnvironmentMaterialAddress
+#define gEnvironmentSampleProbability gPushConstants.gEnvironmentSampleProbability
+#define gRandomSeed 				  gPushConstants.gRandomSeed
+#define gMinPathVertices 			  gPushConstants.gMinPathVertices
+#define gMaxPathVertices 			  gPushConstants.gMaxPathVertices
+#define gMaxLightPathVertices 		  gPushConstants.gMaxLightPathVertices
+#define gMaxNullCollisions 			  gPushConstants.gMaxNullCollisions
+#define gLightPathCount 			  gPushConstants.gLightPathCount
+#define gNEEReservoirM 				  gPushConstants.gNEEReservoirM
+#define gNEEReservoirSpatialSamples   gPushConstants.gNEEReservoirSpatialSamples
+#define gNEEReservoirSpatialRadius 	  gPushConstants.gNEEReservoirSpatialRadius
+#define gReservoirMaxM 				  gPushConstants.gReservoirMaxM
+#define gLightPresampleTileSize		  gPushConstants.gLightPresampleTileSize
+#define gLightPresampleTileCount	  gPushConstants.gLightPresampleTileCount
 
 [[vk::binding( 0,0)]] RaytracingAccelerationStructure gScene;
 [[vk::binding( 1,0)]] StructuredBuffer<PackedVertexData> gVertices;
@@ -162,58 +169,68 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	sample_point_on_light(ls, float4(rng_next_float(path._rng), rng_next_float(path._rng), rng_next_float(path._rng), rng_next_float(path._rng)), 0);
 	if (ls.pdf <= 0 || all(ls.radiance <= 0)) { gPathStates[path.path_index].beta = 0; return; }
 
-	path._beta = ls.radiance / ls.pdf;
-	path.bsdf_pdf = ls.pdf;
-	path.d = gMaxLightPathVertices / ls.pdf;
 	path._medium = -1;
 	path._isect.sd.position = ls.position;
 	path._isect.sd.packed_geometry_normal = pack_normal_octahedron(ls.normal);
+	path._isect.sd.shape_area = 1; // just needs to be >0 so that its not treated as a volume sample
+
+	path._beta = ls.radiance / ls.pdf;
+	path.d = N_kk / ls.pdf;
+	path.G = 1;
+	path.prev_cos_out = 1;
+	path.bsdf_pdf = ls.pdf;
 
 	if (gConnectToLightPaths) path.store_light_vertex();
 
 	if (gMaxLightPathVertices < 2) return;
 
 	// sample direction
-
-	const float3 local_dir_out = sample_cos_hemisphere(rng_next_float(path._rng), rng_next_float(path._rng));
-	path._beta /= cosine_hemisphere_pdfW(local_dir_out.z);
+	const Vector3 local_dir_out = sample_cos_hemisphere(rng_next_float(path._rng), rng_next_float(path._rng));
+	path.bsdf_pdf = cosine_hemisphere_pdfW(local_dir_out.z);
+	path._beta /= path.bsdf_pdf;
 
 	// cosine term from light surface
 	path._beta *= local_dir_out.z;
+	path.prev_cos_out = local_dir_out.z;
 
-	path.prev_cos_theta = local_dir_out.z;
-
-	float3 T,B;
+	Vector3 T,B;
 	make_orthonormal(ls.normal, T, B);
 	path.direction = T*local_dir_out.x + B*local_dir_out.y + ls.normal*local_dir_out.z;
 	path.origin = ray_offset(ls.position, ls.normal);
 
 	path.trace();
 
-	if (path._isect.instance_index() == INVALID_INSTANCE) { gPathStates[path.path_index].beta = 0; return; }
-
-	path.store_state();
+	if (gKernelIterationCount == 0) {
+		while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta)))
+			path.next_vertex();
+	} else {
+		if (path._isect.instance_index() == INVALID_INSTANCE)
+			gPathStates[path.path_index].beta = 0;
+		else
+			path.store_state();
+	}
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint view_index = get_view_index(index.xy, gViews, gViewCount);
-	if (view_index == -1) return;
-
 	PathIntegrator path;
 	path.path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path.path_index == -1) return;
 	path.pixel_coord = index.xy;
 
-	if ((BDPTDebugMode) gDebugMode == BDPTDebugMode::ePathLengthContribution) gDebugImage[path.pixel_coord] = float4(0,0,0,1);
+	const uint view_index = get_view_index(index.xy, gViews, gViewCount);
+	if (view_index == -1) return;
+
+	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution || (BDPTDebugMode)gDebugMode == BDPTDebugMode::eViewTraceContribution)
+		gDebugImage[path.pixel_coord] = float4(0,0,0,1);
 
 	// initialize radiance with light trace sample
-	float3 c = 0;
-	if (gConnectToViews) {
+	Spectrum c = 0;
+	if (gConnectToViews && (BDPTDebugMode)gDebugMode != BDPTDebugMode::eViewTraceContribution) {
 		c = ViewConnection::load_sample(path.pixel_coord);
-		if (any(isnan(c)) || any(isinf(c)) || any(c < 0)) c = 0;
-		if (((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1))
+		if (any(c < 0) || any(isnan(c))) c = 0;
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution || ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1))
 			gDebugImage[path.pixel_coord] = float4(c, 1);
 	}
 	gRadiance[path.pixel_coord] = float4(c,1);
@@ -230,12 +247,13 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 
 	// initialize ray
 	const float2 uv = (path.pixel_coord + 0.5 - gViews[view_index].image_min)/gViews[view_index].extent();
-	float2 clipPos = 2*uv - 1;
-	clipPos.y = -clipPos.y;
-	const float3 local_dir_out = normalize(gViews[view_index].projection.back_project(clipPos));
+	float2 clip_pos = 2*uv - 1;
+	clip_pos.y = -clip_pos.y;
+	const Vector3 local_dir_out = normalize(gViews[view_index].projection.back_project(clip_pos));
+	path.prev_cos_out = abs(local_dir_out.z);
 	path.direction = normalize(gViewTransforms[view_index].transform_vector(local_dir_out));
 
-	path.origin = float3(
+	path.origin = Vector3(
 		gViewTransforms[view_index].m[0][3],
 		gViewTransforms[view_index].m[1][3],
 		gViewTransforms[view_index].m[2][3] );
@@ -243,12 +261,14 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 
 	path.path_length = 1;
 	path._beta = 1;
-	path.bsdf_pdf = 1;
+	path.bsdf_pdf = 1 / (gViews[view_index].projection.sensor_area * pow3(path.prev_cos_out));
 
 	path.init_rng();
 
 	// trace visibility ray
 	path.trace();
+
+	path.d = N_sk(0) / 1;
 
 	if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eGeometryNormal) gDebugImage[path.pixel_coord] = float4(path._isect.sd.geometry_normal()*.5+.5, 1);
 	else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eShadingNormal)  gDebugImage[path.pixel_coord] = float4(path._isect.sd.shading_normal() *.5+.5, 1);
@@ -262,7 +282,6 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	if (path._isect.instance_index() == INVALID_INSTANCE) {
 		gAlbedo[path.pixel_coord] = 1;
 		vis.packed_z = pack_f16_2(POS_INFINITY);
-		vis.packed_dz = pack_f16_2(0);
 		gVisibility[path.pixel_coord.y*gOutputExtent.x + path.pixel_coord.x] = vis;
 		gPrevUVs[path.pixel_coord.xy] = uv;
 		gPathStates[path.path_index].beta = 0;
@@ -272,151 +291,79 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 		return;
 	}
 
-	const float z = length(path.origin - path._isect.sd.position);
-	const float G = abs(dot(path.direction, path._isect.sd.geometry_normal())) / (z*z);
-	const float pdfA = pdfWtoA(1/(gViews[view_index].projection.sensor_area * pow3(abs(local_dir_out.z))), G);
-	path.d = 1 / pdfA;
+	const Real z = length(path._isect.sd.position - path.origin);
 
-	uint material_address;
-	// store visibility packed_dz
+	float2 dz_dxy;
 	{
-		const InstanceData instance = gInstances[path._isect.instance_index()];
-		material_address = instance.material_address();
-
-		switch (instance.type()) {
-		case INSTANCE_TYPE_TRIANGLES: {
-			// TODO: figure out dz
-			const float3 view_normal = gInverseViewTransforms[view_index].transform_vector(path._isect.sd.geometry_normal());
-			vis.packed_dz = pack_f16_2(1/(abs(view_normal.xy) + 1e-2));
-			break;
-		}
-		case INSTANCE_TYPE_SPHERE:
-			vis.packed_dz = pack_f16_2(1/sqrt(instance.radius()));
-			break;
-		case INSTANCE_TYPE_VOLUME:
-			vis.packed_dz = pack_f16_2(1);
-			break;
-		}
+		const float2 uv_x = (path.pixel_coord + uint2(1,0) + 0.5 - gViews[view_index].image_min)/gViews[view_index].extent();
+		float2 clipPos_x = 2*uv_x - 1;
+		clipPos_x.y = -clipPos_x.y;
+		const Vector3 dir_out_x = normalize(gViewTransforms[view_index].transform_vector(normalize(gViews[view_index].projection.back_project(clipPos_x))));
+		dz_dxy.x = ray_plane(path.origin - path._isect.sd.position, dir_out_x, path._isect.sd.geometry_normal()) - z;
+	}
+	{
+		const float2 uv_y = (path.pixel_coord + uint2(0,1) + 0.5 - gViews[view_index].image_min)/gViews[view_index].extent();
+		float2 clipPos_y = 2*uv_y - 1;
+		clipPos_y.y = -clipPos_y.y;
+		const Vector3 dir_out_y = normalize(gViewTransforms[view_index].transform_vector(normalize(gViews[view_index].projection.back_project(clipPos_y))));
+		dz_dxy.y = ray_plane(path.origin - path._isect.sd.position, dir_out_y, path._isect.sd.geometry_normal()) - z;
 	}
 
-	//const float3 prev_cam_pos = tmul(gPrevInverseViewTransforms[view_index], gInstanceMotionTransforms[path._isect.instance_index()]).transform_point(path._isect.sd.position);
-	const float3 prev_cam_pos = gPrevInverseViewTransforms[view_index].transform_point(path._isect.sd.position);
+	//const Vector3 prev_cam_pos = tmul(gPrevInverseViewTransforms[view_index], gInstanceMotionTransforms[path._isect.instance_index()]).transform_point(path._isect.sd.position);
+	const Vector3 prev_cam_pos = gPrevInverseViewTransforms[view_index].transform_point(path._isect.sd.position);
 	vis.packed_z = pack_f16_2(float2(z, length(prev_cam_pos)));
+	vis.packed_dz = pack_f16_2(dz_dxy);
 	gVisibility[path.pixel_coord.y*gOutputExtent.x + path.pixel_coord.x] = vis;
 
-	// calculate prev_uv
-	float4 prevScreenPos = gPrevViews[view_index].projection.project_point(prev_cam_pos);
-	prevScreenPos.y = -prevScreenPos.y;
-	prevScreenPos.xyz /= prevScreenPos.w;
-	gPrevUVs[path.pixel_coord.xy] = prevScreenPos.xy*.5 + .5;
-	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePrevUV) gDebugImage[path.pixel_coord] = float4((prevScreenPos.xy*.5 + .5) - uv, 0, 1);
+	// calculate prev uv
+	float4 prev_clip_pos = gPrevViews[view_index].projection.project_point(prev_cam_pos);
+	prev_clip_pos.y = -prev_clip_pos.y;
+	prev_clip_pos.xyz /= prev_clip_pos.w;
+	gPrevUVs[path.pixel_coord.xy] = prev_clip_pos.xy*.5 + .5;
+	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePrevUV)
+		gDebugImage[path.pixel_coord] = float4(abs(gPrevUVs[path.pixel_coord.xy] - uv)*gOutputExtent, 0, 1);
 
 	// evaluate albedo and emission
 	if (!gHasMedia || path._isect.sd.shape_area > 0) {
+		const uint material_address = gInstances[path._isect.instance_index()].material_address();
 		Material _material;
-		_material.load_and_sample(material_address, path._isect.sd.uv, path._isect.sd.uv_screen_size);
-
-		gAlbedo[path.pixel_coord] = float4(_material.diffuse_reflectance, 1);
-		if (gDemodulateAlbedo) {
-			if (_material.diffuse_reflectance.r > 0) path._beta.r /= _material.diffuse_reflectance.r;
-			if (_material.diffuse_reflectance.g > 0) path._beta.g /= _material.diffuse_reflectance.g;
-			if (_material.diffuse_reflectance.b > 0) path._beta.b /= _material.diffuse_reflectance.b;
-		}
+		_material.load(material_address, path._isect.sd.uv, path._isect.sd.uv_screen_size);
 
 		path.eval_emission(_material);
 
-		if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eAlbedo) 		gDebugImage[path.pixel_coord] = float4(_material.diffuse_reflectance, 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eDiffuse) 		gDebugImage[path.pixel_coord] = float4(_material.diffuse_reflectance, 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eSpecular) 	gDebugImage[path.pixel_coord] = float4(_material.specular_reflectance, 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eTransmission) gDebugImage[path.pixel_coord] = float4(_material.specular_transmittance.xxx, 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eRoughness) 	gDebugImage[path.pixel_coord] = float4(sqrt(_material.alpha).xxx, 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEmission) 	gDebugImage[path.pixel_coord] = float4(_material.emission, 1);
+		const Spectrum albedo = _material.diffuse_reflectance + 0.25*_material.specular_reflectance;
+		gAlbedo[path.pixel_coord] = float4(albedo, 1);
+
+		if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eAlbedo) 		  gDebugImage[path.pixel_coord] = float4(albedo, 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eDiffuse) 		  gDebugImage[path.pixel_coord] = float4(_material.diffuse_reflectance, 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eSpecular) 	  gDebugImage[path.pixel_coord] = float4(_material.specular_reflectance, 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eTransmission)   gDebugImage[path.pixel_coord] = float4(_material.specular_transmittance.xxx, 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eRoughness) 	  gDebugImage[path.pixel_coord] = float4(sqrt(_material.alpha).xxx, 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEmission) 	  gDebugImage[path.pixel_coord] = float4(_material.emission, 1);
 	}
 
-	path.store_state();
-}
-
-#define _path_state gPathStates[path_index]
-void load_path_state(inout PathIntegrator path, const uint path_index, const uint2 pixel_coord) {
-	path.pixel_coord = pixel_coord.xy;
-	path.path_index = path_index;
-	path.origin = _path_state.origin;
-	path.path_length = _path_state.path_length();
-	path._medium = _path_state.medium();
-	path._beta = _path_state.beta;
-	path.bsdf_pdf = _path_state.bsdf_pdf;
-	path.direction = _path_state.dir_in;
-	path.d = gPathStates1[path_index].d;
-	path.local_position = _path_state.p.local_position;
-	path._isect.instance_primitive_index = _path_state.p.instance_primitive_index;
-	make_shading_data(path._isect.sd, _path_state.p.instance_index(), _path_state.p.primitive_index(), path.local_position);
-	path._isect.shape_pdf = shape_pdf(path.origin, path._isect.sd.shape_area, _path_state.p, path._isect.shape_pdf_area_measure);
-
-	path.T_nee_pdf = 1;
-
-	// handle miss
-	if (path._isect.instance_index() == INVALID_INSTANCE) {
-		path.G = 1;
-		path.local_dir_in = path.direction;
-		// update ray differential
-		if (gSpecializationFlags & BDPT_FLAG_RAY_CONES)
-			path._isect.sd.uv_screen_size *= gRayDifferentials[path_index].radius;
-		return;
-	}
-
-	const Vector3 dp = path._isect.sd.position - path.origin;
-	const Real dist2 = dot(dp, dp);
-	path.G = 1/dist2;
-
-	// update ray differential
-	if (gSpecializationFlags & BDPT_FLAG_RAY_CONES) {
-		RayDifferential ray_differential = gRayDifferentials[path_index];
-		ray_differential.transfer(sqrt(dist2));
-		path._isect.sd.uv_screen_size *= ray_differential.radius;
-		gRayDifferentials[path_index] = ray_differential;
-	}
-
-	path._isect.sd.flags = 0;
-
-	if (!gHasMedia || path._isect.sd.shape_area > 0) {
-		path.local_dir_in = normalize(path._isect.sd.to_local(-path.direction));
-		const Real cos_theta = dot(path.direction, path._isect.sd.geometry_normal());
-		path.G *= abs(cos_theta);
-		if (cos_theta > 0)
-			path._isect.sd.flags |= SHADING_FLAG_FRONT_FACE;
+	if (gKernelIterationCount == 0) {
+		while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta)))
+			path.next_vertex();
 	} else
-		path.local_dir_in = path.direction;
-
-}
-
-SLANG_SHADER("compute")
-[numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void multi_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
-	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
-	if (path_index == -1) return;
-
-	PathIntegrator path;
-	load_path_state(path, path_index, index.xy);
-
-	if (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta))) {
-		path.next_vertex();
 		path.store_state();
-	}
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void single_kernel(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+void path_trace_loop(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path_index == -1) return;
 
 	PathIntegrator path;
-	load_path_state(path, path_index, index.xy);
+	path.load_state(path_index, index.xy);
 
-	while (path.path_length <= PathIntegrator::gMaxVertices && any(path._beta > 0) && !any(isnan(path._beta)))
-		path.next_vertex();
+	for (uint i = 0; i < gKernelIterationCount; i++)
+		if (any(path._beta > 0) && !any(isnan(path._beta)))
+			path.next_vertex();
 
-	//path.store_state();
+	if (any(path._beta > 0) && !any(isnan(path._beta)))
+		path.store_state();
 }
 
 SLANG_SHADER("compute")

@@ -57,16 +57,16 @@ void Denoiser::create_pipelines() {
 			mDescriptorMap.emplace(name, binding.mBinding);
 		}
 	};
-	//*
+	/*
 	process_shader(mTemporalAccumulationPipeline, "Shaders/temporal_accumulation.spv");
 	process_shader(mEstimateVariancePipeline, "Shaders/estimate_variance.spv");
 	process_shader(mAtrousPipeline, "Shaders/atrous.spv");
 	process_shader(mCopyRGBPipeline, "Shaders/atrous_copy_rgb.spv");
 	/*/
 	process_shader(mTemporalAccumulationPipeline, "../../src/Shaders/kernels/temporal_accumulation.hlsl", "main");
-	process_shader(mEstimateVariancePipeline, "../../src/Shaders/kernels/estimate_variance.hlsl", "main");
-	process_shader(mAtrousPipeline, "../../src/Shaders/kernels/atrous.hlsl", "main");
-	process_shader(mCopyRGBPipeline, "../../src/Shaders/kernels/atrous.hlsl", "copy_rgb");
+	process_shader(mEstimateVariancePipeline    , "../../src/Shaders/kernels/estimate_variance.hlsl", "main");
+	process_shader(mAtrousPipeline              , "../../src/Shaders/kernels/atrous.hlsl", "main");
+	process_shader(mCopyRGBPipeline             , "../../src/Shaders/kernels/atrous.hlsl", "copy_rgb");
 	//*/
 	mDescriptorSetLayout = make_shared<DescriptorSetLayout>(instance->device(), "denoiser_descriptor_set_layout", bindings);
 
@@ -76,18 +76,21 @@ void Denoiser::create_pipelines() {
 }
 
 void Denoiser::on_inspector_gui() {
-	if (mTemporalAccumulationPipeline && ImGui::Button("Reload Shaders")) {
+	if (mTemporalAccumulationPipeline && ImGui::Button("Reload Denoiser Shaders")) {
 		auto instance = mNode.find_in_ancestor<Instance>();
 		instance->device()->waitIdle();
 		create_pipelines();
 	}
 
+	ImGui::SetNextItemWidth(200);
+	Gui::enum_dropdown("Denoiser Debug Mode", mDebugMode, (uint32_t)DenoiserDebugMode::eDebugModeCount, [](uint32_t i) { return to_string((DenoiserDebugMode)i); });
+
 	if (ImGui::Button("Reset Accumulation"))
 		reset_accumulation();
 
-	Gui::enum_dropdown("Denoiser Debug Mode", mDebugMode, (uint32_t)DenoiserDebugMode::eDebugModeCount, [](uint32_t i) { return to_string((DenoiserDebugMode)i); });
-
 	ImGui::Checkbox("Reprojection", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection")));
+	if (ImGui::Checkbox("Demodulate Albedo", reinterpret_cast<bool*>(&mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gDemodulateAlbedo"))))
+		mResetAccumulation = true;
 
 	ImGui::PushItemWidth(40);
 	ImGui::DragFloat("Target Sample Count", &mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit"));
@@ -106,7 +109,7 @@ void Denoiser::on_inspector_gui() {
 
 }
 
-Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs) {
+Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs) {
 	ProfilerRegion ps("Denoiser::denoise", commandBuffer);
 
 	// Initialize buffers
@@ -134,17 +137,18 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 
 	mCurFrame->mViews = views;
 	mCurFrame->mRadiance = radiance;
+	mCurFrame->mAlbedo = albedo;
 	mCurFrame->mVisibility = visibility;
 
 	const vk::Extent3D extent = radiance.extent();
 	if (!mCurFrame->mAccumColor || mCurFrame->mAccumColor.extent() != extent) {
 		ProfilerRegion ps("Create images");
 
-		mCurFrame->mAccumColor   = make_shared<Image>(commandBuffer.mDevice, "gAccumColor", extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
-		mCurFrame->mAccumMoments = make_shared<Image>(commandBuffer.mDevice, "gAccumMoments", extent, vk::Format::eR16G16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
+		mCurFrame->mAccumColor   = make_shared<Image>(commandBuffer.mDevice, "gAccumColor", extent, radiance.image()->format(), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+		mCurFrame->mAccumMoments = make_shared<Image>(commandBuffer.mDevice, "gAccumMoments", extent, vk::Format::eR32G32Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst);
 		for (uint32_t i = 0; i < mCurFrame->mTemp.size(); i++)
-			mCurFrame->mTemp[i] = make_shared<Image>(commandBuffer.mDevice, "pingpong" + to_string(i), extent, vk::Format::eR16G16B16A16Sfloat, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
-		mCurFrame->mDebugImage = make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, vk::Format::eR8G8B8A8Unorm, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc);
+			mCurFrame->mTemp[i] = make_shared<Image>(commandBuffer.mDevice, "pingpong" + to_string(i), extent, radiance.image()->format(), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+		mCurFrame->mDebugImage = make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, radiance.image()->format(), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc);
 
 		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
 		commandBuffer.clear_color_image(mCurFrame->mAccumMoments, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
@@ -164,6 +168,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gPrevVisibility"), mPrevFrame->mVisibility);
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gPrevUVs"), image_descriptor(prev_uvs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gRadiance"), image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gAlbedo"), image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gAccumColor"), image_descriptor(mCurFrame->mAccumColor, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gAccumMoments"), image_descriptor(mCurFrame->mAccumMoments, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gFilterImages"), 0, image_descriptor(mCurFrame->mTemp[0], vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite));

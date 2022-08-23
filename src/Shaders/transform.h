@@ -115,7 +115,7 @@ struct ProjectionData {
 	float sensor_area;
 
 	// uses reversed z (1 at near plane -> 0 at far plane)
-	inline float4 project_point(float3 v) CONST_CPP {
+	inline float4 project_point(const float3 v) CONST_CPP {
 		float4 r;
 		if (orthographic) {
 			// orthographic
@@ -124,7 +124,7 @@ struct ProjectionData {
 			r[2] = (v[2] - far_plane) / (near_plane - far_plane);
 			r[3] = 1;
 		} else {
-			// perspective, infinite far plane
+			// perspective (infinite far plane)
 			r[0] = v[0] * scale[0] + v[2] * offset[0];
 			r[1] = v[1] * scale[1] + v[2] * offset[1];
 			r[2] = abs(near_plane);
@@ -132,7 +132,7 @@ struct ProjectionData {
 		}
 		return r;
 	}
-	inline float3 back_project(float2 v) CONST_CPP {
+	inline float3 back_project(const float2 v) CONST_CPP {
 		float3 r;
 		if (orthographic) {
 			r[0] = (v[0] - offset[0]) / scale[0];
@@ -146,7 +146,7 @@ struct ProjectionData {
 	}
 };
 
-inline ProjectionData make_orthographic(float2 size, float2 offset, float znear, float zfar) {
+inline ProjectionData make_orthographic(const float2 size, const float2 offset, const float znear, const float zfar) {
 	ProjectionData r;
 	r.scale = 2 / size;
 	r.offset = offset;
@@ -155,7 +155,7 @@ inline ProjectionData make_orthographic(float2 size, float2 offset, float znear,
 	r.orthographic = 1;
 	return r;
 }
-inline ProjectionData make_perspective(float fovy, float aspect, float2 offset, float znear) {
+inline ProjectionData make_perspective(const float fovy, const float aspect, const float2 offset, const float znear) {
 	ProjectionData r;
 	r.scale[1] = 1 / tan(fovy / 2);
 	r.scale[0] = aspect * r.scale[1];
