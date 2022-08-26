@@ -34,6 +34,8 @@ namespace stm {
 #define BDPT_FLAG_TRACE_LIGHT				BIT(26)
 #define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(27)
 #define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(28)
+#define BDPT_FLAG_DEFER_LIGHT_TRACE_RAYS	BIT(29)
+#define BDPT_FLAG_LIGHT_TRACE_USE_Z			BIT(30)
 
 #define BDPT_FLAG_COUNT_RAYS				BIT(31)
 
@@ -128,12 +130,13 @@ struct LightPathVertex {
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 	SLANG_MUTATING
-	inline void pack_beta(const float3 beta) {
-		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]));
+	inline void pack_beta(const float3 beta, const uint subpath_length) {
+		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]) | (subpath_length << 16));
 	}
 	inline float3 beta() CONST_CPP {
 		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
 	}
+	inline uint subpath_length() { return packed_beta[1] >> 16; }
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
 	inline uint material_address() CONST_CPP { return BF_GET(material_address_flags, 4, 28); }
 

@@ -144,7 +144,7 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 		if (ls.pdf > 0) {
 			Material m;
 			m.load(ls.material_address, uv, 0);
-			ls.radiance = m.emission;
+			ls.radiance = m.Le();
 		}
 	}
 }

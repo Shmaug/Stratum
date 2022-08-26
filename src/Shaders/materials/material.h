@@ -34,6 +34,7 @@ struct MaterialSampleRecord {
 };
 
 #ifdef __cplusplus
+
 struct Material {
     ImageValue4 diffuse_roughness;  // diffuse (RGB), roughness (A)
     ImageValue4 specular_transmission; // specular (RGB), transmission (A)
@@ -53,19 +54,27 @@ struct Material {
 		ImGui::DragFloat("Index of Refraction", &eta);
     }
 };
+
 #endif
 
 #ifdef __HLSL__
 
 interface BSDF {
 	Spectrum Le();
+	Spectrum albedo();
 	bool can_eval();
+	bool is_specular();
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint);
 	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint);
 };
 
-#include "material.hlsli"
-#include "disney_material.hlsli"
+//#include "disney_material.hlsli"
+//#define Material DisneyMaterial
+
+#include "rough_plastic.hlsli"
+#define Material RoughPlastic
+
+
 #endif
 
 #endif

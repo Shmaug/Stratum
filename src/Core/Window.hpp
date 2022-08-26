@@ -314,6 +314,8 @@ public:
 
 	inline const MouseKeyboardState& input_state() const { return mInputState; }
 	inline const MouseKeyboardState& input_state_last() const { return mInputStateLast; }
+	inline bool pressed_redge(const KeyCode& key) const { return mInputState.pressed(key) && !mInputStateLast.pressed(key); }
+	inline bool pressed_fedge(const KeyCode& key) const { return !mInputState.pressed(key) && mInputStateLast.pressed(key); }
 
 	inline float2 clip_to_window(const float2& clip) const {
 		return (clip*.5f + float2::Constant(.5f))*float2((float)mSwapchainExtent.width, -(float)mSwapchainExtent.height);

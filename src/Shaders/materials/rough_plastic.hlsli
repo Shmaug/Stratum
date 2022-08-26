@@ -1,20 +1,19 @@
-struct Material : BSDF {
+struct RoughPlastic : BSDF {
 	Spectrum diffuse_reflectance;
 	Real alpha; // roughness^2
 	Spectrum specular_reflectance;
-	Real specular_transmittance;
-	Spectrum emission;
 	Real eta;
+	Spectrum emission;
 	Real spec_weight;
 
 	SLANG_MUTATING
-	inline void load(uint address, const float2 uv, const float uv_screen_size) {
+	void load(uint address, const float2 uv, const float uv_screen_size) {
 		const float4 diffuse_roughness = eval_image_value4(address, uv, uv_screen_size);
 		diffuse_reflectance = diffuse_roughness.rgb;
 		alpha = pow2(max(gMinRoughness, diffuse_roughness.a));
 		const float4 specular_transmission = eval_image_value4(address, uv, uv_screen_size);
 		specular_reflectance = specular_transmission.rgb;
-		specular_transmittance = specular_transmission.a;
+		//specular_transmittance = specular_transmission.a;
 		emission = eval_image_value3(address, uv, uv_screen_size);
 		eta = gMaterialData.Load<float>(address);
 
@@ -23,7 +22,12 @@ struct Material : BSDF {
 		spec_weight = lS / (lS + lR);
 	}
 
-	inline void eval_lambertian(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
+	Spectrum Le() { return emission; }
+	Spectrum albedo() { return diffuse_reflectance + 0.25*specular_reflectance; }
+	bool can_eval() { return any(diffuse_reflectance > 0) || any(specular_reflectance > 0); }
+	bool is_specular() { return all(diffuse_reflectance <= 1e-3) && alpha < 1e-3; }
+
+	void eval_lambertian(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
 		if (dir_in.z * dir_out.z <= 0) {
 			r.f = 0;
 			r.pdf_fwd = 0;
@@ -34,7 +38,7 @@ struct Material : BSDF {
 			r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		}
 	}
-	inline void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+	void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
 		r.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
 		r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
@@ -45,7 +49,7 @@ struct Material : BSDF {
 		r.roughness = 1;
 	}
 
-	inline void eval_roughplastic(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
+	void eval_roughplastic(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
 		// We first account for the dielectric layer.
 
 		// Fresnel equation determines how much light goes through,
@@ -81,7 +85,7 @@ struct Material : BSDF {
 			r.pdf_rev = lerp(cosine_hemisphere_pdfW(dir_in.z),  (G_out * D) / (4 * dir_out.z), spec_weight);
 		}
 	}
-	inline void sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+	void sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		Vector3 half_vector;
 		if (rnd.z <= spec_weight) {
 			half_vector = sample_visible_normals(dir_in, alpha, alpha, rnd.xy);
@@ -100,16 +104,13 @@ struct Material : BSDF {
 		r.pdf_rev = f.pdf_rev;
 	}
 
-	inline Spectrum Le() { return emission; }
-	inline bool can_eval() { return any(diffuse_reflectance > 0) || any(specular_reflectance > 0) || specular_transmittance > 0; }
-
-	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
+	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		if (any(specular_reflectance > 0))
 			eval_roughplastic(r, dir_in, dir_out, normalize(dir_in + dir_out), adjoint);
 		else
 			eval_lambertian(r, dir_in, dir_out, adjoint);
 	}
-	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
+	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
 		if (all(specular_reflectance > 0))
 			sample_roughplastic(r, rnd, dir_in, beta, adjoint);
 		else

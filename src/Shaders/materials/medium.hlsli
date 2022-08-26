@@ -9,7 +9,7 @@ struct Medium : BSDF {
 	uint albedo_volume_index;
 
 	SLANG_MUTATING
-	inline void load(uint address) {
+	void load(uint address) {
 		density_scale		 = gMaterialData.Load<float3>(address); address += 12;
 		anisotropy       	 = gMaterialData.Load<float>(address); address += 4;
 		albedo_scale         = gMaterialData.Load<float3>(address); address += 12;
@@ -18,16 +18,48 @@ struct Medium : BSDF {
 		albedo_volume_index  = gMaterialData.Load(address); address += 4;
 	}
 
-	inline Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
+	Spectrum Le() { return 0; }
+	Spectrum albedo() { return albedo_scale; }
+	bool can_eval() { return any(density_scale > 0); }
+	bool is_specular() { return abs(anisotropy) > 0.999; }
+
+	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
+		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
+		r.f = v;
+		r.pdf_fwd = v;
+		r.pdf_rev = v;
+	}
+	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
+		if (abs(anisotropy) < 1e-3) {
+			const Real z = 1 - 2 * rnd.x;
+			const Real phi = 2 * M_PI * rnd.y;
+			r.dir_out = Vector3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
+		} else {
+			const Real tmp = (anisotropy * anisotropy - 1) / (2 * rnd.x * anisotropy - (anisotropy + 1));
+			const Real cos_elevation = (tmp * tmp - (1 + anisotropy * anisotropy)) / (2 * anisotropy);
+			const Real sin_elevation = sqrt(max(1 - cos_elevation * cos_elevation, 0));
+			const Real azimuth = 2 * M_PI * rnd.y;
+			float3 t, b;
+			make_orthonormal(dir_in, t, b);
+			r.dir_out = sin_elevation * cos(azimuth) * t + sin_elevation * sin(azimuth) * b + cos_elevation * dir_in;
+		}
+		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, r.dir_out), 1.5);
+		r.pdf_fwd = v;
+		r.pdf_rev = v;
+		r.eta = -1;
+		r.roughness = 1 - abs(anisotropy);
+	}
+
+	Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
 		return pnanovdb_read_float(gVolumes[density_volume_index], address);
 	}
-	inline Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, const Vector3 pos_index) {
+	Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, const Vector3 pos_index) {
 		return read_density(density_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor, floor(pos_index)));
 	}
-	inline Spectrum read_albedo(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
+	Spectrum read_albedo(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
 		return pnanovdb_read_float(gVolumes[albedo_volume_index], address);
 	}
-	inline Spectrum read_albedo(inout pnanovdb_readaccessor_t albedo_accessor, const Vector3 pos_index) {
+	Spectrum read_albedo(inout pnanovdb_readaccessor_t albedo_accessor, const Vector3 pos_index) {
 		if (albedo_volume_index == -1)
 			return 1;
 		else
@@ -35,7 +67,7 @@ struct Medium : BSDF {
 	}
 
 	// returns hit position inside medium. multiplies beta by transmittance*sigma_s
-	inline Vector3 delta_track(inout rng_state_t rng_state, Vector3 origin, Vector3 direction, float t_max, inout Spectrum beta, inout Spectrum dir_pdf, inout Spectrum nee_pdf, const bool can_scatter = true) {
+	Vector3 delta_track(inout rng_state_t rng_state, Vector3 origin, Vector3 direction, float t_max, inout Spectrum beta, inout Spectrum dir_pdf, inout Spectrum nee_pdf, const bool can_scatter = true) {
 		// TODO: slang crashes when compiling this??
 #ifndef __SLANG__
 		pnanovdb_readaccessor_t density_accessor, albedo_accessor;
@@ -91,36 +123,5 @@ struct Medium : BSDF {
 		}
 #endif
 		return POS_INFINITY;
-	}
-
-	inline Spectrum Le() { return 0; }
-	inline bool can_eval() { return true; }
-
-	inline void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
-		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
-		r.f = v;
-		r.pdf_fwd = v;
-		r.pdf_rev = v;
-	}
-
-	inline void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
-		if (abs(anisotropy) < 1e-3) {
-			const Real z = 1 - 2 * rnd.x;
-			const Real phi = 2 * M_PI * rnd.y;
-			r.dir_out = Vector3(sqrt(max(0, 1 - z * z)) * float2(cos(phi), sin(phi)), z);
-		} else {
-			const Real tmp = (anisotropy * anisotropy - 1) / (2 * rnd.x * anisotropy - (anisotropy + 1));
-			const Real cos_elevation = (tmp * tmp - (1 + anisotropy * anisotropy)) / (2 * anisotropy);
-			const Real sin_elevation = sqrt(max(1 - cos_elevation * cos_elevation, 0));
-			const Real azimuth = 2 * M_PI * rnd.y;
-			float3 t, b;
-			make_orthonormal(dir_in, t, b);
-			r.dir_out = sin_elevation * cos(azimuth) * t + sin_elevation * sin(azimuth) * b + cos_elevation * dir_in;
-		}
-		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, r.dir_out), 1.5);
-		r.pdf_fwd = v;
-		r.pdf_rev = v;
-		r.eta = -1;
-		r.roughness = 1 - abs(anisotropy);
 	}
 };

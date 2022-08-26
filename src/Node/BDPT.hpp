@@ -25,11 +25,18 @@ public:
 private:
 	Node& mNode;
 
-	shared_ptr<ComputePipelineState> mSamplePhotonsPipeline;
-	shared_ptr<ComputePipelineState> mPresampleLightPipeline;
-	shared_ptr<ComputePipelineState> mSampleVisibilityPipeline;
-	shared_ptr<ComputePipelineState> mTraceNEEPipeline;
-	shared_ptr<ComputePipelineState> mPathTraceLoopPipeline;
+	enum RenderPipelineIndex {
+		eSamplePhotons,
+		eSampleVisibility,
+		ePathTraceLoop,
+		ePresampleLights,
+		eTraceNEE,
+		eSplatLightVertices,
+		eAddLightTrace,
+		ePipelineCount
+	};
+	array<shared_ptr<ComputePipelineState>, RenderPipelineIndex::ePipelineCount> mRenderPipelines;
+
 	shared_ptr<ComputePipelineState> mTonemapPipeline;
 	shared_ptr<ComputePipelineState> mTonemapMaxReducePipeline;
 
@@ -53,7 +60,6 @@ private:
 		shared_ptr<DescriptorSet> mViewDescriptors;
 
 		shared_ptr<Scene::SceneData> mSceneData;
-		Buffer::View<PresampledLightPoint> mPresampledLights;
 
 		Buffer::View<ViewData> mViews;
 		Buffer::View<TransformData> mViewTransforms;

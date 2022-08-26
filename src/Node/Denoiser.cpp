@@ -160,6 +160,9 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 	//mEstimateVariancePipeline->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 	//mAtrousPipeline->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 
+	if (commandBuffer.mDevice.mInstance.window().pressed_redge(KeyCode::eKeyF5))
+		mResetAccumulation = true;
+
 	if (!mResetAccumulation && mPrevFrame && mPrevFrame->mRadiance && mPrevFrame->mRadiance.extent() == mCurFrame->mRadiance.extent()) {
 		mCurFrame->mDescriptorSet = make_shared<DescriptorSet>(mDescriptorSetLayout, "denoiser_view_descriptors");
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gViews"), mCurFrame->mViews);

@@ -244,8 +244,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	bool update = mAlwaysUpdate || mUpdateOnce;
 
 	if (commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyControl) &&
-		commandBuffer.mDevice.mInstance.window().input_state().pressed(KeyCode::eKeyO) &&
-		!commandBuffer.mDevice.mInstance.window().input_state_last().pressed(KeyCode::eKeyO)) {
+		commandBuffer.mDevice.mInstance.window().pressed_redge(KeyCode::eKeyO)) {
 		auto f = pfd::open_file("Open scene", "", loader_filters());
 		for (const string& filepath : f.result())
 			mToLoad.emplace_back(filepath);
