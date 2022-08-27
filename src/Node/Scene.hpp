@@ -11,9 +11,7 @@ namespace stm {
 #pragma pack(push)
 #pragma pack(1)
 #include <Shaders/scene.h>
-#include <Shaders/materials/environment.h>
-#include <Shaders/materials/material.h>
-#include <Shaders/materials/medium.h>
+#include <Shaders/material.h>
 #pragma pack(pop)
 
 // Note: Scene provides inspector gui callbacks for these classes and ones in scene.h

@@ -84,13 +84,6 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			ImageValue3 emission = make_image_value3({}, float3::Zero());
 			float eta = 1.45f;
 
-            aiColor3D tmp_color;
-            if (m->Get(AI_MATKEY_COLOR_DIFFUSE, tmp_color) == AI_SUCCESS) diffuse.value  = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-            if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float4(tmp_color.r, tmp_color.g, tmp_color.b, 1);
-            if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, tmp_color) == AI_SUCCESS) transmittance.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-            if (m->Get(AI_MATKEY_COLOR_EMISSIVE, tmp_color) == AI_SUCCESS) emission.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
-			m->Get(AI_MATKEY_REFRACTI, eta);
-
 			if (m->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
 				aiString aiPath;
 				m->GetTexture(aiTextureType_DIFFUSE, 0, &aiPath);
@@ -104,8 +97,15 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			if (m->GetTextureCount(aiTextureType_EMISSIVE) > 0) {
 				aiString aiPath;
 				m->GetTexture(aiTextureType_EMISSIVE, 0, &aiPath);
-				material.emission = make_image_value3(get_image(aiPath.C_Str(), true), float3::Ones());
+				emission = make_image_value3(get_image(aiPath.C_Str(), true), float3::Ones());
 			}
+
+            aiColor3D tmp_color;
+            if (m->Get(AI_MATKEY_COLOR_DIFFUSE, tmp_color) == AI_SUCCESS) diffuse.value  = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+            if (m->Get(AI_MATKEY_COLOR_SPECULAR, tmp_color) == AI_SUCCESS) specular.value = float4(tmp_color.r, tmp_color.g, tmp_color.b, 1);
+            if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, tmp_color) == AI_SUCCESS) transmittance.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+            if (m->Get(AI_MATKEY_COLOR_EMISSIVE, tmp_color) == AI_SUCCESS) emission.value = float3(tmp_color.r, tmp_color.g, tmp_color.b);
+			m->Get(AI_MATKEY_REFRACTI, eta);
 
 			if (interpret_as_pbr)
 				material = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, diffuse, specular, transmittance, eta, emission);

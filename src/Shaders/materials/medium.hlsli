@@ -1,4 +1,4 @@
-#include "material.h"
+#include "bsdf.hlsli"
 
 struct Medium : BSDF {
 	Spectrum density_scale;

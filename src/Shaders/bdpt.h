@@ -165,10 +165,6 @@ struct LightPathVertex1 {
 enum class BDPTDebugMode {
 	eNone,
 	eAlbedo,
-	eDiffuse,
-	eSpecular,
-	eTransmission,
-	eRoughness,
 	eEmission,
 	eShadingNormal,
 	eGeometryNormal,
@@ -191,10 +187,6 @@ inline string to_string(const stm::BDPTDebugMode& m) {
 		default: return "Unknown";
 		case stm::BDPTDebugMode::eNone: return "None";
 		case stm::BDPTDebugMode::eAlbedo: return "Albedo";
-		case stm::BDPTDebugMode::eDiffuse: return "Diffuse";
-		case stm::BDPTDebugMode::eSpecular: return "Specular";
-		case stm::BDPTDebugMode::eTransmission: return "Transmission";
-		case stm::BDPTDebugMode::eRoughness: return "Roughness";
 		case stm::BDPTDebugMode::eEmission: return "Emission";
 		case stm::BDPTDebugMode::eShadingNormal: return "Shading Normal";
 		case stm::BDPTDebugMode::eGeometryNormal: return "Geometry Normal";

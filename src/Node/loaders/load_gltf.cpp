@@ -249,9 +249,9 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				auto sphere = dst.make_child(l.name).make_component<SpherePrimitive>();
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
 				Material m;
-				m.diffuse_roughness = make_image_value4({}, float4::Zero());
-				m.specular_transmission = make_image_value4({}, float4::Zero());
-				m.emission.value = (double3::Map(l.color.data()) * l.intensity/(4*((float)M_PI)*sphere->mRadius*sphere->mRadius)).cast<float>();
+				const float3 emission = double3::Map(l.color.data()).cast<float>();
+				m.data[0].value.head<3>() = emission/luminance(emission);
+				m.data[0].value[3] = luminance(emission) * (float)(l.intensity / (4*M_PI*sphere->mRadius*sphere->mRadius));
 				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(m);
 			}
 		}

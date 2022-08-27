@@ -1,10 +1,9 @@
 #ifndef ENVIRONMENT_H
 #define ENVIRONMENT_H
 
-#include "../scene.h"
-#include "../image_value.h"
-#include "../shading_data.h"
-#include "../dist2.h"
+#include "scene.h"
+#include "image_value.h"
+#include "dist2.h"
 
 struct Environment {
 	ImageValue3 emission;

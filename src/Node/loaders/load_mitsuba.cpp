@@ -339,10 +339,9 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 				diffuse = parse_spectrum_texture(commandBuffer, child, texture_map);
 		}
 		auto m = dst.make_child(name).make_component<Material>();
-		m->diffuse_roughness = make_image_value4(diffuse.image, float4(diffuse.value[0], diffuse.value[1], diffuse.value[2], 1.f));
-		m->specular_transmission = make_image_value4({}, float4::Zero());
-		m->emission = make_image_value3({}, float3::Zero());
-		m->eta = 1.5f;
+		m->data[0] = make_image_value4(diffuse.image, float4(diffuse.value[0], diffuse.value[1], diffuse.value[2], 0.f));
+		m->data[1].value[0] = 0; // metallic
+		m->data[2].value[3] = 1.5; // eta
 		for (const string& id : ids)
 			if (!id.empty()) material_map[id] = m;
 		return m;
@@ -452,10 +451,10 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, u
 			if (!material)
 				material = it->second;
 		} else if (name == "bsdf") {
-			optional<ImageValue3> emission;
-			if (material) emission = material->emission;
+			optional<float> emission;
+			if (material) emission = material->data[0].value[3];
 			material = parse_bsdf(dst, commandBuffer, child, material_map, texture_map);
-			if (emission) material->emission = *emission;
+			if (emission) material->data[0].value[3] = *emission;
 		} else if (name == "emitter") {
 			float3 radiance = float3::Ones();
 			for (auto grand_child : child.children()) {
@@ -484,15 +483,14 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, u
 					}
 				}
 			}
-			if (material)
-				material->emission = make_image_value3({}, radiance);
-			else {
-				Material m;
-				m.diffuse_roughness = make_image_value4({}, float4::Zero());
-				m.specular_transmission = make_image_value4({}, float4::Zero());
-				m.emission = make_image_value3({}, radiance);
-				m.eta = 1.5f;
-				material = dst.make_component<Material>(m);
+			if (material) {
+				material->data[0].value.head<3>() = radiance/luminance(radiance);
+				material->data[0].value[3] = luminance(radiance);
+			} else {
+				material = dst.make_component<Material>();
+				material->data[0].value.head<3>() = radiance/luminance(radiance);
+				material->data[0].value[3] = luminance(radiance);
+				material->data[2].value[3] = 0; // eta
 			}
 		}
 

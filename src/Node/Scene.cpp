@@ -132,55 +132,76 @@ ImageValue1 Scene::shininess_to_roughness(CommandBuffer& commandBuffer, const Im
 
 Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
 	Material dst;
-	const float metallic = metallic_roughness.value.z();
-	dst.diffuse_roughness.value.head<3>() = base_color.value*(1-metallic);
-	dst.diffuse_roughness.value[3] = metallic_roughness.value.y();
-	dst.specular_transmission.value.head<3>() = base_color.value*metallic;
-	dst.specular_transmission.value[3] = luminance(transmission.value);
-
-	dst.emission = emission;
-	dst.eta = eta;
-	if (base_color.image || metallic_roughness.image) {
-		dst.diffuse_roughness.value = float4(1,1,1,.5f);
-		dst.specular_transmission.value = float4(1,1,1,0);
-		vk::Extent3D extent = base_color.image ? base_color.image.extent() : metallic_roughness.image.extent();
-		dst.diffuse_roughness.image = make_shared<Image>(commandBuffer.mDevice, "diffuse_roughness", extent, vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		dst.specular_transmission.image = make_shared<Image>(commandBuffer.mDevice, "specular_transmission", extent, vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		mConvertPbrPipeline->descriptor("gDiffuse") = image_descriptor(base_color.image ? base_color.image : metallic_roughness.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mConvertPbrPipeline->descriptor("gSpecular") = image_descriptor(metallic_roughness.image ? metallic_roughness.image : base_color.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mConvertPbrPipeline->descriptor("gTransmittance") = image_descriptor(transmission.image ? transmission.image : base_color.image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mConvertPbrPipeline->descriptor("gDiffuseRoughness") = image_descriptor(dst.diffuse_roughness.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mConvertPbrPipeline->descriptor("gSpecularTransmission") = image_descriptor(dst.specular_transmission.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+	if ((emission.value > 0).any()) {
+		dst.data[0].image = emission.image;
+		dst.data[0].value.head<3>() = emission.value/luminance(emission.value);
+		dst.data[0].value[3] = luminance(emission.value);
+		dst.data[2].value[3] = 0; // eta
+		return dst;
+	}
+	dst.data[0].value.head<3>() = base_color.value;
+	dst.data[0].value[3] = 0;
+	dst.data[1].value[0] = metallic_roughness.value.z(); // metallic
+	dst.data[1].value[1] = metallic_roughness.value.y(); // roughness
+	dst.data[1].value[2] = 0; // anisotropic
+	dst.data[1].value[3] = 0; // subsurface
+	dst.data[2].value[0] = 0; // clearcoat
+	dst.data[2].value[1] = 0; // clearcoat gloss
+	dst.data[2].value[2] = luminance(transmission.value);
+	dst.data[2].value[3] = eta;
+	if (base_color.image || metallic_roughness.image || transmission.image) {
+		Image::View d = base_color.image ? base_color.image : metallic_roughness.image ? metallic_roughness.image : transmission.image;
+		for (int i = 0; i < DISNEY_DATA_N; i++) {
+			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+			mConvertPbrPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		}
+		mConvertPbrPipeline->descriptor("gDiffuse") = image_descriptor(base_color.image ? base_color.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+		mConvertPbrPipeline->descriptor("gSpecular") = image_descriptor(metallic_roughness.image ? metallic_roughness.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+		mConvertPbrPipeline->descriptor("gTransmittance") = image_descriptor(transmission.image ? transmission.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertPbrPipeline->specialization_constant<uint32_t>("gUseDiffuse") = (bool)base_color.image;
 		mConvertPbrPipeline->specialization_constant<uint32_t>("gUseSpecular") = (bool)metallic_roughness.image;
 		mConvertPbrPipeline->specialization_constant<uint32_t>("gUseTransmittance") = (bool)transmission.image;
 		commandBuffer.bind_pipeline(mConvertPbrPipeline->get_pipeline());
 		mConvertPbrPipeline->bind_descriptor_sets(commandBuffer);
 		mConvertPbrPipeline->push_constants(commandBuffer);
-		commandBuffer.dispatch_over(extent);
-		dst.diffuse_roughness.image.image()->generate_mip_maps(commandBuffer);
-		dst.specular_transmission.image.image()->generate_mip_maps(commandBuffer);
+		commandBuffer.dispatch_over(d.extent());
+		for (int i = 0; i < DISNEY_DATA_N; i++)
+			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
 	return dst;
 }
 Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
 	Material dst;
-	dst.diffuse_roughness.value.head<3>() = diffuse.value;
-	dst.diffuse_roughness.value[3] = roughness.value;
-	dst.specular_transmission.value.head<3>() = specular.value;
-	dst.specular_transmission.value[3] = luminance(transmission.value);
-	dst.emission = emission;
-	dst.eta = eta;
+	if ((emission.value > 0).any()) {
+		dst.data[0].image = emission.image;
+		dst.data[0].value.head<3>() = emission.value/luminance(emission.value);
+		dst.data[0].value[3] = luminance(emission.value);
+		dst.data[2].value[3] = 0; // eta
+		return dst;
+	}
+	const float ld = luminance(diffuse.value);
+	const float ls = luminance(specular.value);
+	const float lt = luminance(transmission.value);
+	dst.data[0].value.head<3>() = (diffuse.value*ld + specular.value*ls + transmission.value*lt) / (ld + ls + lt);
+	dst.data[0].value[3] = 0;
+	dst.data[1].value[0] = ls / (ld + ls + lt); // metallic
+	dst.data[1].value[1] = roughness.value; // roughness
+	dst.data[1].value[2] = 0; // anisotropic
+	dst.data[1].value[3] = 0; // subsurface
+	dst.data[2].value[0] = 0; // clearcoat
+	dst.data[2].value[1] = 0; // clearcoat gloss
+	dst.data[2].value[2] = lt / (ld + ls + lt);
+	dst.data[2].value[3] = eta;
 	if (diffuse.image || specular.image || transmission.image || roughness.image) {
-		Image::View d = diffuse.image ? diffuse.image : specular.image ? specular.image : transmission.image;
-		dst.diffuse_roughness.image = make_shared<Image>(commandBuffer.mDevice, "base color", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		dst.specular_transmission.image = make_shared<Image>(commandBuffer.mDevice, "specular", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		Image::View d = diffuse.image ? diffuse.image : specular.image ? specular.image : transmission.image ? transmission.image : roughness.image;
+		for (int i = 0; i < DISNEY_DATA_N; i++) {
+			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+			mConvertDiffuseSpecularPipeline->descriptor("Output",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		}
 		mConvertDiffuseSpecularPipeline->descriptor("gDiffuse") = image_descriptor(diffuse.image ? diffuse.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gSpecular") = image_descriptor(specular.image ? specular.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gTransmittance") = image_descriptor(transmission.image ? transmission.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gRoughness") = image_descriptor(roughness.image ? roughness.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-		mConvertDiffuseSpecularPipeline->descriptor("gDiffuseRoughness") = image_descriptor(dst.diffuse_roughness.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
-		mConvertDiffuseSpecularPipeline->descriptor("gSpecularTransmission") = image_descriptor(dst.specular_transmission.image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		mConvertDiffuseSpecularPipeline->specialization_constant<uint32_t>("gUseDiffuse") = (bool)diffuse.image;
 		mConvertDiffuseSpecularPipeline->specialization_constant<uint32_t>("gUseSpecular") = (bool)specular.image;
 		mConvertDiffuseSpecularPipeline->specialization_constant<uint32_t>("gUseTransmittance") = (bool)transmission.image;
@@ -189,8 +210,8 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		mConvertDiffuseSpecularPipeline->bind_descriptor_sets(commandBuffer);
 		mConvertDiffuseSpecularPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(d.extent());
-		dst.diffuse_roughness.image.image()->generate_mip_maps(commandBuffer);
-		dst.specular_transmission.image.image()->generate_mip_maps(commandBuffer);
+		for (int i = 0; i < DISNEY_DATA_N; i++)
+			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
 	return dst;
 }
@@ -417,12 +438,12 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			const TransformData transform = node_to_world(prim.node());
 			const float area = prim->mMesh->area().has_value() ? prim->mMesh->area().value()*transform.m.topLeftCorner<3,3>().matrix().determinant() : 1;
 
-			if ((prim->mMaterial->emission.value > 0).any())
+			if (prim->mMaterial->data[0].value[3] > 0)
 				mSceneData->mEmissivePrimitiveCount += triCount;
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, luminance(prim->mMaterial->emission.value) * area * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, prim->mMaterial->data[0].value[3] * area * M_PI);
 			instance.mask = BVH_FLAG_TRIANGLES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
 
@@ -438,7 +459,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			if (!prim->mMaterial) return;
 			uint32_t material_address = process_material(prim->mMaterial.get());
 
-			if ((prim->mMaterial->emission.value > 0).any())
+			if (prim->mMaterial->data[0].value[3] > 0)
 				mSceneData->mEmissivePrimitiveCount++;
 
 			TransformData transform = node_to_world(prim.node());
@@ -470,7 +491,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_sphere(material_address, r), transform, luminance(prim->mMaterial->emission.value) * (4*M_PI*r*r) * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_sphere(material_address, r), transform, prim->mMaterial->data[0].value[3] * (4*M_PI*r*r) * M_PI);
 			instance.mask = BVH_FLAG_SPHERES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});

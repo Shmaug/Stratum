@@ -75,10 +75,9 @@ inline Real smith_masking_gtr2(const Vector3 w, const Real alpha) {
 /// https://jcgt.org/published/0007/04/01/
 inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha_x, const Real alpha_y, const float2 rnd_param) {
     // The incoming direction is in the "ellipsodial configuration" in Heitz's paper
-    if (local_dir_in[2] < 0) {
-        // Ensure the input is on top of the surface.
-        local_dir_in = -local_dir_in;
-    }
+	const bool inside = local_dir_in[2] < 0;
+	// Ensure the input is on top of the surface.
+    if (inside) local_dir_in = -local_dir_in;
 
     // Transform the incoming direction to the "hemisphere configuration".
     const Vector3 hemi_dir_in = normalize(Vector3(alpha_x * local_dir_in[0], alpha_y * local_dir_in[1], local_dir_in[2]));
@@ -102,7 +101,7 @@ inline Vector3 sample_visible_normals(Vector3 local_dir_in, const Real alpha_x, 
 
     // Transforming the normal back to the ellipsoid configuration
     Vector3 N = normalize(Vector3(alpha_x * hemi_N[0], alpha_y * hemi_N[1], max(0.f, hemi_N[2])));
-    if (local_dir_in[2] < 0) N = -N;
+    if (inside) N = -N;
     return N;
 }
 

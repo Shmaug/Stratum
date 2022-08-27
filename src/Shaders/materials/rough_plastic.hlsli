@@ -1,3 +1,8 @@
+#include "bsdf.hlsli"
+#include "../microfacet.h"
+
+#define gMinRoughness 1e-4
+
 struct RoughPlastic : BSDF {
 	Spectrum diffuse_reflectance;
 	Real alpha; // roughness^2
@@ -33,7 +38,7 @@ struct RoughPlastic : BSDF {
 			r.pdf_fwd = 0;
 			r.pdf_rev = 0;
 		} else {
-			r.f = diffuse_reflectance / M_PI;
+			r.f = diffuse_reflectance * abs(dir_out.z) / M_PI;
 			r.pdf_fwd = cosine_hemisphere_pdfW(abs(dir_out.z));
 			r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		}
@@ -43,7 +48,7 @@ struct RoughPlastic : BSDF {
 		r.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
 		r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		if (dir_in.z < 0) r.dir_out.z = -r.dir_out.z;
-		const Spectrum f = diffuse_reflectance / M_PI;
+		const Spectrum f = diffuse_reflectance * abs(r.dir_out.z) / M_PI;
 		beta *= f / r.pdf_fwd;
 		r.eta = 0;
 		r.roughness = 1;
@@ -72,7 +77,7 @@ struct RoughPlastic : BSDF {
 		// The transmittance is computed by 1 - fresnel.
 		const Real diffuse_contrib = (1 - F_o) * (1 - F_i) / M_PI;
 
-		r.f = specular_reflectance * spec_contrib + diffuse_reflectance * diffuse_contrib;
+		r.f = (specular_reflectance * spec_contrib + diffuse_reflectance * diffuse_contrib) * abs(dir_out.z);
 
 		if (all(r.f <= 0)) {
 			r.pdf_fwd = 0;

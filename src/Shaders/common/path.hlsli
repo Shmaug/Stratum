@@ -3,7 +3,7 @@
 
 #include "rng.hlsli"
 #include "intersection.hlsli"
-#include "../materials/environment.h"
+#include "../environment.h"
 #include "light.hlsli"
 
 Real path_weight(const uint view_length, const uint light_length) {
@@ -78,7 +78,6 @@ struct LightPathConnection {
 				const Vector3 local_dir_out = normalize(lv.to_local(-to_light));
 				m.eval(_eval, local_dir_in, local_dir_out, true);
 				if (_eval.pdf_fwd < 1e-6) { f = 0; return true; }
-				_eval.f *= abs(local_dir_out.z);
 
 				const Vector3 local_geometry_normal = lv.to_local(lv.geometry_normal());
 				G_fwd *= abs(dot(local_geometry_normal, local_dir_out));
@@ -209,7 +208,7 @@ struct LightPathConnection {
 		m.eval(_eval, local_dir_in, local_to_view, true);
 		if (_eval.pdf_fwd < 1e-6) return;
 
-		contribution *= _eval.f * abs(local_to_view.z);
+		contribution *= _eval.f;
 
 		if (all(contribution <= 0)) return;
 
@@ -284,7 +283,6 @@ struct LightPathConnection {
 			m.load(lv.material_address(), lv.uv, 0);
 			specular = m.is_specular();
 			m.eval(_eval, local_dir_in, local_to_view, true);
-			_eval.f *= abs(local_to_view.z);
 
 			// shading normal correction
 			if (ngdotout != 0) {
@@ -429,7 +427,7 @@ struct NEE {
 		m.eval(_eval, local_dir_in, local_to_light, false);
 		bsdf_pdf = _eval.pdf_fwd;
 		if (bsdf_pdf < 1e-6) return 0;
-		return Le * _eval.f * G * abs(local_to_light.z);
+		return Le * _eval.f * G;
 	}
 };
 
@@ -826,7 +824,6 @@ struct PathIntegrator {
 				MaterialEvalRecord _eval;
 				m.eval(_eval, local_dir_in, c.local_to_light, false);
 				if (_eval.pdf_fwd < 1e-6) continue;
-				_eval.f *= abs(c.local_to_light.z);
 
 				// c.f includes 1/dist2 and cosine term from the light path vertex
 				const Spectrum contrib = _beta * _eval.f * c.f;
@@ -878,8 +875,6 @@ struct PathIntegrator {
 
 		if (!gHasMedia || _isect.sd.shape_area > 0) {
 			const Real ndotout = _material_sample.dir_out.z;
-
-			_beta *= abs(ndotout);
 
 			_material_sample.dir_out = normalize(_isect.sd.to_world(_material_sample.dir_out));
 
