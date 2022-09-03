@@ -111,8 +111,8 @@ struct ProjectionData {
 	float2 offset;
 	float near_plane;
 	float far_plane;
-	uint orthographic;
 	float sensor_area;
+	uint orthographic;
 
 	// uses reversed z (1 at near plane -> 0 at far plane)
 	inline float4 project_point(const float3 v) CONST_CPP {

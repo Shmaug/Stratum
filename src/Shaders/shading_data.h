@@ -71,7 +71,7 @@ inline void make_triangle_shading_data(inout ShadingData r, const TransformData 
 		r.uv_screen_size = 1 / max(length(dPdu), length(dPdv));
 	} else {
 		make_orthonormal(geometry_normal, dPdu, dPdv);
-		r.uv_screen_size = 0;
+		r.uv_screen_size = 1;
 	}
 
 	float3 shading_normal = v0.normal + (v1.normal - v0.normal)*bary.x + (v2.normal - v0.normal)*bary.y;

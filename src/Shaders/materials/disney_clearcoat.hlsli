@@ -24,7 +24,7 @@ void disneyclearcoat_eval(const DisneyMaterialData bsdf, out MaterialEvalRecord 
 	r.pdf_fwd = disneyclearcoat_eval_pdf(D, h, hdotwo);
 	r.pdf_rev = disneyclearcoat_eval_pdf(D, h, dot(h, dir_in));
 }
-void disneyclearcoat_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+Spectrum disneyclearcoat_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
     const Real alpha = (1 - bsdf.clearcoat_gloss())*0.1 + bsdf.clearcoat_gloss()*0.001;
 
     const Real alpha2 = alpha*alpha;
@@ -42,5 +42,7 @@ void disneyclearcoat_sample(const DisneyMaterialData bsdf, out MaterialSampleRec
 	r.pdf_rev = disneyclearcoat_eval_pdf(D, h, dot(h, dir_in));
 	r.eta = 0;
 	r.roughness = alpha;
-	beta *= disneyclearcoat_eval(D, dir_in, r.dir_out, h, hdotwo) / r.pdf_fwd;
+	const Spectrum f = disneyclearcoat_eval(D, dir_in, r.dir_out, h, hdotwo);
+	beta *= f / r.pdf_fwd;
+	return f;
 }

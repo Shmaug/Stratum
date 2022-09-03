@@ -233,7 +233,9 @@ Image::View parse_texture(CommandBuffer& commandBuffer, pugi::xml_node node) {
 	}
 	if (type == "bitmap") {
 		ImageData pixels = load_image_data(commandBuffer.mDevice, filename, 0, 4);
-		return make_shared<Image>(commandBuffer, filename.stem().string(), pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		auto img = make_shared<Image>(commandBuffer, filename.stem().string(), pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		commandBuffer.hold_resource(img);
+		return img;
 	} else if (type == "checkerboard") {
 		ImageData pixels;
 		pixels.extent = vk::Extent3D(512, 512, 1);
@@ -251,7 +253,9 @@ Image::View parse_texture(CommandBuffer& commandBuffer, pugi::xml_node node) {
 				pixels.pixels[addr+2] = (byte)(c[2] * 0xFF);
 				pixels.pixels[addr+3] = (byte)(0xFF);
 			}
-		return make_shared<Image>(commandBuffer, "checkerboard", pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		auto img = make_shared<Image>(commandBuffer, "checkerboard", pixels, 0, vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		commandBuffer.hold_resource(img);
+		return img;
 	}
 	throw runtime_error("Unsupported texture type: " + type + " for " + node.attribute("name").value());
 }
@@ -346,9 +350,9 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 			if (!id.empty()) material_map[id] = m;
 		return m;
 	} else if (type == "roughplastic" || type == "plastic" || type == "conductor" || type == "roughconductor") {
-		ImageValue3 diffuse  = make_image_value3({}, float3::Constant(0.5f));
-		ImageValue3 specular = make_image_value3({}, float3::Ones());
-		ImageValue1 roughness = make_image_value1({}, (type == "plastic") ? 0 : 0.1f);
+		ImageValue3 diffuse  = make_image_value3({}, float3::Ones());
+		ImageValue3 specular = make_image_value3({}, float3::Zero());
+		ImageValue1 roughness = make_image_value1({}, (type == "plastic" || type == "conductor") ? 0 : 0.1f);
 
 		float intIOR = 1.49;
 		float extIOR = 1.000277;
@@ -389,8 +393,8 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 			if (!id.empty()) material_map[id] = m;
 		return m;
 	} else if (type == "roughdielectric" || type == "dielectric" || type == "thindielectric") {
-		ImageValue3 diffuse = make_image_value3({}, float3::Ones());
-		ImageValue3 specular = make_image_value3({}, float3::Ones());
+		ImageValue3 diffuse = make_image_value3({}, float3::Zero());
+		ImageValue3 specular = make_image_value3({}, float3::Zero());
 		ImageValue3 transmittance = make_image_value3({}, float3::Ones());
 		ImageValue1 roughness = make_image_value1({}, (type == "dielectric") ? 0 : 0.1f);
 		float intIOR = 1.5046;

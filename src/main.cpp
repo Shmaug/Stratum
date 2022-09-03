@@ -1,9 +1,11 @@
 #include "Node/Application.hpp"
 #include "Node/Inspector.hpp"
-#include "Node/BDPT.hpp"
 #include "Node/XR.hpp"
 #include "Node/FlyCamera.hpp"
 #include "Node/ImageComparer.hpp"
+
+#include "Node/BDPT.hpp"
+#include "Node/VCM.hpp"
 
 using namespace stm;
 
@@ -21,6 +23,29 @@ void load_plugins(const string& plugin_info, Node& dst) {
 		s0 = s1;
 	}
 }
+
+void setup_renderer(auto app, auto renderer, auto camera) {
+	app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+		renderer->render(commandBuffer, app->window().back_buffer(), { { camera->view(), node_to_world(camera.node()) } });
+	});
+}
+#ifdef STRATUM_ENABLE_OPENXR
+void setup_renderer(auto app, auto renderer, auto xrnode) {
+	if (xrnode) {
+		xrnode->OnRender.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+			vector<pair<ViewData,TransformData>> views;
+			views.reserve(xrnode->views().size());
+			for (const XR::View& v : xrnode->views())
+				views.emplace_back(v.mCamera.view(), node_to_world(v.mCamera.node()));
+			renderer->render(commandBuffer, xrnode->back_buffer(), views);
+			xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
+		});
+		app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+			commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
+		}, Node::EventPriority::eAlmostFirst);
+	}
+};
+#endif
 
 int main(int argc, char** argv) {
 	cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
@@ -47,6 +72,7 @@ int main(int argc, char** argv) {
 	}
 #endif
 
+	// create vulkan instance and window
 	auto instance = root_node.make_component<Instance>(args);
 
 	vk::PhysicalDevice device;
@@ -62,42 +88,68 @@ int main(int argc, char** argv) {
 	const auto scene     = app_node.make_component<Scene>();
 #ifdef STRATUM_ENABLE_OPENXR
 	if (xrnode) xrnode->create_session(*instance);
+#else
+	// setup camera
+	float3 pos = float3(0,1,0);
+	quatf rot = quatf_identity();
+	float3 scale = float3::Ones();
+	float fovy = radians(70.f);
+	if (auto p = instance->find_argument("cameraPosX"); p) pos[0]     = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraPosY"); p) pos[1]     = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraPosZ"); p) pos[2]     = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraRotX"); p) rot.xyz[0] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraRotY"); p) rot.xyz[1] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraRotZ"); p) rot.xyz[2] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraRotW"); p) rot.w      = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraScaleX"); p) scale[0] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraScaleY"); p) scale[1] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraScaleZ"); p) scale[2] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("fovy"); p) fovy = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("fov"); p) fovy = (float)atof(p->c_str());
+
+	auto camera = scene.node().make_child("Camera").make_component<Camera>(make_perspective(fovy, 1.f, float2::Zero(), -1 / 1024.f));
+	camera.node().make_component<TransformData>(make_transform(pos, rot, scale));
+	camera.node().make_component<FlyCamera>(camera.node());
 #endif
 
 	// create renderer
 	Node& renderer_node = app_node.make_child("Renderer");
-	const auto renderer = renderer_node.make_component<BDPT>();
-	const auto denoiser = renderer_node.make_component<Denoiser>();
 	renderer_node.make_component<ImageComparer>();
+	renderer_node.make_component<Denoiser>();
+
+#ifdef STRATUM_ENABLE_OPENXR
+	setup_renderer(app, renderer_node.make_component<VCM>(), xrnode);
+#else
+	setup_renderer(app, renderer_node.make_component<VCM>(), camera);
+#endif
+
+	bool vcm = true;
+	auto switcher_inspector_fn = [&]() {
+		if (ImGui::Checkbox("VCM", &vcm)) {
+#ifdef STRATUM_ENABLE_OPENXR
+			xrnode->OnRender.erase(renderer_node);
+#endif
+			app->OnRenderWindow.erase(renderer_node);
+			if (vcm) {
+				renderer_node.erase_component<BDPT>();
+#ifdef STRATUM_ENABLE_OPENXR
+				setup_renderer(app, renderer_node.make_component<VCM>(), xrnode);
+#else
+				setup_renderer(app, renderer_node.make_component<VCM>(), camera);
+#endif
+			} else {
+				renderer_node.erase_component<VCM>();
+#ifdef STRATUM_ENABLE_OPENXR
+				setup_renderer(app, renderer_node.make_component<BDPT>(), xrnode);
+#else
+				setup_renderer(app, renderer_node.make_component<BDPT>(), camera);
+#endif
+			}
+		}
+	};
 
 	for (const string& plugin_info : instance->find_arguments("plugin"))
 		load_plugins(plugin_info, app.node());
-
-	// setup viewer
-#ifdef STRATUM_ENABLE_OPENXR
-	if (xrnode) {
-		xrnode->OnRender.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-			vector<pair<ViewData,TransformData>> views;
-			views.reserve(xrnode->views().size());
-			for (const XR::View& v : xrnode->views())
-				views.emplace_back(v.mCamera.view(), node_to_world(v.mCamera.node()));
-			renderer->render(commandBuffer, xrnode->back_buffer(), views);
-			xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
-		});
-		app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-			commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
-		}, Node::EventPriority::eAlmostFirst);
-	} else
-#endif
-	{
-		auto camera = scene.node().make_child("Camera").make_component<Camera>(make_perspective(radians(70.f), 1.f, float2::Zero(), -1 / 1024.f));
-		camera.node().make_component<TransformData>(make_transform(float3(0, 1, 0), quatf_identity(), float3::Ones()));
-		camera.node().make_component<FlyCamera>(camera.node());
-		app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-			renderer->render(commandBuffer, app->window().back_buffer(), { { camera->view(), node_to_world(camera.node()) } });
-		});
-	}
-
 
 	app->run();
 

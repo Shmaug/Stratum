@@ -1,6 +1,7 @@
 #include "ImageComparer.hpp"
 #include "Application.hpp"
 #include "Inspector.hpp"
+#include "VCM.hpp"
 #include "BDPT.hpp"
 
 namespace stm {
@@ -13,20 +14,55 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 
 	auto app = mNode.find_in_ancestor<Application>();
 
+	mOffset = float2::Constant(0);
+	mZoom = 1.f;
+
 	app->OnUpdate.add_listener(mNode, [&, app](CommandBuffer& commandBuffer, float deltaTime) {
-		if (mComparing.empty()) return;
 		ProfilerRegion ps("ImageComparer");
+		for (auto&[original, img] : mImages|views::values) {
+			if (!img) {
+				img = make_shared<Image>(commandBuffer.mDevice, original.image()->name(), original.extent(), original.image()->format(), original.image()->layer_count(), 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+				commandBuffer.copy_image(original, img);
+				img.image()->generate_mip_maps(commandBuffer);
+			}
+		}
+
+		if (mComparing.empty()) return;
+
 		auto gui = app.node().find_in_descendants<Gui>();
 		if (!gui) return;
 		gui->set_context();
 
 		if (ImGui::Begin("Compare Result")) {
 			if (mComparing.size() == 1) {
-				Image::View& img = mImages.at(*mComparing.begin());
-				const uint32_t w = ImGui::GetWindowSize().x;
-				ImGui::Image(&img, ImVec2(w, w * (float)img.extent().height / (float)img.extent().width));
+				mCurrent = *mComparing.begin();
 			} else {
+				bool s = false;
+				for (auto c : mComparing) {
+					if (s) ImGui::SameLine();
+					s = true;
+					if (ImGui::Button(c.c_str()))
+						mCurrent = c;
+				}
+			}
 
+			const uint32_t w = ImGui::GetWindowSize().x - 4;
+			Image::View& img = mImages.at(mCurrent).second;
+			const float aspect = (float)img.extent().height / (float)img.extent().width;
+			ImVec2 uvMin(mOffset[0], mOffset[1]);
+			ImVec2 uvMax(mOffset[0] + mZoom, mOffset[1] + mZoom);
+			ImGui::Image(&img, ImVec2(w, w * aspect), uvMin, uvMax);
+			if (ImGui::IsItemHovered()) {
+				mZoom *= 1 - 0.05f*app->window().input_state().scroll_delta();
+				mZoom = clamp(mZoom, 0.f, 1.f);
+				mOffset[0] = clamp(mOffset[0], 0.f, 1 - mZoom);
+				mOffset[1] = clamp(mOffset[1], 0.f, 1 - mZoom);
+				if (app->window().input_state().pressed(KeyCode::eMouse1)) {
+					mOffset[0] -= (uvMax.x - uvMin.x) * app->window().input_state().cursor_delta()[0] / w;
+					mOffset[1] -= (uvMax.y - uvMin.y) * app->window().input_state().cursor_delta()[1] / (w*aspect);
+					mOffset[0] = clamp(mOffset[0], 0.f, 1 - mZoom);
+					mOffset[1] = clamp(mOffset[1], 0.f, 1 - mZoom);
+				}
 			}
 		}
 
@@ -43,8 +79,12 @@ void ImageComparer::inspector_gui() {
 	ImGui::InputText("", label, sizeof(label));
 	ImGui::SameLine();
 	if (ImGui::Button("Save") && !string(label).empty()) {
-		component_ptr<BDPT> renderer = mNode.node_graph().find_components<BDPT>().front();
-		mImages.emplace(label, renderer->prev_radiance_image());
+		Image::View img;
+		if (auto renderers = mNode.node_graph().find_components<VCM>(); !renderers.empty())
+			img = renderers.front()->prev_result();
+		else if (auto renderers = mNode.node_graph().find_components<BDPT>(); !renderers.empty())
+			img = renderers.front()->prev_result();
+		mImages.emplace(label, pair<Image::View, Image::View>{ img, {} });
 	}
 
 	for (auto it = mImages.begin(); it != mImages.end(); ) {

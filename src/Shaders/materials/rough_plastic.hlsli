@@ -43,7 +43,7 @@ struct RoughPlastic : BSDF {
 			r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 		}
 	}
-	void sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+	Spectrum sample_lambertian(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
 		r.pdf_fwd = cosine_hemisphere_pdfW(r.dir_out.z);
 		r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
@@ -52,6 +52,7 @@ struct RoughPlastic : BSDF {
 		beta *= f / r.pdf_fwd;
 		r.eta = 0;
 		r.roughness = 1;
+		return f;
 	}
 
 	void eval_roughplastic(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const Vector3 half_vector, const bool adjoint) {
@@ -90,7 +91,7 @@ struct RoughPlastic : BSDF {
 			r.pdf_rev = lerp(cosine_hemisphere_pdfW(dir_in.z),  (G_out * D) / (4 * dir_out.z), spec_weight);
 		}
 	}
-	void sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+	Spectrum sample_roughplastic(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		Vector3 half_vector;
 		if (rnd.z <= spec_weight) {
 			half_vector = sample_visible_normals(dir_in, alpha, alpha, rnd.xy);
@@ -107,6 +108,7 @@ struct RoughPlastic : BSDF {
 		beta *= f.f / f.pdf_fwd;
 		r.pdf_fwd = f.pdf_fwd;
 		r.pdf_rev = f.pdf_rev;
+		return f.f;
 	}
 
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
@@ -115,10 +117,10 @@ struct RoughPlastic : BSDF {
 		else
 			eval_lambertian(r, dir_in, dir_out, adjoint);
 	}
-	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
+	Spectrum sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
 		if (all(specular_reflectance > 0))
-			sample_roughplastic(r, rnd, dir_in, beta, adjoint);
+			return sample_roughplastic(r, rnd, dir_in, beta, adjoint);
 		else
-			sample_lambertian(r, rnd, dir_in, beta, adjoint);
+			return sample_lambertian(r, rnd, dir_in, beta, adjoint);
 	}
 };

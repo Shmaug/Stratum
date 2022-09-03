@@ -29,7 +29,7 @@ struct Medium : BSDF {
 		r.pdf_fwd = v;
 		r.pdf_rev = v;
 	}
-	void sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
+	Spectrum sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint = false) {
 		if (abs(anisotropy) < 1e-3) {
 			const Real z = 1 - 2 * rnd.x;
 			const Real phi = 2 * M_PI * rnd.y;
@@ -48,6 +48,7 @@ struct Medium : BSDF {
 		r.pdf_rev = v;
 		r.eta = -1;
 		r.roughness = 1 - abs(anisotropy);
+		return v;
 	}
 
 	Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {

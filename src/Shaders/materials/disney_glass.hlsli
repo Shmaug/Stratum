@@ -11,7 +11,6 @@ Spectrum disneyglass_eval_reflect(const Spectrum base_color, const Real F, const
 	return base_color * (F * D * G) / (4 * abs(cos_theta_in));
 }
 Spectrum disneyglass_eval_refract(const Spectrum base_color, const Real F, const Real D, const Real G, const Real cos_theta_in, const Real h_dot_in, const Real h_dot_out, const Real local_eta, const bool adjoint) {
-	const Real eta_factor = adjoint ? (1 / (local_eta * local_eta)) : 1;
 	// Snell-Descartes law predicts that the light will contract/expand
 	// due to the different index of refraction. So the normal BSDF needs
 	// to scale with 1/eta^2. However, the "adjoint" of the BSDF does not have
@@ -23,6 +22,7 @@ Spectrum disneyglass_eval_refract(const Spectrum base_color, const Real F, const
 	// See Chapter 5 of Eric Veach's thesis "Robust Monte Carlo Methods for Light Transport Simulation"
 	// for more details.
 	const Real sqrt_denom = h_dot_in + local_eta * h_dot_out;
+	const Real eta_factor = adjoint ? (1 / (local_eta * local_eta)) : 1;
 	return sqrt(base_color) * (eta_factor * (1 - F) * D * G * abs(h_dot_out * h_dot_in)) / (abs(cos_theta_in) * sqrt_denom * sqrt_denom);
 }
 
@@ -53,10 +53,11 @@ void disneyglass_eval(const DisneyMaterialData bsdf, out MaterialEvalRecord r, c
 	}
 }
 
-void disneyglass_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+Spectrum disneyglass_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 	const Real local_eta = dir_in.z < 0 ? 1/bsdf.eta() : bsdf.eta();
 	const Real aspect = sqrt(1 - 0.9 * bsdf.anisotropic());
 	const float2 alpha = max(0.0001, float2(bsdf.alpha() / aspect, bsdf.alpha() * aspect));
+	r.roughness = bsdf.roughness();
 
 	const Vector3 h = sample_visible_normals(dir_in, alpha.x, alpha.y, rnd.xy);
 
@@ -74,7 +75,9 @@ void disneyglass_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord 
 		r.pdf_rev = disneyglass_reflect_pdf(fresnel_dielectric(h_dot_out, local_eta), D, G_out, r.dir_out.z);
 		r.eta = 0;
 
-		beta *= disneyglass_eval_reflect(bsdf.base_color(), F, D, G_in * G_out, dir_in.z) / r.pdf_fwd;
+		const Spectrum f = disneyglass_eval_reflect(bsdf.base_color(), F, D, G_in * G_out, dir_in.z);
+		beta *= f / r.pdf_fwd;
+		return f;
 	} else {
 		// Refraction
 		r.dir_out = refract(-dir_in, h, 1/local_eta);
@@ -84,7 +87,8 @@ void disneyglass_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord 
 		r.pdf_rev = disneyglass_refract_pdf(fresnel_dielectric(h_dot_out, 1/local_eta), D, G_out, r.dir_out.z, h_dot_out, h_dot_in, 1/local_eta);
 		r.eta = local_eta;
 
-		//beta *= disneyglass_eval_refract(bsdf.base_color(), F, D, G_in * G_out, dir_in.z, h_dot_in, h_dot_out, local_eta, adjoint) / r.pdf_fwd;
+		const Spectrum f = disneyglass_eval_refract(bsdf.base_color(), F, D, G_in * G_out, dir_in.z, h_dot_in, h_dot_out, local_eta, adjoint);
+		beta *= f / r.pdf_fwd;
+		return f;
 	}
-	r.roughness = bsdf.roughness();
 }

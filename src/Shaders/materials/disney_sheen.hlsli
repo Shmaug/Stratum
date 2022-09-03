@@ -15,12 +15,14 @@ void disneysheen_eval(const DisneyMaterialData bsdf, out MaterialEvalRecord r, c
 	r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 }
 
-void disneysheen_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+Spectrum disneysheen_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 	r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
 	if (dir_in.z < 0) r.dir_out = -r.dir_out;
 	r.pdf_fwd = cosine_hemisphere_pdfW(abs(r.dir_out.z));
 	r.pdf_rev = cosine_hemisphere_pdfW(abs(dir_in.z));
 	r.eta = 0;
 	r.roughness = 1;
-	beta *= disneysheen_eval(bsdf, dir_in, r.dir_out, normalize(dir_in + r.dir_out)) / r.pdf_fwd;
+	const Spectrum f = disneysheen_eval(bsdf, dir_in, r.dir_out, normalize(dir_in + r.dir_out));
+	beta *= f / r.pdf_fwd;
+	return f;
 }

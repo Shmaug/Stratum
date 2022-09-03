@@ -121,8 +121,7 @@
 [[vk::binding(19,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
 [[vk::binding(20,1)]] RWByteAddressBuffer gLightTraceSamples;
 [[vk::binding(21,1)]] RWStructuredBuffer<LightPathVertex> gLightPathVertices;
-[[vk::binding(22,1)]] RWStructuredBuffer<LightPathVertex1> gLightPathVertices1;
-[[vk::binding(23,1)]] RWStructuredBuffer<NEERayData> gNEERays;
+[[vk::binding(22,1)]] RWStructuredBuffer<NEERayData> gNEERays;
 
 #include "../../common/path.hlsli"
 
@@ -162,6 +161,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	if (path.path_index >= gOutputExtent.x*gOutputExtent.y) return;
 	path.pixel_coord = index.xy;
 	path.path_length = 1;
+	path.n_diffuse_vertices = 1;
 
 	path.init_rng();
 
@@ -177,10 +177,12 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	path._isect.sd.shape_area = 1; // just needs to be >0 so that its not treated as a volume sample
 
 	path._beta = ls.radiance / ls.pdf;
+	path.eta_scale = 1;
 	path.d = N_kk / ls.pdf;
 	path.G = 1;
 	path.prev_cos_out = 1;
 	path.bsdf_pdf = ls.pdf;
+	path.specular = false;
 
 	if (gConnectToLightPaths) path.store_light_vertex();
 
@@ -231,7 +233,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	if (gMaxPathVertices < 2) return;
 
 	// initialize ray differential
-	if (gSpecializationFlags & BDPT_FLAG_RAY_CONES) {
+	if (gUseRayCones) {
 		RayDifferential ray_differential;
 		ray_differential.radius = 0;
 		ray_differential.spread = 1 / min(gViews[view_index].extent().x, gViews[view_index].extent().y);
@@ -253,15 +255,18 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	path._medium = gViewMediumInstances[view_index];
 
 	path.path_length = 1;
+	path.n_diffuse_vertices = 1;
 	path._beta = 1;
+	path.eta_scale = 1;
 	path.bsdf_pdf = 1 / (gViews[view_index].projection.sensor_area * pow3(path.prev_cos_out));
+	path.specular = true;
 
 	path.init_rng();
 
 	// trace visibility ray
 	path.trace();
 
-	path.d = N_sk(0) / 1;
+	path.d = 1 / pdfWtoA(path.bsdf_pdf, path.G);
 
 	if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eGeometryNormal) gDebugImage[path.pixel_coord] = float4(path._isect.sd.geometry_normal()*.5+.5, 1);
 	else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eShadingNormal)  gDebugImage[path.pixel_coord] = float4(path._isect.sd.shading_normal() *.5+.5, 1);
@@ -400,7 +405,7 @@ void splat_light_vertices(uint3 index : SV_DispatchThreadID, uint group_thread_i
 		const uint li = PathIntegrator::light_vertex_index(path_index, light_length);
 		const LightPathVertex lv = gLightPathVertices[li];
 		if (all(lv.beta()) <= 0) break;
-		LightPathConnection::connect_view(_rng, li, lv, view_index, view_position, view_normal);
+		LightTrace::connect_view(_rng, li, lv, view_index, view_position, view_normal);
 	}
 }
 
@@ -408,7 +413,7 @@ SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void add_light_trace(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	if (all(index.xy < gOutputExtent) && (BDPTDebugMode)gDebugMode != BDPTDebugMode::eViewTraceContribution) {
-		Spectrum c = LightPathConnection::load_sample(index.xy);
+		Spectrum c = LightTrace::load_sample(index.xy);
 		if (any(c < 0) || any(isnan(c))) c = 0;
 		gRadiance[index.xy] += float4(c, 0);
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution || ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1))

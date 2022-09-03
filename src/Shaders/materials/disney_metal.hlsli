@@ -24,7 +24,7 @@ void disneymetal_eval(const DisneyMaterialData bsdf, out MaterialEvalRecord r, c
 	r.pdf_rev = disneymetal_eval_pdf(D, G_out, dir_out.z);
 }
 
-void disneymetal_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
+Spectrum disneymetal_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 	const Real aspect = sqrt(1 - 0.9 * bsdf.anisotropic());
 	const float2 alpha = max(0.0001, float2(bsdf.alpha() / aspect, bsdf.alpha() * aspect));
 
@@ -37,5 +37,7 @@ void disneymetal_sample(const DisneyMaterialData bsdf, out MaterialSampleRecord 
 	r.pdf_rev = disneymetal_eval_pdf(D, G_out, r.dir_out.z);
 	r.eta = 0;
 	r.roughness = bsdf.roughness();
-	beta *= disneymetal_eval(bsdf.base_color(), D, G_in * G_out, dir_in, dot(h, r.dir_out)) / r.pdf_fwd;
+	const Spectrum f = disneymetal_eval(bsdf.base_color(), D, G_in * G_out, dir_in, dot(h, r.dir_out));
+	beta *= f / r.pdf_fwd;
+	return f;
 }

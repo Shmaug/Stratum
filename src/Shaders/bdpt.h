@@ -127,16 +127,23 @@ struct LightPathVertex {
 	uint packed_tangent;
 	float2 uv;
 	uint2 packed_beta;
+	float dL_prev; // dL at previous light vertex (dL_{s+2})
+	float G_rev; // G(s+1 -> s+2)
+	float pdfA_fwd_prev; // P(s+1 <- s+2)
+	uint32_t prev_specular;
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 	SLANG_MUTATING
-	inline void pack_beta(const float3 beta, const uint subpath_length) {
-		packed_beta = uint2(f32tof16(beta[0]) | (f32tof16(beta[1]) << 16), f32tof16(beta[2]) | (subpath_length << 16));
+	inline void pack_beta(const float3 beta, const uint subpath_length, const uint n_diffuse) {
+		packed_beta = uint2(
+			f32tof16(beta[0]) | (f32tof16(beta[1]) << 16),
+			f32tof16(beta[2]) | ((subpath_length&0xFF) << 16) | ((n_diffuse&0xFF) << 24));
 	}
 	inline float3 beta() CONST_CPP {
 		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
 	}
-	inline uint subpath_length() { return packed_beta[1] >> 16; }
+	inline uint subpath_length() { return (packed_beta[1] >> 16)&0xFF; }
+	inline uint n_diffuse_vertices() { return (packed_beta[1] >> 24)&0xFF; }
 	inline bool is_medium() { return material_address_flags & PATH_VERTEX_FLAG_IS_MEDIUM; }
 	inline uint material_address() CONST_CPP { return BF_GET(material_address_flags, 4, 28); }
 
@@ -154,12 +161,6 @@ struct LightPathVertex {
 		return float3(dot(v, t), dot(v, cross(n, t)*((material_address_flags & PATH_VERTEX_FLAG_FLIP_BITANGENT) ? -1 : 1)), dot(v, n));
 	}
 #endif
-};
-struct LightPathVertex1 {
-	float dL_prev; // dL at previous light vertex (dL_{s+2})
-	float G_rev; // G(s+1 -> s+2)
-	float pdfA_fwd_prev; // P(s+1 <- s+2)
-	float pad;
 };
 
 enum class BDPTDebugMode {

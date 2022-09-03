@@ -196,7 +196,7 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		Image::View d = diffuse.image ? diffuse.image : specular.image ? specular.image : transmission.image ? transmission.image : roughness.image;
 		for (int i = 0; i < DISNEY_DATA_N; i++) {
 			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-			mConvertDiffuseSpecularPipeline->descriptor("Output",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+			mConvertDiffuseSpecularPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		}
 		mConvertDiffuseSpecularPipeline->descriptor("gDiffuse") = image_descriptor(diffuse.image ? diffuse.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gSpecular") = image_descriptor(specular.image ? specular.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -237,12 +237,15 @@ Scene::Scene(Node& node) : mNode(node) {
 	mConvertPbrPipeline 				 = make_shared<ComputePipelineState>("material_convert_from_gltf_pbr", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_from_gltf_pbr.spv"));
 	mConvertAlphaToRoughnessPipeline 	 = make_shared<ComputePipelineState>("material_convert_alpha_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_alpha_to_roughness.spv"));
 	mConvertShininessToRoughnessPipeline = make_shared<ComputePipelineState>("material_convert_shininess_to_roughness", make_shared<Shader>(app->window().mInstance.device(), "Shaders/material_convert_shininess_to_roughness.spv"));
+
+	for (const string& arg : app->window().mInstance.find_arguments("scene"))
+		mToLoad.emplace_back(arg);
 }
 
 void Scene::on_inspector_gui() {
 	if (mSceneData) {
 		ImGui::Text("%lu instances", mSceneData->mInstances.size());
-		ImGui::Text("%lu light instances", mSceneData->mLightInstances.size());
+		ImGui::Text("%lu light instances", mSceneData->mLightInstanceMap.size());
 		ImGui::Text("%lu emissive primitives", mSceneData->mEmissivePrimitiveCount);
 		ImGui::Text("%u materials", mSceneData->mMaterialCount);
 	}
@@ -323,9 +326,9 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		instanceInverseTransforms.reserve(mPrevFrame->mInstances.size());
 		instanceMotionTransforms.reserve(mPrevFrame->mInstances.size());
 	}
-	vector<uint32_t> lightInstances;
+	vector<uint32_t> lightInstanceMap;
+	vector<uint32_t> instanceLightMap;
 	vector<float> lightInstancePowers;
-	lightInstances.reserve(1);
 
 	mSceneData->mInstanceNodes.clear();
 
@@ -348,11 +351,16 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		instanceDatas.emplace_back(instance);
 		mSceneData->mInstanceNodes.emplace_back(&prim.node());
 
+		uint32_t light_index = INVALID_INSTANCE;
 		if (emissive_power > 0) {
+			light_index = (uint32_t)lightInstanceMap.size();
 			BF_SET(instanceDatas[instance_index].packed[1], lightInstancePowers.size(), 0, 12);
-			lightInstances.emplace_back(instance_index);
+			lightInstanceMap.emplace_back(instance_index);
 			lightInstancePowers.emplace_back(emissive_power);
 		}
+		instanceLightMap.emplace_back(light_index);
+
+		// transforms
 
 		TransformData prevTransform;
 		if (mPrevFrame) {
@@ -609,8 +617,10 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	}
 	if (!mSceneData->mMaterialData || mSceneData->mMaterialData.size_bytes() < materialData.data.size() * sizeof(uint32_t))
 		mSceneData->mMaterialData = make_shared<Buffer>(commandBuffer.mDevice, "gMaterialData", max<size_t>(1, materialData.data.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	if (!mSceneData->mLightInstances || mSceneData->mLightInstances.size() < lightInstances.size())
-		mSceneData->mLightInstances = make_shared<Buffer>(commandBuffer.mDevice, "gLightInstances", max<size_t>(1, lightInstances.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mSceneData->mLightInstanceMap || mSceneData->mLightInstanceMap.size() < lightInstanceMap.size())
+		mSceneData->mLightInstanceMap = make_shared<Buffer>(commandBuffer.mDevice, "gLightInstanceMap", max<size_t>(1, lightInstanceMap.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
+	if (!mSceneData->mInstanceLightMap || mSceneData->mInstanceLightMap.size() < instanceLightMap.size())
+		mSceneData->mInstanceLightMap = make_shared<Buffer>(commandBuffer.mDevice, "gInstanceLightMap", max<size_t>(1, instanceLightMap.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 	if (!mSceneData->mDistributionData || mSceneData->mDistributionData.size() < mSceneData->mResources.distribution_data_size)
 		mSceneData->mDistributionData = make_shared<Buffer>(commandBuffer.mDevice, "gDistributionData", max<size_t>(1, mSceneData->mResources.distribution_data_size) * sizeof(float), vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
@@ -619,7 +629,8 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	memcpy(mSceneData->mInstanceInverseTransforms.data(), instanceInverseTransforms.data(), instanceInverseTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mInstanceMotionTransforms.data(), instanceMotionTransforms.data(), instanceMotionTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mMaterialData.data(), materialData.data.data(), materialData.data.size() * sizeof(uint32_t));
-	memcpy(mSceneData->mLightInstances.data(), lightInstances.data(), lightInstances.size() * sizeof(uint32_t));
+	if (lightInstanceMap.size()) memcpy(mSceneData->mLightInstanceMap.data(), lightInstanceMap.data(), lightInstanceMap.size() * sizeof(uint32_t));
+	if (instanceLightMap.size()) memcpy(mSceneData->mInstanceLightMap.data(), instanceLightMap.data(), instanceLightMap.size() * sizeof(uint32_t));
 	for (const auto& [buf, address] : mSceneData->mResources.distribution_data_map)
 		commandBuffer.copy_buffer(buf, Buffer::View<float>(mSceneData->mDistributionData, address, buf.size()));
 

@@ -333,7 +333,7 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	}
 
 	mPushConstants.gEnvironmentMaterialAddress = mCurFrame->mSceneData->mEnvironmentMaterialAddress;
-	mPushConstants.gLightCount = (uint32_t)mCurFrame->mSceneData->mLightInstances.size();
+	mPushConstants.gLightCount = (uint32_t)mCurFrame->mSceneData->mLightInstanceMap.size();
 	mPushConstants.gLightDistributionPDF = mCurFrame->mSceneData->mLightDistributionPDF;
 	mPushConstants.gLightDistributionCDF = mCurFrame->mSceneData->mLightDistributionCDF;
 
@@ -347,7 +347,7 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gMaterialData"), mCurFrame->mSceneData->mMaterialData);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstances);
+	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
 	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.images)
 		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
@@ -482,10 +482,8 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mCurFrame->mFrameNumber = 0;
 		}
 		const uint32_t light_vertex_count = (sampling_flags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS) ? pixel_count * max(mPushConstants.gMaxLightPathVertices,1u) : 1;
-		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(LightPathVertex)) {
+		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(LightPathVertex))
 			mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(LightPathVertex),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-			mCurFrame->mPathData["gLightPathVertices1"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices1", light_vertex_count * sizeof(LightPathVertex1), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-		}
 		const uint32_t nee_ray_count = (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) ? pixel_count * (max(mPushConstants.gMaxPathVertices,3u)-2)  : 1;
 		if (!mCurFrame->mPathData["gNEERays"] || mCurFrame->mPathData.at("gNEERays").size_bytes() < nee_ray_count * sizeof(NEERayData))
 			mCurFrame->mPathData["gNEERays"] = make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", nee_ray_count * sizeof(NEERayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);

@@ -61,7 +61,8 @@ public:
 		Buffer::View<TransformData> mInstanceTransforms;
 		Buffer::View<TransformData> mInstanceInverseTransforms;
 		Buffer::View<TransformData> mInstanceMotionTransforms;
-		Buffer::View<uint32_t> mLightInstances;
+		Buffer::View<uint32_t> mLightInstanceMap;
+		Buffer::View<uint32_t> mInstanceLightMap;
 		Buffer::View<float> mDistributionData;
 		Buffer::View<uint32_t> mInstanceIndexMap;
 
@@ -103,6 +104,7 @@ public:
 			"Mitsuba Scenes (.xml)", "*.xml",
 			"glTF Scenes (.gltf .glb)", "*.gltf *.glb",
 			"Mitsuba Volumes (.vol)" , "*.vol",
+			"NVDB Volume (.nvdb)" , "*.nvdb",
 	#ifdef STRATUM_ENABLE_ASSIMP
 			"Autodesk (.fbx)", "*.fbx",
 			"Wavefront Object Files (.obj)", "*.obj",
@@ -110,7 +112,6 @@ public:
 			"Stereolithography Files (.stl)", "*.stl",
 			"Blender Scenes (.blend)", "*.blend",
 	#endif
-			"NVDB Volume (.nvdb)" , "*.nvdb",
 	#ifdef STRATUM_ENABLE_OPENVDB
 			"VDB Volumes (.vdb)", "*.vdb",
 	#endif

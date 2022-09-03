@@ -21,7 +21,7 @@ struct LightSampleRecord {
 	inline bool is_environment() { return instance_index() == INVALID_INSTANCE; }
 };
 
-inline uint sample_light(out float pdf, const float rnd) {
+uint sample_light(out float pdf, const float rnd) {
 	int li;
 	if (gSampleLightPower) {
 		li = dist1d_sample(gDistributions, gLightDistributionCDF, gLightCount, rnd);
@@ -34,7 +34,7 @@ inline uint sample_light(out float pdf, const float rnd) {
 	return gLightInstances[li];
 }
 
-inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const float3 ref_pos) {
+void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const float3 ref_pos) {
 	if (gHasEnvironment && (!gHasEmissives || rnd.w <= gEnvironmentSampleProbability)) {
 		// sample environment
 		Environment env;
@@ -149,7 +149,43 @@ inline void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, 
 	}
 }
 
-inline void point_on_light_pdf(inout float pdf, out bool pdf_area_measure, const IntersectionVertex _isect) {
+Real shape_pdf(const Vector3 origin, const Real shape_area, const PointSample p, out bool area_measure) {
+	if (p.instance_index() == INVALID_INSTANCE) {
+		area_measure = false;
+		return 0;
+	}
+
+	const InstanceData instance = gInstances[p.instance_index()];
+	switch (instance.type()) {
+		case INSTANCE_TYPE_TRIANGLES:
+			area_measure = true;
+			return 1 / (shape_area * instance.prim_count());
+
+		case INSTANCE_TYPE_SPHERE:
+			if (gUniformSphereSampling) {
+				area_measure = true;
+				return 1/shape_area;
+			} else {
+				const Vector3 center = Vector3(
+					gInstanceTransforms[p.instance_index()].m[0][3],
+					gInstanceTransforms[p.instance_index()].m[1][3],
+					gInstanceTransforms[p.instance_index()].m[2][3]);
+				const Vector3 to_center = center - origin;
+				const Real sin_elevation_max_sq = pow2(instance.radius()) / dot(to_center,to_center);
+				const Real cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
+				area_measure = false;
+				return 1/(2 * M_PI * (1 - cos_elevation_max));
+			}
+			break;
+
+		default:
+		case INSTANCE_TYPE_VOLUME:
+			area_measure = false;
+			return 1;
+	}
+}
+
+void point_on_light_pdf(inout float pdf, out bool pdf_area_measure, const IntersectionVertex _isect) {
 	if (_isect.instance_index() == INVALID_INSTANCE) {
 		if (!gHasEnvironment) { pdf = 0; return; }
 		if (gHasEmissives) pdf *= gEnvironmentSampleProbability;

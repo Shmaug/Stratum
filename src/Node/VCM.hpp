@@ -3,17 +3,49 @@
 #include "Scene.hpp"
 #include "Denoiser.hpp"
 
-#include <Shaders/bdpt.h>
+#include <Shaders/vcm.h>
 
 namespace stm {
 
-class BDPT {
+template<typename T>
+struct FrameResourcePool {
+	list<shared_ptr<T>> mResources;
+	shared_ptr<T> mPrev, mCur;
+
+	inline void advance(const shared_ptr<Fence>& fence) {
+		// reuse old frame resources
+		ProfilerRegion ps("FrameResourcePool::advance");
+		if (mCur) {
+			mResources.push_front(mCur);
+			mPrev = mCur;
+		}
+		mCur.reset();
+
+		for (auto it = mResources.begin(); it != mResources.end(); it++) {
+			if (*it != mPrev && (*it)->mFence->status() == vk::Result::eSuccess) {
+				mCur = *it;
+				mResources.erase(it);
+				break;
+			}
+		}
+		if (!mCur) mCur = make_shared<T>();
+
+		if (mPrev)
+			mCur->mFrameNumber = mPrev->mFrameNumber + 1;
+		else
+			mCur->mFrameNumber = 0;
+
+		mCur->mFence = fence;
+	}
+};
+
+class VCM {
 public:
-	STRATUM_API BDPT(Node& node);
+	STRATUM_API VCM(Node& node);
 
 	inline Node& node() const { return mNode; }
 
-	inline Image::View prev_result() { return mPrevFrame ? mPrevFrame->mTonemapResult : Image::View(); }
+	inline Image::View prev_result() { return mResources.mPrev ? mResources.mPrev->mTonemapResult : Image::View(); }
 
 	STRATUM_API void create_pipelines();
 
@@ -25,12 +57,8 @@ private:
 	Node& mNode;
 
 	enum RenderPipelineIndex {
-		eSamplePhotons,
-		eSampleVisibility,
-		ePathTraceLoop,
-		ePresampleLights,
-		eTraceNEE,
-		eSplatLightVertices,
+		eLightTrace,
+		eCameraTrace,
 		eAddLightTrace,
 		ePipelineCount
 	};
@@ -41,19 +69,19 @@ private:
 
 	array<unordered_map<string, uint32_t>, 2> mDescriptorMap;
 	array<shared_ptr<DescriptorSetLayout>, 2> mDescriptorSetLayouts;
-	BDPTPushConstants mPushConstants;
+	VCMPushConstants mPushConstants;
 
 	bool mHalfColorPrecision = false;
 	bool mPauseRendering = false;
 	bool mRandomPerFrame = true;
 	bool mDenoise = true;
-	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_SAMPLE_BSDFS | BDPT_FLAG_COHERENT_RR;
-	BDPTDebugMode mDebugMode = BDPTDebugMode::eNone;
-	uint32_t mPathTraceKernelIterations = 0;
+	uint32_t mSamplingFlags = VCM_FLAG_REMAP_THREADS | VCM_FLAG_USE_VC | VCM_FLAG_USE_MIS;
+	VCMDebugMode mDebugMode = VCMDebugMode::eNone;
 	uint32_t mLightTraceQuantization = 65536;
 
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
+		uint32_t mFrameNumber;
 
 		shared_ptr<DescriptorSet> mSceneDescriptors;
 		shared_ptr<DescriptorSet> mViewDescriptors;
@@ -76,7 +104,6 @@ private:
 		Image::View mDenoiseResult;
 		Buffer::View<uint4> mTonemapMax;
 		Image::View mTonemapResult;
-		uint32_t mFrameNumber;
 	};
 
 	Buffer::View<uint32_t> mRayCount;
@@ -84,8 +111,7 @@ private:
 	float mRaysPerSecond;
 	float mRaysPerSecondTimer;
 
-	list<shared_ptr<FrameResources>> mFrameResourcePool;
-	shared_ptr<FrameResources> mPrevFrame, mCurFrame;
+	FrameResourcePool<FrameResources> mResources;
 };
 
 }
