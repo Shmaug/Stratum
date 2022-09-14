@@ -139,13 +139,17 @@ public:
 	}
 
 	template<typename T>
-	inline static void enum_dropdown(const char* label, T& selected, const uint32_t count, auto index_to_str) {
+	inline static bool enum_dropdown(const char* label, T& selected, const uint32_t count, auto index_to_str) {
+		bool ret = false;
 		if (ImGui::BeginCombo(label, index_to_str((uint32_t)selected).c_str())) {
 			for (uint32_t i = 0; i < count; i++)
-				if (ImGui::Selectable(index_to_str(i).c_str(), (uint32_t)selected == i))
+				if (ImGui::Selectable(index_to_str(i).c_str(), (uint32_t)selected == i)) {
 					selected = (T)i;
+					ret = true;
+				}
 			ImGui::EndCombo();
 		}
+		return ret;
 	}
 
 private:

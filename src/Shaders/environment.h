@@ -36,21 +36,13 @@ struct Environment {
 	SLANG_MUTATING
 	inline void load(uint address) {
 		emission.load(address);
-		if (emission.has_image()) {
+		if (emission.has_image() && !gSampleEnvironmentMap) {
 			const uint4 data = gMaterialData.Load4(address);
 			marginal_pdf = data[0];
 			row_pdf 	 = data[1];
 			marginal_cdf = data[2];
 			row_cdf 	 = data[3];
 		}
-	}
-
-	inline Real eval_pdf(const Vector3 dir_out) {
-		if (!emission.has_image()) return uniform_sphere_pdfW();
-		const float2 uv = cartesian_to_spherical_uv(dir_out);
-		uint w, h;
-		emission.image().GetDimensions(w, h);
-		return dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 	}
 
 	inline Spectrum eval(const Vector3 dir_out) {
@@ -63,19 +55,41 @@ struct Environment {
 
 	inline Spectrum sample(const float2 rnd, out Vector3 dir_out, out Real pdf) {
 		if (!emission.has_image()) {
-			const float z = 1 - 2 * rnd.x;
-			const float r_ = sqrt(max(0, 1 - z * z));
-			const float phi = 2 * M_PI * rnd.y;
-			dir_out = spherical_uv_to_cartesian(sample_uniform_sphere(rnd.x, rnd.y));
+			const float2 uv = sample_uniform_sphere(rnd.x, rnd.y);
+			dir_out = spherical_uv_to_cartesian(uv);
 			pdf = uniform_sphere_pdfW();
 			return emission.value;
+		} else {
+			uint w, h;
+			emission.image().GetDimensions(w, h);
+			float2 uv;
+			if (gSampleEnvironmentMap) {
+				uv = sample_texel(emission.image(), rnd, pdf);
+			} else {
+				uv = dist2d_sample(gDistributions, marginal_cdf, row_cdf, w, h, rnd);
+				pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv);
+			}
+			dir_out = spherical_uv_to_cartesian(uv);
+			pdf /= (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+			return emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
 		}
-		uint w, h;
-		emission.image().GetDimensions(w, h);
-		const float2 uv = dist2d_sample(gDistributions, marginal_cdf, row_cdf, w, h, rnd);
-		dir_out = spherical_uv_to_cartesian(uv);
-		pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv) / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
-		return emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
+	}
+
+	inline Real eval_pdf(const Vector3 dir_out) {
+		if (!emission.has_image())
+			return uniform_sphere_pdfW();
+		else {
+			const float2 uv = cartesian_to_spherical_uv(dir_out);
+			Real pdf;
+			if (gSampleEnvironmentMap)
+				pdf = sample_texel_pdf(emission.image(), uv);
+			else {
+				uint w, h;
+				emission.image().GetDimensions(w, h);
+				pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv);
+			}
+			return pdf / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
+		}
 	}
 #endif
 };
@@ -85,7 +99,7 @@ struct Environment {
 inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path& filename) {
 	ImageData image = load_image_data(commandBuffer.mDevice, filename, false);
 	Environment e;
-	e.emission = make_image_value3(make_shared<Image>(commandBuffer, filename.stem().string(), image, 1), float3::Ones());
+	e.emission = make_image_value3(make_shared<Image>(commandBuffer, filename.stem().string(), image), float3::Ones());
 
 	Buffer::View<float> marginalPDF = make_shared<Buffer>(commandBuffer.mDevice, "marginal_pdf_tmp", image.extent.height*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	Buffer::View<float> rowPDF      = make_shared<Buffer>(commandBuffer.mDevice, "row_pdf_tmp"     , image.extent.width*image.extent.height*sizeof(float), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);

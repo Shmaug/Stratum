@@ -23,7 +23,7 @@ BDPT::BDPT(Node& node) : mNode(node) {
 void BDPT::create_pipelines() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
-	float exposure = 1;
+	float exposure = 0;
 	float exposure_alpha = 0.1f;
 	uint32_t tonemapper = 0;
 	if (mTonemapPipeline) {
@@ -31,9 +31,8 @@ void BDPT::create_pipelines() {
 		exposure_alpha = mTonemapPipeline->push_constant<float>("gExposureAlpha");
 		tonemapper = mTonemapPipeline->specialization_constant<uint32_t>("gMode");
 	} else {
-		mPushConstants.gMinPathVertices = 3;
+		mPushConstants.gMinPathVertices = 4;
 		mPushConstants.gMaxPathVertices = 8;
-		mPushConstants.gMaxLightPathVertices = 4;
 		mPushConstants.gMaxNullCollisions = 64;
 		mPushConstants.gLightPathCount = 64;
 		mPushConstants.gNEEReservoirM = 1;
@@ -72,7 +71,7 @@ void BDPT::create_pipelines() {
 		process_shader(mRenderPipelines[ePresampleLights]   , src_path, "presample_lights"    , args);
 		process_shader(mRenderPipelines[eTraceNEE]          , src_path, "trace_nee"           , args);
 		process_shader(mRenderPipelines[ePathTraceLoop]     , src_path, "path_trace_loop"     , args);
-		process_shader(mRenderPipelines[eSplatLightVertices], src_path, "splat_light_vertices", args);
+		process_shader(mRenderPipelines[eConnect]           , src_path, "connect"             , args);
 		process_shader(mRenderPipelines[eAddLightTrace]     , src_path, "add_light_trace"     , args);
 
 		for (thread& t : threads)
@@ -112,7 +111,7 @@ void BDPT::create_pipelines() {
 	mTonemapMaxReducePipeline = make_shared<ComputePipelineState>("tonemap reduce", make_shared<Shader>(instance->device(), "Shaders/tonemap_reduce_max.spv"));
 
 	mRayCount = make_shared<Buffer>(instance->device(), "gCounters", sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
-	memset(mRayCount.data(), 0, mRayCount.size_bytes());
+	mRayCount[0] = 0;
 	mRaysPerSecond = 0;
 	mRaysPerSecondTimer = 0;
 }
@@ -137,6 +136,8 @@ void BDPT::on_inspector_gui() {
 		ImGui::Unindent();
 	}
 
+	ImGui::Checkbox("Force Lambertian", &mForceLambertian);
+
 	ImGui::CheckboxFlags("Count Rays/second", &mSamplingFlags, BDPT_FLAG_COUNT_RAYS);
 	if (mSamplingFlags & BDPT_FLAG_COUNT_RAYS) {
 		const auto [rps, ext] = format_number(mRaysPerSecond);
@@ -157,30 +158,45 @@ void BDPT::on_inspector_gui() {
 		ImGui::CheckboxFlags("Coherent RR", &mSamplingFlags, BDPT_FLAG_COHERENT_RR);
 		ImGui::CheckboxFlags("Coherent RNG", &mSamplingFlags, BDPT_FLAG_COHERENT_RNG);
 		ImGui::CheckboxFlags("Ray Cone LoD", &mSamplingFlags, BDPT_FLAG_RAY_CONES);
-		ImGui::CheckboxFlags("BSDF Sampling", &mSamplingFlags, BDPT_FLAG_SAMPLE_BSDFS);
+		ImGui::CheckboxFlags("Alpha Test", &mSamplingFlags, BDPT_FLAG_ALPHA_TEST);
+		ImGui::CheckboxFlags("Normal Maps", &mSamplingFlags, BDPT_FLAG_NORMAL_MAPS);
 
+		ImGui::CheckboxFlags("BSDF Sampling", &mSamplingFlags, BDPT_FLAG_SAMPLE_BSDFS);
 		ImGui::CheckboxFlags("Connect Light Paths to Views", &mSamplingFlags, BDPT_FLAG_CONNECT_TO_VIEWS);
 		ImGui::CheckboxFlags("Connect Light Paths to View Paths", &mSamplingFlags, BDPT_FLAG_CONNECT_TO_LIGHT_PATHS);
-		if (mSamplingFlags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
-			uint32_t mn = 1;
-			ImGui::PushItemWidth(40);
-			ImGui::DragScalar("Light Path Count", ImGuiDataType_U32, &mPushConstants.gLightPathCount, 1, &mn);
-			ImGui::DragScalar("Max Light Path Length", ImGuiDataType_U32, &mPushConstants.gMaxLightPathVertices, 1, &mn);
-			ImGui::PopItemWidth();
-		} else if (!(mSamplingFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS))
+		if (!(mSamplingFlags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)))
 			ImGui::CheckboxFlags("NEE", &mSamplingFlags, BDPT_FLAG_NEE);
 
 		if (mSamplingFlags & (BDPT_FLAG_NEE|BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
 			ImGui::Indent();
-			if (mSamplingFlags & BDPT_FLAG_CONNECT_TO_VIEWS) {
-				ImGui::SetNextItemWidth(40);
-				ImGui::InputScalar("Light Trace Quantization", ImGuiDataType_U32, &mLightTraceQuantization);
-				ImGui::CheckboxFlags("Defer Light Trace Rays", &mSamplingFlags, BDPT_FLAG_DEFER_LIGHT_TRACE_RAYS);
-				ImGui::CheckboxFlags("Light Trace Depth Check", &mSamplingFlags, BDPT_FLAG_LIGHT_TRACE_USE_Z);
-			}
+			ImGui::CheckboxFlags("Sample Environment Map Directly", &mSamplingFlags, BDPT_FLAG_SAMPLE_ENV_TEXTURE);
 			ImGui::CheckboxFlags("Multiple Importance", &mSamplingFlags, BDPT_FLAG_MIS);
 			if (mPushConstants.gLightCount > 0)
 				ImGui::CheckboxFlags("Sample Light Power", &mSamplingFlags, BDPT_FLAG_SAMPLE_LIGHT_POWER);
+
+			if (mSamplingFlags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
+				ImGui::CheckboxFlags("Defer Connections", &mSamplingFlags, BDPT_FLAG_DEFER_CONNECTIONS);
+				if (mSamplingFlags & BDPT_FLAG_CONNECT_TO_VIEWS) {
+					if (mSamplingFlags & BDPT_FLAG_DEFER_CONNECTIONS)
+						ImGui::CheckboxFlags("View Connections Use Visibility", &mSamplingFlags, BDPT_FLAG_LIGHT_TRACE_USE_Z);
+					ImGui::SetNextItemWidth(40);
+					ImGui::InputScalar("Light Trace Quantization", ImGuiDataType_U32, &mLightTraceQuantization);
+				}
+
+				ImGui::CheckboxFlags("Light Vertex Cache", &mSamplingFlags, BDPT_FLAG_LIGHT_VERTEX_CACHE);
+				if (mSamplingFlags & BDPT_FLAG_LIGHT_VERTEX_CACHE) {
+					uint32_t mn = 1;
+					ImGui::SetNextItemWidth(40);
+					ImGui::DragScalar("Light Path Count", ImGuiDataType_U32, &mPushConstants.gLightPathCount, 1, &mn);
+					ImGui::CheckboxFlags("Light Vertex Reservoir Sampling", &mSamplingFlags, BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS);
+					if (mSamplingFlags & BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS) {
+						ImGui::SetNextItemWidth(40);
+						ImGui::DragScalar("Light Vertex Reservoir M", ImGuiDataType_U32, &mPushConstants.gLightVertexReservoirM);
+					}
+				}
+
+			}
+
 			if (mSamplingFlags & BDPT_FLAG_NEE) {
 				if (mPushConstants.gEnvironmentMaterialAddress != -1 && mPushConstants.gLightCount > 0) {
 					ImGui::SetNextItemWidth(40);
@@ -246,7 +262,7 @@ void BDPT::on_inspector_gui() {
 				denoiser->reset_accumulation();
 		Gui::enum_dropdown("Tone Map", mTonemapPipeline->specialization_constant<uint32_t>("gMode"), (uint32_t)TonemapMode::eTonemapModeCount, [](uint32_t i){ return to_string((TonemapMode)i); });
 		ImGui::PushItemWidth(40);
-		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, 0, 10);
+		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, -10, 10);
 		ImGui::DragFloat("Exposure Alpha", &mTonemapPipeline->push_constant<float>("gExposureAlpha"), .1f, 0, 1);
 		ImGui::PopItemWidth();
 		ImGui::Checkbox("Gamma Correct", reinterpret_cast<bool*>(&mTonemapPipeline->specialization_constant<uint32_t>("gGammaCorrection")));
@@ -402,6 +418,9 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		});
 	}
 
+	if (!(mSamplingFlags & BDPT_FLAG_LIGHT_VERTEX_CACHE))
+		mPushConstants.gLightPathCount = extent.width * extent.height;
+
 	// per-frame push constants
 	BDPTPushConstants push_constants = mPushConstants;
 	push_constants.gOutputExtent = uint2(extent.width, extent.height);
@@ -432,11 +451,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 
 		if (push_constants.gLightCount == 0 && push_constants.gEnvironmentMaterialAddress == -1)
-			sampling_flags &= ~(BDPT_FLAG_NEE|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS|BDPT_FLAG_CONNECT_TO_VIEWS);
+			sampling_flags &= ~(BDPT_FLAG_NEE|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS|BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_DEFER_CONNECTIONS);
 		else if (sampling_flags & (BDPT_FLAG_CONNECT_TO_LIGHT_PATHS|BDPT_FLAG_CONNECT_TO_VIEWS)) {
-			sampling_flags &= ~BDPT_FLAG_NEE; // no NEE when using bdpt
 			sampling_flags |= BDPT_FLAG_UNIFORM_SPHERE_SAMPLING;
-		}
+			sampling_flags &= ~BDPT_FLAG_NEE; // no NEE when using bdpt
+			if (!(sampling_flags & BDPT_FLAG_LIGHT_VERTEX_CACHE))
+				sampling_flags &= ~BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS;
+		} else
+			sampling_flags &= ~(BDPT_FLAG_DEFER_CONNECTIONS|BDPT_FLAG_LIGHT_VERTEX_CACHE|BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS);
 
 		if (!(sampling_flags & BDPT_FLAG_NEE)) {
 			sampling_flags &= ~BDPT_FLAG_PRESAMPLE_LIGHTS;
@@ -455,6 +477,10 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		p->specialization_constant<uint32_t>("gDebugMode") = (uint32_t)mDebugMode;
 		p->specialization_constant<uint32_t>("gKernelIterationCount") = mPathTraceKernelIterations;
 		p->specialization_constant<uint32_t>("gLightTraceQuantization") = mLightTraceQuantization;
+		if (mForceLambertian)
+			p->specialization_constant<uint32_t>("FORCE_LAMBERTIAN") = mForceLambertian;
+		else
+			p->erase_specialization_constant("FORCE_LAMBERTIAN");
 	}
 
 	// allocate data
@@ -470,8 +496,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mCurFrame->mDebugImage 	  = make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, fmt,                       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
 			mCurFrame->mTonemapResult = make_shared<Image>(commandBuffer.mDevice, "gOutput",     extent, fmt,                       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 
-			mCurFrame->mTonemapMax    = make_shared<Buffer>(commandBuffer.mDevice, "gMax", sizeof(uint4)*3, vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY),
-			mCurFrame->mSelectionData = make_shared<Buffer>(commandBuffer.mDevice, "gSelectionData", sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU),
 			mCurFrame->mPathData["gVisibility"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		pixel_count * sizeof(VisibilityInfo), 		   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gPathStates"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gPathStates", 		pixel_count * sizeof(PathState), 			   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gPathStates1"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gPathStates1",		pixel_count * sizeof(PathState1), 			   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
@@ -480,15 +504,27 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mCurFrame->mPathData["gReservoirSamples"]	= make_shared<Buffer>(commandBuffer.mDevice, "gReservoirSamples",   pixel_count * sizeof(uint4), 	    		   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gLightTraceSamples"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",  pixel_count * sizeof(float4), 				   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mFrameNumber = 0;
+
+			mCurFrame->mTonemapMax    = make_shared<Buffer>(commandBuffer.mDevice, "gMax", sizeof(uint4)*3, vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mSelectionData = make_shared<Buffer>(commandBuffer.mDevice, "gSelectionData", sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU);
 		}
-		const uint32_t light_vertex_count = (sampling_flags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS) ? pixel_count * max(mPushConstants.gMaxLightPathVertices,1u) : 1;
-		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(LightPathVertex))
-			mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(LightPathVertex),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-		const uint32_t nee_ray_count = (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) ? pixel_count * (max(mPushConstants.gMaxPathVertices,3u)-2)  : 1;
+
+		const uint32_t light_vertex_count = (sampling_flags & (BDPT_FLAG_CONNECT_TO_LIGHT_PATHS|BDPT_FLAG_DEFER_CONNECTIONS)) ? pixel_count * max(mPushConstants.gMaxPathVertices,1u) : 1;
+		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(PathVertex)) {
+			mCurFrame->mPathData["gLightPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+			mCurFrame->mPathData["gLightPathVertexCount"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertexCount",  sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+		}
+		const uint32_t view_vertex_count = (sampling_flags & BDPT_FLAG_DEFER_CONNECTIONS) ? pixel_count * max(mPushConstants.gMaxPathVertices,1u) : 1;
+		if (!mCurFrame->mPathData["gViewPathVertices"] || mCurFrame->mPathData.at("gViewPathVertices").size_bytes() < view_vertex_count * sizeof(PathVertex))
+			mCurFrame->mPathData["gViewPathVertices"]  = make_shared<Buffer>(commandBuffer.mDevice, "gViewPathVertices",  view_vertex_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
+
+		const uint32_t nee_ray_count = (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) ? pixel_count * (max(mPushConstants.gMaxPathVertices,3u)-2) : 1;
 		if (!mCurFrame->mPathData["gNEERays"] || mCurFrame->mPathData.at("gNEERays").size_bytes() < nee_ray_count * sizeof(NEERayData))
 			mCurFrame->mPathData["gNEERays"] = make_shared<Buffer>(commandBuffer.mDevice, "gNEERays", nee_ray_count * sizeof(NEERayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
-		if (!mCurFrame->mPathData["gPresampledLights"] || mCurFrame->mPathData.at("gPresampledLights").size() < max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize))
-			mCurFrame->mPathData["gPresampledLights"] = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize) * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+
+		const uint32_t presampled_light_count = (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS) ? max(1u,mPushConstants.gLightPresampleTileCount*mPushConstants.gLightPresampleTileSize) : 1;
+		if (!mCurFrame->mPathData["gPresampledLights"] || mCurFrame->mPathData.at("gPresampledLights").size() < presampled_light_count)
+			mCurFrame->mPathData["gPresampledLights"] = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", presampled_light_count * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	}
 
 	// set descriptors
@@ -525,12 +561,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	mCurFrame->mDebugImage.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 
 	// trace light paths
-	if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
+	if (sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS) && push_constants.gMaxPathVertices > 2) {
 		auto lt = mCurFrame->mPathData.at("gLightTraceSamples");
 		auto lv = mCurFrame->mPathData.at("gLightPathVertices");
+		auto lc = mCurFrame->mPathData.at("gLightPathVertexCount");
 		commandBuffer->fillBuffer(**lt.buffer(), lt.offset(), lt.size_bytes(), 0);
 		commandBuffer->fillBuffer(**lv.buffer(), lv.offset(), lv.size_bytes(), 0);
-		commandBuffer.barrier({ lv, lt }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		commandBuffer->fillBuffer(**lc.buffer(), lc.offset(), lc.size_bytes(), 0);
+		commandBuffer.barrier({ lv, lt, lc }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 
 		//vk::Extent3D lightExtent;
 		//const uint32_t n = (mPushConstants.gLightPathCount + 31) / 32;
@@ -546,12 +584,12 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			commandBuffer.dispatch_over(extent);
 		}
 
-		if (push_constants.gMaxLightPathVertices > 1 && mPathTraceKernelIterations > 0) {
+		if (mPathTraceKernelIterations > 0) {
 			ProfilerRegion ps("Trace light paths", commandBuffer);
 			mRenderPipelines[ePathTraceLoop]->specialization_constant<uint32_t>("gSpecializationFlags") = (sampling_flags | BDPT_FLAG_TRACE_LIGHT) & ~BDPT_FLAG_RAY_CONES;
 			commandBuffer.bind_pipeline(mRenderPipelines[ePathTraceLoop]->get_pipeline(mDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
-			for (uint i = 2; i <= push_constants.gMaxLightPathVertices; i += mPathTraceKernelIterations) {
+			for (uint i = 2; i <= push_constants.gMaxPathVertices; i += mPathTraceKernelIterations) {
 				commandBuffer.barrier({
 					mCurFrame->mPathData.at("gPathStates"),
 					mCurFrame->mPathData.at("gPathStates1"),
@@ -576,19 +614,29 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// barriers + clearing
 	{
+		if (sampling_flags & BDPT_FLAG_DEFER_CONNECTIONS) {
+			auto lv = mCurFrame->mPathData.at("gViewPathVertices");
+			commandBuffer->fillBuffer(**lv.buffer(), lv.offset(), lv.size_bytes(), 0);
+			commandBuffer.barrier({ lv }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
+		} else if (sampling_flags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)
+			commandBuffer.barrier({ mCurFrame->mPathData.at("gLightPathVertices"), mCurFrame->mPathData.at("gLightPathVertexCount") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+
 		if (mPathTraceKernelIterations > 0 && sampling_flags & (BDPT_FLAG_CONNECT_TO_VIEWS|BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)) {
 			commandBuffer.barrier({
 				mCurFrame->mPathData.at("gPathStates"),
 				mCurFrame->mPathData.at("gPathStates1")
 			}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 		}
+
 		if (sampling_flags & BDPT_FLAG_PRESAMPLE_LIGHTS)
 			commandBuffer.barrier({ mCurFrame->mPathData.at("gPresampledLights") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+
 		if (sampling_flags & BDPT_FLAG_DEFER_NEE_RAYS) {
 			auto v = mCurFrame->mPathData.at("gNEERays");
 			commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
 			commandBuffer.barrier({ mCurFrame->mPathData.at("gNEERays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
 		}
+
 		if (sampling_flags & (BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE|BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)) {
 			commandBuffer.barrier({
 				mPrevFrame->mPathData.at("gVisibility"),
@@ -640,13 +688,17 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 	}
 
-	// trace view connections
-	if (sampling_flags & BDPT_FLAG_DEFER_LIGHT_TRACE_RAYS) {
-		commandBuffer.barrier({ mCurFrame->mPathData.at("gVisibility") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-		ProfilerRegion ps("Splat light vertices", commandBuffer);
-		commandBuffer.bind_pipeline(mRenderPipelines[eSplatLightVertices]->get_pipeline(mDescriptorSetLayouts));
+	// trace bdpt connections
+	if (sampling_flags & BDPT_FLAG_DEFER_CONNECTIONS) {
+		commandBuffer.barrier({
+			mCurFrame->mPathData.at("gVisibility"),
+			mCurFrame->mPathData.at("gLightPathVertices"),
+			mCurFrame->mPathData.at("gViewPathVertices")
+		}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		ProfilerRegion ps("Vertex connections", commandBuffer);
+		commandBuffer.bind_pipeline(mRenderPipelines[eConnect]->get_pipeline(mDescriptorSetLayouts));
 		bind_descriptors_and_push_constants();
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Splat light vertices");
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Vertex connections");
 		commandBuffer.dispatch_over(extent);
 	}
 

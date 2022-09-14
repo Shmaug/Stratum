@@ -6,13 +6,19 @@
 
 struct Material {
     ImageValue4 data[DISNEY_DATA_N];
+	Image::View bump_image;
+	float bump_strength;
+	bool alpha_test;
 
     inline void store(ByteAppendBuffer& bytes, MaterialResources& resources) const {
 		for (int i = 0; i < DISNEY_DATA_N; i++)
         	data[i].store(bytes, resources);
+		bytes.Append(resources.get_index(bump_image));
+		bytes.Appendf(bump_strength);
     }
     inline void inspector_gui() {
 		ImGui::ColorEdit3("Base Color"        , data[0].value.data());
+		ImGui::PushItemWidth(80);
 		ImGui::DragFloat("Emission"           , &data[0].value[3]);
 		ImGui::DragFloat("Metallic"           , &data[1].value[0], 0.1, 0, 1);
 		ImGui::DragFloat("Roughness"          , &data[1].value[1], 0.1, 0, 1);
@@ -22,6 +28,13 @@ struct Material {
 		ImGui::DragFloat("Clearcoat Gloss"    , &data[2].value[1], 0.1, 0, 1);
 		ImGui::DragFloat("Transmission"       , &data[2].value[2], 0.1, 0, 1);
 		ImGui::DragFloat("Index of Refraction", &data[2].value[3], 0.1, 0, 1);
+		if (bump_image) ImGui::DragFloat("Bump Strength", &bump_strength, 0.1, 0, 10);
+		ImGui::PopItemWidth();
+
+		const float w = ImGui::CalcItemWidth() - 4;
+		for (uint i = 0; i < DISNEY_DATA_N; i++)
+			if (data[i].image) ImGui::Image(&data[i].image, ImVec2(w, w * data[i].image.extent().height / (float)data[i].image.extent().width));
+		if (bump_image) ImGui::Image(&bump_image, ImVec2(w, w * bump_image.extent().height / (float)bump_image.extent().width));
     }
 };
 

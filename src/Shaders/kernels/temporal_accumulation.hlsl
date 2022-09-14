@@ -108,12 +108,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	}
 
 	float4 color_curr = gRadiance[ipos];
-	if (gDemodulateAlbedo) {
-		const float3 albedo = gAlbedo[ipos].rgb;
-		if (albedo.r > 1e-3) color_curr.r /= albedo.r;
-		if (albedo.g > 1e-3) color_curr.g /= albedo.g;
-		if (albedo.b > 1e-3) color_curr.b /= albedo.b;
-	}
+	if (gDemodulateAlbedo) color_curr.rgb /= (1e-2 + gAlbedo[ipos].rgb);
 
 	if (any(isinf(color_curr.rgb)) || any(color_curr.rgb != color_curr.rgb)) color_curr = 0;
 	if (any(isinf(moments_prev)) || any(moments_prev != moments_prev)) moments_prev = 0;

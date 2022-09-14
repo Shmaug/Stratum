@@ -19,7 +19,7 @@ public:
 
 	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs);
 
-	inline void reset_accumulation() { mResetAccumulation = true; }
+	inline void reset_accumulation() { mResetAccumulation = true; mAccumulatedFrames = 0; }
 	inline bool reprojection() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection"); }
 	inline bool demodulate_albedo() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gDemodulateAlbedo"); }
 
@@ -51,6 +51,7 @@ private:
 	shared_ptr<FrameResources> mPrevFrame;
 	shared_ptr<FrameResources> mCurFrame;
 
+	uint32_t mAccumulatedFrames = 0;
 	uint32_t mAtrousIterations = 0;
 	uint32_t mHistoryTap = 0;
 	DenoiserDebugMode mDebugMode = DenoiserDebugMode::eNone;

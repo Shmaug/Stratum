@@ -4,12 +4,12 @@
 #include "../common.h"
 
 struct LightSampleRecord {
-	float3 to_light;
-	float dist;
-
 	float3 radiance;
 	float pdf;
 	bool pdf_area_measure;
+
+	float3 to_light;
+	float dist;
 
 	float3 position;
 	uint instance_primitive_index;
@@ -21,7 +21,7 @@ struct LightSampleRecord {
 	inline bool is_environment() { return instance_index() == INVALID_INSTANCE; }
 };
 
-uint sample_light(out float pdf, const float rnd) {
+uint sample_light_instance(out float pdf, const float rnd) {
 	int li;
 	if (gSampleLightPower) {
 		li = dist1d_sample(gDistributions, gLightDistributionCDF, gLightCount, rnd);
@@ -34,7 +34,7 @@ uint sample_light(out float pdf, const float rnd) {
 	return gLightInstances[li];
 }
 
-void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const float3 ref_pos) {
+void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const float3 ref_pos) {
 	if (gHasEnvironment && (!gHasEmissives || rnd.w <= gEnvironmentSampleProbability)) {
 		// sample environment
 		Environment env;
@@ -46,7 +46,7 @@ void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const f
 		ls.pdf_area_measure = false;
 		ls.material_address = gEnvironmentMaterialAddress;
 	} else if (gHasEmissives) {
-		const uint light_instance_index = sample_light(ls.pdf, gHasEnvironment ? (rnd.w - gEnvironmentSampleProbability) / (1 - gEnvironmentSampleProbability) : rnd.w);
+		const uint light_instance_index = sample_light_instance(ls.pdf, gHasEnvironment ? (rnd.w - gEnvironmentSampleProbability) / (1 - gEnvironmentSampleProbability) : rnd.w);
 		BF_SET(ls.instance_primitive_index, light_instance_index, 0, 16);
 
 		if (gHasEnvironment) ls.pdf *= 1 - gEnvironmentSampleProbability;
@@ -67,7 +67,6 @@ void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const f
 					const float3 local_normal = float3(r_ * cos(phi), z, r_ * sin(phi));
 					uv = cartesian_to_spherical_uv(local_normal);
 					ls.position = gInstanceTransforms[light_instance_index].transform_point(r * local_normal);
-					uv = cartesian_to_spherical_uv(local_normal);
 					ls.normal = normalize(gInstanceTransforms[light_instance_index].transform_vector(local_normal));
 					ls.to_light = ls.position - ref_pos;
 					ls.dist = length(ls.to_light);
@@ -142,8 +141,11 @@ void sample_point_on_light(inout LightSampleRecord ls, const float4 rnd, const f
 		}
 
 		if (ls.pdf > 0) {
+			ShadingData sd;
+			sd.uv = uv;
+			sd.uv_screen_size = 0;
 			Material m;
-			m.load(ls.material_address, uv, 0);
+			m.load(ls.material_address, sd);
 			ls.radiance = m.Le();
 		}
 	}
@@ -170,8 +172,7 @@ Real shape_pdf(const Vector3 origin, const Real shape_area, const PointSample p,
 					gInstanceTransforms[p.instance_index()].m[0][3],
 					gInstanceTransforms[p.instance_index()].m[1][3],
 					gInstanceTransforms[p.instance_index()].m[2][3]);
-				const Vector3 to_center = center - origin;
-				const Real sin_elevation_max_sq = pow2(instance.radius()) / dot(to_center,to_center);
+				const Real sin_elevation_max_sq = pow2(instance.radius()) / len_sqr(center - origin);
 				const Real cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
 				area_measure = false;
 				return 1/(2 * M_PI * (1 - cos_elevation_max));
@@ -185,23 +186,25 @@ Real shape_pdf(const Vector3 origin, const Real shape_area, const PointSample p,
 	}
 }
 
-void point_on_light_pdf(inout float pdf, out bool pdf_area_measure, const IntersectionVertex _isect) {
+Real point_on_light_pdf(const IntersectionVertex _isect, out bool pdf_area_measure) {
 	if (_isect.instance_index() == INVALID_INSTANCE) {
-		if (!gHasEnvironment) { pdf = 0; return; }
-		if (gHasEmissives) pdf *= gEnvironmentSampleProbability;
+		if (!gHasEnvironment) return 0;
+		pdf_area_measure = false;
 		Environment env;
 		env.load(gEnvironmentMaterialAddress);
-		pdf *= env.eval_pdf(_isect.sd.position);
-		pdf_area_measure = false;
+		Real pdf = env.eval_pdf(_isect.sd.position);
+		if (gHasEmissives) pdf *= gEnvironmentSampleProbability;
+		return pdf;
 	} else  {
-		if (!gHasEmissives) { pdf = 0; return; }
-		if (gHasEnvironment) pdf *= 1 - gEnvironmentSampleProbability;
+		if (!gHasEmissives) return 0;
+		pdf_area_measure = _isect.shape_pdf_area_measure;
+		Real pdf = _isect.shape_pdf;
 		if (gSampleLightPower)
 			pdf *= dist1d_pdf(gDistributions, gLightDistributionPDF, gInstances[_isect.instance_index()].light_index());
 		else
 			pdf /= gLightCount;
-		pdf *= _isect.shape_pdf;
-		pdf_area_measure = _isect.shape_pdf_area_measure;
+		if (gHasEnvironment) pdf *= 1 - gEnvironmentSampleProbability;
+		return pdf;
 	}
 }
 

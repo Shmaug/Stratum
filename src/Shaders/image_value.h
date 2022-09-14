@@ -77,7 +77,7 @@ inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float u
 	img.GetDimensions(w, h);
 	float lod = 0;
 	if (gUseRayCones && uv_screen_size > 0)
-		lod = log2(max(uv_screen_size * min(w, h), 1e-6f));
+		lod = log2(max(uv_screen_size * max(w, h), 1e-6f));
 	return img.SampleLevel(gSampler, uv, lod);
 }
 #endif

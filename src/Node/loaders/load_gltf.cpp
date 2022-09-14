@@ -28,7 +28,9 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 	vector<component_ptr<Material>> materials(model.materials.size());
 	vector<vector<component_ptr<Mesh>>> meshes(model.meshes.size());
 
-	auto get_image = [&](uint32_t index, bool srgb) -> Image::View {
+	auto get_image = [&](const uint32_t texture_index, const bool srgb) -> Image::View {
+		if (texture_index >= model.textures.size()) return {};
+		const uint32_t index = model.textures[texture_index].source;
 		if (index >= images.size()) return {};
 		if (images[index]) return images[index];
 
@@ -42,14 +44,14 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 			fmt = formatMap.at(image.component - 1);
 		} else {
 			static const unordered_map<int, std::array<vk::Format,4>> formatMap {
-				{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE, 	{ vk::Format::eR8Unorm, vk::Format::eR8G8Unorm, vk::Format::eR8G8B8Unorm, vk::Format::eR8G8B8A8Unorm } },
-				{ TINYGLTF_COMPONENT_TYPE_BYTE, 					{ vk::Format::eR8Snorm, vk::Format::eR8G8Snorm, vk::Format::eR8G8B8Snorm, vk::Format::eR8G8B8A8Snorm } },
+				{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE,  { vk::Format::eR8Unorm, vk::Format::eR8G8Unorm, vk::Format::eR8G8B8Unorm, vk::Format::eR8G8B8A8Unorm } },
+				{ TINYGLTF_COMPONENT_TYPE_BYTE,           { vk::Format::eR8Snorm, vk::Format::eR8G8Snorm, vk::Format::eR8G8B8Snorm, vk::Format::eR8G8B8A8Snorm } },
 				{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT, { vk::Format::eR16Unorm, vk::Format::eR16G16Unorm, vk::Format::eR16G16B16Unorm, vk::Format::eR16G16B16A16Unorm } },
-				{ TINYGLTF_COMPONENT_TYPE_SHORT, 					{ vk::Format::eR16Snorm, vk::Format::eR16G16Snorm, vk::Format::eR16G16B16Snorm, vk::Format::eR16G16B16A16Snorm } },
-				{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT, 	{ vk::Format::eR32Uint, vk::Format::eR32G32Uint, vk::Format::eR32G32B32Uint, vk::Format::eR32G32B32A32Uint } },
-				{ TINYGLTF_COMPONENT_TYPE_INT, 						{ vk::Format::eR32Sint, vk::Format::eR32G32Sint, vk::Format::eR32G32B32Sint, vk::Format::eR32G32B32A32Sint } },
-				{ TINYGLTF_COMPONENT_TYPE_FLOAT, 					{ vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat, vk::Format::eR32G32B32A32Sfloat } },
-				{ TINYGLTF_COMPONENT_TYPE_DOUBLE, 				{ vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat, vk::Format::eR64G64B64A64Sfloat } }
+				{ TINYGLTF_COMPONENT_TYPE_SHORT,          { vk::Format::eR16Snorm, vk::Format::eR16G16Snorm, vk::Format::eR16G16B16Snorm, vk::Format::eR16G16B16A16Snorm } },
+				{ TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT,   { vk::Format::eR32Uint, vk::Format::eR32G32Uint, vk::Format::eR32G32B32Uint, vk::Format::eR32G32B32A32Uint } },
+				{ TINYGLTF_COMPONENT_TYPE_INT,            { vk::Format::eR32Sint, vk::Format::eR32G32Sint, vk::Format::eR32G32B32Sint, vk::Format::eR32G32B32A32Sint } },
+				{ TINYGLTF_COMPONENT_TYPE_FLOAT,          { vk::Format::eR32Sfloat, vk::Format::eR32G32Sfloat, vk::Format::eR32G32B32Sfloat, vk::Format::eR32G32B32A32Sfloat } },
+				{ TINYGLTF_COMPONENT_TYPE_DOUBLE,         { vk::Format::eR64Sfloat, vk::Format::eR64G64Sfloat, vk::Format::eR64G64B64Sfloat, vk::Format::eR64G64B64A64Sfloat } }
 			};
 			fmt = formatMap.at(image.pixel_type).at(image.component - 1);
 		}
@@ -91,6 +93,11 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 		float eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
 		float transmission = material.extensions.contains("KHR_materials_transmission") ? (float)material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble() : 0;
 		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
+
+		m.bump_image = get_image(material.normalTexture.index, false);
+		m.bump_strength = 1;
+		m.alpha_test = material.alphaMode == "MASK";
+
 		return materialsNode.make_child(material.name).make_component<Material>(m);
 	});
 

@@ -26,7 +26,7 @@ struct Camera {
 		v.image_min = { mImageRect.offset.x, mImageRect.offset.y };
 		v.image_max = { mImageRect.offset.x + mImageRect.extent.width, mImageRect.offset.y + mImageRect.extent.height };
 		float2 extent = mProjection.back_project(float2::Constant(1)).head<2>() - mProjection.back_project(float2::Constant(-1)).head<2>();
-		if (!mProjection.orthographic) extent /= mProjection.near_plane;
+		if (!mProjection.orthographic()) extent /= mProjection.near_plane;
 		v.projection.sensor_area = abs(extent[0] * extent[1]);
 		return v;
 	}
@@ -62,7 +62,6 @@ public:
 		Buffer::View<TransformData> mInstanceInverseTransforms;
 		Buffer::View<TransformData> mInstanceMotionTransforms;
 		Buffer::View<uint32_t> mLightInstanceMap;
-		Buffer::View<uint32_t> mInstanceLightMap;
 		Buffer::View<float> mDistributionData;
 		Buffer::View<uint32_t> mInstanceIndexMap;
 
@@ -83,6 +82,7 @@ public:
 
 	STRATUM_API void on_inspector_gui();
 
+	inline void mark_dirty(Node* node = nullptr) { mUpdateOnce = true; }
 	STRATUM_API void update(CommandBuffer& commandBuffer, const float deltaTime);
 
 	STRATUM_API void load_environment_map(Node& root, CommandBuffer& commandBuffer, const fs::path& filename);

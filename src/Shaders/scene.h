@@ -88,6 +88,39 @@ struct PackedVertexData {
 	inline float2 uv() { return float2(u, v); }
 };
 
+struct RayDifferentialFull {
+	float3 origin_dx, origin_dy;
+	float3 direction_dx, direction_dy;
+#ifdef __HLSL__
+	SLANG_MUTATING
+	inline void transfer(const float hit_t) {
+		origin_dx += hit_t;
+		origin_dy += hit_t;
+	}
+	SLANG_MUTATING
+	inline void transfer(const float3 center, const float radius, const float hit_t) {
+		const float2 tx = ray_sphere(origin_dx, direction_dx, center, radius);
+		origin_dx += direction_dx * (tx.x > 0 ? tx.x : tx.y > 0 ? tx.y : hit_t);
+		const float2 ty = ray_sphere(origin_dy, direction_dy, center, radius);
+		origin_dy += direction_dy * (ty.x > 0 ? ty.x : ty.y > 0 ? ty.y : hit_t);
+	}
+	SLANG_MUTATING
+	inline void transfer(const float3 center, const float3 normal) {
+		origin_dx += ray_plane(origin_dx - center, direction_dx, normal);
+		origin_dy += ray_plane(origin_dy - center, direction_dy, normal);
+	}
+	SLANG_MUTATING
+	inline void reflect_(const float3 n) {
+		direction_dx = reflect(direction_dx, n);
+		direction_dy = reflect(direction_dy, n);
+	}
+	SLANG_MUTATING
+	inline void refract_(const float3 n, const float eta) {
+		direction_dx = refract(direction_dx, n, eta);
+		direction_dy = refract(direction_dy, n, eta);
+	}
+#endif
+};
 struct RayDifferential {
 	float radius;
 	float spread;
@@ -116,11 +149,16 @@ struct ViewData {
 	int2 image_min;
 	int2 image_max;
 	inline int2 extent() CONST_CPP { return image_max - image_min; }
-#ifdef __HLSL__
-	inline bool test_inside(const int2 p) { return all(p >= image_min) && all(p < image_max); }
-#endif
 #ifdef __cplusplus
 	inline bool test_inside(const int2 p) const { return (p >= image_min).all() && (p < image_max).all(); }
+#endif
+#ifdef __HLSL__
+	inline bool test_inside(const int2 p) { return all(p >= image_min) && all(p < image_max); }
+	inline float image_plane_dist() { return abs(image_max.y - image_min.y) / (2 * tan(projection.vertical_fov/2)); }
+	inline float sensor_pdfW(const float cos_theta) {
+		//return 1 / (cos_theta / pow2(image_plane_dist() / cos_theta));
+		return pow2(image_plane_dist()) / pow3(cos_theta);
+	}
 #endif
 };
 

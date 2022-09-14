@@ -78,7 +78,7 @@ void Profiler::sample_timeline_gui() {
 				tmp.mDuration = t1 - t0;
 				tmp.mColor = float4::Ones();
 				tmp.mLabel = label0;
-				const float h = height*(1 + chrono::duration_cast<chrono::duration<float, milli>>(tmp.mDuration).count());
+				const float h = height;
 				draw_sample_timeline(tmp, (t0 - gpu_t_min).count()*inv_gpu_dt, (t1 - gpu_t_min).count()*inv_gpu_dt, w_min.x, x_max, y_min, h);
 				max_height = max(max_height, h);
 			}
@@ -100,7 +100,7 @@ void Profiler::sample_timeline_gui() {
 
 			const float t0 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime - t_min).count() * inv_dt;
 			const float t1 = chrono::duration_cast<chrono::duration<float, milli>>(s->mStartTime - t_min + s->mDuration).count() * inv_dt;
-			const float h = height*(1 + chrono::duration_cast<chrono::duration<float, milli>>(s->mDuration).count());
+			const float h = height;
 			auto r = draw_sample_timeline(*s, t0, t1, w_min.x, x_max, y_min + l, h);
 			if (!r) continue;
 

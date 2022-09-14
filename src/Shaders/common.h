@@ -63,6 +63,8 @@ DECLARE_INTEGER_POW_FNS(float3)
 DECLARE_INTEGER_POW_FNS(float4)
 #undef DECLARE_INTEGER_POW_FNS
 
+inline float len_sqr(const float3 v) { return dot(v,v); }
+
 inline float luminance(const float3 color) {
 	return dot(color, float3(0.2126, 0.7152, 0.0722));
 }

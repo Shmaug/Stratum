@@ -34,6 +34,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 struct PushConstants {
 	uint gViewCount;
 	float gHistoryLimit;
+	float gVarianceBoostLength;
 };
 #ifdef __SLANG__
 #ifndef gDebugMode
@@ -93,5 +94,8 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 	m *= sum_w;
 	c.rgb *= sum_w;
 
-	gFilterImages[0][index.xy] = float4(c.rgb, abs(m.y - pow2(m.x)));
+	float v = abs(m.y - pow2(m.x));
+	if (gPushConstants.gVarianceBoostLength > 0)
+		v *= max(1, gPushConstants.gVarianceBoostLength/(1+c.a));
+	gFilterImages[0][index.xy] = float4(c.rgb, v);
 }

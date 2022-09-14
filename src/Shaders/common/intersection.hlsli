@@ -71,13 +71,17 @@ Real trace_ray(const Vector3 origin, const Vector3 direction, const Real t_max, 
 				}
 			}
 			case CANDIDATE_NON_OPAQUE_TRIANGLE: {
-				//uint instance_primitive_index = 0;
-				//BF_SET(instance_primitive_index, rayQuery.CandidateInstanceID(), 0, 16);
-				//BF_SET(instance_primitive_index, rayQuery.CandidatePrimitiveIndex(), 16, 16);
-				//PathVertex _isect;
-				//make_vertex(instance_primitive_index, ray.origin + ray.direction*rayQuery.CandidateTriangleRayT(), rayQuery.CandidateTriangleBarycentrics(), ray, _isect);
-				// TODO: test alpha
-				rayQuery.CommitNonOpaqueTriangleHit();
+				if (gAlphaTest) {
+					const InstanceData instance = gInstances[hit_instance];
+					uint address = instance.material_address();
+					ShadingData sd;
+					TransformData tmp;
+					make_triangle_shading_data(sd, instance, tmp, rayQuery.CandidatePrimitiveIndex(), rayQuery.CandidateTriangleBarycentrics());
+					const float4 m = eval_image_value4(address, sd.uv, 0);
+					if (m.a > 0.1)
+						rayQuery.CommitNonOpaqueTriangleHit();
+				} else
+					rayQuery.CommitNonOpaqueTriangleHit();
 				break;
 			}
 		}

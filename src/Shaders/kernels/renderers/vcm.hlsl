@@ -6,6 +6,8 @@
 #pragma compile slangc -lang slang -profile sm_6_6 -entry add_light_trace
 #endif
 
+#define FORCE_LAMBERTIAN
+
 #include "../../scene.h"
 #include "../../vcm.h"
 
@@ -55,18 +57,20 @@
 #define gHasEmissives     (gSpecializationFlags & VCM_FLAG_HAS_EMISSIVES)
 #define gHasMedia         (gSpecializationFlags & VCM_FLAG_HAS_MEDIA)
 #define gRemapThreadIndex (gSpecializationFlags & VCM_FLAG_REMAP_THREADS)
-#define gCountRays        (gSpecializationFlags & VCM_FLAG_COUNT_RAYS)
+#define gAlphaTest	  	  (gSpecializationFlags & VCM_FLAG_USE_ALPHA_TEST)
+#define gUseNormalMaps	  (gSpecializationFlags & VCM_FLAG_USE_NORMAL_MAPS)
 #define gUseVM            (gSpecializationFlags & VCM_FLAG_USE_VM)
 #define gUseVC            (gSpecializationFlags & VCM_FLAG_USE_VC)
 #define gPpm              (gSpecializationFlags & VCM_FLAG_USE_PPM)
 #define gUseNEE           (gSpecializationFlags & VCM_FLAG_USE_NEE)
 #define gUseMis           (gSpecializationFlags & VCM_FLAG_USE_MIS)
 #define gLightTraceOnly   (gSpecializationFlags & VCM_FLAG_LIGHT_TRACE_ONLY)
+#define gCountRays        (gSpecializationFlags & VCM_FLAG_COUNT_RAYS)
 
 #define gUseRayCones 0
+#define gSampleEnvironmentMap 1
 #define gUniformSphereSampling 1
 #define gSceneSphere float4(0,0,0,10)
-#define VCM_LAMBERTIAN
 
 #define gOutputExtent				  gPushConstants.gOutputExtent
 #define gViewCount 					  gPushConstants.gViewCount
@@ -76,7 +80,103 @@
 #define gMinPathLength	 			  gPushConstants.gMinPathLength
 #define gMaxPathLength	 			  gPushConstants.gMaxPathLength
 #define gMaxNullCollisions 			  gPushConstants.gMaxNullCollisions
-#define gLightPathCount 			  gPushConstants.gLightPathCount
+
+float2 sample_texel(Texture2D<float4> img, float2 rnd, out float pdf, const uint max_iterations = 10) {
+	static const uint2 offsets[4] = {
+		uint2(0,0),
+		uint2(1,0),
+		uint2(0,1),
+		uint2(1,1),
+	};
+
+ 	uint2 full_size;
+	uint level_count;
+	img.GetDimensions(0, full_size.x, full_size.y, level_count);
+
+	pdf = 1;
+	uint2 coord = 0;
+	uint2 last_size = 1;
+ 	for (uint i = 1; i < min(max_iterations+1, level_count-1); i++) {
+		const uint level = level_count-1 - i;
+		uint tmp;
+		uint2 size;
+		img.GetDimensions(level, size.x, size.y, tmp);
+		coord *= size/last_size;
+
+		const float inv_h = 1/(float)size.y;
+
+		uint j;
+		float4 p = 0;
+		if (size.x > 1)
+			for (j = 0; j < 2; j++)
+				p[j] = luminance(img.Load(uint3(coord + offsets[j], level)).rgb) * sin(M_PI * (coord.y + offsets[j].y + 0.5f)*inv_h);
+		if (size.y > 1)
+			for (j = 2; j < 4; j++)
+				p[j] = luminance(img.Load(uint3(coord + offsets[j], level)).rgb) * sin(M_PI * (coord.y + offsets[j].y + 0.5f)*inv_h);
+		const float sum = dot(p, 1);
+		if (sum < 1e-6) continue;
+		p /= sum;
+
+		for (j = 0; j < 4; j++) {
+			if (rnd.x < p[j]) {
+				coord += offsets[j];
+				pdf *= p[j];
+				rnd.x /= p[j];
+				break;
+			}
+			rnd.x -= p[j];
+		}
+		last_size = size;
+	}
+
+	pdf *= last_size.x*last_size.y;
+
+	return (float2(coord) + rnd) / float2(last_size);
+}
+float sample_texel_pdf(Texture2D<float4> img, const float2 uv, const uint max_iterations = 10) {
+	static const uint2 offsets[4] = {
+		uint2(0,0),
+		uint2(1,0),
+		uint2(0,1),
+		uint2(1,1),
+	};
+
+ 	uint2 full_size;
+	uint level_count;
+	img.GetDimensions(0, full_size.x, full_size.y, level_count);
+
+	float pdf = 1;
+	uint2 last_size = 1;
+ 	for (uint i = 1; i < min(max_iterations+1, level_count-1); i++) {
+		const uint level = level_count-1 - i;
+		uint tmp;
+		uint2 size;
+		img.GetDimensions(level, size.x, size.y, tmp);
+
+		const uint2 coord = floor(size*uv/2)*2;
+
+		const float inv_h = 1/(float)size.y;
+
+		uint j;
+		float4 p = 0;
+		if (size.x > 1)
+			for (j = 0; j < 2; j++)
+				p[j] = luminance(img.Load(uint3(coord + offsets[j], level)).rgb) * sin(M_PI * (coord.y + offsets[j].y + 0.5f)*inv_h);
+		if (size.y > 1)
+			for (j = 2; j < 4; j++)
+				p[j] = luminance(img.Load(uint3(coord + offsets[j], level)).rgb) * sin(M_PI * (coord.y + offsets[j].y + 0.5f)*inv_h);
+		const float sum = dot(p, 1);
+		if (sum < 1e-6) continue;
+		p /= sum;
+
+		const uint2 o = saturate(uint2(uv*size) - coord);
+		pdf *= p[o.y*2 + o.x];
+
+		last_size = size;
+	}
+	pdf *= last_size.x*last_size.y;
+	return pdf;
+}
 
 #include "../../common/vcm_util.hlsli"
 
@@ -256,12 +356,13 @@ class VertexCM {
 		v.mThroughput = lv.beta();
 		v.mPathLength = lv.path_length;
 
-		v.mBsdf.bsdf.load(lv.material_address(), lv.uv, 0);
-		v.mBsdf.mAdjoint = true;
 		v.mBsdf.mFlipBitangent = (lv.material_address_flags & PATH_VERTEX_FLAG_FLIP_BITANGENT) > 0;
 		v.mBsdf.mPackedShadingNormal = lv.packed_shading_normal;
-		v.mBsdf.mPackedGeometryNormal = lv.packed_geometry_normal;
 		v.mBsdf.mPackedTangent = lv.packed_tangent;
+		v.mBsdf.bsdf.load(lv.material_address(), lv.uv, 0, v.mBsdf.mPackedShadingNormal, v.mBsdf.mPackedTangent, v.mBsdf.mFlipBitangent);
+
+		v.mBsdf.mAdjoint = true;
+		v.mBsdf.mPackedGeometryNormal = lv.packed_geometry_normal;
 		v.mBsdf.mLocalDirIn = lv.local_dir_in();
 		v.mBsdf.mCosGeometryThetaIn = dot(v.mBsdf.WorldDirFix(), lv.geometry_normal());
 
@@ -408,7 +509,7 @@ class VertexCM {
 			// our light sources do not have reflective properties
 			if (bsdf.IsLight()) {
 				if (cameraState.mPathLength >= gMinPathLength) {
-					color += cameraState.mThroughput * GetLightRadiance(isect, bsdf, cameraState, PdfWtoA(cameraState.mBsdfPdfW, bsdf.CosThetaFix(), dist));
+					color += cameraState.mThroughput * GetLightRadiance(isect, bsdf, cameraState, PdfWtoA(cameraState.mBsdfPdfW, abs(bsdf.CosThetaFix()), dist));
 				}
 				break;
 			}
@@ -655,7 +756,7 @@ class VertexCM {
 		if (IsZero(contrib)) return 0;
 
 		const float3 geometryNormal = aBsdf.GetGeometryNormal();
-		if (Occluded(ray_offset(aHitpoint, dot(directionToLight, geometryNormal) < 0 ? -geometryNormal : geometryNormal), directionToLight, distance*0.999)) return 0;
+		if (Occluded(ray_offset(aHitpoint, dot(directionToLight, geometryNormal) < 0 ? -geometryNormal : geometryNormal), directionToLight, max(distance - 1e-4, distance*0.999))) return 0;
 
 		return contrib;
 	}
@@ -725,7 +826,7 @@ class VertexCM {
 		if (IsZero(contrib)) return 0;
 
 		const float3 geometryNormal = aCameraBsdf.GetGeometryNormal();
-		if (Occluded(ray_offset(aCameraHitpoint, dot(geometryNormal, direction) < 0 ? -geometryNormal : geometryNormal), direction, distance*0.999)) return 0;
+		if (Occluded(ray_offset(aCameraHitpoint, dot(geometryNormal, direction) < 0 ? -geometryNormal : geometryNormal), direction,  max(distance - 1e-4, distance*0.999))) return 0;
 
 		return contrib;
 	}
@@ -738,7 +839,7 @@ class VertexCM {
 	SLANG_MUTATING
 	void GenerateLightSample(inout SubPathState oLightState) {
 		// We sample lights uniformly
-		const int   lightCount = gLightCount + (gHasEnvironment ? 1 : 0);
+		const int   lightCount = 1;//gLightCount + (gHasEnvironment ? 1 : 0);
 		const float lightPickProb = 1.f / lightCount;
 		const int   lightID = int(mRng.GetFloat() * lightCount) % lightCount;
 		const float2 rndDirSamples = mRng.GetVec2f();
@@ -752,7 +853,7 @@ class VertexCM {
 			emissionPdfW, directPdfA, cosLight);
 
 		emissionPdfW *= lightPickProb;
-		directPdfA *= lightPickProb;
+		directPdfA   *= lightPickProb;
 
 		oLightState.mThroughput /= emissionPdfW;
 		oLightState.mPathLength = 1;
@@ -781,8 +882,8 @@ class VertexCM {
 		const SubPathState aLightState,
 		const float3 aHitpoint,
 		const LightBSDF aBsdf) {
+
 		AbstractCamera camera = AbstractCamera(0);
-		float3 directionToCamera = camera.mPosition - aHitpoint;
 
 		// Check it projects to the screen (and where)
 		float2 imagePos;
@@ -790,6 +891,7 @@ class VertexCM {
 			return;
 
 		// Compute distance and normalize direction to camera
+		float3 directionToCamera = camera.mPosition - aHitpoint;
 		const float distEye2 = dot(directionToCamera, directionToCamera);
 		const float distance = sqrt(distEye2);
 		directionToCamera /= distance;
@@ -842,7 +944,7 @@ class VertexCM {
 		const float3 contrib = misWeight * aLightState.mThroughput * bsdfFactor / (mLightSubPathCount * surfaceToImageFactor);
 
 		if (IsZero(contrib)) return;
-		if (Occluded(camera.mPosition, -directionToCamera, distance*0.999)) return;
+		if (Occluded(camera.mPosition, -directionToCamera,  max(distance - 1e-4, distance*0.999))) return;
 
 		AddLightTraceContribution(imagePos, contrib);
 	}

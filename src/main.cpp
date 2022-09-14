@@ -24,40 +24,8 @@ void load_plugins(const string& plugin_info, Node& dst) {
 	}
 }
 
-void setup_renderer(auto app, auto renderer, auto camera) {
-	app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-		renderer->render(commandBuffer, app->window().back_buffer(), { { camera->view(), node_to_world(camera.node()) } });
-	});
-}
 #ifdef STRATUM_ENABLE_OPENXR
-void setup_renderer(auto app, auto renderer, auto xrnode) {
-	if (xrnode) {
-		xrnode->OnRender.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-			vector<pair<ViewData,TransformData>> views;
-			views.reserve(xrnode->views().size());
-			for (const XR::View& v : xrnode->views())
-				views.emplace_back(v.mCamera.view(), node_to_world(v.mCamera.node()));
-			renderer->render(commandBuffer, xrnode->back_buffer(), views);
-			xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
-		});
-		app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
-			commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
-		}, Node::EventPriority::eAlmostFirst);
-	}
-};
-#endif
-
-int main(int argc, char** argv) {
-	cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
-
-	vector<string> args(argc);
-	ranges::copy_n(argv, argc, args.begin());
-
-	NodeGraph gNodeGraph;
-	Node& root_node = gNodeGraph.emplace("Application");
-
-	// init XR first, in order to load required extensions
-#ifdef STRATUM_ENABLE_OPENXR
+component_ptr<XR> init_xr(Node& root_node, vector<string>& args) {
 	component_ptr<XR> xrnode;
 	if (ranges::find_if(args, [](const string& s) { return s == "--xr"; }) != args.end()) {
 		xrnode = root_node.make_child("XR").make_component<XR>();
@@ -70,25 +38,36 @@ int main(int argc, char** argv) {
 		ss = istringstream(deviceExtensions);
 		while (getline(ss, s, ' ')) args.push_back("--deviceExtension:" + s);
 	}
-#endif
-
-	// create vulkan instance and window
-	auto instance = root_node.make_component<Instance>(args);
-
-	vk::PhysicalDevice device;
-#ifdef STRATUM_ENABLE_OPENXR
-	if (xrnode) device = xrnode->get_vulkan_device(*instance);
-#endif
-	instance->create_device();
-
-	Node& app_node = root_node.make_child("Scene");
-	const auto app       = app_node.make_component<Application>(instance->window());
-	const auto gui       = app_node.make_component<Gui>();
-	const auto inspector = app_node.make_component<Inspector>();
-	const auto scene     = app_node.make_component<Scene>();
-#ifdef STRATUM_ENABLE_OPENXR
-	if (xrnode) xrnode->create_session(*instance);
+	return xrnode;
+}
+template<typename T>
+void init_renderer(const auto& app, Node& renderer_node, const component_ptr<XR>& xrnode) {
+	auto renderer = renderer_node.make_component<T>();
+	xrnode->OnRender.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+		vector<pair<ViewData,TransformData>> views;
+		views.reserve(xrnode->views().size());
+		for (const XR::View& v : xrnode->views())
+			views.emplace_back(v.mCamera.view(), node_to_world(v.mCamera.node()));
+		renderer->render(commandBuffer, xrnode->back_buffer(), views);
+		xrnode->back_buffer().transition_barrier(commandBuffer, vk::ImageLayout::eTransferSrcOptimal);
+	});
+	app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+		commandBuffer.blit_image(xrnode->back_buffer(), app->window().back_buffer());
+	}, Node::EventPriority::eAlmostFirst);
+	return renderer;
+};
 #else
+template<typename T>
+component_ptr<T> init_renderer(const auto& app, Node& renderer_node, const component_ptr<Camera>& camera) {
+	auto renderer = renderer_node.make_component<T>();
+	app->OnRenderWindow.add_listener(renderer.node(), [=](CommandBuffer& commandBuffer) {
+		renderer->render(commandBuffer, app->window().back_buffer(), { { camera->view(), node_to_world(camera.node()) } });
+	});
+	return renderer;
+}
+#endif
+
+component_ptr<Camera> setup_camera(const auto& instance, const auto& scene) {
 	// setup camera
 	float3 pos = float3(0,1,0);
 	quatf rot = quatf_identity();
@@ -110,43 +89,65 @@ int main(int argc, char** argv) {
 	auto camera = scene.node().make_child("Camera").make_component<Camera>(make_perspective(fovy, 1.f, float2::Zero(), -1 / 1024.f));
 	camera.node().make_component<TransformData>(make_transform(pos, rot, scale));
 	camera.node().make_component<FlyCamera>(camera.node());
+	return camera;
+}
+
+int main(int argc, char** argv) {
+	cout << "Stratum " << STRATUM_VERSION_MAJOR << "." << STRATUM_VERSION_MINOR << endl;
+
+	vector<string> args(argc);
+	ranges::copy_n(argv, argc, args.begin());
+
+	NodeGraph gNodeGraph;
+	Node& root_node = gNodeGraph.emplace("Application");
+
+	// init XR first, in order to load required extensions. extensions are added to the command line arguments
+#ifdef STRATUM_ENABLE_OPENXR
+	const auto xrnode = init_xr(root_node, args);
+	if (!xrnode) { return 1; }
+#endif
+
+	// create vulkan instance and window
+	auto instance = root_node.make_component<Instance>(args);
+
+	vk::PhysicalDevice device;
+#ifdef STRATUM_ENABLE_OPENXR
+	device = xrnode->get_vulkan_device(*instance);
+#endif
+	instance->create_device();
+
+
+	Node& app_node = root_node.make_child("Scene");
+
+	const auto app       = app_node.make_component<Application>(instance->window());
+	const auto gui       = app_node.make_component<Gui>();
+	const auto inspector = app_node.make_component<Inspector>();
+	const auto scene     = app_node.make_component<Scene>(); // scene hooks app/inspector events
+#ifdef STRATUM_ENABLE_OPENXR
+	xrnode->create_session(*instance);
+#else
+	const auto camera = setup_camera(instance, scene);
 #endif
 
 	// create renderer
 	Node& renderer_node = app_node.make_child("Renderer");
-	renderer_node.make_component<ImageComparer>();
+
+	if (instance->find_argument("vcm")) {
+#ifdef STRATUM_ENABLE_OPENXR
+		init_renderer<VCM>(app, renderer_node, xrnode);
+#else
+		init_renderer<VCM>(app, renderer_node, camera);
+#endif
+	} else {
+#ifdef STRATUM_ENABLE_OPENXR
+		init_renderer<BDPT>(app, renderer_node, xrnode);
+#else
+		init_renderer<BDPT>(app, renderer_node, camera);
+#endif
+	}
+
 	renderer_node.make_component<Denoiser>();
-
-#ifdef STRATUM_ENABLE_OPENXR
-	setup_renderer(app, renderer_node.make_component<VCM>(), xrnode);
-#else
-	setup_renderer(app, renderer_node.make_component<VCM>(), camera);
-#endif
-
-	bool vcm = true;
-	auto switcher_inspector_fn = [&]() {
-		if (ImGui::Checkbox("VCM", &vcm)) {
-#ifdef STRATUM_ENABLE_OPENXR
-			xrnode->OnRender.erase(renderer_node);
-#endif
-			app->OnRenderWindow.erase(renderer_node);
-			if (vcm) {
-				renderer_node.erase_component<BDPT>();
-#ifdef STRATUM_ENABLE_OPENXR
-				setup_renderer(app, renderer_node.make_component<VCM>(), xrnode);
-#else
-				setup_renderer(app, renderer_node.make_component<VCM>(), camera);
-#endif
-			} else {
-				renderer_node.erase_component<VCM>();
-#ifdef STRATUM_ENABLE_OPENXR
-				setup_renderer(app, renderer_node.make_component<BDPT>(), xrnode);
-#else
-				setup_renderer(app, renderer_node.make_component<BDPT>(), camera);
-#endif
-			}
-		}
-	};
+	renderer_node.make_component<ImageComparer>();
 
 	for (const string& plugin_info : instance->find_arguments("plugin"))
 		load_plugins(plugin_info, app.node());

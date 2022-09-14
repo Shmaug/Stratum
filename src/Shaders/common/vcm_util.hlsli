@@ -48,36 +48,19 @@ float2 SampleConcentricDisc(const float2 aSamples) {
 float ConcentricDiscPdfA() {
     return 1 / M_PI;
 }
-float3 SampleUniformSphereW(const float2 aSamples, out float oPdfSA) {
-    const float term1 = 2 * M_PI * aSamples.x;
-    const float term2 = 2 * sqrt(aSamples.y - aSamples.y * aSamples.y);
-
-    const float3 ret = float3(
-        cos(term1) * term2,
-        sin(term1) * term2,
-        1 - 2 * aSamples.y);
-
-	oPdfSA = 0.25f / M_PI; // 1 / (4 * M_PI);
-    return ret;
-}
-float UniformSpherePdfW() {
-    return 0.25f / M_PI; // 1 / (4 * M_PI);
+float3 SampleUniformSphereA(const float2 aSamples) {
+	const float z = 1 - 2 * aSamples.x;
+	const float r_ = sqrt(max(0, 1 - z * z));
+	const float phi = 2 * M_PI * aSamples.y;
+	return float3(r_ * cos(phi), z, r_ * sin(phi));
 }
 float3 SampleCosHemisphereW(const float2 aSamples, out float oPdfW) {
-    const float term1 = 2.f * M_PI * aSamples.x;
-    const float term2 = sqrt(1.f - aSamples.y);
-
-    const float3 ret = float3(
-        cos(term1) * term2,
-        sin(term1) * term2,
-        sqrt(aSamples.y));
-
-	oPdfW = ret.z / M_PI;
-
+	const float3 ret = sample_cos_hemisphere(aSamples.x, aSamples.y);
+	oPdfW = cosine_hemisphere_pdfW(ret.z);
     return ret;
 }
 float CosHemispherePdfW(const float aCosTheta) {
-    return max(0, aCosTheta) / M_PI;
+    return cosine_hemisphere_pdfW(aCosTheta);
 }
 // returns barycentric coordinates
 float2 SampleUniformTriangle(const float2 aSamples) {
@@ -140,9 +123,9 @@ struct AbstractCamera {
 	__init(uint aViewIndex) {
 		mViewIndex = aViewIndex;
 		const TransformData t = gViewTransforms[mViewIndex];
-		mForward = t.transform_vector(float3(0,0,sign(gViews[mViewIndex].projection.near_plane)));
 		mPosition = float3(t.m[0][3], t.m[1][3], t.m[2][3]);
-		mImagePlaneDist = abs(gViews[mViewIndex].image_max.y - gViews[mViewIndex].image_min.y) * gViews[mViewIndex].projection.scale[1] / 2;
+		mForward = t.transform_vector(float3(0,0,sign(gViews[mViewIndex].projection.near_plane)));
+		mImagePlaneDist = gViews[mViewIndex].image_plane_dist();
 	}
 
 	float3 GenerateRay(const float2 aImagePos, out float oCosTheta) {
@@ -177,9 +160,9 @@ struct AbstractBSDF {
 	float mCosGeometryThetaIn;
 	float3 mLocalDirIn;
 
-	__init(const float3 aWorldDirIn, const IntersectionVertex aIsect, const bool aAdjoint) {
+	__init(const float3 aWorldDirIn, inout IntersectionVertex aIsect, const bool aAdjoint) {
 		mAdjoint = aAdjoint;
-		bsdf.load(gInstances[aIsect.instance_index()].material_address(), aIsect.sd.uv, 0);
+		bsdf.load(gInstances[aIsect.instance_index()].material_address(), aIsect.sd);
 		mFlipBitangent = aIsect.sd.flags & SHADING_FLAG_FLIP_BITANGENT;
 		mPackedGeometryNormal = aIsect.sd.packed_geometry_normal;
 		mPackedShadingNormal = aIsect.sd.packed_shading_normal;
@@ -190,13 +173,13 @@ struct AbstractBSDF {
 
 	bool IsLight() { return !IsZero(bsdf.Le()); }
 	bool IsValid() { return bsdf.can_eval() || any(bsdf.Le() > 0) && abs(mLocalDirIn.z) >= 1e-4; }
-#ifdef VCM_LAMBERTIAN
+#ifdef FORCE_LAMBERTIAN
 	bool IsDelta() { return false; }
 #else
 	bool IsDelta() { return bsdf.is_specular(); }
 #endif
 	float ContinuationProb() { return 1; }
-	float CosThetaFix() { return abs(mLocalDirIn.z); }
+	float CosThetaFix() { return mLocalDirIn.z; }
 	float3 WorldDirFix() { return ToWorld(mLocalDirIn); }
 	float3 Le() { return bsdf.Le(); }
 
@@ -215,13 +198,14 @@ struct AbstractBSDF {
 	}
 
 	float CorrectShadingNormal(const float3 aWorldDirOut, const float3 aLocalDirOut) {
-		if (mPackedShadingNormal == mPackedGeometryNormal) return 1;
+		if (mPackedShadingNormal == mPackedGeometryNormal)
+			return 1;
 		const float num   = abs(dot(aWorldDirOut, GetGeometryNormal()) * mLocalDirIn.z);
 		const float denom = abs(aLocalDirOut.z * mCosGeometryThetaIn);
 		return denom <= 1e-5 ? 1 : num / denom;
 	}
 
-#ifdef VCM_LAMBERTIAN
+#ifdef FORCE_LAMBERTIAN
 	float3 Evaluate(const float3 aWorldDir, out float oCosThetaOut, out float oDirectPdfW, out float oReversePdfW) {
 		const float3 localDir = ToLocal(aWorldDir);
 		if (localDir.z * mLocalDirIn.z <= 0) {
@@ -359,18 +343,17 @@ struct InstanceLight {
 
 	float3 SamplePoint(const float3 aRndTuple, out float3 oNormal, out float2 oUV, out float oPdfA) {
 		ShadingData sd;
+		oPdfA = 1;
 		if (mInstance.type() == INSTANCE_TYPE_TRIANGLES) {
 			const float2 bary = SampleUniformTriangle(aRndTuple.xy);
 			const uint primitiveIndex = uint(mInstance.prim_count() * aRndTuple.z) % mInstance.prim_count();
 			oPdfA = 1 / (float)mInstance.prim_count();
 			make_triangle_shading_data(sd, mInstance, gInstanceTransforms[mInstanceIndex], primitiveIndex, bary);
 		} else if (mInstance.type() == INSTANCE_TYPE_SPHERE) {
-			float tmp;
-			const float3 localPosition = mInstance.radius()*SampleUniformSphereW(aRndTuple.xy, tmp);
+			const float3 localPosition = mInstance.radius()*SampleUniformSphereA(aRndTuple.xy);
 			make_sphere_shading_data(sd, mInstance, gInstanceTransforms[mInstanceIndex], localPosition);
-			oPdfA = 1;
 		}
-		oPdfA *= 1/sd.shape_area;
+		oPdfA /= sd.shape_area;
 		oNormal = sd.geometry_normal();
 		oUV = sd.uv;
 		return sd.position;
@@ -405,9 +388,11 @@ struct InstanceLight {
 
         oDirectPdfW = oDirectPdfA * distSqr / oCosAtLight;
 		oEmissionPdfW = oDirectPdfA * oCosAtLight / M_PI;
-
+		ShadingData sd;
+		sd.uv = uv;
+		sd.uv_screen_size = 0;
 		Material bsdf;
-		bsdf.load(mInstance.material_address(), uv, 0);
+		bsdf.load(mInstance.material_address(), sd);
         return bsdf.Le();
     }
 
@@ -432,17 +417,19 @@ struct InstanceLight {
         oEmissionPdfW *= oDirectPdfA;
 
         // cannot really not emit the particle, so just bias it to the correct angle
-		//localDirOut.z = max(localDirOut.z, 1e-4);
-		if (localDirOut.z < 1e-4) return 0;
+		localDirOut.z = max(localDirOut.z, 1e-4);
+		//if (localDirOut.z < 1e-4) return 0;
 
 		oCosThetaLight = localDirOut.z;
 
 		float3 t,b;
 		make_orthonormal(lightNormal, t, b);
         oDirection = normalize(localDirOut.x * t + localDirOut.y * b + localDirOut.z * lightNormal);
-
+		ShadingData sd;
+		sd.uv = uv;
+		sd.uv_screen_size = 0;
 		Material bsdf;
-		bsdf.load(mInstance.material_address(), uv, 0);
+		bsdf.load(mInstance.material_address(), sd);
         return bsdf.Le() * localDirOut.z;
     }
 

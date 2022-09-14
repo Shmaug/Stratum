@@ -11,12 +11,14 @@ namespace stm {
 #define VCM_FLAG_HAS_EMISSIVES 			BIT(1)
 #define VCM_FLAG_HAS_MEDIA 				BIT(2)
 #define VCM_FLAG_REMAP_THREADS			BIT(3)
-#define VCM_FLAG_USE_VM					BIT(4)
-#define VCM_FLAG_USE_VC					BIT(5)
-#define VCM_FLAG_USE_PPM				BIT(6)
-#define VCM_FLAG_USE_MIS				BIT(7)
-#define VCM_FLAG_USE_NEE				BIT(8)
-#define VCM_FLAG_LIGHT_TRACE_ONLY		BIT(9)
+#define VCM_FLAG_USE_ALPHA_TEST			BIT(4)
+#define VCM_FLAG_USE_NORMAL_MAPS		BIT(5)
+#define VCM_FLAG_USE_VM					BIT(6)
+#define VCM_FLAG_USE_VC					BIT(7)
+#define VCM_FLAG_USE_PPM				BIT(8)
+#define VCM_FLAG_USE_MIS				BIT(9)
+#define VCM_FLAG_USE_NEE				BIT(10)
+#define VCM_FLAG_LIGHT_TRACE_ONLY		BIT(11)
 #define VCM_FLAG_COUNT_RAYS				BIT(31)
 
 struct VCMPushConstants {
@@ -34,8 +36,11 @@ struct VCMPushConstants {
 	uint gDebugLightPathLength;
 };
 
-#define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(0)
-#define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(1)
+#define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(0)
+#define PATH_VERTEX_FLAG_IS_BACKGROUND	BIT(1)
+#define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(2)
+#define PATH_VERTEX_FLAG_IS_DELTA	    BIT(3)
+#define PATH_VERTEX_FLAG_PREV_IS_DELTA  BIT(4)
 
 struct VcmVertex {
 	float3 position;

@@ -23,7 +23,7 @@ VCM::VCM(Node& node) : mNode(node) {
 void VCM::create_pipelines() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
-	float exposure = 1;
+	float exposure = 0;
 	float exposure_alpha = 0.1f;
 	uint32_t tonemapper = 0;
 	if (mTonemapPipeline) {
@@ -56,7 +56,7 @@ void VCM::create_pipelines() {
 			});
 		};
 
-		const fs::path& src_path = "../../src/Shaders/kernels/renderers/vcm.hlsl";
+		const fs::path& src_path("../../src/Shaders/kernels/renderers/vcm.hlsl");
 		const vector<string>& args = { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" };
 		process_shader(mRenderPipelines[eLightTrace]   , src_path, "light_trace"    , args);
 		process_shader(mRenderPipelines[eCameraTrace]  , src_path, "camera_trace"   , args);
@@ -138,6 +138,8 @@ void VCM::on_inspector_gui() {
 		ImGui::DragScalar("Min Path Length", ImGuiDataType_U32, &mPushConstants.gMinPathLength);
 		ImGui::PopItemWidth();
 		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
+		ImGui::CheckboxFlags("Alpha Test", &mSamplingFlags, VCM_FLAG_USE_ALPHA_TEST);
+		ImGui::CheckboxFlags("Normal Maps", &mSamplingFlags, VCM_FLAG_USE_NORMAL_MAPS);
 		ImGui::CheckboxFlags("Remap Threads", &mSamplingFlags, VCM_FLAG_REMAP_THREADS);
 		ImGui::CheckboxFlags("Use VC", &mSamplingFlags, VCM_FLAG_USE_VC);
 		ImGui::CheckboxFlags("Use MIS", &mSamplingFlags, VCM_FLAG_USE_MIS);
@@ -157,7 +159,7 @@ void VCM::on_inspector_gui() {
 				denoiser->reset_accumulation();
 		Gui::enum_dropdown("Tone Map", mTonemapPipeline->specialization_constant<uint32_t>("gMode"), (uint32_t)TonemapMode::eTonemapModeCount, [](uint32_t i){ return to_string((TonemapMode)i); });
 		ImGui::PushItemWidth(40);
-		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, 0, 10);
+		ImGui::DragFloat("Exposure", &mTonemapPipeline->push_constant<float>("gExposure"), .1f, -10, 10);
 		ImGui::DragFloat("Exposure Alpha", &mTonemapPipeline->push_constant<float>("gExposureAlpha"), .1f, 0, 1);
 		ImGui::PopItemWidth();
 		ImGui::Checkbox("Gamma Correct", reinterpret_cast<bool*>(&mTonemapPipeline->specialization_constant<uint32_t>("gGammaCorrection")));

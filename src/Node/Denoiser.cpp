@@ -85,6 +85,8 @@ void Denoiser::on_inspector_gui() {
 	ImGui::SetNextItemWidth(200);
 	Gui::enum_dropdown("Denoiser Debug Mode", mDebugMode, (uint32_t)DenoiserDebugMode::eDebugModeCount, [](uint32_t i) { return to_string((DenoiserDebugMode)i); });
 
+	ImGui::Text("%u frames accumulated", mAccumulatedFrames);
+	ImGui::SameLine();
 	if (ImGui::Button("Reset Accumulation"))
 		reset_accumulation();
 
@@ -98,6 +100,7 @@ void Denoiser::on_inspector_gui() {
 
 	if (mAtrousIterations > 0) {
 		ImGui::Indent();
+		ImGui::DragFloat("Variance Boost Frames", &mEstimateVariancePipeline->push_constant<float>("gVarianceBoostLength"));
 		ImGui::DragFloat("Sigma Luminance Boost", &mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost"), .1f, 0, 0, "%.2f");
 		ImGui::PopItemWidth();
 		Gui::enum_dropdown("Filter", mAtrousPipeline->specialization_constant<uint32_t>("gFilterKernelType"), (uint32_t)FilterKernelType::eFilterKernelTypeCount, [](uint32_t i) { return to_string((FilterKernelType)i); });
@@ -248,9 +251,11 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 			}
 			output = mCurFrame->mTemp[mAtrousIterations%2];
 		}
+		mAccumulatedFrames++;
 	} else {
 		commandBuffer.clear_color_image(mCurFrame->mAccumColor, vk::ClearColorValue{ array<float,4>{ 0.f, 0.f, 0.f, 0.f } });
 		mResetAccumulation = false;
+		mAccumulatedFrames = 0;
 	}
 
 	return mDebugMode == DenoiserDebugMode::eNone ? output : mCurFrame->mDebugImage;

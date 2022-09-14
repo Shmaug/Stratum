@@ -4,6 +4,8 @@
 #include "VCM.hpp"
 #include "BDPT.hpp"
 
+#include <Shaders/image_compare.h>
+
 namespace stm {
 
 void inspector_gui_fn(Inspector& inspector, ImageComparer* v) { v->inspector_gui(); }
@@ -21,7 +23,7 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 		ProfilerRegion ps("ImageComparer");
 		for (auto&[original, img] : mImages|views::values) {
 			if (!img) {
-				img = make_shared<Image>(commandBuffer.mDevice, original.image()->name(), original.extent(), original.image()->format(), original.image()->layer_count(), 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
+				img = make_shared<Image>(commandBuffer.mDevice, original.image()->name(), original.extent(), original.image()->format(), original.image()->layer_count(), 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage|vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst);
 				commandBuffer.copy_image(original, img);
 				img.image()->generate_mip_maps(commandBuffer);
 			}
@@ -44,8 +46,52 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 					if (ImGui::Button(c.c_str()))
 						mCurrent = c;
 				}
+
+				if (mComparing.size() == 2) {
+					auto& mse = mMSE[ *mComparing.begin() + "_" + *(++mComparing.begin())];
+
+					bool update = !mse;
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(80);
+					if (ImGui::DragScalar("Quantization", ImGuiDataType_U32, &mMSEQuantization)) update = true;
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(160);
+					if (Gui::enum_dropdown("Error Mode", mMSEMode, (uint32_t)ErrorMode::eErrorModeCount, [](uint32_t i) { return to_string((ErrorMode)i); })) update = true;
+
+					if (update) {
+						if (!mse)
+							mse = make_shared<Buffer>(commandBuffer.mDevice, "MSE", 2*sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+
+						if (!mImageComparePipeline)
+							mImageComparePipeline = make_shared<ComputePipelineState>("mse", make_shared<Shader>(commandBuffer.mDevice, "Shaders/image_compare.spv"));
+
+						{
+							ProfilerRegion ps("Compute MSE", commandBuffer);
+							mImageComparePipeline->specialization_constant<uint32_t>("gMode") = mMSEMode;
+							mImageComparePipeline->specialization_constant<uint32_t>("gQuantization") = mMSEQuantization;
+							mImageComparePipeline->descriptor("gImage1") = image_descriptor(mImages.at(*mComparing.begin()).second, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+							mImageComparePipeline->descriptor("gImage2") = image_descriptor(mImages.at(*++mComparing.begin()).second, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+							mImageComparePipeline->descriptor("gOutput") = mse;
+							mse[0] = 0;
+							mse[1] = 0;
+							commandBuffer.bind_pipeline(mImageComparePipeline->get_pipeline());
+							mImageComparePipeline->bind_descriptor_sets(commandBuffer);
+							commandBuffer.dispatch_over(mImages.at(*mComparing.begin()).second.extent());
+						}
+					}
+
+					if (mse && !mse.buffer()->in_use()) {
+						ImGui::SameLine();
+						if (mse[1])
+							ImGui::Text("OVERFLOW");
+						else
+							ImGui::Text("%f", mMSEMode == (uint32_t)ErrorMode::eAverageLuminance || mMSEMode == (uint32_t)ErrorMode::eAverageRGB ? mse[0]/(float)mMSEQuantization : sqrt(mse[0]/(float)mMSEQuantization));
+					}
+				}
 			}
 
+
+			// image pan/zoom
 			const uint32_t w = ImGui::GetWindowSize().x - 4;
 			Image::View& img = mImages.at(mCurrent).second;
 			const float aspect = (float)img.extent().height / (float)img.extent().width;
@@ -72,18 +118,21 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 }
 
 void ImageComparer::inspector_gui() {
-	if (ImGui::Button("Clear"))
+	if (ImGui::Button("Clear")) {
 		mImages.clear();
+		mComparing.clear();
+		mCurrent.clear();
+	}
 
 	static char label[64];
 	ImGui::InputText("", label, sizeof(label));
 	ImGui::SameLine();
 	if (ImGui::Button("Save") && !string(label).empty()) {
 		Image::View img;
-		if (auto renderers = mNode.node_graph().find_components<VCM>(); !renderers.empty())
-			img = renderers.front()->prev_result();
-		else if (auto renderers = mNode.node_graph().find_components<BDPT>(); !renderers.empty())
-			img = renderers.front()->prev_result();
+		if (mNode.node_graph().component_count<VCM>())
+			img = mNode.node_graph().find_components<VCM>().front()->prev_result();
+		else if (mNode.node_graph().component_count<BDPT>())
+			img = mNode.node_graph().find_components<BDPT>().front()->prev_result();
 		mImages.emplace(label, pair<Image::View, Image::View>{ img, {} });
 	}
 

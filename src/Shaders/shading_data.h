@@ -21,16 +21,17 @@ struct ShadingData {
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 	inline float3 shading_normal() { return unpack_normal_octahedron(packed_shading_normal); }
 	inline float3 tangent() { return unpack_normal_octahedron(packed_tangent); }
+	inline bool flip_bitangent() { return (flags & SHADING_FLAG_FLIP_BITANGENT); }
 
 	inline float3 to_world(const float3 v) {
 		const float3 n = shading_normal();
 		const float3 t = tangent();
-		return v.x*t + v.y*cross(n, t)*((flags & SHADING_FLAG_FLIP_BITANGENT) ? -1 : 1) + v.z*n;
+		return v.x*t + v.y*cross(n, t)*(flip_bitangent() ? -1 : 1) + v.z*n;
 	}
 	inline float3 to_local(const float3 v) {
 		const float3 n = shading_normal();
 		const float3 t = tangent();
-		return float3(dot(v, t), dot(v, cross(n, t)*((flags & SHADING_FLAG_FLIP_BITANGENT) ? -1 : 1)), dot(v, n));
+		return float3(dot(v, t), dot(v, cross(n, t)*(flip_bitangent() ? -1 : 1)), dot(v, n));
 	}
 #endif
 };
@@ -137,7 +138,7 @@ inline void make_sphere_shading_data(out ShadingData r, const InstanceData insta
 	const float3 dpdu = transform.transform_vector(float3(-sin(r.uv[0]) * sin(r.uv[1]), 0            , cos(r.uv[0]) * sin(r.uv[1])));
 	const float3 dpdv = transform.transform_vector(float3( cos(r.uv[0]) * cos(r.uv[1]), -sin(r.uv[1]), sin(r.uv[0]) * cos(r.uv[1])));
 	r.packed_tangent = pack_normal_octahedron(normalize(dpdu - normal*dot(normal, dpdu)));
-	r.uv_screen_size = (length(dpdu) + length(dpdv)) / 2;
+	r.uv_screen_size = 1/max(length(dpdu), length(dpdv));
 }
 inline void make_volume_shading_data(out ShadingData r, const InstanceData instance, const TransformData transform, const float3 local_position) {
 	r.position = transform.transform_point(local_position);
@@ -148,7 +149,7 @@ inline void make_volume_shading_data(out ShadingData r, const InstanceData insta
 inline void make_shading_data(out ShadingData r, const uint instance_index, const uint primitive_index, const float3 local_position) {
 	if (instance_index == INVALID_INSTANCE) {
 		r.position = local_position;
-		r.shape_area = 0;
+		r.shape_area = -1;
 		r.uv_screen_size = 0;
 	} else {
 		const InstanceData instance = gInstances[instance_index];

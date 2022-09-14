@@ -182,13 +182,9 @@ void main(uint3 index : SV_DispatchThreadID) {
 
 	float3 radiance = gInput[index.xy].rgb;
 	const float3 albedo = gAlbedo[index.xy].rgb;
-	if (gModulateAlbedo) {
-		if (albedo.r > 0) radiance.r *= albedo.r;
-		if (albedo.g > 0) radiance.g *= albedo.g;
-		if (albedo.b > 0) radiance.b *= albedo.b;
-	}
+	if (gModulateAlbedo) radiance *= (1e-2 + albedo);
 
-	radiance *= gPushConstants.gExposure;
+	radiance *= pow(2, gPushConstants.gExposure);
 	switch (gMode) {
 	case (uint)TonemapMode::eReinhard:
 		radiance = tonemap_reinhard(radiance);

@@ -146,6 +146,8 @@ Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 				ImGui::SetNextItemWidth(40);
 
 				if (del) {
+					for (auto scene : mNode.node_graph().find_components<Scene>())
+						scene->mark_dirty();
 					if (ImGui::GetIO().KeyAlt)
 						mNode.node_graph().erase_recurse(*mSelected);
 					else
@@ -172,7 +174,11 @@ Inspector::Inspector(Node& node) : mNode(node), mSelected(nullptr) {
 						}
 						if (d) to_erase = type;
 					}
-					if (to_erase != typeid(nullptr_t)) mSelected->erase_component(to_erase);
+					if (to_erase != typeid(nullptr_t)) {
+						mSelected->erase_component(to_erase);
+						for (auto scene : mNode.node_graph().find_components<Scene>())
+							scene->mark_dirty();
+					}
 				}
 			} else
 				ImGui::Text("Select a node to inspect");

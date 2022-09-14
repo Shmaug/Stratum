@@ -8,13 +8,19 @@ namespace stm {
 
 static float3 gAnimateTranslate = float3::Zero();
 static float3 gAnimateRotate = float3::Zero();
+static float3 gAnimateWiggleBase = float3::Zero();
+static float3 gAnimateWiggleOffset = float3::Zero();
+static float gAnimateWiggleSpeed = 1;
+static float gAnimateWiggleTime = 0;
 static TransformData* gAnimatedTransform = nullptr;
 
 inline void inspector_gui_fn(Inspector& inspector, Scene* scene) { scene->on_inspector_gui(); }
 inline void inspector_gui_fn(Inspector& inspector, Camera* cam) {
-	ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&cam->mProjection.orthographic));
+	bool ortho = cam->mProjection.orthographic();
+	if (ImGui::Checkbox("Orthographic", reinterpret_cast<bool*>(&ortho)))
+		cam->mProjection.vertical_fov = -cam->mProjection.vertical_fov;
 	ImGui::DragFloat("Near Plane", &cam->mProjection.near_plane, 0.01f, -1, 1);
-	if (cam->mProjection.orthographic) {
+	if (cam->mProjection.orthographic()) {
 		ImGui::DragFloat("Far Plane", &cam->mProjection.far_plane, 0.01f, -1, 1);
 		ImGui::DragFloat2("Projection Scale", cam->mProjection.scale.data(), 0.01f, -1, 1);
 	} else {
@@ -53,8 +59,17 @@ inline void inspector_gui_fn(Inspector& inspector, TransformData* t) {
 
 	if (gAnimatedTransform == t) {
 		if (ImGui::Button("Stop Animating")) gAnimatedTransform = nullptr;
-		ImGui::DragFloat3("Translate", gAnimateTranslate.data(), .01f);
+		ImGui::DragFloat3("Move", gAnimateTranslate.data(), .01f);
 		ImGui::DragFloat3("Rotate", gAnimateRotate.data(), .01f);
+		const bool was_zero = gAnimateWiggleOffset.isZero();
+		ImGui::DragFloat3("Wiggle Offset", gAnimateWiggleOffset.data(), .01f);
+		if (!gAnimateWiggleOffset.isZero()) {
+			if (ImGui::Button("Set Wiggle Anchor") || was_zero) {
+				gAnimateWiggleBase = translate;
+				gAnimateWiggleTime = 0;
+			}
+			ImGui::DragFloat("Wiggle Speed", &gAnimateWiggleSpeed);
+		}
 	} else if (ImGui::Button("Animate"))
 		gAnimatedTransform = t;
 }
@@ -168,6 +183,7 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 		for (int i = 0; i < DISNEY_DATA_N; i++)
 			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
+	dst.alpha_test = false;
 	return dst;
 }
 Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
@@ -213,6 +229,7 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		for (int i = 0; i < DISNEY_DATA_N; i++)
 			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
+	dst.alpha_test = false;
 	return dst;
 }
 
@@ -258,11 +275,17 @@ void Scene::on_inspector_gui() {
 }
 
 void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
+	ProfilerRegion s("Scene::update", commandBuffer);
+
 	if (gAnimatedTransform) {
-		*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(gAnimateTranslate * deltaTime, quatf_identity(), float3::Ones()));
 		float r = length(gAnimateRotate);
-		if (r > 0)
-			*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(float3::Zero(), angle_axis(r * deltaTime, gAnimateRotate / r), float3::Ones()));
+		quatf rotate = (r > 0) ? angle_axis(r * deltaTime, gAnimateRotate / r) : quatf_identity();
+		*gAnimatedTransform = tmul(*gAnimatedTransform, make_transform(gAnimateTranslate * deltaTime, rotate, float3::Ones()));
+		if (!gAnimateWiggleOffset.isZero()) {
+			gAnimatedTransform->m.topRightCorner(3, 1) = gAnimateWiggleBase + gAnimateWiggleOffset*sin(gAnimateWiggleTime);
+			gAnimateWiggleTime += deltaTime*gAnimateWiggleSpeed;
+		}
+		mUpdateOnce = true;
 	}
 
 	bool update = mAlwaysUpdate || mUpdateOnce;
@@ -327,7 +350,6 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		instanceMotionTransforms.reserve(mPrevFrame->mInstances.size());
 	}
 	vector<uint32_t> lightInstanceMap;
-	vector<uint32_t> instanceLightMap;
 	vector<float> lightInstancePowers;
 
 	mSceneData->mInstanceNodes.clear();
@@ -358,7 +380,6 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			lightInstanceMap.emplace_back(instance_index);
 			lightInstancePowers.emplace_back(emissive_power);
 		}
-		instanceLightMap.emplace_back(light_index);
 
 		// transforms
 
@@ -400,9 +421,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				triangles.maxVertex = (uint32_t)(positions.size_bytes() / vertexPosDesc.mStride);
 				triangles.indexType = prim->mMesh->index_type();
 				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address();
-				vk::GeometryFlagBitsKHR flag = vk::GeometryFlagBitsKHR::eOpaque;
-				// TODO: non-opaque geometry
-				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, flag);
+				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, prim->mMaterial->alpha_test ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
 				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mMesh->indices().size() / (prim->mMesh->indices().stride() * 3));
 				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name() + "/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
 				blasBarriers.emplace_back(
@@ -487,7 +506,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				aabb[0].maxY = mx[1];
 				aabb[0].maxZ = mx[2];
 				vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
-				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, prim->mMaterial->alpha_test ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
 				vk::AccelerationStructureBuildRangeInfoKHR range(1);
 				shared_ptr<AccelerationStructure> as = make_shared<AccelerationStructure>(commandBuffer, "aabb BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, aabbGeometry, range);
 				blasBarriers.emplace_back(
@@ -619,8 +638,6 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 		mSceneData->mMaterialData = make_shared<Buffer>(commandBuffer.mDevice, "gMaterialData", max<size_t>(1, materialData.data.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 	if (!mSceneData->mLightInstanceMap || mSceneData->mLightInstanceMap.size() < lightInstanceMap.size())
 		mSceneData->mLightInstanceMap = make_shared<Buffer>(commandBuffer.mDevice, "gLightInstanceMap", max<size_t>(1, lightInstanceMap.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
-	if (!mSceneData->mInstanceLightMap || mSceneData->mInstanceLightMap.size() < instanceLightMap.size())
-		mSceneData->mInstanceLightMap = make_shared<Buffer>(commandBuffer.mDevice, "gInstanceLightMap", max<size_t>(1, instanceLightMap.size()) * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU, 16);
 	if (!mSceneData->mDistributionData || mSceneData->mDistributionData.size() < mSceneData->mResources.distribution_data_size)
 		mSceneData->mDistributionData = make_shared<Buffer>(commandBuffer.mDevice, "gDistributionData", max<size_t>(1, mSceneData->mResources.distribution_data_size) * sizeof(float), vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY, 16);
 
@@ -630,7 +647,6 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	memcpy(mSceneData->mInstanceMotionTransforms.data(), instanceMotionTransforms.data(), instanceMotionTransforms.size() * sizeof(TransformData));
 	memcpy(mSceneData->mMaterialData.data(), materialData.data.data(), materialData.data.size() * sizeof(uint32_t));
 	if (lightInstanceMap.size()) memcpy(mSceneData->mLightInstanceMap.data(), lightInstanceMap.data(), lightInstanceMap.size() * sizeof(uint32_t));
-	if (instanceLightMap.size()) memcpy(mSceneData->mInstanceLightMap.data(), instanceLightMap.data(), instanceLightMap.size() * sizeof(uint32_t));
 	for (const auto& [buf, address] : mSceneData->mResources.distribution_data_map)
 		commandBuffer.copy_buffer(buf, Buffer::View<float>(mSceneData->mDistributionData, address, buf.size()));
 
