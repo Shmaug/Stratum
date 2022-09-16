@@ -36,6 +36,7 @@
 [[vk::binding(11,0)]] RWStructuredBuffer<uint> gRayCount;
 [[vk::binding(12,0)]] StructuredBuffer<uint> gVolumes[gVolumeCount];
 [[vk::binding(12+gVolumeCount,0)]] Texture2D<float4> gImages[gImageCount];
+[[vk::binding(12+gVolumeCount+gImageCount,0)]] Texture2D<float> gImage1s[gImageCount];
 
 [[vk::binding( 0,1)]] StructuredBuffer<ViewData> gViews;
 [[vk::binding( 1,1)]] StructuredBuffer<ViewData> gPrevViews;
@@ -68,9 +69,11 @@
 #define gCountRays        (gSpecializationFlags & VCM_FLAG_COUNT_RAYS)
 
 #define gUseRayCones 0
+#define gFlipTriangleUVs 0
+#define gFlipNormalMaps 0
 #define gSampleEnvironmentMap 1
 #define gUniformSphereSampling 1
-#define gSceneSphere float4(0,0,0,10)
+#define gSceneSphere float4(0,0,0,20)
 
 #define gOutputExtent				  gPushConstants.gOutputExtent
 #define gViewCount 					  gPushConstants.gViewCount

@@ -124,10 +124,6 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 
 			material.bump_strength = 1;
             m->Get(AI_MATKEY_BUMPSCALING, material.bump_strength);
-
-			aiBlendMode blend_mode;
-			if (m->Get(AI_MATKEY_BLEND_FUNC, blend_mode) == AI_SUCCESS)
-				material.alpha_test = blend_mode == aiBlendMode::aiBlendMode_Default;
 		}
 		cout << endl;
 	}
@@ -145,7 +141,6 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 		vector<Buffer::View<float3>> normals_tmp(scene->mNumMeshes);
 		vector<Buffer::View<float2>> uvs_tmp(scene->mNumMeshes);
 		vector<Buffer::View<uint32_t>> indices_tmp(scene->mNumMeshes);
-		vector<float> areas(scene->mNumMeshes);
 
 		for (int i = 0; i < scene->mNumMeshes; i++) {
 			cout << "\rCreating vertex buffers " << (i+1) << "/" << scene->mNumMeshes;
@@ -176,16 +171,11 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 				for (int vi = 0; vi < m->mNumVertices; vi++)
 					uvs_tmp[i][vi] = float2(m->mTextureCoords[0][vi].x, m->mTextureCoords[0][vi].y);
 
-			areas[i] = 0;
 			for (int fi = 0; fi < m->mNumFaces; fi++) {
 				const uint32_t idx = fi*3;
 				indices_tmp[i][idx+0] = m->mFaces[fi].mIndices[0];
 				indices_tmp[i][idx+1] = m->mFaces[fi].mIndices[1];
 				indices_tmp[i][idx+2] = m->mFaces[fi].mIndices[2];
-				const float3 v0 = positions_tmp[i][m->mFaces[fi].mIndices[0]];
-				const float3 v1 = positions_tmp[i][m->mFaces[fi].mIndices[1]];
-				const float3 v2 = positions_tmp[i][m->mFaces[fi].mIndices[2]];
-				areas[i] += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
 			}
 		};
 
@@ -234,7 +224,7 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 			}
 
 			Node& mesh_node = meshes_node.make_child(m->mName.C_Str());
-			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, areas[i]) );
+			meshes.emplace_back( mesh_node.make_component<Mesh>(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList) );
 		}
 		cout << endl;
 	}

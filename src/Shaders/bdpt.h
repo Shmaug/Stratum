@@ -17,6 +17,8 @@ namespace stm {
 #define BDPT_FLAG_COHERENT_RR 				BIT(4)
 #define BDPT_FLAG_COHERENT_RNG 				BIT(5)
 
+#define BDPT_FLAG_FLIP_TRIANGLE_UVS 		BIT(28)
+#define BDPT_FLAG_FLIP_NORMAL_MAPS 			BIT(29)
 #define BDPT_FLAG_ALPHA_TEST 				BIT(6)
 #define BDPT_FLAG_NORMAL_MAPS 				BIT(7)
 #define BDPT_FLAG_RAY_CONES 				BIT(8)

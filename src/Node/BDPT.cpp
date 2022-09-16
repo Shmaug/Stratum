@@ -41,6 +41,7 @@ void BDPT::create_pipelines() {
 		mPushConstants.gReservoirMaxM = 128;
 		mPushConstants.gLightPresampleTileSize = 1024;
 		mPushConstants.gLightPresampleTileCount = 128;
+		mPushConstants.gEnvironmentSampleProbability = 0.5f;
 	}
 
 	auto samplerRepeat = make_shared<Sampler>(instance->device(), "gSamplerRepeat", vk::SamplerCreateInfo({},
@@ -92,7 +93,7 @@ void BDPT::create_pipelines() {
 						printf_color(ConsoleColor::eYellow, "Warning: variable descriptor set size not supported yet\n");
 				}
 				if (name == "gSampler" || name == "gSampler1") b.mImmutableSamplers = { samplerRepeat };
-				if (name == "gVolumes" || name == "gImages") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
+				if (name == "gVolumes" || name == "gImages" || name == "gImage1s") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
 				b.mStageFlags = vk::ShaderStageFlagBits::eCompute;
 				bindings[binding.mSet].emplace(binding.mBinding, b);
 				mDescriptorMap[binding.mSet].emplace(name, binding.mBinding);
@@ -122,9 +123,6 @@ void BDPT::on_inspector_gui() {
 		create_pipelines();
 	}
 
-	ImGui::Checkbox("Pause Rendering", &mPauseRendering);
-	ImGui::Checkbox("Half Precision", &mHalfColorPrecision);
-
 	ImGui::SetNextItemWidth(200);
 	Gui::enum_dropdown("BDPT Debug Mode", mDebugMode, (uint32_t)BDPTDebugMode::eDebugModeCount, [](uint32_t i) { return to_string((BDPTDebugMode)i); });
 	if (mDebugMode == BDPTDebugMode::ePathLengthContribution) {
@@ -136,17 +134,29 @@ void BDPT::on_inspector_gui() {
 		ImGui::Unindent();
 	}
 
-	ImGui::Checkbox("Force Lambertian", &mForceLambertian);
-
 	ImGui::CheckboxFlags("Count Rays/second", &mSamplingFlags, BDPT_FLAG_COUNT_RAYS);
 	if (mSamplingFlags & BDPT_FLAG_COUNT_RAYS) {
 		const auto [rps, ext] = format_number(mRaysPerSecond);
 		ImGui::Text("%.2f%s Rays/second", rps, ext);
 	}
 
+	ImGui::Checkbox("Pause Rendering", &mPauseRendering);
+	ImGui::Checkbox("Half Precision", &mHalfColorPrecision);
+	ImGui::CheckboxFlags("Remap Threads", &mSamplingFlags, BDPT_FLAG_REMAP_THREADS);
+
+	if (ImGui::CollapsingHeader("Scene")) {
+		ImGui::Indent();
+		ImGui::CheckboxFlags("Flip Triangle UVs", &mSamplingFlags, BDPT_FLAG_FLIP_TRIANGLE_UVS);
+		ImGui::CheckboxFlags("Flip Normal Maps", &mSamplingFlags, BDPT_FLAG_FLIP_NORMAL_MAPS);
+		ImGui::CheckboxFlags("Alpha Test", &mSamplingFlags, BDPT_FLAG_ALPHA_TEST);
+		ImGui::CheckboxFlags("Normal Maps", &mSamplingFlags, BDPT_FLAG_NORMAL_MAPS);
+		ImGui::CheckboxFlags("Ray Cone LoD", &mSamplingFlags, BDPT_FLAG_RAY_CONES);
+		ImGui::Checkbox("Force Lambertian", &mForceLambertian);
+		ImGui::Unindent();
+	}
+
 	if (ImGui::CollapsingHeader("Path Tracing")) {
 		ImGui::Indent();
-
 		ImGui::PushItemWidth(40);
 		ImGui::DragScalar("Bounces per Dispatch", ImGuiDataType_U32, &mPathTraceKernelIterations);
 		ImGui::DragScalar("Max Path Vertices", ImGuiDataType_U32, &mPushConstants.gMaxPathVertices);
@@ -154,13 +164,8 @@ void BDPT::on_inspector_gui() {
 		ImGui::DragScalar("Max Null Collisions", ImGuiDataType_U32, &mPushConstants.gMaxNullCollisions);
 		ImGui::PopItemWidth();
 		ImGui::Checkbox("Random Frame Seed", &mRandomPerFrame);
-		ImGui::CheckboxFlags("Remap Threads", &mSamplingFlags, BDPT_FLAG_REMAP_THREADS);
 		ImGui::CheckboxFlags("Coherent RR", &mSamplingFlags, BDPT_FLAG_COHERENT_RR);
 		ImGui::CheckboxFlags("Coherent RNG", &mSamplingFlags, BDPT_FLAG_COHERENT_RNG);
-		ImGui::CheckboxFlags("Ray Cone LoD", &mSamplingFlags, BDPT_FLAG_RAY_CONES);
-		ImGui::CheckboxFlags("Alpha Test", &mSamplingFlags, BDPT_FLAG_ALPHA_TEST);
-		ImGui::CheckboxFlags("Normal Maps", &mSamplingFlags, BDPT_FLAG_NORMAL_MAPS);
-
 		ImGui::CheckboxFlags("BSDF Sampling", &mSamplingFlags, BDPT_FLAG_SAMPLE_BSDFS);
 		ImGui::CheckboxFlags("Connect Light Paths to Views", &mSamplingFlags, BDPT_FLAG_CONNECT_TO_VIEWS);
 		ImGui::CheckboxFlags("Connect Light Paths to View Paths", &mSamplingFlags, BDPT_FLAG_CONNECT_TO_LIGHT_PATHS);
@@ -365,10 +370,12 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
 	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
-	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.images)
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 	for (const auto& [vol, index] : mCurFrame->mSceneData->mResources.volume_data_map)
 		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVolumes"), index, vol);
+	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image4s)
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image1s)
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 	mCurFrame->mSceneDescriptors->flush_writes();
 	mCurFrame->mSceneDescriptors->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 }

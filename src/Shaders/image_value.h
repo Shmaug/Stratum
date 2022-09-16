@@ -31,7 +31,8 @@ struct ByteAppendBuffer {
 };
 
 struct MaterialResources {
-	unordered_map<Image::View, uint32_t> images;
+	unordered_map<Image::View, uint32_t> image4s;
+	unordered_map<Image::View, uint32_t> image1s;
 	unordered_map<Buffer::View<byte>, uint32_t> volume_data_map;
 	unordered_map<Buffer::View<float>, uint32_t> distribution_data_map;
 	uint32_t distribution_data_size;
@@ -39,8 +40,13 @@ struct MaterialResources {
 	inline uint32_t get_index(const Image::View& image) {
 		if (!image) return ~0u;
 		const Image::View tmp = Image::View(image.image(), image.subresource_range());
-		auto it = images.find(tmp);
-		return (it == images.end()) ? images.emplace(tmp, (uint32_t)images.size()).first->second : it->second;
+		if (channel_count(tmp.image()->format()) == 1) {
+			auto it = image1s.find(tmp);
+			return (it == image1s.end()) ? image1s.emplace(tmp, (uint32_t)image1s.size()).first->second : it->second;
+		} else {
+			auto it = image4s.find(tmp);
+			return (it == image4s.end()) ? image4s.emplace(tmp, (uint32_t)image4s.size()).first->second : it->second;
+		}
 	}
 	inline uint32_t get_index(const Buffer::View<byte>& buf) {
 		if (!buf) return ~0u;
@@ -72,6 +78,14 @@ inline uint4 channel_mapping_swizzle(vk::ComponentMapping m) {
 #endif // __cplusplus
 
 #ifdef __HLSL__
+inline float sample_image(Texture2D<float> img, const float2 uv, const float uv_screen_size) {
+	float w, h;
+	img.GetDimensions(w, h);
+	float lod = 0;
+	if (gUseRayCones && uv_screen_size > 0)
+		lod = log2(max(uv_screen_size * max(w, h), 1e-6f));
+	return img.SampleLevel(gSampler, uv, lod);
+}
 inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
 	float w, h;
 	img.GetDimensions(w, h);

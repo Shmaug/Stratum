@@ -221,14 +221,7 @@ Mesh load_serialized(CommandBuffer& commandBuffer, const fs::path& filename, int
 	Buffer::View<uint32_t> indexBuffer = make_shared<Buffer>(commandBuffer.mDevice, filename.stem().string() + " indices", indices_tmp.size_bytes(), bufferUsage | vk::BufferUsageFlagBits::eIndexBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	commandBuffer.copy_buffer(indices_tmp, indexBuffer);
 
-	float area = 0;
-	for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
-		const float3 v0 = positions_tmp[indices_tmp[ii]];
-		const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
-		const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
-		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
-	}
-	return Mesh(make_shared<VertexArrayObject>(attributes), indexBuffer, vk::PrimitiveTopology::eTriangleList, area);
+	return Mesh(make_shared<VertexArrayObject>(attributes), indexBuffer, vk::PrimitiveTopology::eTriangleList);
 }
 
 }

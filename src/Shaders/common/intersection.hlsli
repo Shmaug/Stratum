@@ -73,13 +73,14 @@ Real trace_ray(const Vector3 origin, const Vector3 direction, const Real t_max, 
 			case CANDIDATE_NON_OPAQUE_TRIANGLE: {
 				if (gAlphaTest) {
 					const InstanceData instance = gInstances[hit_instance];
-					uint address = instance.material_address();
-					ShadingData sd;
-					TransformData tmp;
-					make_triangle_shading_data(sd, instance, tmp, rayQuery.CandidatePrimitiveIndex(), rayQuery.CandidateTriangleBarycentrics());
-					const float4 m = eval_image_value4(address, sd.uv, 0);
-					if (m.a > 0.1)
-						rayQuery.CommitNonOpaqueTriangleHit();
+					const uint alpha_mask_index = gMaterialData.Load<uint>(instance.material_address() + 20*DISNEY_DATA_N); // skip past ImageValue4s
+					if (alpha_mask_index < gImageCount) {
+						ShadingData sd;
+						TransformData tmp;
+						make_triangle_shading_data(sd, instance, tmp, rayQuery.CandidatePrimitiveIndex(), rayQuery.CandidateTriangleBarycentrics());
+						if (gImage1s[NonUniformResourceIndex(alpha_mask_index)].SampleLevel(gSampler, sd.uv, 0) >= 0.75)
+							rayQuery.CommitNonOpaqueTriangleHit();
+					}
 				} else
 					rayQuery.CommitNonOpaqueTriangleHit();
 				break;

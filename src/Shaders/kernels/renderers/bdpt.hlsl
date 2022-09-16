@@ -47,6 +47,8 @@
 #define gRemapThreadIndex              (gSpecializationFlags & BDPT_FLAG_REMAP_THREADS)
 #define gCoherentRR                    (gSpecializationFlags & BDPT_FLAG_COHERENT_RR)
 #define gCoherentRNG                   (gSpecializationFlags & BDPT_FLAG_COHERENT_RNG)
+#define gFlipTriangleUVs               (gSpecializationFlags & BDPT_FLAG_FLIP_TRIANGLE_UVS)
+#define gFlipNormalMaps	               (gSpecializationFlags & BDPT_FLAG_FLIP_NORMAL_MAPS)
 #define gAlphaTest                     (gSpecializationFlags & BDPT_FLAG_ALPHA_TEST)
 #define gUseNormalMaps                 (gSpecializationFlags & BDPT_FLAG_NORMAL_MAPS)
 #define gUseRayCones                   (gSpecializationFlags & BDPT_FLAG_RAY_CONES)
@@ -104,7 +106,8 @@
 [[vk::binding(10,0)]] SamplerState gSampler;
 [[vk::binding(11,0)]] RWStructuredBuffer<uint> gRayCount;
 [[vk::binding(12,0)]] StructuredBuffer<uint> gVolumes[gVolumeCount];
-[[vk::binding(13,0)]] Texture2D<float4> gImages[gImageCount];
+[[vk::binding(12+gVolumeCount,0)]] Texture2D<float4> gImages[gImageCount];
+[[vk::binding(12+gVolumeCount+gImageCount,0)]] Texture2D<float> gImage1s[gImageCount];
 
 [[vk::binding( 0,1)]] StructuredBuffer<ViewData> gViews;
 [[vk::binding( 1,1)]] StructuredBuffer<ViewData> gPrevViews;
@@ -398,6 +401,9 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 
 	// trace visibility ray
 	path.trace();
+
+	path.bsdf_pdf = 1;
+	path.G = 1;
 
 	// dE_1 = N_{0,k} / p_0_fwd
 	path.d = 1 / pdfWtoA(path.bsdf_pdf, path.G);

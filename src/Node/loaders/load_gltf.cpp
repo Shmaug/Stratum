@@ -96,7 +96,6 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 
 		m.bump_image = get_image(material.normalTexture.index, false);
 		m.bump_strength = 1;
-		m.alpha_test = material.alphaMode == "MASK";
 
 		return materialsNode.make_child(material.name).make_component<Material>(m);
 	});
@@ -125,8 +124,6 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				case TINYGLTF_MODE_TRIANGLE_STRIP: 	topology = vk::PrimitiveTopology::eTriangleStrip; break;
 				case TINYGLTF_MODE_TRIANGLE_FAN: 	topology = vk::PrimitiveTopology::eTriangleFan; break;
 			}
-
-			optional<float> area;
 
 			for (const auto&[attribName,attribIndex] : prim.attributes) {
 				const tinygltf::Accessor& accessor = model.accessors[attribIndex];
@@ -220,7 +217,7 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 					Buffer::View<byte>(buffers[bv.buffer], bv.byteOffset + accessor.byteOffset, stride*accessor.count) };
 			}
 
-			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology, area);
+			meshes[i][j] = meshesNode.make_child(model.meshes[i].name + "_" + to_string(j)).make_component<Mesh>(vertexData, indexBuffer, topology);
 		}
 	}
 	cout << endl;

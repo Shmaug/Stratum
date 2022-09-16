@@ -6,13 +6,9 @@
 #include <Core/AccelerationStructure.hpp>
 #include "NodeGraph.hpp"
 
-namespace stm {
+#include "Material.hpp"
 
-#pragma pack(push)
-#pragma pack(1)
-#include <Shaders/scene.h>
-#include <Shaders/material.h>
-#pragma pack(pop)
+namespace stm {
 
 // Note: Scene provides inspector gui callbacks for these classes and ones in scene.h
 
@@ -156,7 +152,7 @@ private:
 	unordered_map<size_t, shared_ptr<AccelerationStructure>> mAABBs;
 
 	unordered_map<Mesh*, Buffer::View<PackedVertexData>> mMeshVertices;
-	unordered_map<Mesh*, MeshAS> mMeshAccelerationStructures;
+	unordered_map<size_t, MeshAS> mMeshAccelerationStructures;
 
 	shared_ptr<SceneData> mSceneData;
 

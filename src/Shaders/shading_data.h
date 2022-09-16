@@ -42,6 +42,9 @@ struct ShadingData {
 inline void make_triangle_shading_data(inout ShadingData r, const TransformData transform, const float2 bary, const PackedVertexData v0, const PackedVertexData v1, const PackedVertexData v2) {
 	r.uv = v0.uv() + (v1.uv() - v0.uv())*bary.x + (v2.uv() - v0.uv())*bary.y;
 
+	if (gFlipTriangleUVs)
+		r.uv.y = 1 - r.uv.y;
+
 	const float3 dPds = transform.transform_vector(v0.position - v2.position);
 	const float3 dPdt = transform.transform_vector(v1.position - v2.position);
 	float3 geometry_normal = cross(dPds, dPdt);

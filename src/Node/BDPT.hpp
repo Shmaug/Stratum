@@ -48,7 +48,7 @@ private:
 	bool mRandomPerFrame = true;
 	bool mForceLambertian = false;
 	bool mDenoise = true;
-	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_NORMAL_MAPS | BDPT_FLAG_ALPHA_TEST | BDPT_FLAG_SAMPLE_BSDFS | BDPT_FLAG_COHERENT_RR;
+	uint32_t mSamplingFlags = BDPT_FLAG_REMAP_THREADS | BDPT_FLAG_RAY_CONES | BDPT_FLAG_NORMAL_MAPS | BDPT_FLAG_ALPHA_TEST | BDPT_FLAG_SAMPLE_BSDFS | BDPT_FLAG_COHERENT_RR | BDPT_FLAG_NEE | BDPT_FLAG_MIS;
 	BDPTDebugMode mDebugMode = BDPTDebugMode::eNone;
 	uint32_t mPathTraceKernelIterations = 0;
 	uint32_t mLightTraceQuantization = 65536;

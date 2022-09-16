@@ -163,14 +163,6 @@ float3 parse_color(pugi::xml_node node) {
 }
 
 Mesh create_mesh(CommandBuffer& commandBuffer, const vector<float3>& vertices, const vector<float3>& normals, const vector<float2>& uvs, const vector<uint32_t>& indices) {
-	float area = 0;
-	for (int ii = 0; ii < indices.size(); ii+=3) {
-		const float3 v0 = vertices[indices[ii]];
-		const float3 v1 = vertices[indices[ii + 1]];
-		const float3 v2 = vertices[indices[ii + 2]];
-		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
-	}
-
 	vk::BufferUsageFlags bufferUsage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer;
 #ifdef VK_KHR_buffer_device_address
 	bufferUsage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
@@ -199,7 +191,7 @@ Mesh create_mesh(CommandBuffer& commandBuffer, const vector<float3>& vertices, c
 	attributes[VertexArrayObject::AttributeType::ePosition].emplace_back(VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex }, positions_buf);
 	attributes[VertexArrayObject::AttributeType::eNormal].emplace_back(VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float3), vk::Format::eR32G32B32Sfloat, 0, vk::VertexInputRate::eVertex }, normals_buf);
 	attributes[VertexArrayObject::AttributeType::eTexcoord].emplace_back(VertexArrayObject::AttributeDescription{ (uint32_t)sizeof(float2), vk::Format::eR32G32Sfloat, 0, vk::VertexInputRate::eVertex }, texcoords_buf);
-	return Mesh(make_shared<VertexArrayObject>(attributes), indices_buf, vk::PrimitiveTopology::eTriangleList, area);
+	return Mesh(make_shared<VertexArrayObject>(attributes), indices_buf, vk::PrimitiveTopology::eTriangleList);
 }
 
 Image::View parse_texture(CommandBuffer& commandBuffer, pugi::xml_node node) {

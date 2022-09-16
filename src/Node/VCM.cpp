@@ -238,10 +238,12 @@ void VCM::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mResources.mCur->mSceneData->mDistributionData);
 	mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstanceMap"), mResources.mCur->mSceneData->mLightInstanceMap);
 	mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
-	for (const auto& [image, index] : mResources.mCur->mSceneData->mResources.images)
-		mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 	for (const auto& [vol, index] : mResources.mCur->mSceneData->mResources.volume_data_map)
 		mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVolumes"), index, vol);
+	for (const auto& [image, index] : mResources.mCur->mSceneData->mResources.image4s)
+		mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+	for (const auto& [image, index] : mResources.mCur->mSceneData->mResources.image1s)
+		mResources.mCur->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 	mResources.mCur->mSceneDescriptors->flush_writes();
 	mResources.mCur->mSceneDescriptors->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 }

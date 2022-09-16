@@ -5,21 +5,21 @@ namespace stm {
 
 // https://stackoverflow.com/questions/216823/how-to-trim-a-stdstring
 // trim from start
-static inline string& ltrim(string &s) {
+static string& ltrim(string &s) {
     s.erase(s.begin(), find_if(s.begin(), s.end(), [](unsigned char ch) {
         return !isspace(ch);
     }));
     return s;
 }
 // trim from end
-static inline string& rtrim(string &s) {
+static string& rtrim(string &s) {
     s.erase(find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
         return !isspace(ch);
     }).base(), s.end());
     return s;
 }
 // trim from both ends
-static inline string &trim(string &s) {
+static string &trim(string &s) {
     return ltrim(rtrim(s));
 }
 
@@ -42,14 +42,14 @@ static vector<int> split_face_str(const string &s) {
 
 
 // Numerical robust computation of angle between unit vectors
-inline float unit_angle(const float3 &u, const float3 &v) {
+float unit_angle(const float3 &u, const float3 &v) {
     if (dot(u, v) < 0)
         return (M_PI - 2) * asin(0.5f * (v + u).matrix().norm());
     else
         return 2 * asin(0.5f * (v - u).matrix().norm());
 }
 
-inline vector<float3> compute_normal(const vector<float3> &vertices, const vector<uint32_t> &indices) {
+vector<float3> compute_normal(const vector<float3> &vertices, const vector<uint32_t> &indices) {
 	vector<float3> normals(vertices.size(), float3{0, 0, 0});
 
     // Nelson Max, "Computing Vertex Normals from Facet Normals", 1999
@@ -125,16 +125,18 @@ size_t get_vertex_id(const ObjVertex &vertex,
     return id;
 }
 
+
 Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
-    vector<float3> pos_pool;
-    vector<float3> nor_pool;
-    vector<float2> st_pool;
-    map<ObjVertex, size_t> vertex_map;
 
     vector<float3> positions;
     vector<float3> normals;
     vector<float2> uvs;
     vector<uint32_t> indices;
+
+    vector<float3> pos_pool;
+    vector<float3> nor_pool;
+    vector<float2> st_pool;
+    map<ObjVertex, size_t> vertex_map;
 
     ifstream ifs(filename.c_str(), ifstream::in);
     if (!ifs.is_open()) {
@@ -225,6 +227,7 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
         normals = compute_normal(positions, indices);
     }
 
+
 	Buffer::View<float3> positions_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp vertices", positions.size()*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	Buffer::View<float3> normals_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp normals", normals.size()*sizeof(float3), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	Buffer::View<uint32_t> indices_tmp = make_shared<Buffer>(commandBuffer.mDevice, "tmp indices", indices.size()*sizeof(uint32_t), vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -261,16 +264,8 @@ Mesh load_obj(CommandBuffer& commandBuffer, const fs::path &filename) {
         commandBuffer.copy_buffer(uvs_tmp, vao->at(VertexArrayObject::AttributeType::eTexcoord)[0].second);
     }
 
-	float area = 0;
-	for (int ii = 0; ii < indices_tmp.size(); ii+=3) {
-		const float3 v0 = positions_tmp[indices_tmp[ii]];
-		const float3 v1 = positions_tmp[indices_tmp[ii + 1]];
-		const float3 v2 = positions_tmp[indices_tmp[ii + 2]];
-		area += (v2 - v0).matrix().cross((v1 - v0).matrix()).norm();
-	}
-
 	cout << "Loaded " << filename << endl;
-	return Mesh(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList, area);
+	return Mesh(vao, indexBuffer, vk::PrimitiveTopology::eTriangleList);
 }
 
 }

@@ -47,6 +47,8 @@ struct DisneyMaterial : BSDF {
 		for (int i = 0; i < DISNEY_DATA_N; i++)
 			bsdf.data[i] = eval_image_value4(address, uv, uv_screen_size);
 
+		address += 4; // alpha mask
+
 		// normal map
 		if (gUseNormalMaps) {
 			const uint2 p = gMaterialData.Load<uint2>(address);
@@ -55,7 +57,8 @@ struct DisneyMaterial : BSDF {
 			bump_img.image_index = p.x;
 			if (bump_img.has_image() && asfloat(p.y) > 0) {
 				float3 bump = bump_img.eval(uv, uv_screen_size)*2-1;
-				bump.y = -bump.y;
+				if (gFlipNormalMaps)
+					bump.y = -bump.y;
 				bump = normalize(float3(bump.xy * asfloat(p.y), bump.z > 0 ? bump.z : 1));
 
 				float3 n = unpack_normal_octahedron(packed_shading_normal);
@@ -122,9 +125,10 @@ struct DisneyMaterial : BSDF {
 			r.pdf_fwd = r.pdf_rev = 0;
 			return;
 		}
+
 		if (bsdf.transmission() > 0.25)
 			disneyglass_eval(bsdf, r, dir_in, dir_out, adjoint);
-		else if (bsdf.metallic() > 0.5)
+		else if (bsdf.metallic() > 0.5 && bsdf.roughness() < 0.5)
 			disneymetal_eval(bsdf, r, dir_in, dir_out, adjoint);
 		else
 			disneydiffuse_eval(bsdf, r, dir_in, dir_out, adjoint);
@@ -137,7 +141,7 @@ struct DisneyMaterial : BSDF {
 		}
 		if (bsdf.transmission() > 0.25)
 			return disneyglass_sample(bsdf, r, rnd, dir_in, beta, adjoint);
-		else if (bsdf.metallic() > 0.5)
+		else if (bsdf.metallic() > 0.5 && bsdf.roughness() < 0.5)
 			return disneymetal_sample(bsdf, r, rnd, dir_in, beta, adjoint);
 		else
 			return disneydiffuse_sample(bsdf, r, rnd, dir_in, beta, adjoint);

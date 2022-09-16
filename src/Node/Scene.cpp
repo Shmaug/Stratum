@@ -170,6 +170,14 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 			mConvertPbrPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		}
+		if (base_color.image)
+			dst.alpha_mask = make_shared<Image>(commandBuffer.mDevice, "alpha mask", d.extent(), vk::Format::eR8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		mConvertPbrPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.data[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+
+		dst.min_alpha = make_shared<Buffer>(commandBuffer.mDevice, "min_alpha", sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		dst.min_alpha[0] = 0xFFFFFFFF;
+		mConvertPbrPipeline->descriptor("gOutputMinAlpha") = dst.min_alpha;
+
 		mConvertPbrPipeline->descriptor("gDiffuse") = image_descriptor(base_color.image ? base_color.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertPbrPipeline->descriptor("gSpecular") = image_descriptor(metallic_roughness.image ? metallic_roughness.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertPbrPipeline->descriptor("gTransmittance") = image_descriptor(transmission.image ? transmission.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -183,7 +191,6 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 		for (int i = 0; i < DISNEY_DATA_N; i++)
 			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
-	dst.alpha_test = false;
 	return dst;
 }
 Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
@@ -214,6 +221,14 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
 			mConvertDiffuseSpecularPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		}
+		if (diffuse.image)
+			dst.alpha_mask = make_shared<Image>(commandBuffer.mDevice, "alpha mask", d.extent(), vk::Format::eR8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+		mConvertDiffuseSpecularPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.data[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+
+		dst.min_alpha = make_shared<Buffer>(commandBuffer.mDevice, "min_alpha", sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		dst.min_alpha[0] = 0xFFFFFFFF;
+		mConvertDiffuseSpecularPipeline->descriptor("gOutputMinAlpha") = dst.min_alpha;
+
 		mConvertDiffuseSpecularPipeline->descriptor("gDiffuse") = image_descriptor(diffuse.image ? diffuse.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gSpecular") = image_descriptor(specular.image ? specular.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
 		mConvertDiffuseSpecularPipeline->descriptor("gTransmittance") = image_descriptor(transmission.image ? transmission.image : d, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
@@ -229,7 +244,6 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		for (int i = 0; i < DISNEY_DATA_N; i++)
 			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
 	}
-	dst.alpha_test = false;
 	return dst;
 }
 
@@ -406,7 +420,8 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			if (!prim->mMaterial) return;
 
 			// build BLAS
-			auto it = mMeshAccelerationStructures.find(prim->mMesh.get());
+			const size_t key = hash_args(prim->mMesh.get(), prim->mMaterial->alpha_test());
+			auto it = mMeshAccelerationStructures.find(key);
 			if (it == mMeshAccelerationStructures.end()) {
 				ProfilerRegion s("build acceleration structures", commandBuffer);
 				const auto& [vertexPosDesc, positions] = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
@@ -421,7 +436,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				triangles.maxVertex = (uint32_t)(positions.size_bytes() / vertexPosDesc.mStride);
 				triangles.indexType = prim->mMesh->index_type();
 				triangles.indexData = commandBuffer.hold_resource(prim->mMesh->indices()).device_address();
-				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, prim->mMaterial->alpha_test ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureGeometryKHR triangleGeometry(vk::GeometryTypeKHR::eTriangles, triangles, prim->mMaterial->alpha_test() ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
 				vk::AccelerationStructureBuildRangeInfoKHR range(prim->mMesh->indices().size() / (prim->mMesh->indices().stride() * 3));
 				auto as = make_shared<AccelerationStructure>(commandBuffer, prim.node().name() + "/BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, triangleGeometry, range);
 				blasBarriers.emplace_back(
@@ -456,14 +471,14 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 					commandBuffer.barrier({ vertices }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
 				}
 
-				it = mMeshAccelerationStructures.emplace(prim->mMesh.get(), MeshAS{ as, prim->mMesh->indices() }).first;
+				it = mMeshAccelerationStructures.emplace(key, MeshAS{ as, prim->mMesh->indices() }).first;
 			}
 
 			const uint32_t material_address = process_material(prim->mMaterial.get());
 
 			const uint32_t triCount = prim->mMesh->indices().size_bytes() / (prim->mMesh->indices().stride() * 3);
 			const TransformData transform = node_to_world(prim.node());
-			const float area = prim->mMesh->area().has_value() ? prim->mMesh->area().value()*transform.m.topLeftCorner<3,3>().matrix().determinant() : 1;
+			const float area = 1;
 
 			if (prim->mMaterial->data[0].value[3] > 0)
 				mSceneData->mEmissivePrimitiveCount += triCount;
@@ -495,7 +510,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			const float3 mn = -float3::Constant(r);
 			const float3 mx = float3::Constant(r);
-			const size_t key = hash_args(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+			const size_t key = hash_args(mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], prim->mMaterial->alpha_test());
 			auto aabb_it = mAABBs.find(key);
 			if (aabb_it == mAABBs.end()) {
 				Buffer::View<vk::AabbPositionsKHR> aabb = make_shared<Buffer>(commandBuffer.mDevice, "aabb data", sizeof(vk::AabbPositionsKHR), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -506,7 +521,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 				aabb[0].maxY = mx[1];
 				aabb[0].maxZ = mx[2];
 				vk::AccelerationStructureGeometryAabbsDataKHR aabbs(commandBuffer.hold_resource(aabb).device_address(), sizeof(vk::AabbPositionsKHR));
-				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, prim->mMaterial->alpha_test ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
+				vk::AccelerationStructureGeometryKHR aabbGeometry(vk::GeometryTypeKHR::eAabbs, aabbs, prim->mMaterial->alpha_test() ? vk::GeometryFlagBitsKHR{} : vk::GeometryFlagBitsKHR::eOpaque);
 				vk::AccelerationStructureBuildRangeInfoKHR range(1);
 				shared_ptr<AccelerationStructure> as = make_shared<AccelerationStructure>(commandBuffer, "aabb BLAS", vk::AccelerationStructureTypeKHR::eBottomLevel, aabbGeometry, range);
 				blasBarriers.emplace_back(

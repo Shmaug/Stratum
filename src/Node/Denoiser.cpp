@@ -51,7 +51,7 @@ void Denoiser::create_pipelines() {
 					printf_color(ConsoleColor::eYellow, "Warning: variable descriptor set size not supported yet\n");
 			}
 			if (name == "gSampler" || name == "gSampler1") b.mImmutableSamplers = { samplerRepeat };
-			if (name == "gVolumes" || name == "gImages" || name == "g3DImages") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
+			if (name == "gVolumes" || name == "gImages" || name == "gImage1s") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
 			b.mStageFlags = vk::ShaderStageFlagBits::eCompute;
 			bindings.emplace(binding.mBinding, b);
 			mDescriptorMap.emplace(name, binding.mBinding);

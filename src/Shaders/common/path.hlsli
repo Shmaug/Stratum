@@ -250,7 +250,7 @@ struct LightTrace {
 			// dL_{s+1} = (1 + P(s+1 -> s+2)*dL_{s+2}) / P(s+1 <- s+2)
 			// dL_1 = (1 + P(1 -> 2)*dL_2) / P(1 <- 2)
 			const Real dL_1 = connection_dVC(dL_2, pdfWtoA(_eval.pdf_rev, G_rev), prev_pdfA, prev_specular);
-			const Real p0_fwd = pdfWtoA(gViews[view_index].sensor_pdfW(sensor_cos_theta), abs(ngdotout)/pow2(dist));
+			const Real p0_fwd = 1;//pdfWtoA(gViews[view_index].sensor_pdfW(sensor_cos_theta), abs(ngdotout)/pow2(dist));
 			weight = 1 / (1 + dL_1 * mis(p0_fwd));
 		} else
 			weight = path_weight(1, path_length);
