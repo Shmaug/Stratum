@@ -126,12 +126,68 @@ struct DisneyMaterial : BSDF {
 			return;
 		}
 
-		if (bsdf.transmission() > 0.25)
-			disneyglass_eval(bsdf, r, dir_in, dir_out, adjoint);
-		else if (bsdf.metallic() > 0.5 && bsdf.roughness() < 0.5)
-			disneymetal_eval(bsdf, r, dir_in, dir_out, adjoint);
-		else
-			disneydiffuse_eval(bsdf, r, dir_in, dir_out, adjoint);
+		const Real one_minus_metallic = 1 - bsdf.metallic();
+		Real w_diffuse = (1 - bsdf.transmission()) * one_minus_metallic;
+		Real w_sheen = one_minus_metallic;
+		Real w_metal = bsdf.metallic();
+		Real w_glass = bsdf.transmission() * one_minus_metallic;
+		Real w_clearcoat = 0.25 * bsdf.clearcoat();
+		const Real inv_w_sum = 1 / (w_diffuse + w_sheen + w_metal + w_glass + w_clearcoat);
+		w_diffuse *= inv_w_sum;
+		w_sheen   *= inv_w_sum;
+		w_metal   *= inv_w_sum;
+		w_glass   *= inv_w_sum;
+		w_clearcoat *= inv_w_sum;
+
+		const Real local_eta = dir_in.z < 0 ? 1/bsdf.eta() : bsdf.eta();
+		const bool transmit = dir_in.z * dir_out.z < 0;
+		Vector3 h = normalize(transmit ? (dir_in + dir_out * local_eta) : (dir_in + dir_out));
+		if (h.z * dir_in.z < 0) h = -h;
+		const Real h_dot_in = dot(h, dir_in);
+		const Real h_dot_out = dot(h, dir_out);
+
+		const Real aspect = sqrt(1 - 0.9 * bsdf.anisotropic());
+		const float2 alpha = max(0.0001, float2(bsdf.alpha() / aspect, bsdf.alpha() * aspect));
+		const Real D = Dm(alpha.x, alpha.y, h);
+		const Real G_in  = G1(alpha.x, alpha.y, dir_in);
+		const Real G_out = G1(alpha.x, alpha.y, dir_out);
+		const Real F = fresnel_dielectric(h_dot_in, local_eta);
+
+		if (transmit) {
+			if (w_glass > 0) {
+				r.f = w_glass * disneyglass_eval_refract(bsdf.base_color(), F, D, G_in * G_out, dir_in.z, h_dot_in, h_dot_out, local_eta, adjoint);
+				r.pdf_fwd = w_glass * disneyglass_refract_pdf(F, D, G_in, dir_in.z, h_dot_in, h_dot_out, local_eta);
+				r.pdf_rev = w_glass * disneyglass_refract_pdf(fresnel_dielectric(h_dot_out, 1/local_eta), D, G_out, dir_out.z, h_dot_out, h_dot_in, 1/local_eta);
+			}
+		} else {
+			r.f = 0;
+			r.pdf_fwd = 0;
+			r.pdf_rev = 0;
+			if (w_glass > 0) {
+				r.f += w_glass * disneyglass_eval_reflect(bsdf.base_color(), F, D, G_in * G_out, dir_in.z);
+				r.pdf_fwd += w_glass * disneyglass_reflect_pdf(F, D, G_in, dir_in.z);
+				r.pdf_rev += w_glass * disneyglass_reflect_pdf(fresnel_dielectric(h_dot_out, local_eta), D, G_out, dir_out.z);
+			}
+			if (w_metal > 0) {
+				r.f += w_metal * disneymetal_eval(bsdf.base_color(), D, G_in * G_out, dir_in, dot(h, dir_out));
+				r.pdf_fwd += w_metal * disneymetal_eval_pdf(D, G_in, dir_in.z);
+				r.pdf_rev += w_metal * disneymetal_eval_pdf(D, G_out, dir_out.z);
+			}
+			if (w_clearcoat > 0) {
+				const Real D_c = Dc((1 - bsdf.clearcoat_gloss())*0.1 + bsdf.clearcoat_gloss()*0.001, h.z);
+				r.f += w_clearcoat * disneyclearcoat_eval(D_c, dir_in, dir_out, h, h_dot_out);
+				r.pdf_fwd += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_out);
+				r.pdf_rev += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_in);
+			}
+
+			r.pdf_fwd += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_out.z));
+			r.pdf_rev += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_in.z));
+
+			if (w_diffuse > 0)
+				r.f += w_diffuse * disneydiffuse_eval(bsdf, dir_in, dir_out);
+			if (w_sheen > 0)
+				r.f += w_sheen * disneysheen_eval(bsdf, dir_in, dir_out, h);
+		}
 	}
 	Spectrum sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
 		if (bsdf.emission() > 0) {
@@ -139,12 +195,123 @@ struct DisneyMaterial : BSDF {
 			r.pdf_fwd = r.pdf_rev = 0;
 			return 0;
 		}
-		if (bsdf.transmission() > 0.25)
-			return disneyglass_sample(bsdf, r, rnd, dir_in, beta, adjoint);
-		else if (bsdf.metallic() > 0.5 && bsdf.roughness() < 0.5)
-			return disneymetal_sample(bsdf, r, rnd, dir_in, beta, adjoint);
-		else
-			return disneydiffuse_sample(bsdf, r, rnd, dir_in, beta, adjoint);
+
+		const Real one_minus_metallic = 1 - bsdf.metallic();
+		Real w_diffuse = (1 - bsdf.transmission()) * one_minus_metallic;
+		Real w_sheen = one_minus_metallic;
+		Real w_metal = bsdf.metallic();
+		Real w_glass = bsdf.transmission() * one_minus_metallic;
+		Real w_clearcoat = 0.25 * bsdf.clearcoat();
+		const Real inv_w_sum = 1 / (w_diffuse + w_sheen + w_metal + w_glass + w_clearcoat);
+		w_diffuse *= inv_w_sum;
+		w_sheen   *= inv_w_sum;
+		w_metal   *= inv_w_sum;
+		w_glass   *= inv_w_sum;
+		w_clearcoat *= inv_w_sum;
+
+		const Real aspect = sqrt(1 - 0.9 * bsdf.anisotropic());
+		const float2 alpha = max(0.0001, float2(bsdf.alpha() / aspect, bsdf.alpha() * aspect));
+		const Real alpha_c = (1 - bsdf.clearcoat_gloss())*0.1 + bsdf.clearcoat_gloss()*0.001;
+
+		const Real local_eta = dir_in.z < 0 ? 1/bsdf.eta() : bsdf.eta();
+		const Real G_in = G1(alpha.x, alpha.y, dir_in);
+
+		Vector3 h;
+		Real h_dot_in;
+		Real D;
+		Real F;
+
+		r.eta = 0;
+		r.roughness = bsdf.roughness();
+
+		// sample direction
+		if (rnd.z < w_glass + w_metal) {
+			// glass/metal
+			h = sample_visible_normals(dir_in, alpha.x, alpha.y, rnd.xy);
+			h_dot_in = dot(h, dir_in);
+			D = Dm(alpha.x, alpha.y, h);
+			F = fresnel_dielectric(h_dot_in, local_eta);
+			if (rnd.z < w_glass) {
+				const Real h_dot_out_sq = 1 - (1 - h_dot_in * h_dot_in) / (local_eta * local_eta);
+				if (h_dot_out_sq <= 0 || rnd.z/w_glass <= F) {
+					// Reflection
+					r.dir_out = reflect(-dir_in, h);
+				} else {
+					// Refraction
+					r.dir_out = refract(-dir_in, h, 1/local_eta);
+					r.eta = local_eta;
+					const Real G_out = G1(alpha.x, alpha.y, r.dir_out);
+					const Real h_dot_out = dot(h, r.dir_out);
+					r.pdf_fwd = w_glass * disneyglass_refract_pdf(F, D, G_in, dir_in.z, h_dot_in, h_dot_out, local_eta);
+					r.pdf_rev = w_glass * disneyglass_refract_pdf(fresnel_dielectric(h_dot_out, 1/local_eta), D, G_out, r.dir_out.z, h_dot_out, h_dot_in, 1/local_eta);
+					const Spectrum f = w_glass * disneyglass_eval_refract(bsdf.base_color(), F, D, G_in * G_out, dir_in.z, h_dot_in, h_dot_out, local_eta, adjoint);
+					beta *= f / r.pdf_fwd;
+					return f; // other layers are all 0 when transmitting
+				}
+			} else {
+				r.dir_out = reflect(-dir_in, h);
+			}
+		} else {
+			if (rnd.z < w_glass + w_metal + w_clearcoat) {
+				// clearcoat
+				// importance sample Dc
+				const Real alpha2 = alpha_c*alpha_c;
+				const Real cos_phi = sqrt((1 - pow(alpha2, 1 - rnd.x)) / (1 - alpha2));
+				const Real sin_phi = sqrt(1 - max(cos_phi*cos_phi, Real(0)));
+				const Real theta = 2*M_PI * rnd.y;
+				h = Vector3(sin_phi*cos(theta), sin_phi*sin(theta), cos_phi);
+				if (dir_in.z < 0) h = -h;
+				r.dir_out = reflect(-dir_in, h);
+				r.roughness = alpha_c;
+			} else {
+				// diffuse/sheen
+				r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
+				if (dir_in.z < 0) r.dir_out = -r.dir_out;
+				r.roughness = 1;
+				h = normalize(dir_in + r.dir_out);
+			}
+			h_dot_in = dot(h, dir_in);
+			D = Dm(alpha.x, alpha.y, h);
+			F = fresnel_dielectric(h_dot_in, local_eta);
+		}
+
+		const Real G_out = G1(alpha.x, alpha.y, r.dir_out);
+		const Real h_dot_out = dot(h, r.dir_out);
+
+		r.pdf_fwd = 0;
+		r.pdf_rev = 0;
+		Spectrum f = 0;
+
+		// evaluate contribution and pdfs
+		if (w_glass > 0) {
+			r.pdf_fwd += w_glass * disneyglass_reflect_pdf(F, D, G_in, dir_in.z);
+			r.pdf_rev += w_glass * disneyglass_reflect_pdf(fresnel_dielectric(h_dot_out, local_eta), D, G_out, r.dir_out.z);
+			f += w_glass * disneyglass_eval_reflect(bsdf.base_color(), F, D, G_in * G_out, dir_in.z);
+		}
+
+		if (w_metal > 0) {
+			r.pdf_fwd += w_metal * disneymetal_eval_pdf(D, G_in, dir_in.z);
+			r.pdf_rev += w_metal * disneymetal_eval_pdf(D, G_out, r.dir_out.z);
+			f += w_metal * disneymetal_eval(bsdf.base_color(), D, G_in * G_out, dir_in, h_dot_out);
+		}
+
+		if (w_clearcoat > 0) {
+			const Real D_c = Dc(alpha_c, h.z);
+			r.pdf_fwd += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_out);
+			r.pdf_rev += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_in);
+			f += w_clearcoat * disneyclearcoat_eval(D_c, dir_in, r.dir_out, h, h_dot_out);
+		}
+
+		r.pdf_fwd += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(r.dir_out.z));
+		r.pdf_rev += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_in.z));
+
+		if (w_diffuse > 0)
+			f += w_diffuse * disneydiffuse_eval(bsdf, dir_in, r.dir_out);
+		if (w_sheen > 0)
+			f += w_sheen * disneysheen_eval(bsdf, dir_in, r.dir_out, h);
+
+		beta *= f / r.pdf_fwd;
+		return f;
 	}
 #endif
 };
