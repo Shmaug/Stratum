@@ -157,115 +157,6 @@ struct LightPathConnection {
 	}
 };
 
-struct LightTrace {
-	static Spectrum load_sample(const uint2 pixel_coord) {
-		const uint idx = pixel_coord.y * gOutputExtent.x + pixel_coord.x;
-		uint4 v = gLightTraceSamples.Load<uint4>(16*idx);
-		// handle overflow
-		if (v.w & BIT(0)) v.r = 0xFFFFFFFF;
-		if (v.w & BIT(1)) v.g = 0xFFFFFFFF;
-		if (v.w & BIT(2)) v.b = 0xFFFFFFFF;
-		return v.rgb / (Real)gLightTraceQuantization;
-	}
-	static void accumulate_contribution(const uint output_index, const Spectrum c) {
-		const uint3 ci = max(0,c) * gLightTraceQuantization;
-		if (all(ci == 0)) return;
-		const uint addr = 16*output_index;
-		uint3 ci_p;
-		gLightTraceSamples.InterlockedAdd(addr + 0 , ci[0], ci_p[0]);
-		gLightTraceSamples.InterlockedAdd(addr + 4 , ci[1], ci_p[1]);
-		gLightTraceSamples.InterlockedAdd(addr + 8 , ci[2], ci_p[2]);
-		const bool3 overflow = ci > (0xFFFFFFFF - ci_p);
-		if (any(overflow)) {
-			const uint overflow_mask = (overflow[0] ? BIT(0) : 0) | (overflow[1] ? BIT(1) : 0) | (overflow[2] ? BIT(2) : 0);
-			gLightTraceSamples.InterlockedOr(addr + 12, overflow_mask);
-		}
-	}
-	static void connect_view(const BSDF m, inout rng_state_t _rng, const uint cur_medium, const IntersectionVertex _isect, const Spectrum beta, const uint path_length, const Vector3 local_dir_in, const Real ngdotin, const Real dL_2, const Real prev_pdfA, const Real G_rev, const bool prev_specular) {
-		uint view_index = 0;
-		if (gViewCount > 1) view_index = min(rng_next_float(_rng)*gViewCount, gViewCount-1);
-
-		float4 screen_pos = gViews[view_index].projection.project_point(gInverseViewTransforms[view_index].transform_point(_isect.sd.position));
-		screen_pos.y = -screen_pos.y;
-		screen_pos.xyz /= screen_pos.w;
-		if (any(abs(screen_pos.xyz) >= 1) || screen_pos.z <= 0) return;
-        const float2 uv = screen_pos.xy*.5 + .5;
-        const int2 ipos = gViews[view_index].image_min + (gViews[view_index].image_max - gViews[view_index].image_min) * uv;
-		const uint output_index = ipos.y * gOutputExtent.x + ipos.x;
-
-		const Vector3 position = Vector3(
-			gViewTransforms[view_index].m[0][3],
-			gViewTransforms[view_index].m[1][3],
-			gViewTransforms[view_index].m[2][3] );
-		const Vector3 view_normal = normalize(gViewTransforms[view_index].transform_vector(Vector3(0,0,1)));
-
-		Vector3 to_view = position - _isect.sd.position;
-		const Real dist = length(to_view);
-		to_view /= dist;
-
-		const Real sensor_cos_theta = abs(dot(to_view, view_normal));
-
-		const Real lens_radius = 0;
-		const Real lens_area = lens_radius > 0 ? (M_PI * lens_radius * lens_radius) : 1;
-		const Real sensor_importance = 1 / (gViews[view_index].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
-
-		Spectrum contribution = beta * sensor_importance / pdfAtoW(1/lens_area, sensor_cos_theta / pow2(dist));
-
-		Real ngdotout;
-		Vector3 local_to_view;
-
-		Vector3 origin = _isect.sd.position;
-		if (gHasMedia && _isect.sd.shape_area == 0) {
-			ngdotout = 1;
-			local_to_view = to_view;
-		} else {
-			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			ngdotout = dot(to_view, geometry_normal);
-			origin = ray_offset(origin, ngdotout > 0 ? geometry_normal : -geometry_normal);
-			local_to_view = normalize(_isect.sd.to_local(to_view));
-
-			// shading normal correction
-			if (ngdotout != 0) {
-				const Real num = ngdotout * local_dir_in.z;
-				const Real denom = local_to_view.z * ngdotin;
-				if (abs(denom) > 1e-5) contribution *= abs(num / denom);
-			}
-		}
-
-		MaterialEvalRecord _eval;
-		m.eval(_eval, local_dir_in, local_to_view, true);
-		if (_eval.pdf_fwd < 1e-6) return;
-
-		contribution *= _eval.f;
-
-		if (all(contribution <= 0)) return;
-
-		Real nee_pdf = 1;
-		Real dir_pdf = 1;
-		trace_visibility_ray(_rng, origin, to_view, dist, cur_medium, contribution, dir_pdf, nee_pdf);
-		if (nee_pdf > 0) contribution /= nee_pdf;
-
-		Real weight;
-		if (gUseMIS) {
-			// dL_{s+1} = (1 + P(s+1 -> s+2)*dL_{s+2}) / P(s+1 <- s+2)
-			// dL_1 = (1 + P(1 -> 2)*dL_2) / P(1 <- 2)
-			const Real dL_1 = connection_dVC(dL_2, pdfWtoA(_eval.pdf_rev, G_rev), prev_pdfA, prev_specular);
-			const Real p0_fwd = 1;//pdfWtoA(gViews[view_index].sensor_pdfW(sensor_cos_theta), abs(ngdotout)/pow2(dist));
-			weight = 1 / (1 + dL_1 * mis(p0_fwd));
-		} else
-			weight = path_weight(1, path_length);
-
-		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution)
-			weight = 1;
-
-		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1) {
-			if (gPushConstants.gDebugLightPathLength == path_length)
-				accumulate_contribution(output_index, contribution);
-		} else
-			accumulate_contribution(output_index, contribution * weight);
-	}
-};
-
 struct NEE {
 	Spectrum Le;
 	Vector3 ray_origin, ray_direction;
@@ -756,14 +647,122 @@ struct PathIntegrator {
 		return _beta * _eval.f * c.contrib;
 	}
 
+	static Spectrum load_light_sample(const uint2 pixel_coord) {
+		const uint idx = pixel_coord.y * gOutputExtent.x + pixel_coord.x;
+		uint4 v = gLightTraceSamples.Load<uint4>(16*idx);
+		// handle overflow
+		if (v.w & BIT(0)) v.r = 0xFFFFFFFF;
+		if (v.w & BIT(1)) v.g = 0xFFFFFFFF;
+		if (v.w & BIT(2)) v.b = 0xFFFFFFFF;
+		return v.rgb / (Real)gLightTraceQuantization;
+	}
+	static void accumulate_light_contribution(const uint output_index, const Spectrum c) {
+		const uint3 ci = max(0,c) * gLightTraceQuantization;
+		if (all(ci == 0)) return;
+		const uint addr = 16*output_index;
+		uint3 ci_p;
+		gLightTraceSamples.InterlockedAdd(addr + 0 , ci[0], ci_p[0]);
+		gLightTraceSamples.InterlockedAdd(addr + 4 , ci[1], ci_p[1]);
+		gLightTraceSamples.InterlockedAdd(addr + 8 , ci[2], ci_p[2]);
+		const bool3 overflow = ci > (0xFFFFFFFF - ci_p);
+		if (any(overflow)) {
+			const uint overflow_mask = (overflow[0] ? BIT(0) : 0) | (overflow[1] ? BIT(1) : 0) | (overflow[2] ? BIT(2) : 0);
+			gLightTraceSamples.InterlockedOr(addr + 12, overflow_mask);
+		}
+	}
 	SLANG_MUTATING
-	void bdpt_connect(BSDF m) {
+	void connect_view(const BSDF m) {
+		uint view_index = 0;
+		if (gViewCount > 1) view_index = min(rng_next_float(_rng)*gViewCount, gViewCount-1);
+
+		float4 screen_pos = gViews[view_index].projection.project_point(gInverseViewTransforms[view_index].transform_point(_isect.sd.position));
+		screen_pos.y = -screen_pos.y;
+		screen_pos.xyz /= screen_pos.w;
+		if (any(abs(screen_pos.xyz) >= 1) || screen_pos.z <= 0) return;
+        const float2 uv = screen_pos.xy*.5 + .5;
+        const int2 ipos = gViews[view_index].image_min + (gViews[view_index].image_max - gViews[view_index].image_min) * uv;
+		const uint output_index = ipos.y * gOutputExtent.x + ipos.x;
+
+		const Vector3 position = Vector3(
+			gViewTransforms[view_index].m[0][3],
+			gViewTransforms[view_index].m[1][3],
+			gViewTransforms[view_index].m[2][3] );
+		const Vector3 view_normal = normalize(gViewTransforms[view_index].transform_vector(Vector3(0,0,1)));
+
+		Vector3 to_view = position - _isect.sd.position;
+		const Real dist = length(to_view);
+		to_view /= dist;
+
+		const Real sensor_cos_theta = abs(dot(to_view, view_normal));
+
+		const Real lens_radius = 0;
+		const Real lens_area = lens_radius > 0 ? (M_PI * lens_radius * lens_radius) : 1;
+		const Real sensor_importance = 1 / (gViews[view_index].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
+
+		Spectrum contribution = _beta * sensor_importance / pdfAtoW(1/lens_area, sensor_cos_theta / pow2(dist));
+
+		const Real G_rev = abs(prev_cos_out) / len_sqr(origin - _isect.sd.position);
+		const Real ngdotin = -dot(_isect.sd.geometry_normal(), direction);
+		Real ngdotout;
+		Vector3 local_to_view;
+
+		Vector3 ray_origin = _isect.sd.position;
+		if (gHasMedia && _isect.sd.shape_area == 0) {
+			ngdotout = 1;
+			local_to_view = to_view;
+		} else {
+			const Vector3 geometry_normal = _isect.sd.geometry_normal();
+			ngdotout = dot(to_view, geometry_normal);
+			ray_origin = ray_offset(ray_origin, ngdotout > 0 ? geometry_normal : -geometry_normal);
+			local_to_view = normalize(_isect.sd.to_local(to_view));
+
+			// shading normal correction
+			if (ngdotout != 0) {
+				const Real num = ngdotout * local_dir_in.z;
+				const Real denom = local_to_view.z * ngdotin;
+				if (abs(denom) > 1e-5) contribution *= abs(num / denom);
+			}
+		}
+
+		MaterialEvalRecord _eval;
+		m.eval(_eval, local_dir_in, local_to_view, true);
+		if (_eval.pdf_fwd < 1e-6) return;
+
+		contribution *= _eval.f;
+
+		if (all(contribution <= 0)) return;
+
+		Real nee_pdf = 1;
+		Real dir_pdf = 1;
+		trace_visibility_ray(_rng, ray_origin, to_view, dist, _medium, contribution, dir_pdf, nee_pdf);
+		if (nee_pdf > 0) contribution /= nee_pdf;
+
+		Real weight;
+		if (gUseMIS) {
+			// dL_{s+1} = (1 + P(s+1 -> s+2)*dL_{s+2}) / P(s+1 <- s+2)
+			// dL_1 = (1 + P(1 -> 2)*dL_2) / P(1 <- 2)
+			const Real dL_1 = connection_dVC(d, pdfWtoA(_eval.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), prev_specular);
+			const Real p0_fwd = 1;//pdfWtoA(gViews[view_index].sensor_pdfW(sensor_cos_theta), abs(ngdotout)/pow2(dist));
+			weight = 1 / (1 + dL_1 * mis(p0_fwd));
+		} else
+			weight = path_weight(1, path_length);
+
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution)
+			weight = 1;
+
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1) {
+			if (gPushConstants.gDebugLightPathLength == path_length)
+				accumulate_light_contribution(output_index, contribution);
+		} else
+			accumulate_light_contribution(output_index, contribution * weight);
+	}
+
+	SLANG_MUTATING
+	void bdpt_connect(const BSDF m) {
 		if (gTraceLight && gConnectToViews) {
 			if (path_length+1 <= gMaxPathVertices) {
 				// connect light path to eye
-				const Real G_rev = abs(prev_cos_out) / len_sqr(origin - _isect.sd.position);
-				const Real ngdotin = -dot(_isect.sd.geometry_normal(), direction);
-				LightTrace::connect_view(m, _rng, _medium, _isect, _beta, path_length, local_dir_in, ngdotin, d, pdfWtoA(bsdf_pdf, G), G_rev, prev_specular);
+				connect_view(m);
 			}
 		} else if (!gTraceLight && gConnectToLightPaths) {
 			if (gLightVertexCache) {

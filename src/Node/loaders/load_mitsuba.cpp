@@ -335,9 +335,9 @@ component_ptr<Material> parse_bsdf(Node& dst, CommandBuffer& commandBuffer, pugi
 				diffuse = parse_spectrum_texture(commandBuffer, child, texture_map);
 		}
 		auto m = dst.make_child(name).make_component<Material>();
-		m->data[0] = make_image_value4(diffuse.image, float4(diffuse.value[0], diffuse.value[1], diffuse.value[2], 0.f));
-		m->data[1].value[0] = 0; // metallic
-		m->data[2].value[3] = 1.5; // eta
+		m->values[0] = make_image_value4(diffuse.image, float4(diffuse.value[0], diffuse.value[1], diffuse.value[2], 0.f));
+		m->metallic() = 0; // metallic
+		m->eta() = 1.5f; // eta
 		for (const string& id : ids)
 			if (!id.empty()) material_map[id] = m;
 		return m;
@@ -448,9 +448,9 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, u
 				material = it->second;
 		} else if (name == "bsdf") {
 			optional<float> emission;
-			if (material) emission = material->data[0].value[3];
+			if (material) emission = material->emission();
 			material = parse_bsdf(dst, commandBuffer, child, material_map, texture_map);
-			if (emission) material->data[0].value[3] = *emission;
+			if (emission) material->emission() = *emission;
 		} else if (name == "emitter") {
 			float3 radiance = float3::Ones();
 			for (auto grand_child : child.children()) {
@@ -480,13 +480,13 @@ void parse_shape(CommandBuffer& commandBuffer, Node& dst, pugi::xml_node node, u
 				}
 			}
 			if (material) {
-				material->data[0].value.head<3>() = radiance/luminance(radiance);
-				material->data[0].value[3] = luminance(radiance);
+				material->base_color() = radiance/luminance(radiance);
+				material->emission() = luminance(radiance);
 			} else {
 				material = dst.make_component<Material>();
-				material->data[0].value.head<3>() = radiance/luminance(radiance);
-				material->data[0].value[3] = luminance(radiance);
-				material->data[2].value[3] = 0; // eta
+				material->base_color() = radiance/luminance(radiance);
+				material->emission() = luminance(radiance);
+				material->eta() = 0;
 			}
 		}
 

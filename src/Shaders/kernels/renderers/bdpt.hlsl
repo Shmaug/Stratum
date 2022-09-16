@@ -138,10 +138,6 @@
 [[vk::binding(23,1)]] RWStructuredBuffer<PathVertex> gLightPathVertices;
 [[vk::binding(24,1)]] RWStructuredBuffer<uint> gLightPathVertexCount;
 
-//[[vk::binding(25,1)]] RWStructuredBuffer<Reservoir> gReservoirs;
-//[[vk::binding(26,1)]] RWStructuredBuffer<PathVertex> gReservoirSamples;
-
-
 float2 sample_texel(Texture2D<float4> img, float2 rnd, out float pdf, const uint max_iterations = 10) {
 	static const uint2 offsets[4] = {
 		uint2(0,0),
@@ -631,9 +627,9 @@ void connect(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_Gro
 
 			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1) {
 				if (gPushConstants.gDebugLightPathLength == light_vertex.subpath_length())
-					LightTrace::accumulate_contribution(output_index, contrib);
+					PathIntegrator::accumulate_light_contribution(output_index, contrib);
 			} else
-				LightTrace::accumulate_contribution(output_index, contrib * weight);
+				PathIntegrator::accumulate_light_contribution(output_index, contrib * weight);
 		}
 	}
 
@@ -715,7 +711,7 @@ SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void add_light_trace(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	if (all(index.xy < gOutputExtent) && (BDPTDebugMode)gDebugMode != BDPTDebugMode::eViewTraceContribution) {
-		Spectrum c = LightTrace::load_sample(index.xy);
+		Spectrum c = PathIntegrator::load_light_sample(index.xy);
 		if (any(c < 0) || any(isnan(c))) c = 0;
 		gRadiance[index.xy] += float4(c, 0);
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution || ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1))

@@ -10,7 +10,7 @@ namespace stm {
 #pragma pack(pop)
 
 struct Material {
-    ImageValue4 data[DISNEY_DATA_N];
+    ImageValue4 values[DISNEY_DATA_N];
 	Image::View alpha_mask;
 	Buffer::View<uint32_t> min_alpha;
 	Image::View bump_image;
@@ -18,33 +18,44 @@ struct Material {
 
 	bool alpha_test() { return (!min_alpha || min_alpha.buffer()->in_use()) ? false : min_alpha[0] < 0xFFFFFFFF/2; }
 
+	auto base_color()        { return values[0].value.head<3>(); }
+	float& emission()        { return values[0].value[3]; }
+	float& metallic()        { return values[1].value[0]; }
+	float& roughness()       { return values[1].value[1]; }
+	float& anisotropic()     { return values[1].value[2]; }
+	float& subsurface()      { return values[1].value[3]; }
+	float& clearcoat()       { return values[2].value[0]; }
+	float& clearcoat_gloss() { return values[2].value[1]; }
+	float& transmission()    { return values[2].value[2]; }
+	float& eta()             { return values[2].value[3]; }
+
     inline void store(ByteAppendBuffer& bytes, MaterialResources& resources) const {
 		for (int i = 0; i < DISNEY_DATA_N; i++)
-        	data[i].store(bytes, resources);
+        	values[i].store(bytes, resources);
 		bytes.Append(resources.get_index(alpha_mask));
 		bytes.Append(resources.get_index(bump_image));
 		bytes.Appendf(bump_strength);
     }
     inline void inspector_gui() {
-		ImGui::ColorEdit3("Base Color"        , data[0].value.data());
+		ImGui::ColorEdit3("Base Color"        , base_color().data());
 		ImGui::PushItemWidth(80);
-		ImGui::DragFloat("Emission"           , &data[0].value[3]);
-		ImGui::DragFloat("Metallic"           , &data[1].value[0], 0.1, 0, 1);
-		ImGui::DragFloat("Roughness"          , &data[1].value[1], 0.1, 0, 1);
-		ImGui::DragFloat("Anisotropic"        , &data[1].value[2], 0.1, 0, 1);
-		ImGui::DragFloat("Subsurface"         , &data[1].value[3], 0.1, 0, 1);
-		ImGui::DragFloat("Clearcoat"          , &data[2].value[0], 0.1, 0, 1);
-		ImGui::DragFloat("Clearcoat Gloss"    , &data[2].value[1], 0.1, 0, 1);
-		ImGui::DragFloat("Transmission"       , &data[2].value[2], 0.1, 0, 1);
-		ImGui::DragFloat("Index of Refraction", &data[2].value[3], 0.1, 0, 2);
+		ImGui::DragFloat("Emission"           , &emission());
+		ImGui::DragFloat("Metallic"           , &metallic(), 0.1, 0, 1);
+		ImGui::DragFloat("Roughness"          , &roughness(), 0.1, 0, 1);
+		ImGui::DragFloat("Anisotropic"        , &anisotropic(), 0.1, 0, 1);
+		ImGui::DragFloat("Subsurface"         , &subsurface(), 0.1, 0, 1);
+		ImGui::DragFloat("Clearcoat"          , &clearcoat(), 0.1, 0, 1);
+		ImGui::DragFloat("Clearcoat Gloss"    , &clearcoat_gloss(), 0.1, 0, 1);
+		ImGui::DragFloat("Transmission"       , &transmission(), 0.1, 0, 1);
+		ImGui::DragFloat("Index of Refraction", &eta(), 0.1, 0, 2);
 		if (bump_image) ImGui::DragFloat("Bump Strength", &bump_strength, 0.1, 0, 10);
 		ImGui::PopItemWidth();
 
 		const float w = ImGui::CalcItemWidth() - 4;
 		for (uint i = 0; i < DISNEY_DATA_N; i++)
-			if (data[i].image) {
-				ImGui::Text(data[i].image.image()->name().c_str());
-				ImGui::Image(&data[i].image, ImVec2(w, w * data[i].image.extent().height / (float)data[i].image.extent().width));
+			if (values[i].image) {
+				ImGui::Text(values[i].image.image()->name().c_str());
+				ImGui::Image(&values[i].image, ImVec2(w, w * values[i].image.extent().height / (float)values[i].image.extent().width));
 			}
 		if (alpha_mask) {
 			ImGui::Text(alpha_mask.image()->name().c_str());
@@ -55,6 +66,7 @@ struct Material {
 			ImGui::Image(&bump_image, ImVec2(w, w * bump_image.extent().height / (float)bump_image.extent().width));
 		}
     }
+
 };
 
 struct Medium {

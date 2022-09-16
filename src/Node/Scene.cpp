@@ -148,31 +148,31 @@ ImageValue1 Scene::shininess_to_roughness(CommandBuffer& commandBuffer, const Im
 Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, const ImageValue3& base_color, const ImageValue4& metallic_roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
 	Material dst;
 	if ((emission.value > 0).any()) {
-		dst.data[0].image = emission.image;
-		dst.data[0].value.head<3>() = emission.value/luminance(emission.value);
-		dst.data[0].value[3] = luminance(emission.value);
-		dst.data[2].value[3] = 0; // eta
+		dst.values[0].image = emission.image;
+		dst.base_color() = emission.value/luminance(emission.value);
+		dst.emission() = luminance(emission.value);
+		dst.eta() = 0; // eta
 		return dst;
 	}
-	dst.data[0].value.head<3>() = base_color.value;
-	dst.data[0].value[3] = 0;
-	dst.data[1].value[0] = metallic_roughness.value.z(); // metallic
-	dst.data[1].value[1] = metallic_roughness.value.y(); // roughness
-	dst.data[1].value[2] = 0; // anisotropic
-	dst.data[1].value[3] = 0; // subsurface
-	dst.data[2].value[0] = 0; // clearcoat
-	dst.data[2].value[1] = 0; // clearcoat gloss
-	dst.data[2].value[2] = luminance(transmission.value);
-	dst.data[2].value[3] = eta;
+	dst.base_color() = base_color.value;
+	dst.emission() = 0;
+	dst.metallic() = metallic_roughness.value.z(); // metallic
+	dst.roughness() = metallic_roughness.value.y(); // roughness
+	dst.anisotropic() = 0; // anisotropic
+	dst.subsurface() = 0; // subsurface
+	dst.clearcoat() = 0; // clearcoat
+	dst.clearcoat_gloss() = 1; // clearcoat gloss
+	dst.transmission() = luminance(transmission.value);
+	dst.eta() = eta;
 	if (base_color.image || metallic_roughness.image || transmission.image) {
 		Image::View d = base_color.image ? base_color.image : metallic_roughness.image ? metallic_roughness.image : transmission.image;
 		for (int i = 0; i < DISNEY_DATA_N; i++) {
-			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-			mConvertPbrPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+			dst.values[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+			mConvertPbrPipeline->descriptor("gOutput",i) = image_descriptor(dst.values[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		}
 		if (base_color.image)
 			dst.alpha_mask = make_shared<Image>(commandBuffer.mDevice, "alpha mask", d.extent(), vk::Format::eR8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		mConvertPbrPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.data[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mConvertPbrPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.values[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 
 		dst.min_alpha = make_shared<Buffer>(commandBuffer.mDevice, "min_alpha", sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
 		dst.min_alpha[0] = 0xFFFFFFFF;
@@ -189,41 +189,41 @@ Material Scene::make_metallic_roughness_material(CommandBuffer& commandBuffer, c
 		mConvertPbrPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(d.extent());
 		for (int i = 0; i < DISNEY_DATA_N; i++)
-			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
+			dst.values[i].image.image()->generate_mip_maps(commandBuffer);
 	}
 	return dst;
 }
 Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, const ImageValue3& diffuse, const ImageValue3& specular, const ImageValue1& roughness, const ImageValue3& transmission, const float eta, const ImageValue3& emission) {
 	Material dst;
 	if ((emission.value > 0).any()) {
-		dst.data[0].image = emission.image;
-		dst.data[0].value.head<3>() = emission.value/luminance(emission.value);
-		dst.data[0].value[3] = luminance(emission.value);
-		dst.data[2].value[3] = 0; // eta
+		dst.values[0].image = emission.image;
+		dst.base_color() = emission.value/luminance(emission.value);
+		dst.emission() = luminance(emission.value);
+		dst.eta()  = 0; // eta
 		return dst;
 	}
 	const float ld = luminance(diffuse.value);
 	const float ls = luminance(specular.value);
 	const float lt = luminance(transmission.value);
-	dst.data[0].value.head<3>() = (diffuse.value*ld + specular.value*ls + transmission.value*lt) / (ld + ls + lt);
-	dst.data[0].value[3] = 0;
-	dst.data[1].value[0] = ls / (ld + ls + lt); // metallic
-	dst.data[1].value[1] = roughness.value; // roughness
-	dst.data[1].value[2] = 0; // anisotropic
-	dst.data[1].value[3] = 0; // subsurface
-	dst.data[2].value[0] = 0; // clearcoat
-	dst.data[2].value[1] = 0; // clearcoat gloss
-	dst.data[2].value[2] = lt / (ld + ls + lt);
-	dst.data[2].value[3] = eta;
+	dst.base_color() = (diffuse.value*ld + specular.value*ls + transmission.value*lt) / (ld + ls + lt);
+	dst.emission() = 0;
+	dst.metallic() = ls / (ld + ls + lt);
+	dst.roughness() = roughness.value;
+	dst.anisotropic() = 0;
+	dst.subsurface() = 0;
+	dst.clearcoat() = 0;
+	dst.clearcoat_gloss() = 1;
+	dst.transmission() = lt / (ld + ls + lt);
+	dst.eta() = eta;
 	if (diffuse.image || specular.image || transmission.image || roughness.image) {
 		Image::View d = diffuse.image ? diffuse.image : specular.image ? specular.image : transmission.image ? transmission.image : roughness.image;
 		for (int i = 0; i < DISNEY_DATA_N; i++) {
-			dst.data[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-			mConvertDiffuseSpecularPipeline->descriptor("gOutput",i) = image_descriptor(dst.data[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+			dst.values[i].image = make_shared<Image>(commandBuffer.mDevice, "material data", d.extent(), vk::Format::eR8G8B8A8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eTransferSrc|vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
+			mConvertDiffuseSpecularPipeline->descriptor("gOutput",i) = image_descriptor(dst.values[i].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 		}
 		if (diffuse.image)
 			dst.alpha_mask = make_shared<Image>(commandBuffer.mDevice, "alpha mask", d.extent(), vk::Format::eR8Unorm, 1, 0, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eSampled|vk::ImageUsageFlagBits::eStorage);
-		mConvertDiffuseSpecularPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.data[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+		mConvertDiffuseSpecularPipeline->descriptor("gOutputAlphaMask") = image_descriptor(dst.alpha_mask ? dst.alpha_mask : dst.values[0].image, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 
 		dst.min_alpha = make_shared<Buffer>(commandBuffer.mDevice, "min_alpha", sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
 		dst.min_alpha[0] = 0xFFFFFFFF;
@@ -242,7 +242,7 @@ Material Scene::make_diffuse_specular_material(CommandBuffer& commandBuffer, con
 		mConvertDiffuseSpecularPipeline->push_constants(commandBuffer);
 		commandBuffer.dispatch_over(d.extent());
 		for (int i = 0; i < DISNEY_DATA_N; i++)
-			dst.data[i].image.image()->generate_mip_maps(commandBuffer);
+			dst.values[i].image.image()->generate_mip_maps(commandBuffer);
 	}
 	return dst;
 }
@@ -480,12 +480,12 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			const TransformData transform = node_to_world(prim.node());
 			const float area = 1;
 
-			if (prim->mMaterial->data[0].value[3] > 0)
+			if (prim->mMaterial->emission() > 0)
 				mSceneData->mEmissivePrimitiveCount += triCount;
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, prim->mMaterial->data[0].value[3] * area * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_triangles(material_address, triCount, totalVertexCount, totalIndexBufferSize, (uint32_t)it->second.mIndices.stride()), transform, prim->mMaterial->emission() * area);
 			instance.mask = BVH_FLAG_TRIANGLES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(*commandBuffer.hold_resource(it->second.mAccelerationStructure));
 
@@ -501,7 +501,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			if (!prim->mMaterial) return;
 			uint32_t material_address = process_material(prim->mMaterial.get());
 
-			if (prim->mMaterial->data[0].value[3] > 0)
+			if (prim->mMaterial->emission() > 0)
 				mSceneData->mEmissivePrimitiveCount++;
 
 			TransformData transform = node_to_world(prim.node());
@@ -533,7 +533,7 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 
 			vk::AccelerationStructureInstanceKHR& instance = instancesAS.emplace_back();
 			Eigen::Matrix<float, 3, 4, Eigen::RowMajor>::Map(&instance.transform.matrix[0][0]) = to_float3x4(transform);
-			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_sphere(material_address, r), transform, prim->mMaterial->data[0].value[3] * (4*M_PI*r*r) * M_PI);
+			instance.instanceCustomIndex = process_instance(component_ptr<void>(prim), make_instance_sphere(material_address, r), transform, prim->mMaterial->emission() * (4*M_PI*r*r));
 			instance.mask = BVH_FLAG_SPHERES;
 			instance.accelerationStructureReference = commandBuffer.mDevice->getAccelerationStructureAddressKHR(**aabb_it->second);
 		});

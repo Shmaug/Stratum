@@ -92,7 +92,14 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 		ImageValue4 metallic_roughness = make_image_value4(get_image(material.pbrMetallicRoughness.metallicRoughnessTexture.index, false), double4(0, material.pbrMetallicRoughness.roughnessFactor, material.pbrMetallicRoughness.metallicFactor, 0).cast<float>());
 		float eta = material.extensions.contains("KHR_materials_ior") ? (float)material.extensions.at("KHR_materials_ior").Get("ior").GetNumberAsDouble() : 1.5f;
 		float transmission = material.extensions.contains("KHR_materials_transmission") ? (float)material.extensions.at("KHR_materials_transmission").Get("transmissionFactor").GetNumberAsDouble() : 0;
+
+
 		Material m = root.find_in_ancestor<Scene>()->make_metallic_roughness_material(commandBuffer, base_color, metallic_roughness, make_image_value3({}, float3::Constant(transmission)), eta, emission);
+
+		if (material.extensions.contains("KHR_materials_clearcoat")) {
+			auto& v = material.extensions.at("KHR_materials_clearcoat");
+			m.clearcoat() = (float)v.Get("clearcoatFactor").GetNumberAsDouble();
+		}
 
 		m.bump_image = get_image(material.normalTexture.index, false);
 		m.bump_strength = 1;
@@ -254,8 +261,8 @@ void Scene::load_gltf(Node& root, CommandBuffer& commandBuffer, const fs::path& 
 				sphere->mRadius = (float)l.extras.Get("radius").GetNumberAsDouble();
 				Material m;
 				const float3 emission = double3::Map(l.color.data()).cast<float>();
-				m.data[0].value.head<3>() = emission/luminance(emission);
-				m.data[0].value[3] = luminance(emission) * (float)(l.intensity / (4*M_PI*sphere->mRadius*sphere->mRadius));
+				m.base_color() = emission/luminance(emission);
+				m.emission() = luminance(emission) * (float)(l.intensity / (4*M_PI*sphere->mRadius*sphere->mRadius));
 				sphere->mMaterial = materialsNode.make_child(l.name).make_component<Material>(m);
 			}
 		}

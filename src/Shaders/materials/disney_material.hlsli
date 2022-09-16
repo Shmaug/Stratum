@@ -153,6 +153,9 @@ struct DisneyMaterial : BSDF {
 		const Real G_out = G1(alpha.x, alpha.y, dir_out);
 		const Real F = fresnel_dielectric(h_dot_in, local_eta);
 
+		r.f = 0;
+		r.pdf_fwd = 0;
+		r.pdf_rev = 0;
 		if (transmit) {
 			if (w_glass > 0) {
 				r.f = w_glass * disneyglass_eval_refract(bsdf.base_color(), F, D, G_in * G_out, dir_in.z, h_dot_in, h_dot_out, local_eta, adjoint);
@@ -160,9 +163,6 @@ struct DisneyMaterial : BSDF {
 				r.pdf_rev = w_glass * disneyglass_refract_pdf(fresnel_dielectric(h_dot_out, 1/local_eta), D, G_out, dir_out.z, h_dot_out, h_dot_in, 1/local_eta);
 			}
 		} else {
-			r.f = 0;
-			r.pdf_fwd = 0;
-			r.pdf_rev = 0;
 			if (w_glass > 0) {
 				r.f += w_glass * disneyglass_eval_reflect(bsdf.base_color(), F, D, G_in * G_out, dir_in.z);
 				r.pdf_fwd += w_glass * disneyglass_reflect_pdf(F, D, G_in, dir_in.z);
