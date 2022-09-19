@@ -27,10 +27,8 @@ private:
 	enum RenderPipelineIndex {
 		eSamplePhotons,
 		eSampleVisibility,
-		ePathTraceLoop,
 		ePresampleLights,
 		eTraceNEE,
-		eConnect,
 		eAddLightTrace,
 		ePipelineCount
 	};

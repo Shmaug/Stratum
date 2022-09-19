@@ -16,7 +16,6 @@ struct DisneyMaterialData {
 	float clearcoat_gloss()       { return data[2][1]; }
 	float transmission()          { return data[2][2]; }
 	float eta()                   { return data[2][3]; }
-	float sheen_tint()            { return 0; }
 	float alpha()                 { return roughness()*roughness(); }
 
 #ifdef __cplusplus

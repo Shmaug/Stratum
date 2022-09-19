@@ -37,7 +37,7 @@ Real Gc(const Vector3 w_l) {
 #include "disney_metal.hlsli"
 #include "disney_glass.hlsli"
 #include "disney_clearcoat.hlsli"
-#include "disney_sheen.hlsli"
+//#include "disney_sheen.hlsli"
 
 struct DisneyMaterial : BSDF {
 	DisneyMaterialData bsdf;
@@ -128,16 +128,9 @@ struct DisneyMaterial : BSDF {
 
 		const Real one_minus_metallic = 1 - bsdf.metallic();
 		Real w_diffuse = (1 - bsdf.transmission()) * one_minus_metallic;
-		Real w_sheen = one_minus_metallic;
 		Real w_metal = bsdf.metallic();
 		Real w_glass = bsdf.transmission() * one_minus_metallic;
 		Real w_clearcoat = 0.25 * bsdf.clearcoat();
-		const Real inv_w_sum = 1 / (w_diffuse + w_sheen + w_metal + w_glass + w_clearcoat);
-		w_diffuse *= inv_w_sum;
-		w_sheen   *= inv_w_sum;
-		w_metal   *= inv_w_sum;
-		w_glass   *= inv_w_sum;
-		w_clearcoat *= inv_w_sum;
 
 		const Real local_eta = dir_in.z < 0 ? 1/bsdf.eta() : bsdf.eta();
 		const bool transmit = dir_in.z * dir_out.z < 0;
@@ -179,14 +172,11 @@ struct DisneyMaterial : BSDF {
 				r.pdf_fwd += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_out);
 				r.pdf_rev += w_clearcoat * disneyclearcoat_eval_pdf(D_c, h, h_dot_in);
 			}
-
-			r.pdf_fwd += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_out.z));
-			r.pdf_rev += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_in.z));
-
-			if (w_diffuse > 0)
+			if (w_diffuse > 0) {
+				r.pdf_fwd += w_diffuse * cosine_hemisphere_pdfW(abs(dir_out.z));
+				r.pdf_rev += w_diffuse * cosine_hemisphere_pdfW(abs(dir_in.z));
 				r.f += w_diffuse * disneydiffuse_eval(bsdf, dir_in, dir_out);
-			if (w_sheen > 0)
-				r.f += w_sheen * disneysheen_eval(bsdf, dir_in, dir_out, h);
+			}
 		}
 	}
 	Spectrum sample(out MaterialSampleRecord r, const Vector3 rnd, const Vector3 dir_in, inout Spectrum beta, const bool adjoint) {
@@ -198,16 +188,9 @@ struct DisneyMaterial : BSDF {
 
 		const Real one_minus_metallic = 1 - bsdf.metallic();
 		Real w_diffuse = (1 - bsdf.transmission()) * one_minus_metallic;
-		Real w_sheen = one_minus_metallic;
 		Real w_metal = bsdf.metallic();
 		Real w_glass = bsdf.transmission() * one_minus_metallic;
 		Real w_clearcoat = 0.25 * bsdf.clearcoat();
-		const Real inv_w_sum = 1 / (w_diffuse + w_sheen + w_metal + w_glass + w_clearcoat);
-		w_diffuse *= inv_w_sum;
-		w_sheen   *= inv_w_sum;
-		w_metal   *= inv_w_sum;
-		w_glass   *= inv_w_sum;
-		w_clearcoat *= inv_w_sum;
 
 		const Real aspect = sqrt(1 - 0.9 * bsdf.anisotropic());
 		const float2 alpha = max(0.0001, float2(bsdf.alpha() / aspect, bsdf.alpha() * aspect));
@@ -264,7 +247,7 @@ struct DisneyMaterial : BSDF {
 				r.dir_out = reflect(-dir_in, h);
 				r.roughness = alpha_c;
 			} else {
-				// diffuse/sheen
+				// diffuse
 				r.dir_out = sample_cos_hemisphere(rnd.x, rnd.y);
 				if (dir_in.z < 0) r.dir_out = -r.dir_out;
 				r.roughness = 1;
@@ -302,13 +285,11 @@ struct DisneyMaterial : BSDF {
 			f += w_clearcoat * disneyclearcoat_eval(D_c, dir_in, r.dir_out, h, h_dot_out);
 		}
 
-		r.pdf_fwd += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(r.dir_out.z));
-		r.pdf_rev += (w_diffuse + w_sheen) * cosine_hemisphere_pdfW(abs(dir_in.z));
-
-		if (w_diffuse > 0)
+		if (w_diffuse > 0) {
+			r.pdf_fwd += w_diffuse * cosine_hemisphere_pdfW(abs(r.dir_out.z));
+			r.pdf_rev += w_diffuse * cosine_hemisphere_pdfW(abs(dir_in.z));
 			f += w_diffuse * disneydiffuse_eval(bsdf, dir_in, r.dir_out);
-		if (w_sheen > 0)
-			f += w_sheen * disneysheen_eval(bsdf, dir_in, r.dir_out, h);
+		}
 
 		beta *= f / r.pdf_fwd;
 		return f;

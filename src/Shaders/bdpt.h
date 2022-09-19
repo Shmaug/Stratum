@@ -17,10 +17,11 @@ namespace stm {
 #define BDPT_FLAG_COHERENT_RR 				BIT(4)
 #define BDPT_FLAG_COHERENT_RNG 				BIT(5)
 
-#define BDPT_FLAG_FLIP_TRIANGLE_UVS 		BIT(28)
-#define BDPT_FLAG_FLIP_NORMAL_MAPS 			BIT(29)
+#define BDPT_FLAG_FLIP_TRIANGLE_UVS 		BIT(26)
+#define BDPT_FLAG_FLIP_NORMAL_MAPS 			BIT(27)
 #define BDPT_FLAG_ALPHA_TEST 				BIT(6)
 #define BDPT_FLAG_NORMAL_MAPS 				BIT(7)
+#define BDPT_FLAG_SHADING_NORMAL_SHADOW_FIX BIT(28)
 #define BDPT_FLAG_RAY_CONES 				BIT(8)
 #define BDPT_FLAG_RAY_DIFFERENTIAL			BIT(9)
 #define BDPT_FLAG_SAMPLE_BSDFS 				BIT(10)
@@ -39,10 +40,8 @@ namespace stm {
 #define BDPT_FLAG_TRACE_LIGHT				BIT(21)
 #define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(22)
 #define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(23)
-#define BDPT_FLAG_LIGHT_TRACE_USE_Z			BIT(24)
-#define BDPT_FLAG_DEFER_CONNECTIONS			BIT(25)
-#define BDPT_FLAG_LIGHT_VERTEX_CACHE		BIT(26)
-#define BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS	BIT(27)
+#define BDPT_FLAG_LIGHT_VERTEX_CACHE		BIT(24)
+#define BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS	BIT(25)
 
 #define BDPT_FLAG_SAMPLE_ENV_TEXTURE		BIT(30)
 
@@ -60,6 +59,7 @@ struct BDPTPushConstants {
 
 	uint gMinPathVertices;
 	uint gMaxPathVertices;
+	uint gMaxDiffuseVertices;
 	uint gMaxNullCollisions;
 
 	uint gLightPresampleTileSize;
@@ -128,8 +128,7 @@ struct NEERayData {
 #define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(0)
 #define PATH_VERTEX_FLAG_IS_BACKGROUND	BIT(1)
 #define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(2)
-#define PATH_VERTEX_FLAG_IS_DELTA	    BIT(3)
-#define PATH_VERTEX_FLAG_PREV_IS_DELTA  BIT(4)
+#define PATH_VERTEX_FLAG_IS_PREV_DELTA  BIT(3)
 
 struct PathVertex {
 	float3 position;
@@ -147,22 +146,23 @@ struct PathVertex {
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 	SLANG_MUTATING
-	inline void pack_beta(const float3 beta, const uint subpath_length, const uint flags) {
+	inline void pack_beta(const float3 beta, const uint subpath_length, const uint diffuse_vertices, const uint flags) {
 		BF_SET(packed_beta[0], f32tof16(beta[0])  , 0 , 16);
 		BF_SET(packed_beta[0], f32tof16(beta[1])  , 16, 16);
 		BF_SET(packed_beta[1], f32tof16(beta[2])  , 0 , 16);
-		BF_SET(packed_beta[1], subpath_length     , 16, 11);
-		BF_SET(packed_beta[1], flags              , 27, 5);
+		BF_SET(packed_beta[1], subpath_length     , 16, 7);
+		BF_SET(packed_beta[1], diffuse_vertices   , 23, 5);
+		BF_SET(packed_beta[1], flags              , 28, 4);
 	}
 	inline float3 beta() CONST_CPP {
 		return float3(f16tof32(packed_beta[0]), f16tof32(packed_beta[0] >> 16), f16tof32(packed_beta[1]));
 	}
-	inline uint subpath_length()   { return BF_GET(packed_beta[1], 16, 11); }
-	inline bool is_background()    { return BF_GET(packed_beta[1], 27, 5) & PATH_VERTEX_FLAG_IS_BACKGROUND; }
-	inline bool is_medium()        { return BF_GET(packed_beta[1], 27, 5) & PATH_VERTEX_FLAG_IS_MEDIUM; }
-	inline bool is_delta()         { return BF_GET(packed_beta[1], 27, 5) & PATH_VERTEX_FLAG_IS_DELTA; }
-	inline bool prev_is_delta()    { return BF_GET(packed_beta[1], 27, 5) & PATH_VERTEX_FLAG_PREV_IS_DELTA; }
-	inline bool flip_bitangent()   { return BF_GET(packed_beta[1], 27, 5) & PATH_VERTEX_FLAG_FLIP_BITANGENT; }
+	inline uint subpath_length()   { return BF_GET(packed_beta[1], 16, 7); }
+	inline uint diffuse_vertices() { return BF_GET(packed_beta[1], 23, 5); }
+	inline bool is_background()    { return BF_GET(packed_beta[1], 28, 4) & PATH_VERTEX_FLAG_IS_BACKGROUND; }
+	inline bool is_medium()        { return BF_GET(packed_beta[1], 28, 4) & PATH_VERTEX_FLAG_IS_MEDIUM; }
+	inline bool is_prev_delta()    { return BF_GET(packed_beta[1], 28, 4) & PATH_VERTEX_FLAG_IS_PREV_DELTA; }
+	inline bool flip_bitangent()   { return BF_GET(packed_beta[1], 28, 4) & PATH_VERTEX_FLAG_FLIP_BITANGENT; }
 
 	inline float3 local_dir_in()   { return unpack_normal_octahedron(packed_local_dir_in); }
 	inline float3 shading_normal() { return unpack_normal_octahedron(packed_shading_normal); }
