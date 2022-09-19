@@ -278,6 +278,7 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	path.path_contrib = ls.radiance;
 	path._beta = ls.radiance / ls.pdf;
 	path.path_pdf = ls.pdf;
+	path.path_pdf_rev = 1;
 	path.d = 1 / ls.pdf;
 	path.G = 1;
 	path.prev_cos_out = 1;
@@ -375,6 +376,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 
 	path.path_contrib = 1;
 	path.path_pdf = 1;
+	path.path_pdf_rev = 1;
 	path.bsdf_pdf = 1;
 	path.G = 1;
 

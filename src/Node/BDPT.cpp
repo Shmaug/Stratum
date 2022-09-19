@@ -187,12 +187,15 @@ void BDPT::on_inspector_gui() {
 					ImGui::InputScalar("Light Trace Quantization", ImGuiDataType_U32, &mLightTraceQuantization);
 				}
 
-				ImGui::CheckboxFlags("Light Vertex Cache", &mSamplingFlags, BDPT_FLAG_LIGHT_VERTEX_CACHE);
+				if (mSamplingFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)
+					ImGui::CheckboxFlags("Light Vertex Cache", &mSamplingFlags, BDPT_FLAG_LIGHT_VERTEX_CACHE);
+
 				if (mSamplingFlags & BDPT_FLAG_LIGHT_VERTEX_CACHE) {
 					uint32_t mn = 1;
 					ImGui::SetNextItemWidth(40);
 					ImGui::DragScalar("Light Path Count", ImGuiDataType_U32, &mPushConstants.gLightPathCount, 1, &mn);
 					ImGui::CheckboxFlags("Light Vertex Reservoir Sampling", &mSamplingFlags, BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS);
+					ImGui::CheckboxFlags("Defer LVC Rays", &mSamplingFlags, BDPT_FLAG_DEFER_NEE_RAYS);
 					if (mSamplingFlags & BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS) {
 						ImGui::SetNextItemWidth(40);
 						ImGui::DragScalar("Light Vertex Reservoir M", ImGuiDataType_U32, &mPushConstants.gLightVertexReservoirM);
@@ -463,10 +466,11 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		} else
 			sampling_flags &= ~(BDPT_FLAG_LIGHT_VERTEX_CACHE|BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS);
 
-		if (!(sampling_flags & BDPT_FLAG_NEE)) {
+		if (!(sampling_flags & BDPT_FLAG_NEE))
 			sampling_flags &= ~BDPT_FLAG_PRESAMPLE_LIGHTS;
+
+		if (!(sampling_flags & BDPT_FLAG_NEE) && !(sampling_flags & BDPT_FLAG_LIGHT_VERTEX_CACHE))
 			sampling_flags &= ~BDPT_FLAG_DEFER_NEE_RAYS;
-		}
 
 		if (!mPrevFrame || !mPrevFrame->mPathData.contains("gReservoirs") || !mPrevFrame->mPathData.at("gReservoirs"))
 			sampling_flags &= ~(BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE|BDPT_FLAG_RESERVOIR_SPATIAL_REUSE);
