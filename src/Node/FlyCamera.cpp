@@ -11,16 +11,8 @@ void inspector_gui_fn(Inspector& inspector, FlyCamera* v) {
 	if (v->mRotateSpeed < 0) v->mRotateSpeed = 0;
 	ImGui::Checkbox("Match Window Rect", &v->mMatchWindowRect);
 
-	if (ImGui::DragFloat2("Rotation", v->mRotation.data(), 0.01f, 0)) {
+	if (ImGui::DragFloat2("Rotation", v->mRotation.data(), 0.01f, 0))
 		v->mRotation.x() = clamp(v->mRotation.x(), -((float)M_PI) / 2, ((float)M_PI) / 2);
-
-		const auto& camera = v->mNode.find<Camera>();
-		auto transform = v->mNode.find<TransformData>();
-		const quatf r = qmul(
-			angle_axis(v->mRotation.y(), float3(0, 1, 0)),
-			angle_axis(v->mRotation.x(), float3((camera->mProjection.near_plane < 0) ? -1 : 1, 0, 0)) );
-		transform->m.block<3, 3>(0, 0) = Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
-	}
 }
 
 FlyCamera::FlyCamera(Node& node) : mNode(node) {
@@ -51,11 +43,11 @@ FlyCamera::FlyCamera(Node& node) : mNode(node) {
 
 				mRotation.y() += input.cursor_delta().x() * fwd * mRotateSpeed;
 				mRotation.x() = clamp(mRotation.x() + input.cursor_delta().y() * mRotateSpeed, -((float)M_PI) / 2, ((float)M_PI) / 2);
-				const quatf r = qmul(
-					angle_axis(mRotation.y(), float3(0, 1, 0)),
-					angle_axis(mRotation.x(), float3(fwd, 0, 0)) );
-				transform->m.block<3, 3>(0, 0) = Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
 			}
+			const quatf r = qmul(
+				angle_axis(mRotation.y(), float3(0, 1, 0)),
+				angle_axis(mRotation.x(), float3(fwd, 0, 0)) );
+			transform->m.block<3, 3>(0, 0) = Eigen::Quaternionf(r.w, r.xyz[0], r.xyz[1], r.xyz[2]).matrix();
 		}
 		if (!ImGui::GetIO().WantCaptureKeyboard) {
 			float3 mv = float3(0, 0, 0);
@@ -65,7 +57,8 @@ FlyCamera::FlyCamera(Node& node) : mNode(node) {
 			if (input.pressed(KeyCode::eKeyS)) mv += float3(0, 0, -fwd);
 			if (input.pressed(KeyCode::eKeySpace)) mv += float3(0, 1, 0);
 			if (input.pressed(KeyCode::eKeyShift)) mv += float3(0, -1, 0);
-			*transform = tmul(*transform, make_transform(mv * mMoveSpeed * deltaTime, quatf_identity(), float3::Ones()));
+			if (!mv.isZero())
+				*transform = tmul(*transform, make_transform(mv * mMoveSpeed * deltaTime, quatf_identity(), float3::Ones()));
 		}
 	});
 }

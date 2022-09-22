@@ -151,41 +151,6 @@ void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const flo
 	}
 }
 
-Real shape_pdf(const Vector3 origin, const Real shape_area, const PointSample p, out bool area_measure) {
-	if (p.instance_index() == INVALID_INSTANCE) {
-		area_measure = false;
-		return 0;
-	}
-
-	const InstanceData instance = gInstances[p.instance_index()];
-	switch (instance.type()) {
-		case INSTANCE_TYPE_TRIANGLES:
-			area_measure = true;
-			return 1 / (shape_area * instance.prim_count());
-
-		case INSTANCE_TYPE_SPHERE:
-			if (gUniformSphereSampling) {
-				area_measure = true;
-				return 1/shape_area;
-			} else {
-				const Vector3 center = Vector3(
-					gInstanceTransforms[p.instance_index()].m[0][3],
-					gInstanceTransforms[p.instance_index()].m[1][3],
-					gInstanceTransforms[p.instance_index()].m[2][3]);
-				const Real sin_elevation_max_sq = pow2(instance.radius()) / len_sqr(center - origin);
-				const Real cos_elevation_max = sqrt(max(0, 1 - sin_elevation_max_sq));
-				area_measure = false;
-				return 1/(2 * M_PI * (1 - cos_elevation_max));
-			}
-			break;
-
-		default:
-		case INSTANCE_TYPE_VOLUME:
-			area_measure = false;
-			return 1;
-	}
-}
-
 Real point_on_light_pdf(const IntersectionVertex _isect, out bool pdf_area_measure) {
 	if (_isect.instance_index() == INVALID_INSTANCE) {
 		if (!gHasEnvironment) return 0;

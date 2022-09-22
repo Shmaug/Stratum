@@ -18,8 +18,52 @@ struct IntersectionVertex {
 	inline uint set_primitive_index(const uint v) { return BF_SET(instance_primitive_index, v, 16, 16); }
 };
 
+float visibility_distance_epsilon(const float dist) { return dist*0.999; }
+
+float3 ray_offset(const float3 pos, const float3 geometry_normal) {
+#if 0
+	// from Blender (src/intern/cycles/kernel/bvh_util.h)
+	const float epsilon_f = 1e-5f;
+	const float epsilon_test = 1.0f;
+	const int epsilon_i = 32;
+
+	float3 res;
+
+	for (int i = 0; i < 3; i++) {
+		if (abs(pos[i]) < epsilon_test) {
+			res[i] = pos[i] + geometry_normal[i] * epsilon_f;
+		} else {
+			uint ix = asuint(pos[i]);
+			ix += ((ix ^ asuint(geometry_normal[i])) >> 31) ? -epsilon_i : epsilon_i;
+			res[i] = asfloat(ix);
+		}
+	}
+
+	return res;
+#else
+	// This function should be used to compute a modified ray start position for
+	// rays leaving from a surface. This is from "A Fast and Robust Method for Avoiding
+	// Self-Intersection" see https://research.nvidia.com/publication/2019-03_A-Fast-and
+	const float int_scale = 256.0f;
+	const float origin = 1 / 32.0;
+	const float float_scale = 1 / 65536.0;
+
+	int3 of_i = int3(int_scale * geometry_normal);
+	if (pos.x < 0) of_i.x = -of_i.x;
+	if (pos.y < 0) of_i.y = -of_i.y;
+	if (pos.z < 0) of_i.z = -of_i.z;
+
+	const float3 p_i = asfloat(asint(pos) + of_i);
+
+	return float3(
+		abs(pos.x) < origin ? pos.x + geometry_normal.x*float_scale : p_i.x,
+		abs(pos.y) < origin ? pos.y + geometry_normal.y*float_scale : p_i.y,
+		abs(pos.z) < origin ? pos.z + geometry_normal.z*float_scale : p_i.z);
+#endif
+}
+
 Real trace_ray(const Vector3 origin, const Vector3 direction, const Real t_max, inout IntersectionVertex _isect, out Vector3 local_hit_pos, const bool accept_first = false) {
-	if (gCountRays) InterlockedAdd(gRayCount[0], 1);
+	if (gUsePerformanceCounters) InterlockedAdd(gRayCount[0], 1);
 
 	RayQuery<RAY_FLAG_NONE> rayQuery;
 	RayDesc rayDesc;
@@ -151,11 +195,12 @@ void trace_visibility_ray(inout rng_state_t rng_state, Vector3 origin, const Vec
 	while (t_max > 1e-6f) {
 		IntersectionVertex shadow_isect;
 		Vector3 local_pos;
-		const Real dt = trace_ray(origin, direction, t_max*0.999, shadow_isect, local_pos, !gHasMedia);
+		const Real dt = trace_ray(origin, direction, t_max, shadow_isect, local_pos, !gHasMedia);
 		if (!isinf(t_max)) t_max -= dt;
 
+		if (shadow_isect.instance_index() == INVALID_INSTANCE) break;
+
 		if (gHasMedia) {
-			if (shadow_isect.instance_index() == INVALID_INSTANCE) break;
 			if (gInstances[shadow_isect.instance_index()].type() != INSTANCE_TYPE_VOLUME) {
 				// hit a surface
 				beta = 0;
@@ -184,12 +229,10 @@ void trace_visibility_ray(inout rng_state_t rng_state, Vector3 origin, const Vec
 				origin = ray_offset(shadow_isect.sd.position, shadow_isect.sd.geometry_normal());
 			}
 		} else {
-			if (shadow_isect.instance_index() != INVALID_INSTANCE) {
-				// hit a surface
-				beta = 0;
-				T_dir_pdf = 0;
-				T_nee_pdf = 0;
-			}
+			// hit a surface
+			beta = 0;
+			T_dir_pdf = 0;
+			T_nee_pdf = 0;
 			break; // early exit; dont need to do delta tracking if no volumes are present
 		}
 	}

@@ -1,14 +1,11 @@
 #if 0
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_visibility
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E sample_photons
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -fspv-extension=SPV_KHR_ray_tracing -fspv-extension=SPV_KHR_ray_query -T cs_6_7 -HV 2021 -E trace_nee
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -T cs_6_7 -HV 2021 -E presample_lights
-//#pragma compile dxc -Zpr -spirv -fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_descriptor_indexing -T cs_6_7 -HV 2021 -E add_light_trace
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry sample_visibility
 #pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry sample_photons
-#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry trace_nee
+#pragma compile slangc -capability GL_EXT_ray_tracing -profile sm_6_6 -lang slang -entry trace_shadows
 #pragma compile slangc -profile sm_6_6 -lang slang -entry presample_lights
 #pragma compile slangc -profile sm_6_6 -lang slang -entry add_light_trace
+#pragma compile slangc -profile sm_6_6 -lang slang -entry hashgrid_compute_indices
+#pragma compile slangc -profile sm_6_6 -lang slang -entry hashgrid_swizzle
 #endif
 
 //#define FORCE_LAMBERTIAN
@@ -16,7 +13,9 @@
 #include "../../scene.h"
 #include "../../bdpt.h"
 
-#ifdef __SLANG__
+#ifndef gSceneFlags
+#define gSceneFlags 0
+#endif
 #ifndef gSpecializationFlags
 #define gSpecializationFlags 0
 #endif
@@ -27,43 +26,38 @@
 #define gLightTraceQuantization 16384
 #endif
 [[vk::push_constant]] ConstantBuffer<BDPTPushConstants> gPushConstants;
-#else // !defined(__SLANG__)
-[[vk::constant_id(0)]] const uint gSpecializationFlags = 0;
-[[vk::constant_id(1)]] const uint gDebugMode = 0;
-[[vk::constant_id(2)]] const uint gLightTraceQuantization = 65536;
-[[vk::push_constant]] const BDPTPushConstants gPushConstants;
-#endif
 
-#define gHasEnvironment                (gSpecializationFlags & BDPT_FLAG_HAS_ENVIRONMENT)
-#define gHasEmissives                  (gSpecializationFlags & BDPT_FLAG_HAS_EMISSIVES)
-#define gHasMedia                      (gSpecializationFlags & BDPT_FLAG_HAS_MEDIA)
-#define gRemapThreadIndex              (gSpecializationFlags & BDPT_FLAG_REMAP_THREADS)
-#define gCoherentRR                    (gSpecializationFlags & BDPT_FLAG_COHERENT_RR)
-#define gCoherentRNG                   (gSpecializationFlags & BDPT_FLAG_COHERENT_RNG)
-#define gFlipTriangleUVs               (gSpecializationFlags & BDPT_FLAG_FLIP_TRIANGLE_UVS)
-#define gFlipNormalMaps	               (gSpecializationFlags & BDPT_FLAG_FLIP_NORMAL_MAPS)
-#define gAlphaTest                     (gSpecializationFlags & BDPT_FLAG_ALPHA_TEST)
-#define gUseNormalMaps                 (gSpecializationFlags & BDPT_FLAG_NORMAL_MAPS)
-#define gShadingNormalFix              (gSpecializationFlags & BDPT_FLAG_SHADING_NORMAL_SHADOW_FIX)
-#define gUseRayCones                   (gSpecializationFlags & BDPT_FLAG_RAY_CONES)
-#define gSampleBSDFs                   (gSpecializationFlags & BDPT_FLAG_SAMPLE_BSDFS)
-#define gSampleLightPower              (gSpecializationFlags & BDPT_FLAG_SAMPLE_LIGHT_POWER)
-#define gUniformSphereSampling         (gSpecializationFlags & BDPT_FLAG_UNIFORM_SPHERE_SAMPLING)
-#define gUseMIS                        (gSpecializationFlags & BDPT_FLAG_MIS)
-#define gUseNEE                        (gSpecializationFlags & BDPT_FLAG_NEE)
-#define gPresampleLights               (gSpecializationFlags & BDPT_FLAG_PRESAMPLE_LIGHTS)
-#define gReservoirNEE                  (gSpecializationFlags & BDPT_FLAG_RESERVOIR_NEE)
-#define gReservoirTemporalReuse        (gSpecializationFlags & BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE)
-#define gReservoirSpatialReuse         (gSpecializationFlags & BDPT_FLAG_RESERVOIR_SPATIAL_REUSE)
-#define gReservoirUnbiasedReuse        (gSpecializationFlags & BDPT_FLAG_RESERVOIR_UNBIASED_REUSE)
-#define gDeferNEERays                  (gSpecializationFlags & BDPT_FLAG_DEFER_NEE_RAYS)
-#define gTraceLight                    (gSpecializationFlags & BDPT_FLAG_TRACE_LIGHT)
-#define gConnectToViews                (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_VIEWS)
-#define gConnectToLightPaths           (gSpecializationFlags & BDPT_FLAG_CONNECT_TO_LIGHT_PATHS)
-#define gLightVertexCache              (gSpecializationFlags & BDPT_FLAG_LIGHT_VERTEX_CACHE)
-#define gLightVertexReservoirs         (gSpecializationFlags & BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS)
-#define gSampleEnvironmentMap          (gSpecializationFlags & BDPT_FLAG_SAMPLE_ENV_TEXTURE)
-#define gCountRays                     (gSpecializationFlags & BDPT_FLAG_COUNT_RAYS)
+#define gCoherentRNG 0
+
+#define gHasEnvironment                (gSceneFlags & BDPT_FLAG_HAS_ENVIRONMENT)
+#define gHasEmissives                  (gSceneFlags & BDPT_FLAG_HAS_EMISSIVES)
+#define gHasMedia                      (gSceneFlags & BDPT_FLAG_HAS_MEDIA)
+#define gTraceLight                    (gSceneFlags & BDPT_FLAG_TRACE_LIGHT)
+
+#define gUsePerformanceCounters        BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::ePerformanceCounters)
+#define gRemapThreadIndex              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eRemapThreads)
+#define gCoherentRR                    BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eCoherentRR)
+#define gCoherentSampling              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eCoherentSampling)
+#define gFlipTriangleUVs               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eFlipTriangleUVs)
+#define gFlipNormalMaps	               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eFlipNormalMaps)
+#define gAlphaTest                     BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eAlphaTest)
+#define gUseNormalMaps                 BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNormalMaps)
+#define gShadingNormalFix              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eShadingNormalShadowFix)
+#define gUseRayCones                   BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eRayCones)
+#define gSampleBSDFs                   BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eSampleBSDFs)
+#define gSampleLightPower              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eSampleLightPower)
+#define gUniformSphereSampling         BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eUniformSphereSampling)
+#define gUseMIS                        BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eMIS)
+#define gUseNEE                        BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNEE)
+#define gPresampleLights               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::ePresampleLights)
+#define gDeferShadowRays               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eDeferShadowRays)
+#define gConnectToViews                BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eConnectToViews)
+#define gConnectToLightPaths           BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eConnectToLightPaths)
+#define gLightVertexCache              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eLVC)
+#define gUseReservoirs                 BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eReservoirs)
+#define gUseReservoirReuse             BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eReservoirReuse)
+#define gHashGridJitter                BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eHashGridJitter)
+#define gSampleEnvironmentMap          BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eSampleEnvironmentMapDirectly)
 
 #define gOutputExtent                  gPushConstants.gOutputExtent
 #define gViewCount                     gPushConstants.gViewCount
@@ -79,12 +73,13 @@
 #define gMaxNullCollisions             gPushConstants.gMaxNullCollisions
 #define gLightPresampleTileSize        gPushConstants.gLightPresampleTileSize
 #define gLightPresampleTileCount       gPushConstants.gLightPresampleTileCount
-#define gNEEReservoirM                 gPushConstants.gNEEReservoirM
+#define gReservoirM                    gPushConstants.gReservoirM
 #define gReservoirMaxM                 gPushConstants.gReservoirMaxM
-#define gNEEReservoirSpatialSamples    gPushConstants.gNEEReservoirSpatialSamples
-#define gNEEReservoirSpatialRadius     gPushConstants.gNEEReservoirSpatialRadius
+#define gReservoirSpatialM             gPushConstants.gReservoirSpatialM
 #define gLightPathCount                gPushConstants.gLightPathCount
-#define gLightVertexReservoirM         gPushConstants.gLightVertexReservoirM
+#define gHashGridBucketCount           gPushConstants.gHashGridBucketCount
+#define gHashGridMinBucketRadius       gPushConstants.gHashGridMinBucketRadius
+#define gHashGridBucketPixelRadius     gPushConstants.gHashGridBucketPixelRadius
 
 [[vk::binding( 0,0)]] RaytracingAccelerationStructure gScene;
 [[vk::binding( 1,0)]] StructuredBuffer<PackedVertexData> gVertices;
@@ -113,20 +108,28 @@
 [[vk::binding( 8,1)]] RWTexture2D<float4> gDebugImage;
 [[vk::binding( 9,1)]] RWStructuredBuffer<VisibilityInfo> gVisibility;
 [[vk::binding(10,1)]] RWTexture2D<float2> gPrevUVs;
-[[vk::binding(11,1)]] StructuredBuffer<VisibilityInfo> gPrevVisibility;
-[[vk::binding(12,1)]] RWStructuredBuffer<RayDifferential> gRayDifferentials;
+[[vk::binding(11,1)]] RWStructuredBuffer<RayDifferential> gRayDifferentials;
+[[vk::binding(12,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
+[[vk::binding(13,1)]] RWStructuredBuffer<ShadowRayData> gShadowRays;
+[[vk::binding(14,1)]] RWByteAddressBuffer gLightTraceSamples;
+[[vk::binding(15,1)]] RWStructuredBuffer<PathVertex> gLightPathVertices;
+[[vk::binding(16,1)]] RWStructuredBuffer<uint> gLightPathVertexCount;
 
-[[vk::binding(13,1)]] RWStructuredBuffer<PresampledLightPoint> gPresampledLights;
-[[vk::binding(14,1)]] RWStructuredBuffer<NEERayData> gNEERays;
+[[vk::binding(17,1)]] RWStructuredBuffer<uint> gHashGridChecksums;
+[[vk::binding(18,1)]] RWStructuredBuffer<uint> gHashGridCounters;
+[[vk::binding(19,1)]] RWStructuredBuffer<uint> gHashGridStats;
+[[vk::binding(20,1)]] RWStructuredBuffer<ReservoirData> gHashGridReservoirs;
+[[vk::binding(21,1)]] RWStructuredBuffer<ReservoirPayload> gHashGridReservoirSamples;
+[[vk::binding(22,1)]] RWStructuredBuffer<uint> gHashGridIndices;
+[[vk::binding(23,1)]] RWStructuredBuffer<uint2> gHashGridAppendIndices;
+[[vk::binding(24,1)]] RWStructuredBuffer<ReservoirData> gHashGridAppendReservoirs;
+[[vk::binding(25,1)]] RWStructuredBuffer<ReservoirPayload> gHashGridAppendReservoirSamples;
 
-[[vk::binding(15,1)]] RWStructuredBuffer<Reservoir> gReservoirs;
-[[vk::binding(16,1)]] RWStructuredBuffer<uint4> gReservoirSamples;
-[[vk::binding(17,1)]] RWStructuredBuffer<Reservoir> gPrevReservoirs;
-[[vk::binding(18,1)]] RWStructuredBuffer<uint4> gPrevReservoirSamples;
-
-[[vk::binding(19,1)]] RWByteAddressBuffer gLightTraceSamples;
-[[vk::binding(20,1)]] RWStructuredBuffer<PathVertex> gLightPathVertices;
-[[vk::binding(21,1)]] RWStructuredBuffer<uint> gLightPathVertexCount;
+[[vk::binding(26,1)]] RWStructuredBuffer<uint> gPrevHashGridChecksums;
+[[vk::binding(27,1)]] RWStructuredBuffer<uint> gPrevHashGridCounters;
+[[vk::binding(28,1)]] RWStructuredBuffer<uint> gPrevHashGridIndices;
+[[vk::binding(29,1)]] RWStructuredBuffer<ReservoirData> gPrevHashGridReservoirs;
+[[vk::binding(30,1)]] RWStructuredBuffer<ReservoirPayload> gPrevHashGridReservoirSamples;
 
 float2 sample_texel(Texture2D<float4> img, float2 rnd, out float pdf, const uint max_iterations = 10) {
 	static const uint2 offsets[4] = {
@@ -225,6 +228,84 @@ float sample_texel_pdf(Texture2D<float4> img, const float2 uv, const uint max_it
 	return pdf;
 }
 
+#include "../../common/rng.hlsli"
+
+float hashgrid_cell_size(const float3 pos) {
+	if (gHashGridBucketPixelRadius < 0)
+		return gHashGridMinBucketRadius;
+	const uint view_index = 0;
+	const TransformData t = gViewTransforms[view_index];
+	const float dist = length(pos - float3(t.m[0][3], t.m[1][3], t.m[2][3]));
+	const float2 extent = gViews[view_index].image_max - gViews[view_index].image_min;
+	const float step = dist * tan(gHashGridBucketPixelRadius * gViews[view_index].projection.vertical_fov * max(1/extent.y, extent.y/pow2(extent.x)));
+	return gHashGridMinBucketRadius * (1 << uint(log2(step / gHashGridMinBucketRadius)));
+}
+uint hashgrid_bucket_index(const float3 pos, out uint checksum, const float cell_size) {
+	// compute index in hash grid
+	const int3 p = floor(pos/cell_size) + 0.5;
+	checksum = max(1, xxhash32(cell_size + xxhash32(p.z + xxhash32(p.y + xxhash32(p.x)))));
+	return pcg(cell_size + pcg(p.z + pcg(p.y + pcg(p.x)))) % gHashGridBucketCount;
+}
+uint hashgrid_lookup(RWStructuredBuffer<uint> checksums, const float3 pos, const float cell_size, const bool inserting = false) {
+	uint checksum;
+	uint bucket_index = hashgrid_bucket_index(pos, checksum, cell_size);
+	for (uint i = 0; i < 32; i++) {
+		if (inserting) {
+			uint checksum_prev;
+			InterlockedCompareExchange(checksums[bucket_index], 0, checksum, checksum_prev);
+			if (checksum_prev == 0 || checksum_prev == checksum)
+				return bucket_index;
+		} else {
+			if (checksums[bucket_index] == checksum)
+				return bucket_index;
+		}
+		bucket_index++;
+	}
+	if (gUsePerformanceCounters && inserting)
+		InterlockedAdd(gHashGridStats[0], 1); // failed inserts
+	return -1;
+}
+void hashgrid_insert(const float3 pos, const float cell_size, const ReservoirData rd, const ReservoirPayload y) {
+	const uint bucket_index = hashgrid_lookup(gHashGridChecksums, pos, cell_size, true);
+	if (bucket_index == -1) return;
+
+	uint index_in_bucket;
+	InterlockedAdd(gHashGridCounters[bucket_index], 1, index_in_bucket);
+
+	if (gUsePerformanceCounters && index_in_bucket == 0)
+		InterlockedAdd(gHashGridStats[1], 1); // buckets used
+
+	uint append_index;
+	InterlockedAdd(gHashGridAppendIndices[0][0], 1, append_index);
+	gHashGridAppendReservoirs[1 + append_index] = rd;
+	gHashGridAppendReservoirSamples[1 + append_index] = y;
+	gHashGridAppendIndices[1 + append_index] = uint2(bucket_index, index_in_bucket);
+}
+
+SLANG_SHADER("compute")
+[numthreads(64,1,1)]
+void hashgrid_compute_indices(uint3 index : SV_DispatchThreadID) {
+	const uint bucket_index = index.y * gOutputExtent.x + index.x;
+	if (bucket_index >= gHashGridBucketCount) return;
+
+	uint offset;
+	InterlockedAdd(gHashGridAppendIndices[0][1], gHashGridCounters[bucket_index], offset);
+
+	gHashGridIndices[bucket_index] = offset;
+}
+SLANG_SHADER("compute")
+[numthreads(64,1,1)]
+void hashgrid_swizzle(uint3 index : SV_DispatchThreadID) {
+	const uint append_index = index.y * gOutputExtent.x + index.x;
+	if (append_index >= gHashGridAppendIndices[0][0]) return;
+	const uint2 data = gHashGridAppendIndices[1 + append_index];
+	const uint bucket_index = data[0];
+	const uint index_in_bucket = data[1];
+
+	const uint dst_index = gHashGridIndices[bucket_index] + index_in_bucket;
+	gHashGridReservoirs[dst_index]       = gHashGridAppendReservoirs[1 + append_index];
+	gHashGridReservoirSamples[dst_index] = gHashGridAppendReservoirSamples[1 + append_index];
+}
 
 #include "../../common/path.hlsli"
 
@@ -351,7 +432,6 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	}
 
 	path._beta = 1;
-	path.bsdf_pdf = gViews[view_index].sensor_pdfW(path.prev_cos_out);
 	path.prev_specular = true;
 
 	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEnvironmentSampleTest) {
@@ -397,13 +477,31 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 		vis.packed_z = pack_f16_2(POS_INFINITY);
 		gVisibility[path.pixel_coord.y*gOutputExtent.x + path.pixel_coord.x] = vis;
 		gPrevUVs[path.pixel_coord.xy] = uv;
-		if (gUseNEE && gReservoirNEE) gReservoirs[path.path_index].init();
 		if (gHasEnvironment) {
 			Environment env;
 			env.load(gEnvironmentMaterialAddress);
 			path.eval_emission(env.eval(path.direction));
 		}
 		return;
+	}
+
+	// evaluate albedo and emission
+	if (!gHasMedia || path._isect.sd.shape_area > 0) {
+		ShadingData tmp_sd = path._isect.sd;
+
+		Material m;
+		m.load(gInstances[path._isect.instance_index()].material_address(), tmp_sd);
+
+		vis.packed_normal = tmp_sd.packed_shading_normal;
+
+		path.eval_emission(m.Le());
+
+		gAlbedo[path.pixel_coord] = float4(m.albedo(), 1);
+
+		if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eAlbedo) 		  gDebugImage[path.pixel_coord] = float4(m.albedo(), 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eSpecular) 	  gDebugImage[path.pixel_coord] = float4(float3(m.is_specular()), 1);
+		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEmission) 	  gDebugImage[path.pixel_coord] = float4(m.Le(), 1);
+	    else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eShadingNormal)  gDebugImage[path.pixel_coord] = float4(tmp_sd.shading_normal() *.5+.5, 1);
 	}
 
 	const Real z = length(path._isect.sd.position - path.origin);
@@ -437,32 +535,13 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePrevUV)
 		gDebugImage[path.pixel_coord] = float4(abs(gPrevUVs[path.pixel_coord.xy] - uv)*gOutputExtent, 0, 1);
 
-	// evaluate albedo and emission
-	if (!gHasMedia || path._isect.sd.shape_area > 0) {
-		ShadingData tmp_sd = path._isect.sd;
-
-		Material m;
-		m.load(gInstances[path._isect.instance_index()].material_address(), tmp_sd);
-
-		path.eval_emission(m.Le());
-
-		gVisibility[path.pixel_coord.y*gOutputExtent.x + path.pixel_coord.x].packed_normal = tmp_sd.packed_shading_normal;
-
-		gAlbedo[path.pixel_coord] = float4(m.albedo(), 1);
-
-		if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eAlbedo) 		  gDebugImage[path.pixel_coord] = float4(m.albedo(), 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eSpecular) 	  gDebugImage[path.pixel_coord] = float4(float3(m.is_specular()), 1);
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEmission) 	  gDebugImage[path.pixel_coord] = float4(m.Le(), 1);
-	    else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eShadingNormal)  gDebugImage[path.pixel_coord] = float4(tmp_sd.shading_normal() *.5+.5, 1);
-	}
-
 	while (any(path._beta > 0) && !any(isnan(path._beta)))
 		path.next_vertex();
 }
 
 SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
-void trace_nee(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
+void trace_shadows(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	const uint path_index = map_pixel_coord(index.xy, group_id.xy, group_thread_index);
 	if (path_index >= gOutputExtent.x*gOutputExtent.y) return;
 
@@ -470,17 +549,17 @@ void trace_nee(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_G
 
 	Spectrum c = 0;
 	for (int i = 1; i <= gMaxDiffuseVertices; i++) {
-		const NEERayData rd = gNEERays[nee_vertex_index(path_index, i)];
+		ShadowRayData rd = gShadowRays[shadow_ray_index(path_index, i)];
 		if (all(rd.contribution <= 0)) continue;
 
 		rng_state_t _rng = rng_init(pixel_coord, rd.rng_offset);
 
-		Spectrum beta = 1;
-		Real T_dir_pdf = 1;
-		Real T_nee_pdf = 1;
-		trace_visibility_ray(_rng, rd.ray_origin, rd.ray_direction, rd.dist, rd.medium, beta, T_dir_pdf, T_nee_pdf);
-		if (T_nee_pdf > 0) beta /= T_nee_pdf;
-		c += rd.contribution * beta;
+		Real dir_pdf = 1;
+		Real nee_pdf = 1;
+		trace_visibility_ray(_rng, rd.ray_origin, rd.ray_direction, rd.ray_distance, rd.medium, rd.contribution, dir_pdf, nee_pdf);
+		if (nee_pdf > 0) rd.contribution /= nee_pdf;
+
+		c += rd.contribution;
 	}
 
 	gRadiance[pixel_coord] += float4(c, 0);
@@ -490,7 +569,7 @@ SLANG_SHADER("compute")
 [numthreads(GROUPSIZE_X,GROUPSIZE_Y,1)]
 void add_light_trace(uint3 index : SV_DispatchThreadID, uint group_thread_index : SV_GroupIndex, uint3 group_id : SV_GroupID) {
 	if (all(index.xy < gOutputExtent) && (BDPTDebugMode)gDebugMode != BDPTDebugMode::eViewTraceContribution) {
-		Spectrum c = PathIntegrator::load_light_sample(index.xy);
+		Spectrum c = load_light_sample(index.xy);
 		if (any(c < 0) || any(isnan(c))) c = 0;
 		gRadiance[index.xy] += float4(c, 0);
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eLightTraceContribution || ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugViewPathLength == 1))

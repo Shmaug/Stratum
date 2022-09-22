@@ -68,27 +68,24 @@ component_ptr<T> init_renderer(const auto& app, Node& renderer_node, const compo
 #endif
 
 component_ptr<Camera> setup_camera(const auto& instance, const auto& scene) {
+	Node& n = scene.node().make_child("Camera");
 	// setup camera
 	float3 pos = float3(0,1,0);
-	quatf rot = quatf_identity();
-	float3 scale = float3::Ones();
-	float fovy = radians(70.f);
-	if (auto p = instance->find_argument("cameraPosX"); p) pos[0]     = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraPosY"); p) pos[1]     = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraPosZ"); p) pos[2]     = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraRotX"); p) rot.xyz[0] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraRotY"); p) rot.xyz[1] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraRotZ"); p) rot.xyz[2] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraRotW"); p) rot.w      = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraScaleX"); p) scale[0] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraScaleY"); p) scale[1] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("cameraScaleZ"); p) scale[2] = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("fovy"); p) fovy = (float)atof(p->c_str());
-	if (auto p = instance->find_argument("fov"); p) fovy = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraPosX"); p) pos[0] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraPosY"); p) pos[1] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraPosZ"); p) pos[2] = (float)atof(p->c_str());
+	auto t  = n.make_component<TransformData>(make_transform(pos, quatf_identity(), float3::Ones()));
 
-	auto camera = scene.node().make_child("Camera").make_component<Camera>(make_perspective(fovy, 1.f, float2::Zero(), -1 / 1024.f));
-	camera.node().make_component<TransformData>(make_transform(pos, rot, scale));
-	camera.node().make_component<FlyCamera>(camera.node());
+	auto fc = n.make_component<FlyCamera>();
+	if (auto p = instance->find_argument("cameraRotX"); p) fc->mRotation[0] = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("cameraRotY"); p) fc->mRotation[1] = (float)atof(p->c_str());
+
+	float fovy = radians(70.f);
+	if (auto p = instance->find_argument("fovy"); p) fovy = (float)atof(p->c_str());
+	if (auto p = instance->find_argument("fov"); p)  fovy = (float)atof(p->c_str());
+
+	auto camera = n.make_component<Camera>(make_perspective(fovy, 1.f, float2::Zero(), -1 / 1024.f));
+
 	return camera;
 }
 

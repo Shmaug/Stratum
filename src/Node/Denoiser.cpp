@@ -73,6 +73,8 @@ void Denoiser::create_pipelines() {
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 0;
 	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
+	mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection") = 1;
+	mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gDemodulateAlbedo") = 1;
 }
 
 void Denoiser::on_inspector_gui() {

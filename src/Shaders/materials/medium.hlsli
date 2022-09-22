@@ -23,6 +23,9 @@ struct Medium : BSDF {
 	bool can_eval() { return any(density_scale > 0); }
 	bool is_specular() { return abs(anisotropy) > 0.999; }
 
+	Spectrum eval_approx(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
+		return 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
+	}
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint = false) {
 		const Real v = 1/(4*M_PI) * (1 - anisotropy * anisotropy) / pow(1 + anisotropy * anisotropy + 2 * anisotropy * dot(dir_in, dir_out), 1.5);
 		r.f = v;
@@ -70,7 +73,7 @@ struct Medium : BSDF {
 	// returns hit position inside medium. multiplies beta by transmittance*sigma_s
 	Vector3 delta_track(inout rng_state_t rng_state, Vector3 origin, Vector3 direction, float t_max, inout Spectrum beta, inout Spectrum dir_pdf, inout Spectrum nee_pdf, const bool can_scatter = true) {
 		// TODO: slang crashes when compiling this??
-#ifndef __SLANG__
+//#ifndef __SLANG__
 		pnanovdb_readaccessor_t density_accessor, albedo_accessor;
 		pnanovdb_grid_handle_t grid_handle = { 0 };
 		pnanovdb_readaccessor_init(density_accessor, pnanovdb_tree_get_root(gVolumes[density_volume_index], pnanovdb_grid_get_tree(gVolumes[density_volume_index], grid_handle)));
@@ -79,9 +82,9 @@ struct Medium : BSDF {
 
 		const Spectrum majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor.root));
 		const uint channel = rng_next_uint(rng_state)%3;
-		if (majorant[channel] == 0) return POS_INFINITY;
+		if (majorant[channel] < 1e-6) return POS_INFINITY;
 
-		origin    = pnanovdb_grid_world_to_indexf(gVolumes[density_volume_index], grid_handle, origin);
+		origin    = pnanovdb_grid_world_to_indexf    (gVolumes[density_volume_index], grid_handle, origin);
 		direction = pnanovdb_grid_world_to_index_dirf(gVolumes[density_volume_index], grid_handle, direction);
 
 		for (uint iteration = 0; iteration < gMaxNullCollisions && any(beta > 0); iteration++) {
@@ -122,7 +125,7 @@ struct Medium : BSDF {
 				break;
 			}
 		}
-#endif
+//#endif
 		return POS_INFINITY;
 	}
 };

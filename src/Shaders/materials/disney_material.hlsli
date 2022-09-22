@@ -84,6 +84,11 @@ struct DisneyMaterial : BSDF {
 #ifdef FORCE_LAMBERTIAN
 	bool is_specular() { return false; }
 
+	Spectrum eval_approx(const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
+		if (bsdf.emission() > 0)
+			return 0;
+		return bsdf.base_color() * abs(dir_out.z) / M_PI;
+	}
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {
 		if (bsdf.emission() > 0) {
 			r.f = 0;
@@ -125,13 +130,12 @@ struct DisneyMaterial : BSDF {
 		}
 		const Real shininess = 2/pow2(bsdf.roughness() + 1e-6) - 2;
 		if (dir_in.z * dir_out.z <= 0) {
-			const Spectrum spec = pow(abs(dot(refract(-dir_in, float3(0,1,0)), dir_out)), shininess);
 			const Real local_eta = dir_in.z < 0 ? 1/bsdf.eta() : bsdf.eta();
-			return sqrt(bsdf.base_color()) * abs(dir_out.z) * spec * bsdf.transmission() * adjoint ? 1/(local_eta*local_eta);
+			const Real spec = pow(abs(dot(refract(-dir_in, float3(0,0,sign(dir_in.z)), 1/local_eta), dir_out)), shininess);
+			return sqrt(bsdf.base_color()) * abs(dir_out.z) * spec * bsdf.transmission() * (adjoint ? 1/(local_eta*local_eta) : 1);
 		} else {
-			const Spectrum diff = 1 / M_PI;
-			const Spectrum spec = pow(abs(dot(reflect(-dir_in, float3(0,1,0)), dir_out)), shininess);
-			return bsdf.base_color() * abs(dir_out.z) * lerp(diff, spec, bsdf.metallic());
+			const Real spec = pow(abs(dot(reflect(-dir_in, float3(0,0,sign(dir_in.z))), dir_out)), shininess);
+			return bsdf.base_color() * abs(dir_out.z) * lerp(1 / M_PI, spec, bsdf.metallic());
 		}
 	}
 	void eval(out MaterialEvalRecord r, const Vector3 dir_in, const Vector3 dir_out, const bool adjoint) {

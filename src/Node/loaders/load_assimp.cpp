@@ -65,8 +65,9 @@ void Scene::load_assimp(Node& root, CommandBuffer& commandBuffer, const fs::path
 	if (scene->HasMaterials()) {
 		bool interpret_as_pbr = false;
 		if (filename.extension().string() == ".fbx") {
-			pfd::message n("Load PBR materials?", "Interpret diffuse/specular as glTF basecolor/pbr textures?", pfd::choice::yes_no);
-			interpret_as_pbr = n.result() == pfd::button::yes;
+			//pfd::message n("Load PBR materials?", "Interpret diffuse/specular as glTF basecolor/pbr textures?", pfd::choice::yes_no);
+			//interpret_as_pbr = n.result() == pfd::button::yes;
+			interpret_as_pbr = true;
 		}
 
 		cout << "Loading materials...";

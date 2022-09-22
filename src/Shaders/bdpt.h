@@ -9,43 +9,42 @@ namespace stm {
 
 #include "reservoir.h"
 
+enum BDPTFlagBits {
+	ePerformanceCounters,
+	eRemapThreads,
+	eCoherentRR,
+	eCoherentSampling,
+	eFlipTriangleUVs,
+	eFlipNormalMaps,
+	eAlphaTest,
+	eNormalMaps,
+	eShadingNormalShadowFix,
+	eRayCones,
+	eSampleBSDFs,
+	eNEE,
+	eMIS,
+	eSampleLightPower,
+	eUniformSphereSampling,
+	ePresampleLights,
+	eDeferShadowRays,
+	eConnectToViews,
+	eConnectToLightPaths,
+	eLVC,
+	eReservoirs,
+	eReservoirReuse,
+	eHashGridJitter,
+	eSampleEnvironmentMapDirectly,
+	eBDPTFlagCount,
+};
+
+#define BDPT_CHECK_FLAG(mask, flag) (mask & BIT((uint)flag))
+#define BDPT_SET_FLAG(mask, flag) mask |= BIT((uint)flag)
+#define BDPT_UNSET_FLAG(mask, flag) mask &= ~BIT((uint)flag)
+
 #define BDPT_FLAG_HAS_ENVIRONMENT 			BIT(0)
 #define BDPT_FLAG_HAS_EMISSIVES 			BIT(1)
 #define BDPT_FLAG_HAS_MEDIA 				BIT(2)
-
-#define BDPT_FLAG_REMAP_THREADS				BIT(3)
-#define BDPT_FLAG_COHERENT_RR 				BIT(4)
-#define BDPT_FLAG_COHERENT_RNG 				BIT(5)
-
-#define BDPT_FLAG_FLIP_TRIANGLE_UVS 		BIT(26)
-#define BDPT_FLAG_FLIP_NORMAL_MAPS 			BIT(27)
-#define BDPT_FLAG_ALPHA_TEST 				BIT(6)
-#define BDPT_FLAG_NORMAL_MAPS 				BIT(7)
-#define BDPT_FLAG_SHADING_NORMAL_SHADOW_FIX BIT(28)
-#define BDPT_FLAG_RAY_CONES 				BIT(8)
-#define BDPT_FLAG_RAY_DIFFERENTIAL			BIT(9)
-#define BDPT_FLAG_SAMPLE_BSDFS 				BIT(10)
-#define BDPT_FLAG_SAMPLE_LIGHT_POWER		BIT(11)
-#define BDPT_FLAG_UNIFORM_SPHERE_SAMPLING	BIT(12)
-#define BDPT_FLAG_MIS 						BIT(13)
-
-#define BDPT_FLAG_NEE 						BIT(14)
-#define BDPT_FLAG_PRESAMPLE_LIGHTS			BIT(15)
-#define BDPT_FLAG_RESERVOIR_NEE				BIT(16)
-#define BDPT_FLAG_RESERVOIR_TEMPORAL_REUSE	BIT(17)
-#define BDPT_FLAG_RESERVOIR_SPATIAL_REUSE	BIT(18)
-#define BDPT_FLAG_RESERVOIR_UNBIASED_REUSE	BIT(19)
-#define BDPT_FLAG_DEFER_NEE_RAYS			BIT(20)
-
-#define BDPT_FLAG_TRACE_LIGHT				BIT(21)
-#define BDPT_FLAG_CONNECT_TO_VIEWS			BIT(22)
-#define BDPT_FLAG_CONNECT_TO_LIGHT_PATHS	BIT(23)
-#define BDPT_FLAG_LIGHT_VERTEX_CACHE		BIT(24)
-#define BDPT_FLAG_LIGHT_VERTEX_RESERVOIRS	BIT(25)
-
-#define BDPT_FLAG_SAMPLE_ENV_TEXTURE		BIT(30)
-
-#define BDPT_FLAG_COUNT_RAYS				BIT(31)
+#define BDPT_FLAG_TRACE_LIGHT				BIT(3)
 
 struct BDPTPushConstants {
 	uint2 gOutputExtent;
@@ -65,64 +64,37 @@ struct BDPTPushConstants {
 	uint gLightPresampleTileSize;
 	uint gLightPresampleTileCount;
 
-	uint gNEEReservoirM;
-	uint gReservoirMaxM;
-	uint gNEEReservoirSpatialSamples;
-	uint gNEEReservoirSpatialRadius;
-
 	uint gLightPathCount;
 
-	uint gLightVertexReservoirM;
+	uint gReservoirM;
+	uint gReservoirMaxM;
+	uint gReservoirSpatialM;
+
+	uint gHashGridBucketCount;
+	float gHashGridMinBucketRadius;
+	float gHashGridBucketPixelRadius;
 
 	uint gDebugViewPathLength;
 	uint gDebugLightPathLength;
 };
 
-struct PointSample {
-	float3 local_position;
-	uint instance_primitive_index;
-	inline uint instance_index() CONST_CPP { return BF_GET(instance_primitive_index, 0, 16); }
-	inline uint primitive_index() CONST_CPP { return BF_GET(instance_primitive_index, 16, 16); }
-};
-
-struct PathState {
-	PointSample p;
-	float3 origin;
-	uint path_length_medium;
-	float3 beta;
-	float prev_cos_out;
-	float3 dir_in;
-	float bsdf_pdf;
-
-	SLANG_MUTATING
-	inline void pack_path_length_medium(const uint path_length, const uint medium) {
-		BF_SET(path_length_medium, path_length, 0, 16);
-		BF_SET(path_length_medium, medium, 16, 16);
-	}
-	inline uint path_length() CONST_CPP { return BF_GET(path_length_medium,0,16); }
-	inline uint medium() CONST_CPP { return BF_GET(path_length_medium,16,16); }
-};
-struct PathState1 {
-	float d;
+struct ShadowRayData {
+	float3 contribution;
+	uint rng_offset;
+	float3 ray_origin;
+	uint medium;
+	float3 ray_direction;
+	float ray_distance;
 };
 
 struct PresampledLightPoint {
 	float3 position;
 	uint packed_geometry_normal;
 	float3 Le;
-	float pdfA;
+	float pdfA; // negative for environment map samples
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 #endif
-};
-
-struct NEERayData {
-	float3 contribution;
-	uint rng_offset;
-	float3 ray_origin;
-	uint medium;
-	float3 ray_direction;
-	float dist;
 };
 
 #define PATH_VERTEX_FLAG_FLIP_BITANGENT	BIT(0)
@@ -180,6 +152,18 @@ struct PathVertex {
 #endif
 };
 
+struct ReservoirData {
+	Reservoir r;
+	uint packed_geometry_normal;
+	float W;
+#ifdef __HLSL__
+	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
+#endif
+};
+
+#define ReservoirPayload PresampledLightPoint
+
+
 enum class BDPTDebugMode {
 	eNone,
 	eAlbedo,
@@ -203,6 +187,35 @@ enum class BDPTDebugMode {
 #pragma pack(pop)
 
 namespace std {
+inline string to_string(const stm::BDPTFlagBits& m) {
+	switch (m) {
+		default: return "Unknown";
+		case stm::BDPTFlagBits::ePerformanceCounters: return "Performance counters";
+		case stm::BDPTFlagBits::eRemapThreads: return "Remap threads";
+		case stm::BDPTFlagBits::eCoherentRR: return "Coherent RR";
+		case stm::BDPTFlagBits::eCoherentSampling: return "Coherent sampling";
+		case stm::BDPTFlagBits::eFlipTriangleUVs: return "Flip triangle UVs";
+		case stm::BDPTFlagBits::eFlipNormalMaps: return "Flip normal maps";
+		case stm::BDPTFlagBits::eAlphaTest: return "Alpha test";
+		case stm::BDPTFlagBits::eNormalMaps: return "Normal maps";
+		case stm::BDPTFlagBits::eShadingNormalShadowFix: return "Shading normal shadow fix";
+		case stm::BDPTFlagBits::eRayCones: return "Ray cones";
+		case stm::BDPTFlagBits::eSampleBSDFs: return "Sample BSDFs";
+		case stm::BDPTFlagBits::eNEE: return "NEE";
+		case stm::BDPTFlagBits::eMIS: return "MIS";
+		case stm::BDPTFlagBits::eSampleLightPower: return "Sample light power";
+		case stm::BDPTFlagBits::eUniformSphereSampling: return "Uniform sphere sampling";
+		case stm::BDPTFlagBits::ePresampleLights: return "Presample lights";
+		case stm::BDPTFlagBits::eDeferShadowRays: return "Defer shadow rays";
+		case stm::BDPTFlagBits::eConnectToViews: return "Connect to views";
+		case stm::BDPTFlagBits::eConnectToLightPaths: return "Connect to light paths";
+		case stm::BDPTFlagBits::eLVC: return "Light vertex cache";
+		case stm::BDPTFlagBits::eReservoirs: return "Reservoirs";
+		case stm::BDPTFlagBits::eReservoirReuse: return "Reservoir reuse";
+		case stm::BDPTFlagBits::eHashGridJitter: return "Jitter hash grid lookups ";
+		case stm::BDPTFlagBits::eSampleEnvironmentMapDirectly: return "Sample environment map directly";
+	}
+}
 inline string to_string(const stm::BDPTDebugMode& m) {
 	switch (m) {
 		default: return "Unknown";
@@ -210,17 +223,16 @@ inline string to_string(const stm::BDPTDebugMode& m) {
 		case stm::BDPTDebugMode::eAlbedo: return "Albedo";
 		case stm::BDPTDebugMode::eSpecular: return "Specular";
 		case stm::BDPTDebugMode::eEmission: return "Emission";
-		case stm::BDPTDebugMode::eShadingNormal: return "Shading Normal";
-		case stm::BDPTDebugMode::eGeometryNormal: return "Geometry Normal";
-		case stm::BDPTDebugMode::eDirOut: return "Bounce Direction";
+		case stm::BDPTDebugMode::eShadingNormal: return "Shading normal";
+		case stm::BDPTDebugMode::eGeometryNormal: return "Geometry normal";
+		case stm::BDPTDebugMode::eDirOut: return "Bounce direction";
 		case stm::BDPTDebugMode::ePrevUV: return "Prev UV";
-		case stm::BDPTDebugMode::eEnvironmentSampleTest: return "Environment Map Sampling Test";
-		case stm::BDPTDebugMode::eEnvironmentSamplePDF: return "Environment Map Sampling PDF";
-		case stm::BDPTDebugMode::eReservoirWeight: return "Reservoir Weight";
-		case stm::BDPTDebugMode::ePathLengthContribution: return "Path Contribution (per length)";
-		case stm::BDPTDebugMode::eLightTraceContribution: return "Light Trace Contribution";
-		case stm::BDPTDebugMode::eViewTraceContribution: return "View Trace Contribution";
-		case stm::BDPTDebugMode::eDebugModeCount: return "DebugModeCount";
+		case stm::BDPTDebugMode::eEnvironmentSampleTest: return "Environment map sampling test";
+		case stm::BDPTDebugMode::eEnvironmentSamplePDF: return "Environment map sampling PDF";
+		case stm::BDPTDebugMode::eReservoirWeight: return "Reservoir weight";
+		case stm::BDPTDebugMode::ePathLengthContribution: return "Path contribution (per length)";
+		case stm::BDPTDebugMode::eLightTraceContribution: return "Light trace contribution";
+		case stm::BDPTDebugMode::eViewTraceContribution: return "View trace contribution";
 	}
 };
 }

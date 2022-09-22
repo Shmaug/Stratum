@@ -20,12 +20,13 @@ RWByteAddressBuffer gPrevMax;
 } gPushConstants;
 
 float3 tonemap_reinhard(const float3 c) {
+	//return c / (1 + c);
 	const float l = luminance(c);
-	const float l1 = l / (1 + l);
-	return c * (1 + c);
+	const float3 tc = c / (1 + c);
+	return lerp(c/(1 + l), tc, tc);
 }
 float3 tonemap_reinhard_extended(const float3 c, const float3 max_c) {
-	return c * (1 + c / pow2(lerp(max_c, 1, max_c == 0))) / (1 + c);
+	return c / (1 + c) * (1 + c / pow2(lerp(max_c, 1, max_c == 0)));
 }
 
 float3 tonemap_reinhard_luminance(const float3 c) {
@@ -35,7 +36,7 @@ float3 tonemap_reinhard_luminance(const float3 c) {
 }
 float3 tonemap_reinhard_luminance_extended(const float3 c, const float max_l) {
 	const float l = luminance(c);
-	const float l1 = l * (1 + l / pow2(max_l == 0 ? 1 : max_l)) / (1 + l);
+	const float l1 = (l / (1 + l)) * (1 + l / pow2(max_l == 0 ? 1 : max_l));
 	return c * (l1 / l);
 }
 

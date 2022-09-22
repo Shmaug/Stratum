@@ -188,20 +188,6 @@ inline uint get_view_index(const uint2 index, StructuredBuffer<ViewData> views, 
 	return -1;
 }
 
-inline float3 ray_offset(const float3 P, const float3 Ng) {
-	// This function should be used to compute a modified ray start position for
-	// rays leaving from a surface. This is from "A Fast and Robust Method for Avoiding
-	// Self-Intersection" see https://research.nvidia.com/publication/2019-03_A-Fast-and
-  const float int_scale = 256.0f;
-  const int3 of_i = int3((int)(int_scale * Ng.x), (int)(int_scale * Ng.y), (int)(int_scale * Ng.z));
-
-  const float origin = 1 / 32.0;
-  const float float_scale = 1 / 65536.0;
-  return float3(abs(P.x) < origin ? P.x + float_scale * Ng.x : asfloat(asint(P.x) + ((P.x < 0) ? -of_i.x : of_i.x)),
-                abs(P.y) < origin ? P.y + float_scale * Ng.y : asfloat(asint(P.y) + ((P.y < 0) ? -of_i.y : of_i.y)),
-                abs(P.z) < origin ? P.z + float_scale * Ng.z : asfloat(asint(P.z) + ((P.z < 0) ? -of_i.z : of_i.z)));
-}
-
 inline uint3 load_tri_(ByteAddressBuffer indices, uint indexByteOffset, uint indexStride, uint primitiveIndex) {
 	const uint offsetBytes = indexByteOffset + primitiveIndex*3*indexStride;
 	uint3 tri;
