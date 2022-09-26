@@ -234,7 +234,7 @@ struct PathIntegrator {
 	Real path_pdf; // area measure
 	Real path_pdf_rev; // area measure
 	Real bsdf_pdf; // solid angle measure
-	Real d; // dE for view paths, dL for light paths. updated in sample_direction()
+	Real dVC; // bdpt mis quantity. dVC for the previous vertex is computed in sample_direction()
 	bool prev_specular;
 
 	// the ray that was traced to get here
@@ -263,6 +263,8 @@ struct PathIntegrator {
 		diffuse_vertices = 0;
 		path_length = 1;
 		eta_scale = 1;
+
+		prev_specular = false;
 
 		static const uint rngs_per_ray = gHasMedia ? (1 + 2*gMaxNullCollisions) : 0;
 		_rng = rng_init(pixel_coord, (gTraceLight ? 0xFFFFFF : 0) + (0xFFF + rngs_per_ray*4)*(path_length-1));
@@ -345,7 +347,7 @@ struct PathIntegrator {
 
 				if (c_i.p.pdfA <= 0 || all(c_i.p.Le <= 0)) continue;
 
-				const Real target_pdf_i = luminance(c_i.p.Le * m.eval_approx(local_dir_in, c_i.local_to_light, false)) * c_i.G;
+				const Real target_pdf_i = luminance(c_i.p.Le) * c_i.G * abs(c_i.local_to_light.z);
 				if (r.update(rng_next_float(_rng), target_pdf_i/c_i.p.pdfA)) {
 					r_target_pdf = target_pdf_i;
 					c = c_i;
@@ -353,6 +355,7 @@ struct PathIntegrator {
 			}
 		}
 
+		#ifndef HASHGRID_RESERVOIR_VERTEX
 		Vector3 t,b;
 		make_orthonormal(_isect.sd.geometry_normal(), t, b);
 
@@ -367,15 +370,13 @@ struct PathIntegrator {
 				uint M = r.M;
 				for (uint i = 0; i < gReservoirSpatialM; i++) {
 					const uint reservoir_index = bucket_start + rng_next_uint(_rng)%bucket_size;
-
 					const ReservoirData prev_reservoir = gPrevHashGridReservoirs[reservoir_index];
 					DirectLightSample c_i = DirectLightSample(_isect, gPrevHashGridReservoirSamples[reservoir_index]);
-
 					if (c_i.p.pdfA <= 0 || all(c_i.p.Le <= 0)) continue;
 
 					M += prev_reservoir.r.M;
 
-					const Real target_pdf_i = luminance(c_i.p.Le * m.eval_approx(local_dir_in, c_i.local_to_light, false)) * c_i.G;
+					const Real target_pdf_i = luminance(c_i.p.Le) * c_i.G * abs(c_i.local_to_light.z);
 					if (r.update(rng_next_float(_rng), target_pdf_i * prev_reservoir.W * prev_reservoir.r.M)) {
 						r_target_pdf = target_pdf_i;
 						c = c_i;
@@ -384,16 +385,19 @@ struct PathIntegrator {
 				r.M = M;
 			}
 		}
+		#endif
 
 		const Real W = r.W(r_target_pdf);
 
 		if (W > 1e-6) {
+			#ifndef HASHGRID_RESERVOIR_VERTEX
 			if (gUseReservoirReuse) {
 				const Real phi = rng_next_float(_rng)*2*M_PI;
 				const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
 				r.M = min(r.M, gReservoirMaxM);
 				hashgrid_insert(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W }, c.p);
 			}
+			#endif
 
 			MaterialEvalRecord _eval;
 			m.eval(_eval, local_dir_in, c.local_to_light, false);
@@ -435,7 +439,7 @@ struct PathIntegrator {
 	////////////////////////////////////////////
 	// BDPT
 
-	void store_vertex() {
+	PathVertex vertex() {
 		uint flags = 0;
 		if (_isect.sd.flags & SHADING_FLAG_FLIP_BITANGENT) flags |= PATH_VERTEX_FLAG_FLIP_BITANGENT;
 		if (gHasMedia && _isect.sd.shape_area == 0) flags |= PATH_VERTEX_FLAG_IS_MEDIUM;
@@ -457,18 +461,21 @@ struct PathIntegrator {
 		v.uv = _isect.sd.uv;
 		v.pack_beta(gUseReservoirs ? path_contrib : _beta, path_length, diffuse_vertices, flags);
 
-		v.prev_dVC = d;
+		v.prev_dVC = dVC;
 		v.G_rev = prev_cos_out/len_sqr(origin - _isect.sd.position);
 		v.prev_pdfA_fwd = pdfWtoA(bsdf_pdf, G);
 		v.path_pdf = path_pdf;
 
+		return v;
+	}
+	void store_light_vertex() {
 		uint idx;
 		if (gLightVertexCache) {
 			InterlockedAdd(gLightPathVertexCount[0], 1, idx);
 			idx = idx % (gLightPathCount*gMaxDiffuseVertices);
 		} else
 			idx = light_vertex_index(path_index, diffuse_vertices);
-		gLightPathVertices[idx] = v;
+		gLightPathVertices[idx] = vertex();
 	}
 
 	Real shading_normal_factor(const Real ndotout, const Real ngdotout, const Real ngdotns, const bool adjoint) {
@@ -541,10 +548,10 @@ struct PathIntegrator {
 			if (gConnectToLightPaths) {
 				// dL_{s+1} = (1 + P(s+1 -> s+2)*dL_{s+2}) / P(s+1 <- s+2)
 				// dL_1 = (1 + P(1 -> 2)*dL_2) / P(1 <- 2)
-				const Real dL_1 = connection_dVC(d, pdfWtoA(_eval.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), prev_specular);
+				const Real dL_1 = connection_dVC(dVC, pdfWtoA(_eval.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), prev_specular);
 				weight = 1 / (1 + dL_1 * mis(p0_fwd));
 			} else
-				weight = mis(path_pdf, p0_fwd * path_pdf_rev * pdfWtoA(_eval.pdf_rev, G_rev));
+				weight = prev_specular ? 1 : mis(path_pdf, p0_fwd * path_pdf_rev * pdfWtoA(_eval.pdf_rev, G_rev));
 		} else
 			weight = path_weight(1, path_length);
 
@@ -574,7 +581,7 @@ struct PathIntegrator {
 
 		Real dL, pdfA_rev;
 
-		if (!lv.is_medium() && !lv.is_background())
+		if (!lv.is_medium())
 			ray_distance = visibility_distance_epsilon(ray_distance);
 
 		if (lv.subpath_length() == 1) {
@@ -585,7 +592,7 @@ struct PathIntegrator {
 
 			// lv.prev_dL is just 1/P(k <- k+1)
 			dL = lv.prev_dVC;
-			pdfA_rev = cosine_hemisphere_pdfW(cos_theta_light); // gets converted to area measure below
+			pdfA_rev = cosine_hemisphere_pdfW(cos_theta_light) * rcp_dist2; // gets converted to area measure below
 		} else {
 			// evaluate BSDF at light vertex
 			Real cos_theta_light;
@@ -595,28 +602,24 @@ struct PathIntegrator {
 
 			// dL_{s+2}
 			dL = connection_dVC(lv.prev_dVC, pdfWtoA(lv_eval.pdf_rev, lv.G_rev), lv.prev_pdfA_fwd, lv.is_prev_delta());
-			pdfA_rev = lv_eval.pdf_fwd;
+			pdfA_rev = lv_eval.pdf_fwd * rcp_dist2;
 		}
-
-		pdfA_rev *= rcp_dist2;
 
 		if (all(contrib <= 0)) return 0; // no contribution towards _isect.sd.position, but path still valid
 
 		Vector3 local_to_light;
-		Real ngdotout, ngdotns;
 
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			local_to_light = ray_direction;
-			ngdotout = 1;
-			ngdotns = 1;
 		} else {
 			local_to_light = normalize(_isect.sd.to_local(ray_direction));
 			const Vector3 geometry_normal = _isect.sd.geometry_normal();
-			ngdotout = dot(geometry_normal, ray_direction);
+			const Real ngdotout = dot(geometry_normal, ray_direction);
+			const Real ngdotns = dot(geometry_normal, _isect.sd.shading_normal());
 			ray_origin = ray_offset(ray_origin, ngdotout > 0 ? geometry_normal : -geometry_normal);
-			ngdotns = dot(geometry_normal, _isect.sd.shading_normal());
 
 			pdfA_rev *= abs(ngdotout);
+			contrib *= shading_normal_factor(local_to_light.z, ngdotout, ngdotns, false);
 		}
 
 
@@ -624,12 +627,12 @@ struct PathIntegrator {
 		m.eval(_eval, local_dir_in, local_to_light, false);
 		if (_eval.pdf_fwd < 1e-6) return 0;
 
-		contrib *= _eval.f * shading_normal_factor(local_to_light.z, ngdotout, ngdotns, false);
+		contrib *= _eval.f;
 		if (all(contrib <= 0)) return 0;
 
 		if (gUseMIS) {
 			const Real G_rev = prev_cos_out/len_sqr(origin - _isect.sd.position);
-			const Real dE = connection_dVC(d, pdfWtoA(_eval.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), false);
+			const Real dE = connection_dVC(dVC, pdfWtoA(_eval.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), prev_specular);
 			weight = 1 / (1 + dE * mis(pdfA_rev) + dL * mis(pdfWtoA(_eval.pdf_fwd, connection_G_fwd)));
 		} else
 			weight = path_weight(path_length, lv.subpath_length());
@@ -645,11 +648,11 @@ struct PathIntegrator {
 		} else if (!gTraceLight && gConnectToLightPaths) {
 			if (gLightVertexCache) {
 				// connect eye vertex to random light vertex
-				const uint n = min(gLightPathVertexCount[0], gLightPathCount*gMaxDiffuseVertices);
+				const uint n = min(gLightPathVertexCount[0], gLightPathCount*(gMaxDiffuseVertices-1));
 
 				uint li = rng_next_uint(_rng);
 				if (gCoherentSampling) li = WaveReadLaneFirst(li) + WaveGetLaneIndex();
-				const PathVertex lv = gLightPathVertices[li % n];
+				PathVertex lv = gLightPathVertices[li % n];
 
 				Spectrum contrib = 0;
 				Real weight = 1;
@@ -663,7 +666,7 @@ struct PathIntegrator {
 					r.init();
 
 					for (int i = 0; i < gReservoirM; i++) {
-						const PathVertex lv_i = gLightPathVertices[(gCoherentSampling ? (li + 1 + i*WaveGetLaneCount()) : rng_next_uint(_rng)) % n];
+						const PathVertex lv_i = gLightPathVertices[(gCoherentSampling ? (li + (1 + i)*WaveGetLaneCount()) : rng_next_uint(_rng)) % n];
 						if (lv_i.subpath_length() + path_length > gMaxPathVertices || lv_i.diffuse_vertices() + diffuse_vertices > gMaxDiffuseVertices || all(lv_i.beta() <= 0)) continue;
 
 						Vector3 ray_origin_i, ray_direction_i;
@@ -678,9 +681,63 @@ struct PathIntegrator {
 							ray_direction = ray_direction_i;
 							ray_distance = ray_distance_i;
 							r_target_pdf = target_pdf_i;
+							lv = lv_i;
 						}
 					}
+
+					Real W = r.W(r_target_pdf);
+
+					#ifdef HASHGRID_RESERVOIR_VERTEX
+					if (gUseReservoirReuse) {
+						Vector3 t,b;
+						make_orthonormal(_isect.sd.geometry_normal(), t, b);
+						const Real cell_size = hashgrid_cell_size(_isect.sd.position);
+						if (gReservoirSpatialM > 0) {
+							const Real phi = rng_next_float(_rng)*2*M_PI;
+							const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
+							const uint bucket_index = hashgrid_lookup(gPrevHashGridChecksums, _isect.sd.position + jitter, cell_size);
+							if (bucket_index != -1) {
+								const uint bucket_start = gPrevHashGridIndices[bucket_index];
+								const uint bucket_size = gPrevHashGridCounters[bucket_index];
+								uint M = r.M;
+								for (uint i = 0; i < gReservoirSpatialM; i++) {
+									const uint reservoir_index = bucket_start + rng_next_uint(_rng)%bucket_size;
+									const ReservoirData prev_reservoir = gPrevHashGridReservoirs[reservoir_index];
+									const PathVertex lv_i = gPrevHashGridReservoirSamples[reservoir_index];
+									if (lv_i.subpath_length() + path_length > gMaxPathVertices || lv_i.diffuse_vertices() + diffuse_vertices > gMaxDiffuseVertices || all(lv_i.beta() <= 0)) continue;
+
+									M += prev_reservoir.r.M;
+
+									Vector3 ray_origin_i, ray_direction_i;
+									Real ray_distance_i;
+									Real weight_i;
+									const Spectrum contrib_i = connect_light_vertex(m, lv_i, weight_i, ray_origin_i, ray_direction_i, ray_distance_i);
+									const Real target_pdf_i = luminance(contrib_i);
+									if (r.update(rng_next_float(_rng), target_pdf_i/lv_i.path_pdf)) {
+										contrib = contrib_i;
+										weight = weight_i;
+										ray_origin = ray_origin_i;
+										ray_direction = ray_direction_i;
+										ray_distance = ray_distance_i;
+										r_target_pdf = target_pdf_i;
+										lv = lv_i;
+									}
+								}
+								r.M = M;
+							}
+						}
+						W = r.W(r_target_pdf);
+						{
+							const Real phi = rng_next_float(_rng)*2*M_PI;
+							const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
+							r.M = min(r.M, gReservoirMaxM);
+							hashgrid_insert(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W }, lv);
+						}
+					}
+					#endif
+
 					contrib *= r.W(r_target_pdf);
+
 				} else if (lv.subpath_length() + path_length <= gMaxPathVertices && lv.diffuse_vertices() + diffuse_vertices <= gMaxDiffuseVertices && any(lv.beta() > 0))
 					contrib = connect_light_vertex(m, lv, weight, ray_origin, ray_direction, ray_distance);
 
@@ -785,10 +842,10 @@ struct PathIntegrator {
 				if (gUseMIS) {
 					const Real p_rev_k = pdfWtoA(cosine_hemisphere_pdfW(abs(cos_theta_light)), abs(prev_cos_out)/len_sqr(origin - _isect.sd.position));
 					if (gConnectToLightPaths) {
-						const Real dE_k = connection_dVC(d, p_rev_k, pdfWtoA(bsdf_pdf, G), false);
+						const Real dE_k = connection_dVC(dVC, p_rev_k, pdfWtoA(bsdf_pdf, G), prev_specular);
 						weight = 1 / (1 + dE_k * mis(light_pdfA));
 					} else {
-						weight = mis(path_pdf, path_pdf_rev*p_rev_k*light_pdfA);
+						weight = prev_specular ? 0 : mis(path_pdf, path_pdf_rev*p_rev_k*light_pdfA);
 					}
 				} else
 					weight = path_weight(path_length, 0);
@@ -834,7 +891,7 @@ struct PathIntegrator {
 		const Real G_rev = prev_cos_out/len_sqr(origin - _isect.sd.position);
 		if (gTraceLight || path_length > 2)
 			path_pdf_rev *= pdfWtoA(_material_sample.pdf_rev, G_rev);
-		d = connection_dVC(d, pdfWtoA(_material_sample.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), m.is_specular());
+		dVC = connection_dVC(dVC, pdfWtoA(_material_sample.pdf_rev, G_rev), pdfWtoA(bsdf_pdf, G), m.is_specular());
 		bsdf_pdf = _material_sample.pdf_fwd;
 		prev_specular = m.is_specular();
 
@@ -881,7 +938,7 @@ struct PathIntegrator {
 				return false;
 
 			if (gTraceLight && gConnectToLightPaths && path_length+2 <= gMaxPathVertices && diffuse_vertices < gMaxDiffuseVertices)
-				store_vertex();
+				store_light_vertex();
 
 			bdpt_connect(m);
 

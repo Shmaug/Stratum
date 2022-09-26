@@ -14,6 +14,8 @@ static float gAnimateWiggleSpeed = 1;
 static float gAnimateWiggleTime = 0;
 static TransformData* gAnimatedTransform = nullptr;
 
+static bool gChanged = false;
+
 inline void inspector_gui_fn(Inspector& inspector, Scene* scene) { scene->on_inspector_gui(); }
 inline void inspector_gui_fn(Inspector& inspector, Camera* cam) {
 	bool ortho = cam->mProjection.orthographic();
@@ -46,16 +48,22 @@ inline void inspector_gui_fn(Inspector& inspector, TransformData* t) {
 	const Eigen::Matrix3f r = t->m.block<3, 3>(0, 0).matrix() * Eigen::DiagonalMatrix<float, 3, 3>(1 / scale.x(), 1 / scale.y(), 1 / scale.z());
 	Eigen::Quaternionf rotation(r);
 
-	if (ImGui::DragFloat3("Translation", translate.data(), .1f) && !translate.hasNaN())
+	if (ImGui::DragFloat3("Translation", translate.data(), .1f) && !translate.hasNaN()) {
 		t->m.topRightCorner(3, 1) = translate;
+		gChanged = true;
+	}
 
 	bool v = ImGui::DragFloat3("Rotation (XYZ)", rotation.vec().data(), .1f);
 	v |= ImGui::DragFloat("Rotation (W)", &rotation.w(), .1f);
-	if (v && !rotation.vec().hasNaN())
+	if (v && !rotation.vec().hasNaN()) {
 		t->m.block<3, 3>(0, 0) = rotation.normalized().matrix();
+		gChanged = true;
+	}
 
-	if (ImGui::DragFloat3("Scale", scale.data(), .1f) && !rotation.vec().hasNaN() && !scale.hasNaN())
-		t->m.block<3, 3>(0, 0) = rotation.normalized().matrix() * Eigen::DiagonalMatrix<float, 3, 3>(scale.x(), scale.y(), scale.z());
+	if (ImGui::DragFloat3("Scale", scale.data(), .1f) && !rotation.vec().hasNaN() && !scale.hasNaN()) {
+		t->m.block<3, 3>(0, 0) = rotation.normalized().matrix() * Eigen::DiagonalMatrix<float, 3, 3>(scale.x() == 0 ? 1 : scale.x(), scale.y() == 0 ? 1 : scale.y(), scale.z() == 0 ? 1 : scale.z());
+		gChanged = true;
+	}
 
 	if (gAnimatedTransform == t) {
 		if (ImGui::Button("Stop Animating")) gAnimatedTransform = nullptr;
@@ -86,7 +94,7 @@ inline void inspector_gui_fn(Inspector& inspector, MeshPrimitive* mesh) {
 	}
 }
 inline void inspector_gui_fn(Inspector& inspector, SpherePrimitive* sphere) {
-	ImGui::DragFloat("Radius", &sphere->mRadius, .01f);
+	if (ImGui::DragFloat("Radius", &sphere->mRadius, .01f)) gChanged = true;
 	if (sphere->mMaterial) {
 		ImGui::Text("%s", type_index(typeid(Material)).name());
 		ImGui::SameLine();
@@ -300,6 +308,11 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			gAnimateWiggleTime += deltaTime*gAnimateWiggleSpeed;
 		}
 		mUpdateOnce = true;
+	}
+
+	if (gChanged) {
+		mUpdateOnce = true;
+		gChanged = false;
 	}
 
 	bool update = mAlwaysUpdate || mUpdateOnce;

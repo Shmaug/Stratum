@@ -27,6 +27,12 @@
 #endif
 [[vk::push_constant]] ConstantBuffer<BDPTPushConstants> gPushConstants;
 
+#ifdef HASHGRID_RESERVOIR_VERTEX
+typedef PathVertex ReservoirPayload;
+#else
+typedef PresampledLightPoint ReservoirPayload;
+#endif
+
 #define gCoherentRNG 0
 
 #define gHasEnvironment                (gSceneFlags & BDPT_FLAG_HAS_ENVIRONMENT)
@@ -360,13 +366,11 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	path._beta = ls.radiance / ls.pdf;
 	path.path_pdf = ls.pdf;
 	path.path_pdf_rev = 1;
-	path.d = 1 / ls.pdf;
+	path.dVC = 1 / ls.pdf;
 	path.G = 1;
 	path.prev_cos_out = 1;
 	path.bsdf_pdf = ls.pdf;
-	path.prev_specular = false;
-
-	if (gConnectToLightPaths) path.store_vertex();
+	if (gConnectToLightPaths) path.store_light_vertex();
 
 	// sample direction
 	const Vector3 local_dir_out = sample_cos_hemisphere(rng_next_float(path._rng), rng_next_float(path._rng));
@@ -414,7 +418,6 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	const TransformData t = gViewTransforms[view_index];
 	path.direction = normalize(t.transform_vector(local_dir_out));
 	path.origin = Vector3(t.m[0][3], t.m[1][3], t.m[2][3] );
-	path._medium = gViewMediumInstances[view_index];
 
 	// initialize ray differential
 	if (gUseRayCones) {
@@ -430,9 +433,6 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 		ray_differential.spread = min(length(dir_dx/dir_dx.z - local_dir_out/local_dir_out.z), length(dir_dy/dir_dy.z - local_dir_out/local_dir_out.z));
 		gRayDifferentials[path.path_index] = ray_differential;
 	}
-
-	path._beta = 1;
-	path.prev_specular = true;
 
 	if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eEnvironmentSampleTest) {
 		Environment env;
@@ -451,6 +451,9 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 		return;
 	}
 
+	path._beta = 1;
+	path._medium = gViewMediumInstances[view_index];
+
 	// trace visibility ray
 	path.trace();
 
@@ -461,7 +464,7 @@ void sample_visibility(uint3 index : SV_DispatchThreadID, uint group_thread_inde
 	path.G = 1;
 
 	// dE_1 = N_{0,k} / p_0_fwd
-	path.d = 1 / pdfWtoA(path.bsdf_pdf, path.G);
+	path.dVC = 1 / pdfWtoA(path.bsdf_pdf, path.G);
 
 	if      ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eGeometryNormal) gDebugImage[path.pixel_coord] = float4(path._isect.sd.geometry_normal()*.5+.5, 1);
 	else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eShadingNormal)  gDebugImage[path.pixel_coord] = float4(path._isect.sd.shading_normal() *.5+.5, 1);

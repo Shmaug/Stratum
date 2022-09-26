@@ -161,9 +161,6 @@ struct ReservoirData {
 #endif
 };
 
-#define ReservoirPayload PresampledLightPoint
-
-
 enum class BDPTDebugMode {
 	eNone,
 	eAlbedo,

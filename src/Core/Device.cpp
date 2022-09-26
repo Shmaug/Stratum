@@ -135,6 +135,7 @@ Device::Device(stm::Instance& instance, vk::PhysicalDevice physicalDevice, const
 	allocatorInfo.device = mDevice;
 	allocatorInfo.instance = *mInstance;
 	allocatorInfo.vulkanApiVersion = mInstance.vulkan_version();
+	allocatorInfo.preferredLargeHeapBlockSize = 1024 * 1024;
 	#if VK_KHR_buffer_device_address
 	if (buffer_device_address_features().bufferDeviceAddress)
 		allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;

@@ -437,8 +437,12 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		});
 	}
 
-	if (!BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVC))
+	if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVC))
+		mRenderPipelines[eSampleVisibility]->specialization_constant<uint32_t>("HASHGRID_RESERVOIR_VERTEX") = 1;
+	else {
+		mRenderPipelines[eSampleVisibility]->erase_specialization_constant("HASHGRID_RESERVOIR_VERTEX");
 		mPushConstants.gLightPathCount = extent.width * extent.height;
+	}
 
 	component_ptr<Denoiser> denoiser = mNode.find<Denoiser>();
 	const bool reprojection = denoiser ? denoiser->reprojection() : false;
@@ -517,6 +521,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	mRenderPipelines[eSamplePhotons]->specialization_constant<uint32_t>("gSpecializationFlags") = tmp;
 	mRenderPipelines[eSamplePhotons]->specialization_constant<uint32_t>("gSceneFlags") = scene_flags | BDPT_FLAG_TRACE_LIGHT;
 
+
 	// allocate data
 	{
 		const uint32_t pixel_count = extent.width * extent.height;
@@ -564,10 +569,10 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		const uint32_t hashgrid_reservoir_count  = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse) ? pixel_count * max(1u,push_constants.gMaxDiffuseVertices) : 1;
 		if (!mCurFrame->mPathData["gHashGridReservoirs"] || mCurFrame->mPathData.at("gHashGridReservoirs").size_bytes() < hashgrid_reservoir_count * sizeof(ReservoirData)) {
 			mCurFrame->mPathData["gHashGridReservoirs"]             = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirs"            , hashgrid_reservoir_count * sizeof(ReservoirData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridReservoirSamples"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirSamples"      , hashgrid_reservoir_count * sizeof(ReservoirPayload), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gHashGridReservoirSamples"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirSamples"      , hashgrid_reservoir_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridAppendIndices"]          = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendIndices"         , hashgrid_reservoir_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridAppendReservoirs"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendReservoirs"      , hashgrid_reservoir_count * sizeof(ReservoirData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridAppendReservoirSamples"] = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendReservoirSamples", hashgrid_reservoir_count * sizeof(ReservoirPayload), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gHashGridAppendReservoirSamples"] = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendReservoirSamples", hashgrid_reservoir_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 		}
 	}
 
