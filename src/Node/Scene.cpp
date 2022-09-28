@@ -628,15 +628,16 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 			vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eAccelerationStructureReadKHR);
 	}
 
-	{ // environment map
-		ProfilerRegion s("Process env map", commandBuffer);
-		component_ptr<Environment> envMap = mNode.find_in_descendants<Environment>();
-		if (envMap) {
-			mSceneData->mEnvironmentMaterialAddress = (uint32_t)(materialData.data.size() * sizeof(uint32_t));
-			mSceneData->mMaterialCount++;
-			envMap->store(materialData, mSceneData->mResources);
-		} else
-			mSceneData->mEnvironmentMaterialAddress = -1;
+	{ // environment material
+		ProfilerRegion s("Process environment", commandBuffer);
+		mSceneData->mEnvironmentMaterialAddress = -1;
+		mNode.for_each_descendant<Environment>([&](const component_ptr<Environment> environment) {
+			if (environment && !environment->emission.value.isZero() && mSceneData->mEnvironmentMaterialAddress  == -1) {
+				mSceneData->mEnvironmentMaterialAddress = (uint32_t)(materialData.data.size() * sizeof(uint32_t));
+				mSceneData->mMaterialCount++;
+				environment->store(materialData, mSceneData->mResources);
+			}
+		});
 	}
 
 	{ // copy vertices and indices

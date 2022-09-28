@@ -54,14 +54,16 @@ typedef PresampledLightPoint ReservoirPayload;
 #define gSampleLightPower              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eSampleLightPower)
 #define gUniformSphereSampling         BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eUniformSphereSampling)
 #define gUseMIS                        BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eMIS)
-#define gUseNEE                        BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNEE)
+#define gConnectToLights               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNEE)
+#define gUseNEEReservoirs              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNEEReservoirs)
+#define gUseNEEReservoirReuse          BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eNEEReservoirReuse)
 #define gPresampleLights               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::ePresampleLights)
 #define gDeferShadowRays               BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eDeferShadowRays)
 #define gConnectToViews                BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eConnectToViews)
 #define gConnectToLightPaths           BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eConnectToLightPaths)
 #define gLightVertexCache              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eLVC)
-#define gUseReservoirs                 BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eReservoirs)
-#define gUseReservoirReuse             BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eReservoirReuse)
+#define gUseLVCReservoirs              BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eLVCReservoirs)
+#define gUseLVCReservoirReuse          BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eLVCReservoirReuse)
 #define gHashGridJitter                BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eHashGridJitter)
 #define gSampleEnvironmentMap          BDPT_CHECK_FLAG(gSpecializationFlags, BDPTFlagBits::eSampleEnvironmentMapDirectly)
 
@@ -130,7 +132,6 @@ typedef PresampledLightPoint ReservoirPayload;
 [[vk::binding(23,1)]] RWStructuredBuffer<uint2> gHashGridAppendIndices;
 [[vk::binding(24,1)]] RWStructuredBuffer<ReservoirData> gHashGridAppendReservoirs;
 [[vk::binding(25,1)]] RWStructuredBuffer<ReservoirPayload> gHashGridAppendReservoirSamples;
-
 [[vk::binding(26,1)]] RWStructuredBuffer<uint> gPrevHashGridChecksums;
 [[vk::binding(27,1)]] RWStructuredBuffer<uint> gPrevHashGridCounters;
 [[vk::binding(28,1)]] RWStructuredBuffer<uint> gPrevHashGridIndices;
@@ -234,24 +235,36 @@ float sample_texel_pdf(Texture2D<float4> img, const float2 uv, const uint max_it
 	return pdf;
 }
 
-#include "../../common/rng.hlsli"
+#include "../../common/hashgrid.hlsli"
+HashGrid<ReservoirPayload> gHashGrid = {
+	gHashGridChecksums,
+	gHashGridCounters,
+	gHashGridReservoirs,
+	gHashGridReservoirSamples,
+	gHashGridIndices,
+	gHashGridAppendIndices,
+	gHashGridAppendReservoirs,
+	gHashGridAppendReservoirSamples,
+	gHashGridStats
+};
+HashGrid<ReservoirPayload> gPrevHashGrid = {
+	gPrevHashGridChecksums,
+	gPrevHashGridCounters,
+	gPrevHashGridReservoirs,
+	gPrevHashGridReservoirSamples,
+	gPrevHashGridIndices,
+	gHashGridAppendIndices,
+	gHashGridAppendReservoirs,
+	gHashGridAppendReservoirSamples,
+	gHashGridStats
+};
+#define gLVCHashGrid gHashGrid
+#define gPrevLVCHashGrid gPrevHashGrid
+#define gNEEHashGrid gHashGrid
+#define gPrevNEEHashGrid gPrevHashGrid
+//ParameterBlock<HashGrid<ReservoirPayload>> gHashGrid;
+//ParameterBlock<HashGrid<ReservoirPayload>> gPrevHashGrid;
 
-float hashgrid_cell_size(const float3 pos) {
-	if (gHashGridBucketPixelRadius < 0)
-		return gHashGridMinBucketRadius;
-	const uint view_index = 0;
-	const TransformData t = gViewTransforms[view_index];
-	const float dist = length(pos - float3(t.m[0][3], t.m[1][3], t.m[2][3]));
-	const float2 extent = gViews[view_index].image_max - gViews[view_index].image_min;
-	const float step = dist * tan(gHashGridBucketPixelRadius * gViews[view_index].projection.vertical_fov * max(1/extent.y, extent.y/pow2(extent.x)));
-	return gHashGridMinBucketRadius * (1 << uint(log2(step / gHashGridMinBucketRadius)));
-}
-uint hashgrid_bucket_index(const float3 pos, out uint checksum, const float cell_size) {
-	// compute index in hash grid
-	const int3 p = floor(pos/cell_size) + 0.5;
-	checksum = max(1, xxhash32(cell_size + xxhash32(p.z + xxhash32(p.y + xxhash32(p.x)))));
-	return pcg(cell_size + pcg(p.z + pcg(p.y + pcg(p.x)))) % gHashGridBucketCount;
-}
 uint hashgrid_lookup(RWStructuredBuffer<uint> checksums, const float3 pos, const float cell_size, const bool inserting = false) {
 	uint checksum;
 	uint bucket_index = hashgrid_bucket_index(pos, checksum, cell_size);
@@ -287,7 +300,6 @@ void hashgrid_insert(const float3 pos, const float cell_size, const ReservoirDat
 	gHashGridAppendReservoirSamples[1 + append_index] = y;
 	gHashGridAppendIndices[1 + append_index] = uint2(bucket_index, index_in_bucket);
 }
-
 SLANG_SHADER("compute")
 [numthreads(64,1,1)]
 void hashgrid_compute_indices(uint3 index : SV_DispatchThreadID) {
@@ -313,6 +325,9 @@ void hashgrid_swizzle(uint3 index : SV_DispatchThreadID) {
 	gHashGridReservoirSamples[dst_index] = gHashGridAppendReservoirSamples[1 + append_index];
 }
 
+
+
+#include "../../common/rng.hlsli"
 #include "../../common/path.hlsli"
 
 #define GROUPSIZE_X 8
@@ -370,7 +385,6 @@ void sample_photons(uint3 index : SV_DispatchThreadID, uint group_thread_index :
 	path.G = 1;
 	path.prev_cos_out = 1;
 	path.bsdf_pdf = ls.pdf;
-	if (gConnectToLightPaths) path.store_light_vertex();
 
 	// sample direction
 	const Vector3 local_dir_out = sample_cos_hemisphere(rng_next_float(path._rng), rng_next_float(path._rng));

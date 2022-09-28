@@ -22,6 +22,8 @@ enum BDPTFlagBits {
 	eRayCones,
 	eSampleBSDFs,
 	eNEE,
+	eNEEReservoirs,
+	eNEEReservoirReuse,
 	eMIS,
 	eSampleLightPower,
 	eUniformSphereSampling,
@@ -30,8 +32,8 @@ enum BDPTFlagBits {
 	eConnectToViews,
 	eConnectToLightPaths,
 	eLVC,
-	eReservoirs,
-	eReservoirReuse,
+	eLVCReservoirs,
+	eLVCReservoirReuse,
 	eHashGridJitter,
 	eSampleEnvironmentMapDirectly,
 	eBDPTFlagCount,
@@ -199,6 +201,8 @@ inline string to_string(const stm::BDPTFlagBits& m) {
 		case stm::BDPTFlagBits::eRayCones: return "Ray cones";
 		case stm::BDPTFlagBits::eSampleBSDFs: return "Sample BSDFs";
 		case stm::BDPTFlagBits::eNEE: return "NEE";
+		case stm::BDPTFlagBits::eNEEReservoirs: return "NEE Reservoirs";
+		case stm::BDPTFlagBits::eNEEReservoirReuse: return "NEE Reservoir reuse";
 		case stm::BDPTFlagBits::eMIS: return "MIS";
 		case stm::BDPTFlagBits::eSampleLightPower: return "Sample light power";
 		case stm::BDPTFlagBits::eUniformSphereSampling: return "Uniform sphere sampling";
@@ -207,8 +211,8 @@ inline string to_string(const stm::BDPTFlagBits& m) {
 		case stm::BDPTFlagBits::eConnectToViews: return "Connect to views";
 		case stm::BDPTFlagBits::eConnectToLightPaths: return "Connect to light paths";
 		case stm::BDPTFlagBits::eLVC: return "Light vertex cache";
-		case stm::BDPTFlagBits::eReservoirs: return "Reservoirs";
-		case stm::BDPTFlagBits::eReservoirReuse: return "Reservoir reuse";
+		case stm::BDPTFlagBits::eLVCReservoirs: return "LVC Reservoirs";
+		case stm::BDPTFlagBits::eLVCReservoirReuse: return "LVC Reservoir reuse";
 		case stm::BDPTFlagBits::eHashGridJitter: return "Jitter hash grid lookups ";
 		case stm::BDPTFlagBits::eSampleEnvironmentMapDirectly: return "Sample environment map directly";
 	}

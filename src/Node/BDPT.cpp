@@ -243,11 +243,11 @@ void BDPT::on_inspector_gui() {
 			ImGui::Unindent();
 		}
 
-		if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eReservoirs)) {
+		if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eNEEReservoirs) || BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVCReservoirs)) {
 			ImGui::Indent();
 			ImGui::DragScalar("Reservoir candidate samples", ImGuiDataType_U32, &mPushConstants.gReservoirM);
 			if (mPushConstants.gReservoirM == 0) mPushConstants.gReservoirM = 1;
-			if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eReservoirReuse)) {
+			if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eNEEReservoirReuse) || BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVCReservoirReuse)) {
 				ImGui::DragScalar("Spatial candidates", ImGuiDataType_U32, &mPushConstants.gReservoirSpatialM);
 				ImGui::DragScalar("Max M", ImGuiDataType_U32, &mPushConstants.gReservoirMaxM);
 				ImGui::DragScalar("Bucket count", ImGuiDataType_U32, &mPushConstants.gHashGridBucketCount);
@@ -370,26 +370,29 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mPushConstants.gLightDistributionPDF = mCurFrame->mSceneData->mLightDistributionPDF;
 	mPushConstants.gLightDistributionCDF = mCurFrame->mSceneData->mLightDistributionCDF;
 
-	if (!mCurFrame->mSceneDescriptors) mCurFrame->mSceneDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[0], "path_tracer_scene_descriptors");
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gScene"), **mCurFrame->mSceneData->mScene);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVertices"), mCurFrame->mSceneData->mVertices);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gIndices"), mCurFrame->mSceneData->mIndices);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstances"), mCurFrame->mSceneData->mInstances);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceTransforms"), mCurFrame->mSceneData->mInstanceTransforms);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceInverseTransforms"), mCurFrame->mSceneData->mInstanceInverseTransforms);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gMaterialData"), mCurFrame->mSceneData->mMaterialData);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
-	mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
-	for (const auto& [vol, index] : mCurFrame->mSceneData->mResources.volume_data_map)
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVolumes"), index, vol);
-	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image4s)
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
-	for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image1s)
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
-	mCurFrame->mSceneDescriptors->flush_writes();
-	mCurFrame->mSceneDescriptors->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+	{
+		ProfilerRegion ps("Setup descriptors", commandBuffer);
+		if (!mCurFrame->mSceneDescriptors) mCurFrame->mSceneDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[0], "path_tracer_scene_descriptors");
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gScene"), **mCurFrame->mSceneData->mScene);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVertices"), mCurFrame->mSceneData->mVertices);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gIndices"), mCurFrame->mSceneData->mIndices);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstances"), mCurFrame->mSceneData->mInstances);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceTransforms"), mCurFrame->mSceneData->mInstanceTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceInverseTransforms"), mCurFrame->mSceneData->mInstanceInverseTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gMaterialData"), mCurFrame->mSceneData->mMaterialData);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
+		for (const auto& [vol, index] : mCurFrame->mSceneData->mResources.volume_data_map)
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVolumes"), index, vol);
+		for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image4s)
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+		for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image1s)
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+		mCurFrame->mSceneDescriptors->flush_writes();
+		mCurFrame->mSceneDescriptors->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
+	}
 }
 
 void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget, const vector<pair<ViewData,TransformData>>& views) {
@@ -437,12 +440,15 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		});
 	}
 
-	if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVC))
+	if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVCReservoirs)) {
 		mRenderPipelines[eSampleVisibility]->specialization_constant<uint32_t>("HASHGRID_RESERVOIR_VERTEX") = 1;
-	else {
+		mRenderPipelines[eHashGridSwizzle]->specialization_constant<uint32_t>("HASHGRID_RESERVOIR_VERTEX") = 1;
+	} else {
 		mRenderPipelines[eSampleVisibility]->erase_specialization_constant("HASHGRID_RESERVOIR_VERTEX");
-		mPushConstants.gLightPathCount = extent.width * extent.height;
+		mRenderPipelines[eHashGridSwizzle]->erase_specialization_constant("HASHGRID_RESERVOIR_VERTEX");
 	}
+	if (!BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVC))
+		mPushConstants.gLightPathCount = extent.width * extent.height;
 
 	component_ptr<Denoiser> denoiser = mNode.find<Denoiser>();
 	const bool reprojection = denoiser ? denoiser->reprojection() : false;
@@ -481,28 +487,22 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eNEE);
 			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eConnectToViews);
 			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths);
-		} else if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToViews) || BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths)) {
-			// using bidirectional methods
-			BDPT_SET_FLAG(sampling_flags, BDPTFlagBits::eUniformSphereSampling);
-			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eNEE);
-			if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eLVC)) {
-				BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eReservoirs);
-				BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse);
-			}
-		} else {
-			// regular path tracing
-			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eLVC);
-			if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eNEE)) {
-				BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eReservoirs);
-				BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse);
-			}
 		}
 
 		if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eNEE)) {
 			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights);
-			if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eLVC))
-				BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eDeferShadowRays);
+			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eNEEReservoirs);
+			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eNEEReservoirReuse);
 		}
+
+		if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eLVC)) {
+			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eLVCReservoirs);
+			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eLVCReservoirReuse);
+		}
+
+		if (!BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eLVC) && !BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eNEE))
+			BDPT_UNSET_FLAG(sampling_flags, BDPTFlagBits::eDeferShadowRays);
+
 	}
 	for (auto& p : mRenderPipelines) {
 		p->specialization_constant<uint32_t>("gSceneFlags") = scene_flags;
@@ -521,6 +521,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	mRenderPipelines[eSamplePhotons]->specialization_constant<uint32_t>("gSpecializationFlags") = tmp;
 	mRenderPipelines[eSamplePhotons]->specialization_constant<uint32_t>("gSceneFlags") = scene_flags | BDPT_FLAG_TRACE_LIGHT;
 
+	const bool reservoir_reuse = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eLVCReservoirReuse) || BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eNEEReservoirReuse);
 
 	// allocate data
 	{
@@ -544,7 +545,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mCurFrame->mSelectionData = make_shared<Buffer>(commandBuffer.mDevice, "gSelectionData", sizeof(VisibilityInfo), vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_TO_CPU);
 		}
 
-		const uint32_t light_vertex_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths) ? push_constants.gLightPathCount * (push_constants.gMaxDiffuseVertices+1) : 1;
+		const uint32_t light_vertex_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths) ? push_constants.gLightPathCount * push_constants.gMaxDiffuseVertices : 1;
 		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(PathVertex)) {
 			mCurFrame->mPathData["gLightPathVertices"]    = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 			mCurFrame->mPathData["gLightPathVertexCount"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertexCount",  sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
@@ -558,15 +559,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		if (!mCurFrame->mPathData["gPresampledLights"] || mCurFrame->mPathData.at("gPresampledLights").size_bytes() < presampled_light_count * sizeof(PresampledLightPoint))
 			mCurFrame->mPathData["gPresampledLights"] = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", presampled_light_count * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 
-		const uint32_t hashgrid_bucket_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse) ? max(1u,push_constants.gHashGridBucketCount) : 1;
+		const uint32_t hashgrid_bucket_count = reservoir_reuse ? max(1u,push_constants.gHashGridBucketCount) : 1;
 		if (!mCurFrame->mPathData["gHashGridChecksums"] || mCurFrame->mPathData.at("gHashGridChecksums").size_bytes() < hashgrid_bucket_count * sizeof(uint32_t)) {
 			mCurFrame->mPathData["gHashGridChecksums"]      = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridChecksums", hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridCounters"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridCounters" , hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridIndices"]        = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridIndices" , hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridStats"]          = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridStats", 4 * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
 		}
-
-		const uint32_t hashgrid_reservoir_count  = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse) ? pixel_count * max(1u,push_constants.gMaxDiffuseVertices) : 1;
+		const uint32_t hashgrid_reservoir_count  = reservoir_reuse ? pixel_count * max(1u,push_constants.gMaxDiffuseVertices) : 1;
 		if (!mCurFrame->mPathData["gHashGridReservoirs"] || mCurFrame->mPathData.at("gHashGridReservoirs").size_bytes() < hashgrid_reservoir_count * sizeof(ReservoirData)) {
 			mCurFrame->mPathData["gHashGridReservoirs"]             = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirs"            , hashgrid_reservoir_count * sizeof(ReservoirData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mPathData["gHashGridReservoirSamples"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirSamples"      , hashgrid_reservoir_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -589,7 +589,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gAlbedo"), image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevUVs"), image_descriptor(mCurFrame->mPrevUVs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gDebugImage"), image_descriptor(mCurFrame->mDebugImage, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
-		const bool use_prev_reservoirs = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse) && push_constants.gReservoirSpatialM > 0;
+		const bool use_prev_reservoirs = reservoir_reuse && push_constants.gReservoirSpatialM > 0;
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridChecksums")       , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridChecksums"));
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridCounters")        , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridCounters"));
 		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridIndices")         , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridIndices"));
@@ -660,7 +660,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			commandBuffer.barrier({ mCurFrame->mPathData.at("gShadowRays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
 		}
 
-		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse)) {
+		if (reservoir_reuse) {
 			auto c  = mCurFrame->mPathData.at("gHashGridCounters");
 			auto cs = mCurFrame->mPathData.at("gHashGridChecksums");
 			auto a  = mCurFrame->mPathData.at("gHashGridAppendIndices");
@@ -697,7 +697,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 
 		// trace shadow rays
-		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eReservoirReuse)) {
+		if (reservoir_reuse) {
 			{
 				commandBuffer.barrier({
 					mCurFrame->mPathData.at("gHashGridCounters"),

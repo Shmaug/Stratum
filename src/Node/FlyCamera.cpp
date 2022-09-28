@@ -56,7 +56,7 @@ FlyCamera::FlyCamera(Node& node) : mNode(node) {
 			if (input.pressed(KeyCode::eKeyW)) mv += float3(0, 0, fwd);
 			if (input.pressed(KeyCode::eKeyS)) mv += float3(0, 0, -fwd);
 			if (input.pressed(KeyCode::eKeySpace)) mv += float3(0, 1, 0);
-			if (input.pressed(KeyCode::eKeyShift)) mv += float3(0, -1, 0);
+			if (input.pressed(KeyCode::eKeyC))     mv += float3(0, -1, 0);
 			if (!mv.isZero())
 				*transform = tmul(*transform, make_transform(mv * mMoveSpeed * deltaTime, quatf_identity(), float3::Ones()));
 		}

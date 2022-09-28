@@ -18,8 +18,9 @@ namespace stm {
 
 using namespace stm;
 
-Gui::Gui(Node& node) : mNode(node) {
+Gui::Gui(Node& node) : mNode(node), mHidden(false) {
 	auto app = mNode.find_in_ancestor<Application>();
+
 	app->OnUpdate.add_listener(mNode, bind_front(&Gui::new_frame, this), Node::EventPriority::eFirst);
 	app->OnUpdate.add_listener(mNode, bind(&Gui::make_geometry, this, std::placeholders::_1), Node::EventPriority::eAlmostLast);
 	app->OnRenderWindow.add_listener(mNode, [&,app](CommandBuffer& commandBuffer) { render(commandBuffer, app->window().back_buffer()); }, Node::EventPriority::eLast);
@@ -147,6 +148,9 @@ void Gui::new_frame(CommandBuffer& commandBuffer, float deltaTime) {
 	ImGui_ImplWin32_NewFrame();
 	#endif
 	ImGui::NewFrame();
+
+	if (ImGui::IsKeyPressed(ImGuiKey_F2))
+		mHidden = !mHidden;
 }
 
 void Gui::make_geometry(CommandBuffer& commandBuffer) {
@@ -193,7 +197,7 @@ void Gui::make_geometry(CommandBuffer& commandBuffer) {
 	}
 }
 void Gui::render(CommandBuffer& commandBuffer, const Image::View& dst) {
-	if (!mDrawData || mDrawData->CmdListsCount <= 0 || mDrawData->DisplaySize.x == 0 || mDrawData->DisplaySize.y == 0) return;
+	if (mHidden || !mDrawData || mDrawData->CmdListsCount <= 0 || mDrawData->DisplaySize.x == 0 || mDrawData->DisplaySize.y == 0) return;
 
 	ProfilerRegion ps("Gui::render", commandBuffer);
 

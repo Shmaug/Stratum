@@ -161,6 +161,7 @@ private:
 	const ImDrawData* mDrawData;
 	ImFont* mFont;
 	ImFont* mTitleFont;
+	bool mHidden;
 };
 
 }
