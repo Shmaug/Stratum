@@ -39,7 +39,7 @@ Real connection_dVC(const Real dVC, const Real pdfA_rev, const Real prev_pdfA_fw
 
 Spectrum load_light_sample(const uint2 pixel_coord) {
 	const uint idx = pixel_coord.y * gOutputExtent.x + pixel_coord.x;
-	uint4 v = gLightTraceSamples.Load<uint4>(16*idx);
+	uint4 v = gFrameParams.gLightTraceSamples.Load<uint4>(16*idx);
 	// handle overflow
 	if (v.w & BIT(0)) v.r = 0xFFFFFFFF;
 	if (v.w & BIT(1)) v.g = 0xFFFFFFFF;
@@ -51,13 +51,13 @@ void accumulate_light_contribution(const uint output_index, const Spectrum c) {
 	if (all(ci == 0)) return;
 	const uint addr = 16*output_index;
 	uint3 ci_p;
-	gLightTraceSamples.InterlockedAdd(addr + 0 , ci[0], ci_p[0]);
-	gLightTraceSamples.InterlockedAdd(addr + 4 , ci[1], ci_p[1]);
-	gLightTraceSamples.InterlockedAdd(addr + 8 , ci[2], ci_p[2]);
+	gFrameParams.gLightTraceSamples.InterlockedAdd(addr + 0 , ci[0], ci_p[0]);
+	gFrameParams.gLightTraceSamples.InterlockedAdd(addr + 4 , ci[1], ci_p[1]);
+	gFrameParams.gLightTraceSamples.InterlockedAdd(addr + 8 , ci[2], ci_p[2]);
 	const bool3 overflow = ci > (0xFFFFFFFF - ci_p);
 	if (any(overflow)) {
 		const uint overflow_mask = (overflow[0] ? BIT(0) : 0) | (overflow[1] ? BIT(1) : 0) | (overflow[2] ? BIT(2) : 0);
-		gLightTraceSamples.InterlockedOr(addr + 12, overflow_mask);
+		gFrameParams.gLightTraceSamples.InterlockedOr(addr + 12, overflow_mask);
 	}
 }
 
@@ -221,6 +221,28 @@ struct DirectLightSample {
 	}
 };
 
+struct RayDifferential {
+	float radius;
+	float spread;
+
+	SLANG_MUTATING
+	void transfer(const float t) {
+		radius += spread*t;
+	}
+	SLANG_MUTATING
+	void reflect(const float mean_curvature, const float roughness) {
+		const float spec_spread = spread + 2 * mean_curvature * radius;
+		const float diff_spread = 0.2;
+		spread = max(0, lerp(spec_spread, diff_spread, roughness));
+	}
+	SLANG_MUTATING
+	void refract(const float mean_curvature, const float roughness, const float eta) {
+		const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
+		const float diff_spread = 0.2;
+		spread = max(0, lerp(spec_spread, diff_spread, roughness));
+	}
+};
+
 // after initialization, simply call next_vertex() until _beta is 0
 // for view paths: radiance is accumulated directly into gRadiance[pixel_coord]
 struct PathIntegrator {
@@ -244,6 +266,7 @@ struct PathIntegrator {
 	// also the ray traced by trace()
 	// computed in sample_next_direction()
 	Vector3 origin, direction;
+	RayDifferential ray_differential;
 	Real prev_cos_out; // abs(dot(direction, prev_geometry_normal))
 
 	// current intersection, computed in trace()
@@ -274,6 +297,12 @@ struct PathIntegrator {
 		if (gCoherentRNG) _rng = WaveReadLaneFirst(_rng);
 	}
 
+	void accumulate_contribution(const Spectrum contrib, const Real weight, const uint light_length = 0) {
+		gFrameParams.gRadiance[pixel_coord].rgb += contrib*weight;
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == light_length && path_length == gPushConstants.gDebugViewPathLength)
+			gFrameParams.gDebugImage[pixel_coord].rgb += contrib;
+	}
+
 
 	////////////////////////////////////////////
 	// NEE
@@ -287,7 +316,7 @@ struct PathIntegrator {
 			uint ti = rng_next_uint(_rng) % gLightPresampleTileSize;
 			if (gCoherentSampling)
 				ti = (WaveReadLaneFirst(ti) + WaveGetLaneIndex()) % gLightPresampleTileSize;
-			c = DirectLightSample(_isect, gPresampledLights[tile_offset + ti]);
+			c = DirectLightSample(_isect, gFrameParams.gPresampledLights[tile_offset + ti]);
 		} else
 			c = DirectLightSample(_isect, _rng);
 		if (all(c.p.Le <= 0) && c.p.pdfA < 1e-6) return;
@@ -331,12 +360,9 @@ struct PathIntegrator {
 			rd.medium = _medium;
 			rd.ray_direction = c.ray_direction;
 			rd.ray_distance = c.ray_distance;
-			gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
+			gFrameParams.gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
 		} else
-			gRadiance[pixel_coord].rgb += _beta * contrib * weight;
-
-		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
-			gDebugImage[pixel_coord].rgb += _beta * contrib;
+			accumulate_contribution(_beta * contrib, weight, 1);
 	}
 	SLANG_MUTATING
 	void connect_light_reservoir(BSDF m) {
@@ -357,7 +383,7 @@ struct PathIntegrator {
 
 				if (gPresampleLights) {
 					if (!gCoherentSampling) ti = rng_next_uint(_rng);
-					c_i = DirectLightSample(_isect, gPresampledLights[tile_offset + ti % gLightPresampleTileSize]);
+					c_i = DirectLightSample(_isect, gFrameParams.gPresampledLights[tile_offset + ti % gLightPresampleTileSize]);
 					if (gCoherentSampling) ti += WaveGetLaneCount();
 				} else
 					c_i = DirectLightSample(_isect, _rng);
@@ -375,20 +401,19 @@ struct PathIntegrator {
 		Vector3 t,b;
 		make_orthonormal(_isect.sd.geometry_normal(), t, b);
 
-		#ifndef HASHGRID_RESERVOIR_VERTEX
 		const Real cell_size = hashgrid_cell_size(_isect.sd.position);
 		if (gUseNEEReservoirReuse && gReservoirSpatialM > 0) {
 			const Real phi = rng_next_float(_rng)*2*M_PI;
 			const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
-			const uint bucket_index = gPrevNEEHashGrid.lookup(_isect.sd.position + jitter, cell_size);
+			const uint bucket_index = gFrameParams.gPrevNEEHashGrid.find(_isect.sd.position + jitter, cell_size);
 			if (bucket_index != -1) {
-				const uint bucket_start = gPrevNEEHashGrid.mIndices[bucket_index];
-				const uint bucket_size = gPrevNEEHashGrid.mCounters[bucket_index];
+				const uint bucket_start = gFrameParams.gPrevNEEHashGrid.mIndices[bucket_index];
+				const uint bucket_size = gFrameParams.gPrevNEEHashGrid.mCounters[bucket_index];
 				uint M = r.M;
 				for (uint i = 0; i < gReservoirSpatialM; i++) {
 					const uint reservoir_index = bucket_start + rng_next_uint(_rng)%bucket_size;
-					const ReservoirData prev_reservoir = gPrevNEEHashGrid.mReservoirs[reservoir_index];
-					DirectLightSample c_i = DirectLightSample(_isect, gPrevNEEHashGrid.mReservoirSamples[reservoir_index]);
+					const NEEReservoir prev_reservoir = gFrameParams.gPrevNEEHashGrid.mData[reservoir_index];
+					DirectLightSample c_i = DirectLightSample(_isect, prev_reservoir.y);
 					if (c_i.p.pdfA <= 0 || all(c_i.p.Le <= 0)) continue;
 
 					M += prev_reservoir.r.M;
@@ -402,20 +427,17 @@ struct PathIntegrator {
 				r.M = M;
 			}
 		}
-		#endif
 
 		const Real W = r.W(r_target_pdf);
 
 		if (W <= 1e-6 || isnan(W)) return;
 
-		#ifndef HASHGRID_RESERVOIR_VERTEX
 		if (gUseNEEReservoirReuse) {
 			const Real phi = rng_next_float(_rng)*2*M_PI;
 			const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
 			r.M = min(r.M, gReservoirMaxM);
-			gNEEHashGrid.append(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W }, c.p);
+			gFrameParams.gNEEHashGrid.append(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W, c.p });
 		}
-		#endif
 
 		MaterialEvalRecord _eval;
 		m.eval(_eval, local_dir_in, c.local_to_light, false);
@@ -447,7 +469,7 @@ struct PathIntegrator {
 			rd.medium = _medium;
 			rd.ray_direction = c.ray_direction;
 			rd.ray_distance = c.ray_distance;
-			gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
+			gFrameParams.gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
 		} else {
 			Real nee_pdf = 1;
 			Real dir_pdf = 1;
@@ -458,11 +480,9 @@ struct PathIntegrator {
 			if (all(contrib <= 0)) return;
 
 			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eReservoirWeight)
-				gDebugImage[pixel_coord].rgb += W;
+				gFrameParams.gDebugImage[pixel_coord].rgb += W;
 
-			gRadiance[pixel_coord].rgb += _beta * contrib * weight;
-			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 1 && path_length == gPushConstants.gDebugViewPathLength)
-				gDebugImage[pixel_coord].rgb += _beta * contrib;
+			accumulate_contribution(_beta * contrib, weight, 1);
 		}
 	}
 
@@ -481,7 +501,7 @@ struct PathIntegrator {
 		if (path_length > 1) {
 			v.material_address = gEnvironmentMaterialAddress;
 			if (_isect.instance_index() != INVALID_INSTANCE)
-				v.material_address = gInstances[_isect.instance_index()].material_address();
+				v.material_address = gSceneParams.gInstances[_isect.instance_index()].material_address();
 		} else
 			v.material_address = -1;
 		v.position = _isect.sd.position;
@@ -502,11 +522,11 @@ struct PathIntegrator {
 	void store_light_vertex() {
 		uint idx;
 		if (gLightVertexCache) {
-			InterlockedAdd(gLightPathVertexCount[0], 1, idx);
+			InterlockedAdd(gFrameParams.gLightPathVertexCount[0], 1, idx);
 			idx = idx % (gLightPathCount*gMaxDiffuseVertices);
 		} else
 			idx = light_vertex_index(path_index, diffuse_vertices);
-		gLightPathVertices[idx] = vertex();
+		gFrameParams.gLightPathVertices[idx] = vertex();
 	}
 
 	Real shading_normal_factor(const Real ndotout, const Real ngdotout, const Real ngdotns, const bool adjoint) {
@@ -517,20 +537,19 @@ struct PathIntegrator {
 	void connect_view(const BSDF m) {
 		uint view_index = 0;
 		if (gViewCount > 1) view_index = min(rng_next_float(_rng)*gViewCount, gViewCount-1);
+		const ViewData view = gFrameParams.gViews[view_index];
 
-		float4 screen_pos = gViews[view_index].projection.project_point(gInverseViewTransforms[view_index].transform_point(_isect.sd.position));
+		float4 screen_pos = view.projection.project_point(gFrameParams.gInverseViewTransforms[view_index].transform_point(_isect.sd.position));
 		screen_pos.y = -screen_pos.y;
 		screen_pos.xyz /= screen_pos.w;
 		if (any(abs(screen_pos.xyz) >= 1) || screen_pos.z <= 0) return;
         const float2 uv = screen_pos.xy*.5 + .5;
-        const int2 ipos = gViews[view_index].image_min + (gViews[view_index].image_max - gViews[view_index].image_min) * uv;
+        const int2 ipos = view.image_min + (view.image_max - view.image_min) * uv;
 		const uint output_index = ipos.y * gOutputExtent.x + ipos.x;
 
-		const Vector3 position = Vector3(
-			gViewTransforms[view_index].m[0][3],
-			gViewTransforms[view_index].m[1][3],
-			gViewTransforms[view_index].m[2][3] );
-		const Vector3 view_normal = normalize(gViewTransforms[view_index].transform_vector(Vector3(0,0,1)));
+		const TransformData t = gFrameParams.gViewTransforms[view_index];
+		const Vector3 position = Vector3(t.m[0][3], t.m[1][3], t.m[2][3]);
+		const Vector3 view_normal = normalize(t.transform_vector(Vector3(0,0,1)));
 
 		Vector3 to_view = position - _isect.sd.position;
 		const Real dist = length(to_view);
@@ -540,7 +559,7 @@ struct PathIntegrator {
 
 		const Real lens_radius = 0;
 		const Real lens_area = lens_radius > 0 ? (M_PI * lens_radius * lens_radius) : 1;
-		const Real sensor_importance = 1 / (gViews[view_index].projection.sensor_area * lens_area * pow4(sensor_cos_theta));
+		const Real sensor_importance = 1 / (view.projection.sensor_area * lens_area * pow4(sensor_cos_theta));
 
 		Spectrum contribution = _beta * sensor_importance / pdfAtoW(1/lens_area, sensor_cos_theta / pow2(dist));
 
@@ -657,17 +676,17 @@ struct PathIntegrator {
 		} else
 			weight = path_weight(path_length, lv.subpath_length());
 
-		return _beta * contrib;
+		return contrib;
 	}
 
 	SLANG_MUTATING
 	void connect_lvc(const BSDF m) {
 		// connect eye vertex to random light vertex
-		const uint n = min(gLightPathVertexCount[0], gLightPathCount*gMaxDiffuseVertices);
+		const uint n = min(gFrameParams.gLightPathVertexCount[0], gLightPathCount*gMaxDiffuseVertices);
 
 		uint li = rng_next_uint(_rng);
 		if (gCoherentSampling) li = WaveReadLaneFirst(li) + WaveGetLaneIndex();
-		PathVertex lv = gLightPathVertices[li % n];
+		PathVertex lv = gFrameParams.gLightPathVertices[li % n];
 
 		Spectrum contrib = 0;
 		Real weight = 1;
@@ -681,7 +700,7 @@ struct PathIntegrator {
 
 			// RIS pass
 			for (int i = 0; i < gReservoirM; i++) {
-				const PathVertex lv_i = gLightPathVertices[(gCoherentSampling ? (li + (1 + i)*WaveGetLaneCount()) : rng_next_uint(_rng)) % n];
+				const PathVertex lv_i = gFrameParams.gLightPathVertices[(gCoherentSampling ? (li + (1 + i)*WaveGetLaneCount()) : rng_next_uint(_rng)) % n];
 				if (lv_i.subpath_length() + path_length > gMaxPathVertices || lv_i.diffuse_vertices() + diffuse_vertices > gMaxDiffuseVertices || all(lv_i.beta() <= 0)) continue;
 
 				Vector3 ray_origin_i, ray_direction_i;
@@ -702,7 +721,6 @@ struct PathIntegrator {
 
 			Real W = r.W(r_target_pdf);
 
-			#ifdef HASHGRID_RESERVOIR_VERTEX
 			if (gUseLVCReservoirReuse) {
 				Vector3 t,b;
 				make_orthonormal(_isect.sd.geometry_normal(), t, b);
@@ -710,15 +728,15 @@ struct PathIntegrator {
 				if (gReservoirSpatialM > 0) {
 					const Real phi = rng_next_float(_rng)*2*M_PI;
 					const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
-					const uint bucket_index = gPrevLVCHashGrid.lookup(_isect.sd.position + jitter, cell_size);
+					const uint bucket_index = gFrameParams.gPrevLVCHashGrid.find(_isect.sd.position + jitter, cell_size);
 					if (bucket_index != -1) {
-						const uint bucket_start = gPrevLVCHashGrid.mIndices[bucket_index];
-						const uint bucket_size = gPrevLVCHashGrid.mCounters[bucket_index];
+						const uint bucket_start = gFrameParams.gPrevLVCHashGrid.mIndices[bucket_index];
+						const uint bucket_size = gFrameParams.gPrevLVCHashGrid.mCounters[bucket_index];
 						uint M = r.M;
 						for (uint i = 0; i < gReservoirSpatialM; i++) {
 							const uint reservoir_index = bucket_start + rng_next_uint(_rng)%bucket_size;
-							const ReservoirData prev_reservoir = gPrevLVCHashGrid.mReservoirs[reservoir_index];
-							const PathVertex lv_i = gPrevLVCHashGrid.mReservoirSamples[reservoir_index];
+							const PathVertexReservoir prev_reservoir = gFrameParams.gPrevLVCHashGrid.mData[reservoir_index];
+							const PathVertex lv_i = prev_reservoir.y;
 							if (lv_i.subpath_length() + path_length > gMaxPathVertices || lv_i.diffuse_vertices() + diffuse_vertices > gMaxDiffuseVertices || all(lv_i.beta() <= 0)) continue;
 
 							M += prev_reservoir.r.M;
@@ -749,17 +767,17 @@ struct PathIntegrator {
 					const Vector3 jitter = gHashGridJitter ? cell_size*rng_next_float(_rng)*(t*cos(phi) + b*sin(phi)) : 0;
 					r.M = min(r.M, gReservoirMaxM);
 
-					gLVCHashGrid.append(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W }, lv);
+					gFrameParams.gLVCHashGrid.append(_isect.sd.position + jitter, cell_size, { r, _isect.sd.packed_geometry_normal, W, lv });
 				}
 			}
-			#endif
 
 			contrib *= r.W(r_target_pdf);
-
 		} else if (lv.subpath_length() + path_length <= gMaxPathVertices && lv.diffuse_vertices() + diffuse_vertices <= gMaxDiffuseVertices && any(lv.beta() > 0))
 			contrib = connect_light_vertex(m, lv, weight, ray_origin, ray_direction, ray_distance);
 
 		contrib *= gMaxDiffuseVertices-1;
+
+		contrib *= _beta;
 
 		if (gDeferShadowRays) {
 			ShadowRayData rd;
@@ -769,16 +787,14 @@ struct PathIntegrator {
 			rd.medium = _medium;
 			rd.ray_direction = ray_direction;
 			rd.ray_distance = ray_distance;
-			gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
+			gFrameParams.gShadowRays[shadow_ray_index(path_index, diffuse_vertices)] = rd;
 		} else if (any(contrib > 0) && weight > 0) {
 			Real dir_pdf = 1;
 			Real nee_pdf = 1;
 			trace_visibility_ray(_rng, ray_origin, ray_direction, ray_distance, _medium, contrib, dir_pdf, nee_pdf);
 			if (any(contrib > 0) && nee_pdf > 0) {
 				contrib /= nee_pdf;
-				gRadiance[pixel_coord].rgb += contrib * weight;
-				if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && lv.subpath_length() == gPushConstants.gDebugLightPathLength && path_length == gPushConstants.gDebugViewPathLength)
-					gDebugImage[pixel_coord].rgb += contrib;
+				accumulate_contribution(contrib, weight, lv.subpath_length());
 			}
 		}
 	}
@@ -786,13 +802,13 @@ struct PathIntegrator {
 	void connect_light_subpath(const BSDF m) {
 		// connect eye vertex to all light subpath vertices
 		for (uint i = 1; i < gMaxDiffuseVertices; i++) {
-			const PathVertex lv = gLightPathVertices[light_vertex_index(path_index, i)];
+			const PathVertex lv = gFrameParams.gLightPathVertices[light_vertex_index(path_index, i)];
 			if (lv.subpath_length() + path_length > gMaxPathVertices || lv.diffuse_vertices() + diffuse_vertices > gMaxDiffuseVertices || all(lv.beta() <= 0)) break;
 
 			Vector3 ray_origin, ray_direction;
 			Real ray_distance;
 			Real weight;
-			Spectrum contrib = connect_light_vertex(m, lv, weight, ray_origin, ray_direction, ray_distance);
+			Spectrum contrib = _beta * connect_light_vertex(m, lv, weight, ray_origin, ray_direction, ray_distance);
 			if (all(contrib <= 0) || weight <= 0) continue;
 
 			Real dir_pdf = 1;
@@ -801,9 +817,7 @@ struct PathIntegrator {
 			if (all(contrib <= 0) || nee_pdf <= 0) continue;
 			contrib /= nee_pdf;
 
-			gRadiance[pixel_coord].rgb += contrib * weight;
-			if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && lv.subpath_length() == gPushConstants.gDebugLightPathLength && path_length == gPushConstants.gDebugViewPathLength)
-				gDebugImage[pixel_coord].rgb += contrib;
+			accumulate_contribution(contrib, weight, lv.subpath_length());
 		}
 	}
 
@@ -873,12 +887,10 @@ struct PathIntegrator {
 			}
 		}
 
-		gRadiance[pixel_coord].rgb += contrib * weight;
-
 		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eViewTraceContribution)
-			gDebugImage[pixel_coord].rgb += contrib;
-		else if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::ePathLengthContribution && gPushConstants.gDebugLightPathLength == 0 && path_length == gPushConstants.gDebugViewPathLength)
-			gDebugImage[pixel_coord].rgb += contrib;
+			gFrameParams.gDebugImage[pixel_coord].rgb += contrib;
+
+		accumulate_contribution(contrib, weight, 0);
 	}
 
 	// sample next direction, compute _beta *= f/pdfW, update dE/dL, update origin and direction
@@ -898,9 +910,9 @@ struct PathIntegrator {
 
 		if (gUseRayCones) {
 			if (_material_sample.eta != 0)
-				gRayDifferentials[path_index].refract(_isect.sd.mean_curvature, _material_sample.roughness, _material_sample.eta);
+				ray_differential.refract(_isect.sd.mean_curvature, _material_sample.roughness, _material_sample.eta);
 			else
-				gRayDifferentials[path_index].reflect(_isect.sd.mean_curvature, _material_sample.roughness);
+				ray_differential.reflect(_isect.sd.mean_curvature, _material_sample.roughness);
 		}
 
 		// MIS quantities
@@ -935,7 +947,7 @@ struct PathIntegrator {
 
 		direction = _material_sample.dir_out;
 
-		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eDirOut) gDebugImage[pixel_coord] = float4(direction*.5+.5, 1);
+		if ((BDPTDebugMode)gDebugMode == BDPTDebugMode::eDirOut) gFrameParams.gDebugImage[pixel_coord] = float4(direction*.5+.5, 1);
 		return true;
 	}
 
@@ -991,7 +1003,7 @@ struct PathIntegrator {
 	void trace() {
 		Real T_dir_pdf = 1;
 		T_nee_pdf = 1;
-		if (gUsePerformanceCounters) InterlockedAdd(gRayCount[1], 1);
+		if (gUsePerformanceCounters) InterlockedAdd(gSceneParams.gRayCount[1], 1);
 		trace_ray(_rng, origin, direction, _medium, _beta, T_dir_pdf, T_nee_pdf, _isect, local_position);
 		if (T_dir_pdf <= 0 || all(_beta <= 0)) { _beta = 0; return; }
 		_beta /= T_dir_pdf;
@@ -1006,7 +1018,7 @@ struct PathIntegrator {
 			G = 1;
 			ngdotin = 1;
 			if (gUseRayCones)
-				_isect.sd.uv_screen_size *= gRayDifferentials[path_index].radius;
+				_isect.sd.uv_screen_size *= ray_differential.radius;
 			return;
 		}
 
@@ -1014,9 +1026,7 @@ struct PathIntegrator {
 
 		// update ray differential
 		if (gUseRayCones) {
-			RayDifferential ray_differential = gRayDifferentials[path_index];
 			ray_differential.transfer(sqrt(dist2));
-			gRayDifferentials[path_index] = ray_differential;
 			_isect.sd.uv_screen_size *= ray_differential.radius;
 		}
 
@@ -1047,7 +1057,7 @@ struct PathIntegrator {
 			return;
 		}
 
-		const uint material_address = gInstances[_isect.instance_index()].material_address();
+		const uint material_address = gSceneParams.gInstances[_isect.instance_index()].material_address();
 
 		if (gHasMedia && _isect.sd.shape_area == 0) {
 			Medium m;

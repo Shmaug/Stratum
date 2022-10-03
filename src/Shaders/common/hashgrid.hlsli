@@ -5,10 +5,11 @@ float hashgrid_cell_size(const float3 pos) {
 	if (gHashGridBucketPixelRadius < 0)
 		return gHashGridMinBucketRadius;
 	const uint view_index = 0;
-	const TransformData t = gViewTransforms[view_index];
+	const TransformData t = gFrameParams.gViewTransforms[view_index];
 	const float dist = length(pos - float3(t.m[0][3], t.m[1][3], t.m[2][3]));
-	const float2 extent = gViews[view_index].image_max - gViews[view_index].image_min;
-	const float step = dist * tan(gHashGridBucketPixelRadius * gViews[view_index].projection.vertical_fov * max(1/extent.y, extent.y/pow2(extent.x)));
+	const ViewData view = gFrameParams.gViews[view_index];
+	const float2 extent = view.image_max - view.image_min;
+	const float step = dist * tan(gHashGridBucketPixelRadius * view.projection.vertical_fov * max(1/extent.y, extent.y/pow2(extent.x)));
 	return gHashGridMinBucketRadius * (1 << uint(log2(step / gHashGridMinBucketRadius)));
 }
 uint hashgrid_bucket_index(const float3 pos, out uint checksum, const float cell_size) {
@@ -18,40 +19,42 @@ uint hashgrid_bucket_index(const float3 pos, out uint checksum, const float cell
 	return pcg(cell_size + pcg(p.z + pcg(p.y + pcg(p.x)))) % gHashGridBucketCount;
 }
 
-struct HashGrid<ReservoirPayload> {
-	RWStructuredBuffer<uint>             mChecksums;
-	RWStructuredBuffer<uint>             mCounters;
-	RWStructuredBuffer<ReservoirData>    mReservoirs;
-	RWStructuredBuffer<ReservoirPayload> mReservoirSamples;
-	RWStructuredBuffer<uint>             mIndices;
+struct HashGrid<T> {
+	RWStructuredBuffer<uint>  mChecksums;
+	RWStructuredBuffer<uint>  mCounters;
+	RWStructuredBuffer<uint>  mIndices;
+	RWStructuredBuffer<T>     mData;
+	RWStructuredBuffer<uint2> mAppendIndices;
+	RWStructuredBuffer<T>     mAppendData;
 
-	RWStructuredBuffer<uint2>            mAppendIndices;
-	RWStructuredBuffer<ReservoirData>    mAppendReservoirs;
-	RWStructuredBuffer<ReservoirPayload> mAppendReservoirSamples;
+	RWStructuredBuffer<uint> mStats;
 
-	RWStructuredBuffer<uint>             mStats;
-
-	uint lookup(const float3 pos, const float cell_size, const bool inserting = false) {
+	uint find(const float3 pos, const float cell_size) {
 		uint checksum;
 		uint bucket_index = hashgrid_bucket_index(pos, checksum, cell_size);
 		for (uint i = 0; i < 32; i++) {
-			if (inserting) {
-				uint checksum_prev;
-				InterlockedCompareExchange(mChecksums[bucket_index], 0, checksum, checksum_prev);
-				if (checksum_prev == 0 || checksum_prev == checksum)
-					return bucket_index;
-			} else {
-				if (mChecksums[bucket_index] == checksum)
-					return bucket_index;
-			}
+			if (mChecksums[bucket_index] == checksum)
+				return bucket_index;
 			bucket_index++;
 		}
-		if (gUsePerformanceCounters && inserting)
+		return -1;
+	}
+	uint find_or_insert(const float3 pos, const float cell_size) {
+		uint checksum;
+		uint bucket_index = hashgrid_bucket_index(pos, checksum, cell_size);
+		for (uint i = 0; i < 32; i++) {
+			uint checksum_prev;
+			InterlockedCompareExchange(mChecksums[bucket_index], 0, checksum, checksum_prev);
+			if (checksum_prev == 0 || checksum_prev == checksum)
+				return bucket_index;
+			bucket_index++;
+		}
+		if (gUsePerformanceCounters)
 			InterlockedAdd(mStats[0], 1); // failed inserts
 		return -1;
 	}
-	void append(const float3 pos, const float cell_size, const ReservoirData rd, const ReservoirPayload y) {
-		uint bucket_index = lookup(pos, cell_size, true);
+	void append(const float3 pos, const float cell_size, const T y) {
+		uint bucket_index = find_or_insert(pos, cell_size);
 		if (bucket_index == -1) return;
 		uint index_in_bucket;
 		InterlockedAdd(mCounters[bucket_index], 1, index_in_bucket);
@@ -63,8 +66,7 @@ struct HashGrid<ReservoirPayload> {
 		InterlockedAdd(mAppendIndices[0][0], 1, append_index);
 		append_index++; // skip past counter
 		mAppendIndices[append_index] = uint2(bucket_index, index_in_bucket);
-		mAppendReservoirs[append_index] = rd;
-		mAppendReservoirSamples[append_index] = y;
+		mAppendData[append_index] = y;
 	}
 
 	void compute_indices(const uint bucket_index) {
@@ -82,10 +84,7 @@ struct HashGrid<ReservoirPayload> {
 		const uint2 data = mAppendIndices[1 + append_index];
 		const uint bucket_index = data[0];
 		const uint index_in_bucket = data[1];
-
-		const uint dst_index = mIndices[bucket_index] + index_in_bucket;
-		mReservoirs[dst_index]       = mAppendReservoirs[1 + append_index];
-		mReservoirSamples[dst_index] = mAppendReservoirSamples[1 + append_index];
+		mData[mIndices[bucket_index] + index_in_bucket] = mAppendData[1 + append_index];
 	}
 };
 

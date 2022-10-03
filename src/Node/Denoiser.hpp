@@ -17,7 +17,7 @@ public:
 
 	STRATUM_API void on_inspector_gui();
 
-	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs);
+	STRATUM_API Image::View denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Buffer::View<DepthInfo>& depths, const Image::View& prev_uvs);
 
 	inline void reset_accumulation() { mResetAccumulation = true; mAccumulatedFrames = 0; }
 	inline bool reprojection() const { return mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection"); }
@@ -40,6 +40,7 @@ private:
 		Image::View mRadiance;
 		Image::View mAlbedo;
 		Buffer::View<VisibilityInfo> mVisibility;
+		Buffer::View<DepthInfo> mDepth;
 		Image::View mAccumColor;
 		Image::View mAccumMoments;
 		Image::View mDebugImage;

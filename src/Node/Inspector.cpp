@@ -11,7 +11,23 @@ inline void inspector_gui_fn(Inspector& inspector, Instance* instance) {
 		VK_API_VERSION_MINOR(instance->vulkan_version()),
 		VK_API_VERSION_PATCH(instance->vulkan_version()));
 
-	ImGui::LabelText("Descriptor sets", "%u", instance->device().descriptor_set_count());
+	ImGui::Text("%u Descriptor sets", instance->device().descriptor_set_count());
+
+	VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
+	vmaGetHeapBudgets(instance->device().allocator(), budgets);
+	const vk::PhysicalDeviceMemoryProperties properties = instance->device().physical().getMemoryProperties();
+	for (uint32_t heapIndex = 0; heapIndex < properties.memoryHeapCount; heapIndex++) {
+		const auto[usage, usageUnit] = format_bytes(budgets[heapIndex].usage);
+		const auto[budget, budgetUnit] = format_bytes(budgets[heapIndex].budget);
+		const auto[allocationBytes, allocationBytesUnit] = format_bytes(budgets[heapIndex].statistics.allocationBytes);
+		const auto[blockBytes, blockBytesUnit] = format_bytes(budgets[heapIndex].statistics.blockBytes);
+		ImGui::Text("Heap %u %s", heapIndex, (properties.memoryHeaps[heapIndex].flags & vk::MemoryHeapFlagBits::eDeviceLocal) ? "(device local)" : "");
+		ImGui::Text("%llu %s used, %llu %s budgeted", usage, usageUnit, budget, budgetUnit);
+		ImGui::Indent();
+		ImGui::Text("%u allocations (%llu %s)", budgets[heapIndex].statistics.allocationCount, allocationBytes, allocationBytesUnit);
+		ImGui::Text("%u device memory blocks (%llu %s)", budgets[heapIndex].statistics.blockCount, blockBytes, blockBytesUnit);
+		ImGui::Unindent();
+	}
 
 	vk::Extent2D swapchain_extent = instance->window().swapchain_extent();
 	bool resize = false;

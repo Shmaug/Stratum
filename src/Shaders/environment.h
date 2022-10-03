@@ -37,7 +37,7 @@ struct Environment {
 	inline void load(uint address) {
 		emission.load(address);
 		if (emission.has_image() && !gSampleEnvironmentMap) {
-			const uint4 data = gMaterialData.Load4(address);
+			const uint4 data = gSceneParams.gMaterialData.Load4(address);
 			marginal_pdf = data[0];
 			row_pdf 	 = data[1];
 			marginal_cdf = data[2];
@@ -66,12 +66,12 @@ struct Environment {
 			if (gSampleEnvironmentMap) {
 				uv = sample_texel(emission.image(), rnd, pdf);
 			} else {
-				uv = dist2d_sample(gDistributions, marginal_cdf, row_cdf, w, h, rnd);
-				pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv);
+				uv = dist2d_sample(gSceneParams.gDistributions, marginal_cdf, row_cdf, w, h, rnd);
+				pdf = dist2d_pdf(gSceneParams.gDistributions, marginal_pdf, row_pdf, w, h, uv);
 			}
 			dir_out = spherical_uv_to_cartesian(uv);
 			pdf /= (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
-			return emission.value*emission.image().SampleLevel(gSampler, uv, 0).rgb;
+			return emission.value*emission.image().SampleLevel(gSceneParams.gStaticSampler, uv, 0).rgb;
 		}
 	}
 
@@ -86,7 +86,7 @@ struct Environment {
 			else {
 				uint w, h;
 				emission.image().GetDimensions(w, h);
-				pdf = dist2d_pdf(gDistributions, marginal_pdf, row_pdf, w, h, uv);
+				pdf = dist2d_pdf(gSceneParams.gDistributions, marginal_pdf, row_pdf, w, h, uv);
 			}
 			return pdf / (2 * M_PI * M_PI * sqrt(1 - dir_out.y*dir_out.y));
 		}
@@ -131,9 +131,9 @@ inline Environment load_environment(CommandBuffer& commandBuffer, const fs::path
 	commandBuffer.barrier({ marginalPDF, rowPDF, marginalCDF, rowCDF }, vk::PipelineStageFlagBits::eHost, vk::AccessFlagBits::eHostWrite, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferRead);
 
 	e.marginal_pdf = make_shared<Buffer>(commandBuffer.mDevice, "marginal_PDF", marginalPDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-	e.row_pdf = make_shared<Buffer>(commandBuffer.mDevice, "row_pdf", rowPDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+	e.row_pdf      = make_shared<Buffer>(commandBuffer.mDevice, "row_pdf"     , rowPDF.size_bytes()     , vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 	e.marginal_cdf = make_shared<Buffer>(commandBuffer.mDevice, "marginal_cdf", marginalCDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-	e.row_cdf = make_shared<Buffer>(commandBuffer.mDevice, "row_cdf", rowCDF.size_bytes(), vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+	e.row_cdf      = make_shared<Buffer>(commandBuffer.mDevice, "row_cdf"     , rowCDF.size_bytes()     , vk::BufferUsageFlagBits::eTransferSrc|vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 
 	commandBuffer.copy_buffer(marginalPDF, e.marginal_pdf);
 	commandBuffer.copy_buffer(rowPDF, e.row_pdf);

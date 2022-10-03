@@ -51,7 +51,7 @@ struct DisneyMaterial : BSDF {
 
 		// normal map
 		if (gUseNormalMaps) {
-			const uint2 p = gMaterialData.Load<uint2>(address);
+			const uint2 p = gSceneParams.gMaterialData.Load<uint2>(address);
 			ImageValue3 bump_img;
 			bump_img.value = 1;
 			bump_img.image_index = p.x;

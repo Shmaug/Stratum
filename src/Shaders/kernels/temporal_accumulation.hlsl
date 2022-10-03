@@ -71,6 +71,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 	float sum_w         = 0;
 	if (gReprojection) {
 		const VisibilityInfo vis = gVisibility[ipos.y*extent.x + ipos.x];
+		const DepthInfo depth    = gDepth[ipos.y*extent.x + ipos.x];
 		if (vis.instance_index() != INVALID_INSTANCE) {
 			const float2 pos_prev = gViews[view_index].image_min + gPrevUVs[ipos] * float2(gViews[view_index].image_max - gViews[view_index].image_min) - 0.5;
 			const int2 p = pos_prev;
@@ -84,7 +85,7 @@ void main(uint3 index : SV_DispatchThreadId) {
 					const VisibilityInfo prev_vis = gPrevVisibility[ipos_prev.y*extent.x + ipos_prev.x];
 					if (gInstanceIndexMap[vis.instance_index()] != prev_vis.instance_index()) continue;
 					if (dot(vis.normal(), prev_vis.normal()) < cos(degrees(2))) continue;
-					if (abs(vis.prev_z() - prev_vis.z()) >= 1.5*length(prev_vis.dz_dxy())) continue;
+					if (abs(depth.prev_z - gPrevDepth[ipos_prev.y*extent.x + ipos_prev.x].z) >= 1.5*length(depth.dz_dxy)) continue;
 
 					const float4 c = gPrevAccumColor[ipos_prev];
 
@@ -113,9 +114,6 @@ void main(uint3 index : SV_DispatchThreadId) {
 	if (any(isinf(color_curr.rgb)) || any(color_curr.rgb != color_curr.rgb)) color_curr = 0;
 	if (any(isinf(moments_prev)) || any(moments_prev != moments_prev)) moments_prev = 0;
 
-	if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eWeightSum)
-		gDebugImage[ipos] = float4(viridis_quintic(sum_w), 1);
-
 	const float l = luminance(color_curr.rgb);
 
 	if (sum_w > 0 && color_prev.a > 0) {
@@ -139,7 +137,9 @@ void main(uint3 index : SV_DispatchThreadId) {
 		if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eSampleCount) gDebugImage[ipos] = float4(viridis_quintic(0), 1);
 	}
 
-	if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eVariance) {
+	if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eWeightSum)
+		gDebugImage[ipos] = float4(viridis_quintic(sum_w), 1);
+	else if ((DenoiserDebugMode)gDebugMode == DenoiserDebugMode::eVariance) {
 		const float2 m = gAccumMoments[ipos];
 		gDebugImage[ipos] = float4(viridis_quintic(saturate(abs(m.y - pow2(m.x)))), 1);
 	}

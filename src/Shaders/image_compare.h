@@ -5,24 +5,22 @@
 namespace stm {
 #endif
 
-enum class ErrorMode {
-	eMSELuminance,
-	eMSERGB,
-	eAverageLuminance,
-	eAverageRGB,
-	eErrorModeCount
+enum class CompareMetric {
+	eSMAPE,
+	eMSE,
+	eAverage,
+	eCompareMetricCount
 };
 
 #ifdef __cplusplus
 }
 namespace std {
-inline string to_string(const stm::ErrorMode& m) {
+inline string to_string(const stm::CompareMetric& m) {
 	switch (m) {
-		default: return "MSE Unknown";
-		case stm::ErrorMode::eMSERGB: return "MSE RGB";
-		case stm::ErrorMode::eMSELuminance: return "MSE Luminance";
-		case stm::ErrorMode::eAverageLuminance: return "Average Luminance";
-		case stm::ErrorMode::eAverageRGB: return "Average RGB";
+		default: return "Unknown";
+		case stm::CompareMetric::eSMAPE: return "SMAPE";
+		case stm::CompareMetric::eMSE: return "MSE";
+		case stm::CompareMetric::eAverage: return "Average";
 	}
 };
 }

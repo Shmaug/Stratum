@@ -196,7 +196,20 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
 			{ SLANG_SCALAR_TYPE_INT16, sizeof(int16_t) },
 			{ SLANG_SCALAR_TYPE_UINT16, sizeof(uint16_t) }
 		};
-
+		static const unordered_map<SlangBindingType, vk::DescriptorType> descriptor_type_map = {
+			{ SLANG_BINDING_TYPE_SAMPLER, vk::DescriptorType::eSampler },
+			{ SLANG_BINDING_TYPE_TEXTURE, vk::DescriptorType::eSampledImage},
+			{ SLANG_BINDING_TYPE_CONSTANT_BUFFER, vk::DescriptorType::eUniformBuffer },
+			{ SLANG_BINDING_TYPE_TYPED_BUFFER, vk::DescriptorType::eUniformTexelBuffer },
+			{ SLANG_BINDING_TYPE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
+			{ SLANG_BINDING_TYPE_COMBINED_TEXTURE_SAMPLER, vk::DescriptorType::eCombinedImageSampler },
+			{ SLANG_BINDING_TYPE_INPUT_RENDER_TARGET, vk::DescriptorType::eInputAttachment },
+			{ SLANG_BINDING_TYPE_INLINE_UNIFORM_DATA, vk::DescriptorType::eInlineUniformBlock },
+			{ SLANG_BINDING_TYPE_RAY_TRACTING_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
+			{ SLANG_BINDING_TYPE_MUTABLE_TETURE, vk::DescriptorType::eStorageImage },
+			{ SLANG_BINDING_TYPE_MUTABLE_TYPED_BUFFER, vk::DescriptorType::eStorageTexelBuffer },
+			{ SLANG_BINDING_TYPE_MUTABLE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
+		};
 		static const unordered_map<SlangStage, vk::ShaderStageFlagBits> stage_map = {
         	{ SLANG_STAGE_VERTEX, vk::ShaderStageFlagBits::eVertex },
         	{ SLANG_STAGE_HULL, vk::ShaderStageFlagBits::eTessellationControl },
@@ -212,6 +225,7 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
         	{ SLANG_STAGE_CALLABLE, vk::ShaderStageFlagBits::eCallableKHR },
         	{ SLANG_STAGE_MESH, vk::ShaderStageFlagBits::eMeshNV },
 		};
+
 		mStage = stage_map.at(shaderReflection->getEntryPointByIndex(0)->getStage());
 		if (mStage == vk::ShaderStageFlagBits::eCompute) {
 			SlangUInt sz[3];
@@ -221,39 +235,35 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
 			mWorkgroupSize.depth  = (uint32_t)sz[2];
 		}
 
+		function<void(const uint32_t, const string, slang::VariableLayoutReflection*, const uint32_t)> reflectParameter;
+		reflectParameter = [&](const uint32_t set_index, const string baseName, slang::VariableLayoutReflection* parameter, const uint32_t offset) {
+			slang::TypeReflection* type = parameter->getType();
+			slang::TypeLayoutReflection* typeLayout = parameter->getTypeLayout();
+
+			vector<variant<uint32_t,string>> arraySize;
+			if (typeLayout->getKind() == slang::TypeReflection::Kind::Array)
+				arraySize.emplace_back((uint32_t)typeLayout->getTotalArrayElementCount());
+
+			const string name = baseName + "." + parameter->getName();
+			const uint32_t binding_index = offset + parameter->getBindingIndex();
+
+			if (type->getFieldCount() == 0) {
+				const vk::DescriptorType descriptorType = descriptor_type_map.at((SlangBindingType)typeLayout->getBindingRangeType(0));
+				mDescriptorMap.emplace(name, DescriptorBinding(set_index, binding_index, descriptorType, arraySize, 0));
+			} else {
+				for (uint32_t i = 0; i < type->getFieldCount(); i++)
+					reflectParameter(set_index, name, typeLayout->getFieldByIndex(i), binding_index);
+			}
+		};
+
 		for (uint32_t parameter_index = 0; parameter_index < shaderReflection->getParameterCount(); parameter_index++) {
 			slang::VariableLayoutReflection* parameter = shaderReflection->getParameterByIndex(parameter_index);
 			slang::ParameterCategory category = parameter->getCategory();
 			slang::TypeReflection* type = parameter->getType();
 			slang::TypeLayoutReflection* typeLayout = parameter->getTypeLayout();
 
-			if (category == slang::ParameterCategory::DescriptorTableSlot) {
-				static const unordered_map<SlangBindingType, vk::DescriptorType> descriptor_type_map = {
-  					{ SLANG_BINDING_TYPE_SAMPLER, vk::DescriptorType::eSampler },
-  					{ SLANG_BINDING_TYPE_TEXTURE, vk::DescriptorType::eSampledImage},
-  					{ SLANG_BINDING_TYPE_CONSTANT_BUFFER, vk::DescriptorType::eUniformBuffer },
-  					{ SLANG_BINDING_TYPE_TYPED_BUFFER, vk::DescriptorType::eUniformTexelBuffer },
-  					{ SLANG_BINDING_TYPE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
-  					{ SLANG_BINDING_TYPE_COMBINED_TEXTURE_SAMPLER, vk::DescriptorType::eCombinedImageSampler },
-  					{ SLANG_BINDING_TYPE_INPUT_RENDER_TARGET, vk::DescriptorType::eInputAttachment },
-  					{ SLANG_BINDING_TYPE_INLINE_UNIFORM_DATA, vk::DescriptorType::eInlineUniformBlock },
-  					{ SLANG_BINDING_TYPE_RAY_TRACTING_ACCELERATION_STRUCTURE, vk::DescriptorType::eAccelerationStructureKHR },
-  					{ SLANG_BINDING_TYPE_MUTABLE_TETURE, vk::DescriptorType::eStorageImage },
-  					{ SLANG_BINDING_TYPE_MUTABLE_TYPED_BUFFER, vk::DescriptorType::eStorageTexelBuffer },
-  					{ SLANG_BINDING_TYPE_MUTABLE_RAW_BUFFER, vk::DescriptorType::eStorageBuffer },
-				};
-				const vk::DescriptorType descriptor_type = descriptor_type_map.at((SlangBindingType)typeLayout->getBindingRangeType(0));
-
-				vector<variant<uint32_t,string>> array_size;
-				if (typeLayout->getKind() == slang::TypeReflection::Kind::Array)
-					array_size.emplace_back((uint32_t)typeLayout->getTotalArrayElementCount());
-
-				const uint32_t input_attachment_index = 0; // TODO
-
-				mDescriptorMap.emplace(parameter->getName(), DescriptorBinding(parameter->getBindingSpace(), parameter->getBindingIndex(), descriptor_type, array_size, input_attachment_index));
-
-			} else if (category == slang::ParameterCategory::PushConstantBuffer) {
-				// TODO: get offset from slang; currently assumes tightly packed scalar push constants
+			if (category == slang::ParameterCategory::PushConstantBuffer) {
+				// TODO: get offset from slang. currently assumes tightly packed scalar push constants
 				size_t offset = 0;
 				for (uint32_t i = 0; i < type->getElementType()->getFieldCount(); i++) {
 					slang::VariableReflection* field = type->getElementType()->getFieldByIndex(i);
@@ -271,6 +281,15 @@ vector<uint32_t> Shader::slang_compile(const unordered_map<string, variant<uint3
 					dst.mTypeSize = scalar_size_map.at((SlangScalarType)fieldType->getScalarType());
 					offset += max<size_t>(fieldType->getTotalArrayElementCount(), 1) * fieldTypeLayout->getStride();
 				}
+			} else if (category == slang::ParameterCategory::DescriptorTableSlot) {
+				const vk::DescriptorType descriptorType = descriptor_type_map.at((SlangBindingType)typeLayout->getBindingRangeType(0));
+				vector<variant<uint32_t,string>> array_size;
+				if (typeLayout->getKind() == slang::TypeReflection::Kind::Array)
+					array_size.emplace_back((uint32_t)typeLayout->getTotalArrayElementCount());
+				mDescriptorMap.emplace(parameter->getName(), DescriptorBinding(parameter->getBindingSpace(), parameter->getBindingIndex(), descriptorType, array_size, 0));
+			} else if (category == slang::ParameterCategory::RegisterSpace) {
+				for (uint32_t i = 0; i < type->getElementType()->getFieldCount(); i++)
+					reflectParameter(parameter->getBindingIndex(), parameter->getName(), typeLayout->getElementTypeLayout()->getFieldByIndex(i), 0);
 			} else
 				cerr << "Warning: Unsupported resource category: " << category_name_map.at((SlangParameterCategory)category) << endl;
 		}

@@ -29,7 +29,10 @@ void Application::run() {
 
 		auto commandBuffer = instance->device().get_command_buffer("Frame");
 
-		{ // gpu timestamps
+		// enable timestamps when profiler history exists
+		instance->device().use_timestamps(false);
+
+		if (instance->device().use_timestamps()) { // gpu timestamps
 			auto& [qp,queryCount,labels] = instance->device().query_pool();
 			vector<pair<string,chrono::nanoseconds>> timestamps(labels.size());
 			if (!labels.empty()) {
@@ -49,9 +52,6 @@ void Application::run() {
 					qp = instance->device()->createQueryPool(vk::QueryPoolCreateInfo({}, vk::QueryType::eTimestamp, queryCount));
 				}
 			}
-
-			// enable timestamps when profiler history exists
-			instance->device().use_timestamps(Profiler::has_history());
 
 			// reset query pool
 			labels.clear();

@@ -465,17 +465,17 @@ void Scene::update(CommandBuffer& commandBuffer, const float deltaTime) {
 					auto positions = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::ePosition)[0];
 					auto normals = prim->mMesh->vertices()->at(VertexArrayObject::AttributeType::eNormal)[0];
 					auto texcoords = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTexcoord);
-					auto tangents = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTangent);
+					//auto tangents = prim->mMesh->vertices()->find(VertexArrayObject::AttributeType::eTangent);
 
 					mCopyVerticesPipeline->descriptor("gVertices") = vertices;
 					mCopyVerticesPipeline->descriptor("gPositions") = Buffer::View(positions.second, positions.first.mOffset);
 					mCopyVerticesPipeline->descriptor("gNormals") = Buffer::View(normals.second, normals.first.mOffset);
-					mCopyVerticesPipeline->descriptor("gTangents") = tangents ? Buffer::View(tangents->second, tangents->first.mOffset) : positions.second;
+					//mCopyVerticesPipeline->descriptor("gTangents") = tangents ? Buffer::View(tangents->second, tangents->first.mOffset) : positions.second;
 					mCopyVerticesPipeline->descriptor("gTexcoords") = texcoords ? Buffer::View(texcoords->second, texcoords->first.mOffset) : positions.second;
 					mCopyVerticesPipeline->push_constant<uint32_t>("gCount") = vertices.size();
 					mCopyVerticesPipeline->push_constant<uint32_t>("gPositionStride") = positions.first.mStride;
 					mCopyVerticesPipeline->push_constant<uint32_t>("gNormalStride") = normals.first.mStride;
-					mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents ? tangents->first.mStride : 0;
+					//mCopyVerticesPipeline->push_constant<uint32_t>("gTangentStride") = tangents ? tangents->first.mStride : 0;
 					mCopyVerticesPipeline->push_constant<uint32_t>("gTexcoordStride") = texcoords ? texcoords->first.mStride : 0;
 					commandBuffer.bind_pipeline(mCopyVerticesPipeline->get_pipeline());
 					mCopyVerticesPipeline->bind_descriptor_sets(commandBuffer);

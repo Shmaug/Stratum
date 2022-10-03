@@ -20,11 +20,11 @@ Denoiser::Denoiser(Node& node) : mNode(node) {
 void Denoiser::create_pipelines() {
 	auto instance = mNode.find_in_ancestor<Instance>();
 
-	auto samplerRepeat = make_shared<Sampler>(instance->device(), "gSampler", vk::SamplerCreateInfo({},
+	auto samplerRepeat = make_shared<Sampler>(instance->device(), "gStaticSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
-	auto samplerClamp = make_shared<Sampler>(instance->device(), "gSampler", vk::SamplerCreateInfo({},
+	auto samplerClamp = make_shared<Sampler>(instance->device(), "gStaticSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge, vk::SamplerAddressMode::eClampToEdge,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE));
@@ -50,7 +50,7 @@ void Denoiser::create_pipelines() {
 				else
 					printf_color(ConsoleColor::eYellow, "Warning: variable descriptor set size not supported yet\n");
 			}
-			if (name == "gSampler" || name == "gSampler1") b.mImmutableSamplers = { samplerRepeat };
+			if (name == "gStaticSampler" || name == "gStaticSampler1") b.mImmutableSamplers = { samplerRepeat };
 			if (name == "gVolumes" || name == "gImages" || name == "gImage1s") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
 			b.mStageFlags = vk::ShaderStageFlagBits::eCompute;
 			bindings.emplace(binding.mBinding, b);
@@ -71,7 +71,7 @@ void Denoiser::create_pipelines() {
 	mDescriptorSetLayout = make_shared<DescriptorSetLayout>(instance->device(), "denoiser_descriptor_set_layout", bindings);
 
 	mTemporalAccumulationPipeline->push_constant<float>("gHistoryLimit") = 0;
-	mTemporalAccumulationPipeline->set_immutable_sampler("gSampler", samplerClamp);
+	mTemporalAccumulationPipeline->set_immutable_sampler("gStaticSampler", samplerClamp);
 	mAtrousPipeline->push_constant<float>("gSigmaLuminanceBoost") = 3;
 	mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gReprojection") = 1;
 	mTemporalAccumulationPipeline->specialization_constant<uint32_t>("gDemodulateAlbedo") = 1;
@@ -114,7 +114,14 @@ void Denoiser::on_inspector_gui() {
 
 }
 
-Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& radiance, const Image::View& albedo, const Buffer::View<ViewData>& views, const Buffer::View<VisibilityInfo>& visibility, const Image::View& prev_uvs) {
+Image::View Denoiser::denoise(
+	CommandBuffer& commandBuffer,
+	const Image::View& radiance,
+	const Image::View& albedo,
+	const Buffer::View<ViewData>& views,
+	const Buffer::View<VisibilityInfo>& visibility,
+	const Buffer::View<DepthInfo>& depth,
+	const Image::View& prev_uvs) {
 	ProfilerRegion ps("Denoiser::denoise", commandBuffer);
 
 	// Initialize buffers
@@ -144,6 +151,7 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 	mCurFrame->mRadiance = radiance;
 	mCurFrame->mAlbedo = albedo;
 	mCurFrame->mVisibility = visibility;
+	mCurFrame->mDepth = depth;
 
 	const vk::Extent3D extent = radiance.extent();
 	if (!mCurFrame->mAccumColor || mCurFrame->mAccumColor.extent() != extent) {
@@ -174,6 +182,8 @@ Image::View Denoiser::denoise(CommandBuffer& commandBuffer, const Image::View& r
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gInstanceIndexMap"), mNode.find_in_ancestor<Scene>()->data()->mInstanceIndexMap);
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gVisibility"), mCurFrame->mVisibility);
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gPrevVisibility"), mPrevFrame->mVisibility);
+		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gDepth"), mCurFrame->mDepth);
+		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gPrevDepth"), mPrevFrame->mDepth);
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gPrevUVs"), image_descriptor(prev_uvs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gRadiance"), image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 		mCurFrame->mDescriptorSet->insert_or_assign(mDescriptorMap.at("gAlbedo"), image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));

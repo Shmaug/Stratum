@@ -1,7 +1,6 @@
 #include "ImageComparer.hpp"
 #include "Application.hpp"
 #include "Inspector.hpp"
-#include "VCM.hpp"
 #include "BDPT.hpp"
 
 #include <Shaders/image_compare.h>
@@ -56,7 +55,8 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 					if (ImGui::DragScalar("Quantization", ImGuiDataType_U32, &mMSEQuantization)) update = true;
 					ImGui::SameLine();
 					ImGui::SetNextItemWidth(160);
-					if (Gui::enum_dropdown("Error Mode", mMSEMode, (uint32_t)ErrorMode::eErrorModeCount, [](uint32_t i) { return to_string((ErrorMode)i); })) update = true;
+					if (Gui::enum_dropdown("Error Mode", mMSEMode, (uint32_t)CompareMetric::eCompareMetricCount, [](uint32_t i) { return to_string((CompareMetric)i); }))
+						update = true;
 
 					if (update) {
 						if (!mse)
@@ -85,11 +85,10 @@ ImageComparer::ImageComparer(Node& node) : mNode(node) {
 						if (mse[1])
 							ImGui::Text("OVERFLOW");
 						else
-							ImGui::Text("%f", mMSEMode == (uint32_t)ErrorMode::eAverageLuminance || mMSEMode == (uint32_t)ErrorMode::eAverageRGB ? mse[0]/(float)mMSEQuantization : sqrt(mse[0]/(float)mMSEQuantization));
+							ImGui::Text("%f", mMSEMode == (uint32_t)CompareMetric::eMSE ? sqrt(mse[0]/(float)mMSEQuantization) : mse[0]/(float)mMSEQuantization);
 					}
 				}
 			}
-
 
 			// image pan/zoom
 			const uint32_t w = ImGui::GetWindowSize().x - 4;
@@ -129,9 +128,10 @@ void ImageComparer::inspector_gui() {
 	ImGui::SameLine();
 	if (ImGui::Button("Save") && !string(label).empty()) {
 		Image::View img;
-		if (mNode.node_graph().component_count<VCM>())
-			img = mNode.node_graph().find_components<VCM>().front()->prev_result();
-		else if (mNode.node_graph().component_count<BDPT>())
+		//if (mNode.node_graph().component_count<VCM>())
+		//	img = mNode.node_graph().find_components<VCM>().front()->prev_result();
+		//else
+		if (mNode.node_graph().component_count<BDPT>())
 			img = mNode.node_graph().find_components<BDPT>().front()->prev_result();
 		mImages.emplace(label, pair<Image::View, Image::View>{ img, {} });
 	}

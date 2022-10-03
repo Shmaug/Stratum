@@ -39,17 +39,19 @@ switch (m) {
 [[vk::binding( 1,0)]] StructuredBuffer<uint> gInstanceIndexMap;
 [[vk::binding( 2,0)]] StructuredBuffer<VisibilityInfo> gVisibility;
 [[vk::binding( 3,0)]] StructuredBuffer<VisibilityInfo> gPrevVisibility;
-[[vk::binding( 4,0)]] Texture2D<float2> gPrevUVs;
-[[vk::binding( 5,0)]] Texture2D<float4> gRadiance;
-[[vk::binding( 6,0)]] Texture2D<float4> gAlbedo;
-[[vk::binding( 7,0)]] RWTexture2D<float4> gAccumColor;
-[[vk::binding( 8,0)]] RWTexture2D<float2> gAccumMoments;
-[[vk::binding( 9,0)]] RWTexture2D<float4> gFilterImages[2];
-[[vk::binding(11,0)]] Texture2D<float4> gPrevRadiance;
-[[vk::binding(12,0)]] Texture2D<float4> gPrevAccumColor;
-[[vk::binding(13,0)]] Texture2D<float2> gPrevAccumMoments;
-[[vk::binding(14,0)]] SamplerState gSampler;
-[[vk::binding(15,0)]] RWTexture2D<float4> gDebugImage;
+[[vk::binding( 4,0)]] StructuredBuffer<DepthInfo> gDepth;
+[[vk::binding( 5,0)]] StructuredBuffer<DepthInfo> gPrevDepth;
+[[vk::binding( 6,0)]] Texture2D<float2> gPrevUVs;
+[[vk::binding( 7,0)]] Texture2D<float4> gRadiance;
+[[vk::binding( 8,0)]] Texture2D<float4> gAlbedo;
+[[vk::binding( 9,0)]] RWTexture2D<float4> gAccumColor;
+[[vk::binding(10,0)]] RWTexture2D<float2> gAccumMoments;
+[[vk::binding(11,0)]] RWTexture2D<float4> gFilterImages[2];
+[[vk::binding(12,0)]] Texture2D<float4> gPrevRadiance;
+[[vk::binding(13,0)]] Texture2D<float4> gPrevAccumColor;
+[[vk::binding(14,0)]] Texture2D<float2> gPrevAccumMoments;
+[[vk::binding(15,0)]] SamplerState gStaticSampler;
+[[vk::binding(16,0)]] RWTexture2D<float4> gDebugImage;
 
 #endif
 

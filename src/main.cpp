@@ -5,7 +5,6 @@
 #include "Node/ImageComparer.hpp"
 
 #include "Node/BDPT.hpp"
-#include "Node/VCM.hpp"
 
 using namespace stm;
 
@@ -129,19 +128,19 @@ int main(int argc, char** argv) {
 	// create renderer
 	Node& renderer_node = app_node.make_child("Renderer");
 
-	if (instance->find_argument("vcm")) {
-#ifdef STRATUM_ENABLE_OPENXR
-		init_renderer<VCM>(app, renderer_node, xrnode);
-#else
-		init_renderer<VCM>(app, renderer_node, camera);
-#endif
-	} else {
+//	if (instance->find_argument("vcm")) {
+//#ifdef STRATUM_ENABLE_OPENXR
+//		init_renderer<VCM>(app, renderer_node, xrnode);
+//#else
+//		init_renderer<VCM>(app, renderer_node, camera);
+//#endif
+//	} else {
 #ifdef STRATUM_ENABLE_OPENXR
 		init_renderer<BDPT>(app, renderer_node, xrnode);
 #else
 		init_renderer<BDPT>(app, renderer_node, camera);
 #endif
-	}
+//	}
 
 	renderer_node.make_component<Denoiser>();
 	renderer_node.make_component<ImageComparer>();

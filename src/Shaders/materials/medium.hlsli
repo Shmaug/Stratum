@@ -10,12 +10,12 @@ struct Medium : BSDF {
 
 	SLANG_MUTATING
 	void load(uint address) {
-		density_scale		 = gMaterialData.Load<float3>(address); address += 12;
-		anisotropy       	 = gMaterialData.Load<float>(address); address += 4;
-		albedo_scale         = gMaterialData.Load<float3>(address); address += 12;
-		attenuation_unit 	 = gMaterialData.Load<float>(address); address += 4;
-		density_volume_index = gMaterialData.Load(address); address += 4;
-		albedo_volume_index  = gMaterialData.Load(address); address += 4;
+		density_scale		 = gSceneParams.gMaterialData.Load<float3>(address); address += 12;
+		anisotropy       	 = gSceneParams.gMaterialData.Load<float>(address); address += 4;
+		albedo_scale         = gSceneParams.gMaterialData.Load<float3>(address); address += 12;
+		attenuation_unit 	 = gSceneParams.gMaterialData.Load<float>(address); address += 4;
+		density_volume_index = gSceneParams.gMaterialData.Load(address); address += 4;
+		albedo_volume_index  = gSceneParams.gMaterialData.Load(address); address += 4;
 	}
 
 	Spectrum Le() { return 0; }
@@ -55,37 +55,35 @@ struct Medium : BSDF {
 	}
 
 	Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
-		return pnanovdb_read_float(gVolumes[density_volume_index], address);
+		return pnanovdb_read_float(gSceneParams.gVolumes[density_volume_index], address);
 	}
 	Spectrum read_density(inout pnanovdb_readaccessor_t density_accessor, const Vector3 pos_index) {
-		return read_density(density_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor, floor(pos_index)));
+		return read_density(density_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gSceneParams.gVolumes[density_volume_index], density_accessor, floor(pos_index)));
 	}
 	Spectrum read_albedo(inout pnanovdb_readaccessor_t density_accessor, pnanovdb_address_t address) {
-		return pnanovdb_read_float(gVolumes[albedo_volume_index], address);
+		return pnanovdb_read_float(gSceneParams.gVolumes[albedo_volume_index], address);
 	}
 	Spectrum read_albedo(inout pnanovdb_readaccessor_t albedo_accessor, const Vector3 pos_index) {
 		if (albedo_volume_index == -1)
 			return 1;
 		else
-			return read_albedo(albedo_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[albedo_volume_index], albedo_accessor, floor(pos_index)));
+			return read_albedo(albedo_accessor, pnanovdb_readaccessor_get_value_address(PNANOVDB_GRID_TYPE_FLOAT, gSceneParams.gVolumes[albedo_volume_index], albedo_accessor, floor(pos_index)));
 	}
 
 	// returns hit position inside medium. multiplies beta by transmittance*sigma_s
 	Vector3 delta_track(inout rng_state_t rng_state, Vector3 origin, Vector3 direction, float t_max, inout Spectrum beta, inout Spectrum dir_pdf, inout Spectrum nee_pdf, const bool can_scatter = true) {
-		// TODO: slang crashes when compiling this??
-//#ifndef __SLANG__
 		pnanovdb_readaccessor_t density_accessor, albedo_accessor;
 		pnanovdb_grid_handle_t grid_handle = { 0 };
-		pnanovdb_readaccessor_init(density_accessor, pnanovdb_tree_get_root(gVolumes[density_volume_index], pnanovdb_grid_get_tree(gVolumes[density_volume_index], grid_handle)));
+		pnanovdb_readaccessor_init(density_accessor, pnanovdb_tree_get_root(gSceneParams.gVolumes[density_volume_index], pnanovdb_grid_get_tree(gSceneParams.gVolumes[density_volume_index], grid_handle)));
 		if (albedo_volume_index != -1)
-			pnanovdb_readaccessor_init(albedo_accessor, pnanovdb_tree_get_root(gVolumes[albedo_volume_index], pnanovdb_grid_get_tree(gVolumes[albedo_volume_index], grid_handle)));
+			pnanovdb_readaccessor_init(albedo_accessor, pnanovdb_tree_get_root(gSceneParams.gVolumes[albedo_volume_index], pnanovdb_grid_get_tree(gSceneParams.gVolumes[albedo_volume_index], grid_handle)));
 
-		const Spectrum majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gVolumes[density_volume_index], density_accessor.root));
+		const Spectrum majorant = density_scale * read_density(density_accessor, pnanovdb_root_get_max_address(PNANOVDB_GRID_TYPE_FLOAT, gSceneParams.gVolumes[density_volume_index], density_accessor.root));
 		const uint channel = rng_next_uint(rng_state)%3;
 		if (majorant[channel] < 1e-6) return POS_INFINITY;
 
-		origin    = pnanovdb_grid_world_to_indexf    (gVolumes[density_volume_index], grid_handle, origin);
-		direction = pnanovdb_grid_world_to_index_dirf(gVolumes[density_volume_index], grid_handle, direction);
+		origin    = pnanovdb_grid_world_to_indexf    (gSceneParams.gVolumes[density_volume_index], grid_handle, origin);
+		direction = pnanovdb_grid_world_to_index_dirf(gSceneParams.gVolumes[density_volume_index], grid_handle, direction);
 
 		for (uint iteration = 0; iteration < gMaxNullCollisions && any(beta > 0); iteration++) {
 			const float2 rnd = float2(rng_next_float(rng_state), rng_next_float(rng_state));
@@ -108,7 +106,7 @@ struct Medium : BSDF {
 					// real particle
 					beta *= tr * local_sigma_s;
 					dir_pdf *= tr * majorant * real_prob;
-					return pnanovdb_grid_index_to_worldf(gVolumes[density_volume_index], grid_handle, origin);
+					return pnanovdb_grid_index_to_worldf(gSceneParams.gVolumes[density_volume_index], grid_handle, origin);
 				} else {
 					// fake particle
 					beta *= tr * (majorant - local_sigma_t);
@@ -125,7 +123,7 @@ struct Medium : BSDF {
 				break;
 			}
 		}
-//#endif
+
 		return POS_INFINITY;
 	}
 };

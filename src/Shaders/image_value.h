@@ -84,7 +84,7 @@ inline float sample_image(Texture2D<float> img, const float2 uv, const float uv_
 	float lod = 0;
 	if (gUseRayCones && uv_screen_size > 0)
 		lod = log2(max(uv_screen_size * max(w, h), 1e-6f));
-	return img.SampleLevel(gSampler, uv, lod);
+	return img.SampleLevel(gSceneParams.gStaticSampler, uv, lod);
 }
 inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float uv_screen_size) {
 	float w, h;
@@ -92,7 +92,7 @@ inline float4 sample_image(Texture2D<float4> img, const float2 uv, const float u
 	float lod = 0;
 	if (gUseRayCones && uv_screen_size > 0)
 		lod = log2(max(uv_screen_size * max(w, h), 1e-6f));
-	return img.SampleLevel(gSampler, uv, lod);
+	return img.SampleLevel(gSceneParams.gStaticSampler, uv, lod);
 }
 #endif
 
@@ -102,7 +102,7 @@ struct ImageValue1 {
 	uint image_index_channel;
 	bool has_image() { return BF_GET(image_index_channel,0,30) < gImageCount; }
 	uint channel() { return BF_GET(image_index_channel,30,2); }
-	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(BF_GET(image_index_channel,0,30))]; }
+	Texture2D<float4> image() { return gSceneParams.gImages[NonUniformResourceIndex(BF_GET(image_index_channel,0,30))]; }
 	float eval(const float2 uv, const float uv_screen_size) {
 		if (value <= 0) return 0;
 		if (!has_image()) return value;
@@ -110,8 +110,8 @@ struct ImageValue1 {
 	}
 	SLANG_MUTATING
 	void load(inout uint address) {
-		value               = gMaterialData.Load<float>(address); address += 4;
-		image_index_channel = gMaterialData.Load<uint>(address); address += 4;
+		value               = gSceneParams.gMaterialData.Load<float>(address); address += 4;
+		image_index_channel = gSceneParams.gMaterialData.Load<uint>(address); address += 4;
 	}
 #endif
 #ifdef __cplusplus
@@ -133,11 +133,11 @@ struct ImageValue2 {
 #ifdef __HLSL__
 	uint image_index;
 	bool has_image() { return image_index < gImageCount; }
-	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	Texture2D<float4> image() { return gSceneParams.gImages[NonUniformResourceIndex(image_index)]; }
 	SLANG_MUTATING
 	void load(inout uint address) {
-		value       = gMaterialData.Load<float2>(address); address += 8;
-		image_index = gMaterialData.Load<uint>(address); address += 4;
+		value       = gSceneParams.gMaterialData.Load<float2>(address); address += 8;
+		image_index = gSceneParams.gMaterialData.Load<uint>(address); address += 4;
 	}
 	float2 eval(const float2 uv, const float uv_screen_size) {
 		if (!has_image()) return value;
@@ -159,11 +159,11 @@ struct ImageValue3 {
 #ifdef __HLSL__
 	uint image_index;
 	bool has_image() { return image_index < gImageCount; }
-	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	Texture2D<float4> image() { return gSceneParams.gImages[NonUniformResourceIndex(image_index)]; }
 	SLANG_MUTATING
 	void load(inout uint address) {
-		value       = gMaterialData.Load<float3>(address); address += 12;
-		image_index = gMaterialData.Load<uint>(address); address += 4;
+		value       = gSceneParams.gMaterialData.Load<float3>(address); address += 12;
+		image_index = gSceneParams.gMaterialData.Load<uint>(address); address += 4;
 	}
 	float3 eval(const float2 uv, const float uv_screen_size) {
 		if (!has_image()) return value;
@@ -185,11 +185,11 @@ struct ImageValue4 {
 #ifdef __HLSL__
 	uint image_index;
 	bool has_image() { return image_index < gImageCount; }
-	Texture2D<float4> image() { return gImages[NonUniformResourceIndex(image_index)]; }
+	Texture2D<float4> image() { return gSceneParams.gImages[NonUniformResourceIndex(image_index)]; }
 	SLANG_MUTATING
 	void load(inout uint address) {
-		value       = gMaterialData.Load<float4>(address); address += 16;
-		image_index = gMaterialData.Load<uint>(address); address += 4;
+		value       = gSceneParams.gMaterialData.Load<float4>(address); address += 16;
+		image_index = gSceneParams.gMaterialData.Load<uint>(address); address += 4;
 	}
 	float4 eval(const float2 uv, const float uv_screen_size) {
 		if (!has_image()) return value;

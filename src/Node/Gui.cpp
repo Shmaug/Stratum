@@ -86,7 +86,7 @@ Gui::Gui(Node& node) : mNode(node), mHidden(false) {
 		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
 		vk::BlendFactor::eSrcAlpha, vk::BlendFactor::eOneMinusSrcAlpha, vk::BlendOp::eAdd,
 		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA) };
-	mPipeline->set_immutable_sampler("gSampler", make_shared<Sampler>(color_image_fs->mDevice, "gSampler", vk::SamplerCreateInfo({},
+	mPipeline->set_immutable_sampler("gStaticSampler", make_shared<Sampler>(color_image_fs->mDevice, "gStaticSampler", vk::SamplerCreateInfo({},
 		vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerMipmapMode::eLinear,
 		vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat, vk::SamplerAddressMode::eRepeat,
 		0, true, 8, false, vk::CompareOp::eAlways, 0, VK_LOD_CLAMP_NONE)));

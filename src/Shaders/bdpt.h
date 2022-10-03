@@ -104,6 +104,7 @@ struct PresampledLightPoint {
 #define PATH_VERTEX_FLAG_IS_MEDIUM 		BIT(2)
 #define PATH_VERTEX_FLAG_IS_PREV_DELTA  BIT(3)
 
+// 64 bytes
 struct PathVertex {
 	float3 position;
 	uint packed_geometry_normal;
@@ -154,10 +155,20 @@ struct PathVertex {
 #endif
 };
 
-struct ReservoirData {
+struct NEEReservoir {
 	Reservoir r;
 	uint packed_geometry_normal;
 	float W;
+	PresampledLightPoint y;
+#ifdef __HLSL__
+	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
+#endif
+};
+struct PathVertexReservoir {
+	Reservoir r;
+	uint packed_geometry_normal;
+	float W;
+	PathVertex y;
 #ifdef __HLSL__
 	inline float3 geometry_normal() { return unpack_normal_octahedron(packed_geometry_normal); }
 #endif

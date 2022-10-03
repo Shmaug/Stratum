@@ -10,6 +10,26 @@
 
 namespace stm {
 
+/*
+struct HashGridData {
+	unordered_map<string, Buffer::View<byte>> mBuffers;
+	HashGridData(const string& name, const uint32_t bucket_count, const uint32_t size) {
+		mBuffers["g"+name+"HashGrid.mChecksums"]     = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mChecksums", bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mCounters"]      = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mCounters" , bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mIndices"]       = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mIndices"  , bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mStats"]         = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mStats"    , 4 * sizeof(uint32_t)           , vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mData"]          = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mData"         , size * sizeof(NEEReservoir), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mAppendData"]    = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mAppendData"   , size * sizeof(NEEReservoir), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+		mBuffers["g"+name+"HashGrid.mAppendIndices"] = make_shared<Buffer>(commandBuffer.mDevice, "g"+name+"HashGrid.mAppendIndices", size * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+	}
+
+	void assign_descriptors(const shared_ptr<DescriptorSet>& descriptorSet, const unordered_map<string,uint32_t>& descriptorMap) {
+		for (const auto&[name, buf] : mBuffers)
+			descriptorSet->insert_or_assign(descriptorMap.at("gFrameParams." + name), buf);
+	}
+};
+*/
+
 void inspector_gui_fn(Inspector& inspector, BDPT* v) { v->on_inspector_gui(); }
 
 BDPT::BDPT(Node& node) : mNode(node) {
@@ -115,29 +135,29 @@ void BDPT::create_pipelines() {
 	{
 		vector<tuple<shared_ptr<Shader>, string, shared_ptr<ComputePipelineState>*>> shaders;
 		vector<thread> threads;
-		shaders.reserve(5);
-		threads.reserve(5);
+		shaders.reserve(7);
+		threads.reserve(7);
 
 		auto process_shader = [&](shared_ptr<ComputePipelineState>& dst, const fs::path& path, const string& entry_point = "", const vector<string>& compile_args = {}) {
 			auto&[shader, name, pipeline] = shaders.emplace_back();
 			name = entry_point.empty() ? path.stem().string() : (path.stem().string() + "_" + entry_point);
 			pipeline = &dst;
 			uint32_t i = shaders.size() - 1;
-			threads.emplace_back([&,i,path,entry_point,compile_args]() {
+			//threads.emplace_back([&,i,path,entry_point,compile_args]() {
 				get<shared_ptr<Shader>>(shaders[i]) = make_shared<Shader>(instance->device(), path, entry_point, compile_args);
-			});
+			//});
 		};
 
 		const fs::path& src_path = "../../src/Shaders/kernels/renderers/bdpt.hlsl";
 		const vector<string>& args_rt = { "-matrix-layout-row-major", "-capability", "spirv_1_5" };
 		const vector<string>& args = { "-matrix-layout-row-major", "-capability", "spirv_1_5", "-capability", "GL_EXT_ray_tracing" };
-		process_shader(mRenderPipelines[eSamplePhotons]         , src_path, "sample_photons"           , args_rt);
-		process_shader(mRenderPipelines[eSampleVisibility]      , src_path, "sample_visibility"        , args_rt);
-		process_shader(mRenderPipelines[eTraceShadows]          , src_path, "trace_shadows"            , args_rt);
-		process_shader(mRenderPipelines[ePresampleLights]       , src_path, "presample_lights"         , args);
-		process_shader(mRenderPipelines[eHashGridComputeIndices], src_path, "hashgrid_compute_indices" , args);
-		process_shader(mRenderPipelines[eHashGridSwizzle]       , src_path, "hashgrid_swizzle"         , args);
-		process_shader(mRenderPipelines[eAddLightTrace]         , src_path, "add_light_trace"          , args);
+		process_shader(mRenderPipelines[eSamplePhotons]         , src_path, "sample_photons"          , args_rt);
+		process_shader(mRenderPipelines[eSampleVisibility]      , src_path, "sample_visibility"       , args_rt);
+		process_shader(mRenderPipelines[eTraceShadows]          , src_path, "trace_shadows"           , args_rt);
+		process_shader(mRenderPipelines[ePresampleLights]       , src_path, "presample_lights"        , args);
+		process_shader(mRenderPipelines[eHashGridComputeIndices], src_path, "hashgrid_compute_indices", args);
+		process_shader(mRenderPipelines[eHashGridSwizzle]       , src_path, "hashgrid_swizzle"        , args);
+		process_shader(mRenderPipelines[eAddLightTrace]         , src_path, "add_light_trace"         , args);
 
 		for (thread& t : threads)
 			if (t.joinable())
@@ -156,8 +176,8 @@ void BDPT::create_pipelines() {
 					else
 						printf_color(ConsoleColor::eYellow, "Warning: variable descriptor set size not supported yet\n");
 				}
-				if (name == "gSampler" || name == "gSampler1") b.mImmutableSamplers = { samplerRepeat };
-				if (name == "gVolumes" || name == "gImages" || name == "gImage1s") b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
+				if (name.ends_with("gStaticSampler") || name.ends_with("gStaticSampler1")) b.mImmutableSamplers = { samplerRepeat };
+				if (name.ends_with("gVolumes") || name.ends_with("gImages") || name.ends_with("gImage1s")) b.mBindingFlags = vk::DescriptorBindingFlagBits::ePartiallyBound;
 				b.mStageFlags = vk::ShaderStageFlagBits::eCompute;
 				bindings[binding.mSet].emplace(binding.mBinding, b);
 				mDescriptorMap[binding.mSet].emplace(name, binding.mBinding);
@@ -256,10 +276,15 @@ void BDPT::on_inspector_gui() {
 				mPushConstants.gHashGridBucketCount = max(mPushConstants.gHashGridBucketCount, 1u);
 				if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::ePerformanceCounters)) {
 					for (auto it = mFrameResourcePool.begin(); it != mFrameResourcePool.end(); it++) {
-						if (*it && (*it)->mFence->status() == vk::Result::eSuccess && (*it)->mPathData["gHashGridStats"]) {
-							Buffer::View<uint32_t> data = (*it)->mPathData["gHashGridStats"].cast<uint32_t>();
-							ImGui::Text("%u failed inserts", data[0]);
-							ImGui::Text("%u%% buckets used", (100*data[1])/mPushConstants.gHashGridBucketCount);
+						if (*it && (*it)->mFence->status() == vk::Result::eSuccess && (*it)->mPathData.contains("gLVCHashGrid.mStats")) {
+							if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eNEEReservoirReuse)) {
+								Buffer::View<uint32_t> data = (*it)->mPathData.at("gNEEHashGrid.mStats").cast<uint32_t>();
+								ImGui::Text("NEE: %u failed inserts, %u%% buckets used", data[0], (100*data[1])/mPushConstants.gHashGridBucketCount);
+							}
+							if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVCReservoirReuse)) {
+								Buffer::View<uint32_t> data = (*it)->mPathData.at("gLVCHashGrid.mStats").cast<uint32_t>();
+								ImGui::Text("LVC: %u failed inserts, %u%% buckets used", data[0], (100*data[1])/mPushConstants.gHashGridBucketCount);
+							}
 							break;
 						}
 					}
@@ -371,25 +396,25 @@ void BDPT::update(CommandBuffer& commandBuffer, const float deltaTime) {
 	mPushConstants.gLightDistributionCDF = mCurFrame->mSceneData->mLightDistributionCDF;
 
 	{
-		ProfilerRegion ps("Setup descriptors", commandBuffer);
+		ProfilerRegion ps("Assign/write descriptors", commandBuffer);
 		if (!mCurFrame->mSceneDescriptors) mCurFrame->mSceneDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[0], "path_tracer_scene_descriptors");
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gScene"), **mCurFrame->mSceneData->mScene);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVertices"), mCurFrame->mSceneData->mVertices);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gIndices"), mCurFrame->mSceneData->mIndices);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstances"), mCurFrame->mSceneData->mInstances);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceTransforms"), mCurFrame->mSceneData->mInstanceTransforms);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceInverseTransforms"), mCurFrame->mSceneData->mInstanceInverseTransforms);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gMaterialData"), mCurFrame->mSceneData->mMaterialData);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gDistributions"), mCurFrame->mSceneData->mDistributionData);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
-		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gRayCount"), mRayCount);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gAccelerationStructure"), **mCurFrame->mSceneData->mScene);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gVertices"), mCurFrame->mSceneData->mVertices);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gIndices"), mCurFrame->mSceneData->mIndices);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gInstances"), mCurFrame->mSceneData->mInstances);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gInstanceTransforms"), mCurFrame->mSceneData->mInstanceTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gInstanceInverseTransforms"), mCurFrame->mSceneData->mInstanceInverseTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gInstanceMotionTransforms"), mCurFrame->mSceneData->mInstanceMotionTransforms);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gMaterialData"), mCurFrame->mSceneData->mMaterialData);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gDistributions"), mCurFrame->mSceneData->mDistributionData);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gLightInstances"), mCurFrame->mSceneData->mLightInstanceMap);
+		mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gRayCount"), mRayCount);
 		for (const auto& [vol, index] : mCurFrame->mSceneData->mResources.volume_data_map)
-			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gVolumes"), index, vol);
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gVolumes"), index, vol);
 		for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image4s)
-			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gImages"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 		for (const auto& [image, index] : mCurFrame->mSceneData->mResources.image1s)
-			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
+			mCurFrame->mSceneDescriptors->insert_or_assign(mDescriptorMap[0].at("gSceneParams.gImage1s"), index, image_descriptor(image, vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead));
 		mCurFrame->mSceneDescriptors->flush_writes();
 		mCurFrame->mSceneDescriptors->transition_images(commandBuffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
@@ -417,6 +442,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// upload views, compute gViewMediumInstances
 	{
+		ProfilerRegion ps("Upload views", commandBuffer);
 		// upload viewdata
 		mCurFrame->mViews = make_shared<Buffer>(commandBuffer.mDevice, "gViews", views.size() * sizeof(ViewData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
 		mCurFrame->mViewTransforms = make_shared<Buffer>(commandBuffer.mDevice, "gViewTransforms", views.size() * sizeof(TransformData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -440,13 +466,6 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		});
 	}
 
-	if (BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVCReservoirs)) {
-		mRenderPipelines[eSampleVisibility]->specialization_constant<uint32_t>("HASHGRID_RESERVOIR_VERTEX") = 1;
-		mRenderPipelines[eHashGridSwizzle]->specialization_constant<uint32_t>("HASHGRID_RESERVOIR_VERTEX") = 1;
-	} else {
-		mRenderPipelines[eSampleVisibility]->erase_specialization_constant("HASHGRID_RESERVOIR_VERTEX");
-		mRenderPipelines[eHashGridSwizzle]->erase_specialization_constant("HASHGRID_RESERVOIR_VERTEX");
-	}
 	if (!BDPT_CHECK_FLAG(mSamplingFlags, BDPTFlagBits::eLVC))
 		mPushConstants.gLightPathCount = extent.width * extent.height;
 
@@ -460,7 +479,7 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	push_constants.gViewCount = (uint32_t)views.size();
 	if (mRandomPerFrame) push_constants.gRandomSeed = mCurFrame->mFrameNumber;
 
-	if ((changed && !reprojection) || !mPrevFrame || !mPrevFrame->mPathData["gHashGridReservoirs"])
+	if ((changed && !reprojection) || !mPrevFrame || !mPrevFrame->mPathData.contains("gNEEHashGrid.mData"))
 		push_constants.gReservoirSpatialM = 0;
 
 	// determine sampling flags
@@ -525,6 +544,8 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 
 	// allocate data
 	{
+		ProfilerRegion ps("Allocate data", commandBuffer);
+
 		const uint32_t pixel_count = extent.width * extent.height;
 		if (!mCurFrame->mRadiance || mCurFrame->mRadiance.extent() != extent) {
 			ProfilerRegion ps("Allocate data");
@@ -536,9 +557,9 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			mCurFrame->mDebugImage 	  = make_shared<Image>(commandBuffer.mDevice, "gDebugImage", extent, fmt,                       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
 			mCurFrame->mTonemapResult = make_shared<Image>(commandBuffer.mDevice, "gOutput",     extent, fmt,                       1, 1, vk::SampleCountFlagBits::e1, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst);
 
-			mCurFrame->mPathData["gVisibility"] 		= make_shared<Buffer>(commandBuffer.mDevice, "gVisibility", 		pixel_count * sizeof(VisibilityInfo), 		   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gRayDifferentials"] 	= make_shared<Buffer>(commandBuffer.mDevice, "gRayDifferentials",   pixel_count * sizeof(RayDifferential), 		   vk::BufferUsageFlagBits::eStorageBuffer,                                       VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gLightTraceSamples"]  = make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples",  pixel_count * sizeof(float4), 				   vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gVisibility"]        = make_shared<Buffer>(commandBuffer.mDevice, "gVisibility",        pixel_count * sizeof(VisibilityInfo),  vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gDepth"]             = make_shared<Buffer>(commandBuffer.mDevice, "gDepth",             pixel_count * sizeof(DepthInfo),       vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData["gLightTraceSamples"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightTraceSamples", pixel_count * sizeof(float4), 		 vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
 			mCurFrame->mFrameNumber = 0;
 
 			mCurFrame->mTonemapMax    = make_shared<Buffer>(commandBuffer.mDevice, "gMax", sizeof(uint4)*3, vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -546,57 +567,66 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		}
 
 		const uint32_t light_vertex_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths) ? push_constants.gLightPathCount * push_constants.gMaxDiffuseVertices : 1;
-		if (!mCurFrame->mPathData["gLightPathVertices"] || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(PathVertex)) {
+		if (!mCurFrame->mPathData.contains("gLightPathVertices") || mCurFrame->mPathData.at("gLightPathVertices").size_bytes() < light_vertex_count * sizeof(PathVertex)) {
 			mCurFrame->mPathData["gLightPathVertices"]    = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertices",  light_vertex_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 			mCurFrame->mPathData["gLightPathVertexCount"] = make_shared<Buffer>(commandBuffer.mDevice, "gLightPathVertexCount",  sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 		}
 
 		const uint32_t shadow_ray_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eDeferShadowRays) ? pixel_count * max(push_constants.gMaxDiffuseVertices,1u) : 1;
-		if (!mCurFrame->mPathData["gShadowRays"] || mCurFrame->mPathData.at("gShadowRays").size_bytes() < shadow_ray_count * sizeof(ShadowRayData))
+		if (!mCurFrame->mPathData.contains("gShadowRays") || mCurFrame->mPathData.at("gShadowRays").size_bytes() < shadow_ray_count * sizeof(ShadowRayData))
 			mCurFrame->mPathData["gShadowRays"] = make_shared<Buffer>(commandBuffer.mDevice, "gShadowRays", shadow_ray_count * sizeof(ShadowRayData), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY, 32);
 
 		const uint32_t presampled_light_count = BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights) ? max(1u,push_constants.gLightPresampleTileCount*push_constants.gLightPresampleTileSize) : 1;
-		if (!mCurFrame->mPathData["gPresampledLights"] || mCurFrame->mPathData.at("gPresampledLights").size_bytes() < presampled_light_count * sizeof(PresampledLightPoint))
+		if (!mCurFrame->mPathData.contains("gPresampledLights") || mCurFrame->mPathData.at("gPresampledLights").size_bytes() < presampled_light_count * sizeof(PresampledLightPoint))
 			mCurFrame->mPathData["gPresampledLights"] = make_shared<Buffer>(commandBuffer.mDevice, "gPresampledLights", presampled_light_count * sizeof(PresampledLightPoint), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
 
+		// hash grids
+		auto allocate_hashgrid_buckets = [&](const string& name, const uint32_t bucketCount) {
+			mCurFrame->mPathData[name + ".mChecksums"]     = make_shared<Buffer>(commandBuffer.mDevice, name + ".mChecksums"    , bucketCount * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData[name + ".mCounters"]      = make_shared<Buffer>(commandBuffer.mDevice, name + ".mCounters"     , bucketCount * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData[name + ".mIndices"]       = make_shared<Buffer>(commandBuffer.mDevice, name + ".mIndices"      , bucketCount * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData[name + ".mStats"]         = make_shared<Buffer>(commandBuffer.mDevice, name + ".mStats"        , 4 * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
+		};
+		auto allocate_hashgrid_data = [&](const string& name, const uint32_t elementSize, const uint32_t elementCount) {
+			mCurFrame->mPathData[name + ".mData"]          = make_shared<Buffer>(commandBuffer.mDevice, name + ".mData"         , elementCount * elementSize, vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData[name + ".mAppendData"]    = make_shared<Buffer>(commandBuffer.mDevice, name + ".mAppendData"   , elementCount * elementSize, vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+			mCurFrame->mPathData[name + ".mAppendIndices"] = make_shared<Buffer>(commandBuffer.mDevice, name + ".mAppendIndices", elementCount * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
+		};
 		const uint32_t hashgrid_bucket_count = reservoir_reuse ? max(1u,push_constants.gHashGridBucketCount) : 1;
-		if (!mCurFrame->mPathData["gHashGridChecksums"] || mCurFrame->mPathData.at("gHashGridChecksums").size_bytes() < hashgrid_bucket_count * sizeof(uint32_t)) {
-			mCurFrame->mPathData["gHashGridChecksums"]      = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridChecksums", hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridCounters"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridCounters" , hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridIndices"]        = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridIndices" , hashgrid_bucket_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridStats"]          = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridStats", 4 * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_CPU_ONLY);
-		}
 		const uint32_t hashgrid_reservoir_count  = reservoir_reuse ? pixel_count * max(1u,push_constants.gMaxDiffuseVertices) : 1;
-		if (!mCurFrame->mPathData["gHashGridReservoirs"] || mCurFrame->mPathData.at("gHashGridReservoirs").size_bytes() < hashgrid_reservoir_count * sizeof(ReservoirData)) {
-			mCurFrame->mPathData["gHashGridReservoirs"]             = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirs"            , hashgrid_reservoir_count * sizeof(ReservoirData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridReservoirSamples"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridReservoirSamples"      , hashgrid_reservoir_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridAppendIndices"]          = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendIndices"         , hashgrid_reservoir_count * sizeof(uint32_t), vk::BufferUsageFlagBits::eStorageBuffer|vk::BufferUsageFlagBits::eTransferDst, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridAppendReservoirs"]       = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendReservoirs"      , hashgrid_reservoir_count * sizeof(ReservoirData), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
-			mCurFrame->mPathData["gHashGridAppendReservoirSamples"] = make_shared<Buffer>(commandBuffer.mDevice, "gHashGridAppendReservoirSamples", hashgrid_reservoir_count * sizeof(PathVertex), vk::BufferUsageFlagBits::eStorageBuffer, VMA_MEMORY_USAGE_GPU_ONLY);
+		if (!mCurFrame->mPathData.contains("gNEEHashGrid.mChecksums") || mCurFrame->mPathData.at("gNEEHashGrid.mChecksums").size_bytes() < hashgrid_bucket_count * sizeof(uint32_t)) {
+			allocate_hashgrid_buckets("gNEEHashGrid", hashgrid_bucket_count);
+			allocate_hashgrid_buckets("gLVCHashGrid", hashgrid_bucket_count);
+		}
+		if (!mCurFrame->mPathData.contains("gNEEHashGrid.mData") || mCurFrame->mPathData.at("gNEEHashGrid.mData").size_bytes() < hashgrid_reservoir_count * sizeof(NEEReservoir)) {
+			allocate_hashgrid_data("gNEEHashGrid", hashgrid_reservoir_count, sizeof(NEEReservoir));
+			allocate_hashgrid_data("gLVCHashGrid", hashgrid_reservoir_count, sizeof(PathVertexReservoir));
 		}
 	}
 
-	// set descriptors
+	// assign descriptors
 	{
+		ProfilerRegion ps("Assign descriptors", commandBuffer);
 		mCurFrame->mViewDescriptors = make_shared<DescriptorSet>(mDescriptorSetLayouts[1], "bdpt_view_descriptors");
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gViews"), mCurFrame->mViews);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gViewTransforms"), mCurFrame->mViewTransforms);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gInverseViewTransforms"), mCurFrame->mViewInverseTransforms);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevViews"), (mPrevFrame && mPrevFrame->mViews ? mPrevFrame : mCurFrame)->mViews);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevInverseViewTransforms"), (mPrevFrame && mPrevFrame->mViews ? mPrevFrame : mCurFrame)->mViewInverseTransforms);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gViewMediumInstances"), mCurFrame->mViewMediumIndices);
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gRadiance"), image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gAlbedo"), image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevUVs"), image_descriptor(mCurFrame->mPrevUVs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gDebugImage"), image_descriptor(mCurFrame->mDebugImage, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
-		const bool use_prev_reservoirs = reservoir_reuse && push_constants.gReservoirSpatialM > 0;
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridChecksums")       , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridChecksums"));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridCounters")        , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridCounters"));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridIndices")         , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridIndices"));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridReservoirs")      , (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridReservoirs"));
-		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gPrevHashGridReservoirSamples"), (use_prev_reservoirs ? mPrevFrame : mCurFrame)->mPathData.at("gHashGridReservoirSamples"));
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gViews"), mCurFrame->mViews);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrevViews"), (mPrevFrame && mPrevFrame->mViews ? mPrevFrame : mCurFrame)->mViews);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gViewTransforms"), mCurFrame->mViewTransforms);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gInverseViewTransforms"), mCurFrame->mViewInverseTransforms);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrevInverseViewTransforms"), (mPrevFrame && mPrevFrame->mViews ? mPrevFrame : mCurFrame)->mViewInverseTransforms);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gViewMediumInstances"), mCurFrame->mViewMediumIndices);
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gRadiance")  , image_descriptor(mCurFrame->mRadiance, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gAlbedo")    , image_descriptor(mCurFrame->mAlbedo, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gDebugImage"), image_descriptor(mCurFrame->mDebugImage, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+		mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrevUVs")   , image_descriptor(mCurFrame->mPrevUVs, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite));
+		const auto frame = (reservoir_reuse && push_constants.gReservoirSpatialM > 0) ? mPrevFrame : mCurFrame;
+		for (const string v : { "NEEHashGrid", "LVCHashGrid" }) {
+			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrev" + v + ".mChecksums"), frame->mPathData.at("g" + v + ".mChecksums"));
+			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrev" + v + ".mCounters") , frame->mPathData.at("g" + v + ".mCounters"));
+			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrev" + v + ".mIndices")  , frame->mPathData.at("g" + v + ".mIndices"));
+			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams.gPrev" + v + ".mData")     , frame->mPathData.at("g" + v + ".mData"));
+		}
 		for (const auto&[name, buf] : mCurFrame->mPathData)
-			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at(name), buf);
+			mCurFrame->mViewDescriptors->insert_or_assign(mDescriptorMap[1].at("gFrameParams." + name), buf);
 	}
 
 	auto bind_descriptors_and_push_constants = [&]() {
@@ -605,12 +635,19 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer->pushConstants(commandBuffer.bound_pipeline()->layout(), vk::ShaderStageFlagBits::eCompute, 0, sizeof(BDPTPushConstants), &push_constants);
 	};
 
-	commandBuffer.clear_color_image(mCurFrame->mRadiance, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
-	commandBuffer.clear_color_image(mCurFrame->mDebugImage, vk::ClearColorValue(array<uint32_t, 4>{ 0, 0, 0, 0 }));
 	mCurFrame->mRadiance.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 	mCurFrame->mAlbedo.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 	mCurFrame->mPrevUVs.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
 	mCurFrame->mDebugImage.transition_barrier(commandBuffer, vk::PipelineStageFlagBits::eComputeShader, vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+
+	// presample lights
+	if (push_constants.gMaxPathVertices > 2 && BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights)) {
+		ProfilerRegion ps("Presample lights", commandBuffer);
+		commandBuffer.bind_pipeline(mRenderPipelines[ePresampleLights]->get_pipeline(mDescriptorSetLayouts));
+		bind_descriptors_and_push_constants();
+		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Presample_lights");
+		commandBuffer.dispatch_over(mPushConstants.gLightPresampleTileSize * mPushConstants.gLightPresampleTileCount);
+	}
 
 	// trace light paths
 	if ((BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToViews) || BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths)) && push_constants.gMaxPathVertices > 2) {
@@ -622,60 +659,46 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 		commandBuffer->fillBuffer(**lc.buffer(), lc.offset(), lc.size_bytes(), 0);
 		commandBuffer.barrier({ lv, lt, lc }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead|vk::AccessFlagBits::eShaderWrite);
 
-		//vk::Extent3D lightExtent;
-		//const uint32_t n = (mPushConstants.gLightPathCount + 31) / 32;
-		//lightExtent.height = (uint32_t)sqrt((float)n);
-		//lightExtent.width = (n + (lightExtent.height-1)) / lightExtent.height;
-		//lightExtent.depth = 1;
-
 		{
 			ProfilerRegion ps("Sample photons", commandBuffer);
 			commandBuffer.bind_pipeline(mRenderPipelines[eSamplePhotons]->get_pipeline(mDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
 			commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Sample photons");
-			commandBuffer.dispatch_over(extent);
+			commandBuffer.dispatch_over(extent.width, (mPushConstants.gLightPathCount + extent.width-1) / extent.width);
 		}
 	}
 
-	// presample lights
-	if (push_constants.gMaxPathVertices > 2 && BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights)) {
-		ProfilerRegion ps("Presample lights", commandBuffer);
-		commandBuffer.bind_pipeline(mRenderPipelines[ePresampleLights]->get_pipeline(mDescriptorSetLayouts));
-		bind_descriptors_and_push_constants();
-		commandBuffer.write_timestamp(vk::PipelineStageFlagBits::eComputeShader, "Presample_lights");
-		commandBuffer.dispatch_over(mPushConstants.gLightPresampleTileSize * mPushConstants.gLightPresampleTileCount);
+	// clear gShadowRays
+	if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eDeferShadowRays)) {
+		auto v = mCurFrame->mPathData.at("gShadowRays");
+		commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
+		commandBuffer.barrier({ mCurFrame->mPathData.at("gShadowRays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
 	}
 
-	// barriers + clearing
-	{
-		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths))
-			commandBuffer.barrier({ mCurFrame->mPathData.at("gLightPathVertices"), mCurFrame->mPathData.at("gLightPathVertexCount") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-
-		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights))
-			commandBuffer.barrier({ mCurFrame->mPathData.at("gPresampledLights") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
-
-		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eDeferShadowRays)) {
-			auto v = mCurFrame->mPathData.at("gShadowRays");
-			commandBuffer->fillBuffer(**v.buffer(), v.offset(), v.size_bytes(), 0);
-			commandBuffer.barrier({ mCurFrame->mPathData.at("gShadowRays") }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
-		}
-
-		if (reservoir_reuse) {
-			auto c  = mCurFrame->mPathData.at("gHashGridCounters");
-			auto cs = mCurFrame->mPathData.at("gHashGridChecksums");
-			auto a  = mCurFrame->mPathData.at("gHashGridAppendIndices");
-			commandBuffer->fillBuffer(**c.buffer() , c.offset() , c.size_bytes() , 0);
-			commandBuffer->fillBuffer(**cs.buffer(), cs.offset(), cs.size_bytes(), 0);
-			commandBuffer->fillBuffer(**a.buffer() , a.offset() , sizeof(uint2)  , 0);
-			commandBuffer.barrier({ c, cs, a }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
-			memset(mCurFrame->mPathData["gHashGridStats"].data(), 0, mCurFrame->mPathData["gHashGridStats"].size_bytes());
+	// clear hash grids
+	if (reservoir_reuse) {
+		for (const string v : { "gNEEHashGrid", "gLVCHashGrid"}) {
+			auto counters  = mCurFrame->mPathData.at(v + ".mCounters");
+			auto checksums = mCurFrame->mPathData.at(v + ".mChecksums");
+			auto inds      = mCurFrame->mPathData.at(v + ".mAppendIndices");
+			commandBuffer->fillBuffer(**counters.buffer() , counters.offset() , counters.size_bytes() , 0);
+			commandBuffer->fillBuffer(**checksums.buffer(), checksums.offset(), checksums.size_bytes(), 0);
+			commandBuffer->fillBuffer(**inds.buffer(), inds.offset(), sizeof(uint2), 0);
+			commandBuffer.barrier({ counters, checksums, inds, }, vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite);
+			memset(mCurFrame->mPathData[v + ".mStats"].data(), 0, mCurFrame->mPathData[v + ".mStats"].size_bytes());
 		}
 	}
 
 	// trace view paths
 	{
+		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::eConnectToLightPaths))
+			commandBuffer.barrier({ mCurFrame->mPathData.at("gLightPathVertices"), mCurFrame->mPathData.at("gLightPathVertexCount") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+		if (BDPT_CHECK_FLAG(sampling_flags, BDPTFlagBits::ePresampleLights))
+			commandBuffer.barrier({ mCurFrame->mPathData.at("gPresampledLights") }, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
+
 		// trace visibility
 		{
+
 			ProfilerRegion ps("Sample visibility", commandBuffer);
 			commandBuffer.bind_pipeline(mRenderPipelines[eSampleVisibility]->get_pipeline(mDescriptorSetLayouts));
 			bind_descriptors_and_push_constants();
@@ -696,11 +719,12 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			commandBuffer.dispatch_over(extent);
 		}
 
-		// trace shadow rays
+		// store hashgrid
 		if (reservoir_reuse) {
 			{
 				commandBuffer.barrier({
-					mCurFrame->mPathData.at("gHashGridCounters"),
+					mCurFrame->mPathData.at("gNEEHashGrid.mCounters"),
+					mCurFrame->mPathData.at("gLVCHashGrid.mCounters"),
 				}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 				ProfilerRegion ps("Compute hash grid indices", commandBuffer);
 				commandBuffer.bind_pipeline(mRenderPipelines[eHashGridComputeIndices]->get_pipeline(mDescriptorSetLayouts));
@@ -710,10 +734,12 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 			}
 			{
 				commandBuffer.barrier({
-					mCurFrame->mPathData.at("gHashGridIndices"),
-					mCurFrame->mPathData.at("gHashGridAppendReservoirs"),
-					mCurFrame->mPathData.at("gHashGridAppendReservoirSamples"),
-					mCurFrame->mPathData.at("gHashGridAppendIndices")
+					mCurFrame->mPathData.at("gNEEHashGrid.mIndices"),
+					mCurFrame->mPathData.at("gNEEHashGrid.mAppendData"),
+					mCurFrame->mPathData.at("gNEEHashGrid.mAppendIndices"),
+					mCurFrame->mPathData.at("gLVCHashGrid.mIndices"),
+					mCurFrame->mPathData.at("gLVCHashGrid.mAppendData"),
+					mCurFrame->mPathData.at("gLVCHashGrid.mAppendIndices")
 				}, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderWrite, vk::PipelineStageFlagBits::eComputeShader, vk::AccessFlagBits::eShaderRead);
 				ProfilerRegion ps("Swizzle hash grid", commandBuffer);
 				commandBuffer.bind_pipeline(mRenderPipelines[eHashGridSwizzle]->get_pipeline(mDescriptorSetLayouts));
@@ -740,7 +766,14 @@ void BDPT::render(CommandBuffer& commandBuffer, const Image::View& renderTarget,
 	// accumulate/denoise
 	if (mDenoise && denoiser) {
 		if (changed && !reprojection) denoiser->reset_accumulation();
-		mCurFrame->mDenoiseResult = denoiser->denoise(commandBuffer, result, mCurFrame->mAlbedo, mCurFrame->mViews, mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>(), mCurFrame->mPrevUVs);
+		mCurFrame->mDenoiseResult = denoiser->denoise(
+			commandBuffer,
+			result,
+			mCurFrame->mAlbedo,
+			mCurFrame->mViews,
+			mCurFrame->mPathData.at("gVisibility").cast<VisibilityInfo>(),
+			mCurFrame->mPathData.at("gDepth").cast<DepthInfo>(),
+			mCurFrame->mPrevUVs);
 		result = mCurFrame->mDenoiseResult;
 
 		mTonemapMaxReducePipeline->specialization_constant<uint32_t>("gModulateAlbedo") = denoiser->demodulate_albedo();

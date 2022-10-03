@@ -10,7 +10,7 @@
 
 [[vk::constant_id(1)]] const float gAlphaClip = -1; // set below 0 to disable
 
-SamplerState gSampler;
+SamplerState gStaticSampler;
 StructuredBuffer<ViewData> gViews;
 StructuredBuffer<TransformData> gViewTransforms;
 StructuredBuffer<TransformData> gInverseViewTransforms;
@@ -60,7 +60,7 @@ v2f_image color_image_vs(appdata_image v) {
 	return o;
 }
 float4 color_image_fs(float4 color : COLOR, float2 uv : TEXCOORD0) : SV_Target0 {
-	const float4 c = color * gImages[(gImageCount>1) ? gPushConstants.gImageIndex : 0].Sample(gSampler, uv);
+	const float4 c = color * gImages[(gImageCount>1) ? gPushConstants.gImageIndex : 0].Sample(gStaticSampler, uv);
 	if (gAlphaClip >= 0 && c.a < gAlphaClip) discard;
 	return c;
 }
@@ -74,7 +74,7 @@ float4 skybox_vs(uint vertexId : SV_VertexID, out float2 clipPos : TEXCOORD0) : 
 }
 float4 skybox_fs(float2 clipPos : TEXCOORD0) : SV_Target0 {
 	const float3 ray = normalize(gViewTransforms[gPushConstants.gViewIndex].transform_vector(gViews[gPushConstants.gViewIndex].projection.back_project(clipPos)));
-	float4 color = gImages[gPushConstants.gImageIndex].SampleLevel(gSampler, cartesian_to_spherical_uv(ray), 0);
+	float4 color = gImages[gPushConstants.gImageIndex].SampleLevel(gStaticSampler, cartesian_to_spherical_uv(ray), 0);
 	color.rgb = pow(color.rgb, 1/gPushConstants.gEnvironmentGamma);
 	return color;
 }

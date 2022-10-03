@@ -105,7 +105,8 @@ struct TapData {
 		const float w_l = abs(l_p - l_center) / max(sigma_l, 1e-10);
 
 		const VisibilityInfo vis_p = gVisibility[p.y*screen_width + p.x];
-		const float w_z = abs(vis_p.z() - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
+		const DepthInfo depth_p = gDepth[p.y*screen_width + p.x];
+		const float w_z = abs(depth_p.z - z_center) / (length(dz_center * float2(offset * gPushConstants.gStepSize)) + 1e-2);
 		const float w_n = pow(max(0, dot(vis_p.normal(), center_normal)), 256);
 
 		const float w = exp(-pow2(w_l) - w_z) * kernel_weight * w_n;
@@ -215,10 +216,11 @@ void main(uint3 index : SV_DispatchThreadId) {
 	gOutput.GetDimensions(t.screen_width, h);
 
 	const VisibilityInfo vis = gVisibility[index.y*t.screen_width + index.x];
+	const DepthInfo depth = gDepth[index.y*t.screen_width + index.x];
 	t.index = index.xy;
 	t.center_normal = vis.normal();
-	t.z_center = (float)vis.z();
-	t.dz_center = (float2)vis.dz_dxy();
+	t.z_center = depth.z;
+	t.dz_center = depth.dz_dxy;
 	t.sum_weight = 1;
 	t.sum_color = gInput[t.index];
 	t.l_center = luminance(t.sum_color.rgb);

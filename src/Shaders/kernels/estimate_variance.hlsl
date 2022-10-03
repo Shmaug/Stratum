@@ -67,6 +67,8 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 		return;
 	}
 
+	const DepthInfo depth = gDepth[index_1d];
+
 	float sum_w = 1;
 
 	const int r = histlen > 1 ? 2 : 3;
@@ -80,7 +82,7 @@ void main(uint3 index : SV_DispatchThreadId, uint3 group_index : SV_GroupThreadI
 			const VisibilityInfo vis_p = gVisibility[p.y*extent.x + p.x];
 			if (gInstanceIndexMap[vis.instance_index()] != vis_p.instance_index()) continue;
 
-			const float w_z = abs(vis_p.z() - vis.z()) / (length(vis.dz_dxy() * float2(xx, yy)) + 1e-2);
+			const float w_z = abs(gDepth[p.y*extent.x + p.x].z - depth.z) / (length(depth.dz_dxy * float2(xx, yy)) + 1e-2);
 			const float w_n = pow(saturate(dot(vis_p.normal(), vis.normal())), 128);
 			const float w = exp(-w_z) * w_n;
 			if (isnan(w) || isinf(w)) continue;

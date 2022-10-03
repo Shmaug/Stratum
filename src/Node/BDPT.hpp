@@ -7,6 +7,8 @@
 
 namespace stm {
 
+struct HashGridData;
+
 class BDPT {
 public:
 	STRATUM_API BDPT(Node& node);
@@ -52,6 +54,7 @@ private:
 	BDPTDebugMode mDebugMode = BDPTDebugMode::eNone;
 	uint32_t mLightTraceQuantization = 65536;
 
+
 	struct FrameResources {
 		shared_ptr<Fence> mFence;
 
@@ -70,6 +73,7 @@ private:
 		Image::View mDebugImage;
 
 		unordered_map<string, Buffer::View<byte>> mPathData;
+		vector<shared_ptr<HashGridData>> mHashGrids;
 		Buffer::View<VisibilityInfo> mSelectionData;
 		bool mSelectionDataValid;
 

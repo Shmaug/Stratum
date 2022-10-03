@@ -24,14 +24,14 @@ struct LightSampleRecord {
 uint sample_light_instance(out float pdf, const float rnd) {
 	int li;
 	if (gSampleLightPower) {
-		li = dist1d_sample(gDistributions, gLightDistributionCDF, gLightCount, rnd);
-		pdf = dist1d_pdf(gDistributions, gLightDistributionPDF, li);
+		li = dist1d_sample(gSceneParams.gDistributions, gLightDistributionCDF, gLightCount, rnd);
+		pdf = dist1d_pdf(gSceneParams.gDistributions, gLightDistributionPDF, li);
 	} else {
 		// pick random light
 		li = rnd*(gLightCount*.9999);
 		pdf = 1/(float)gLightCount;
 	}
-	return gLightInstances[li];
+	return gSceneParams.gLightInstances[li];
 }
 
 void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const float3 ref_pos) {
@@ -52,7 +52,7 @@ void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const flo
 		if (gHasEnvironment) ls.pdf *= 1 - gEnvironmentSampleProbability;
 
 		float2 uv;
-		const InstanceData instance = gInstances[light_instance_index];
+		const InstanceData instance = gSceneParams.gInstances[light_instance_index];
 		ls.material_address = instance.material_address();
 		switch (instance.type()) {
 			case INSTANCE_TYPE_SPHERE: {
@@ -66,16 +66,16 @@ void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const flo
 					const float phi = 2 * M_PI * rnd.y;
 					const float3 local_normal = float3(r_ * cos(phi), z, r_ * sin(phi));
 					uv = cartesian_to_spherical_uv(local_normal);
-					ls.position = gInstanceTransforms[light_instance_index].transform_point(r * local_normal);
-					ls.normal = normalize(gInstanceTransforms[light_instance_index].transform_vector(local_normal));
+					ls.position = gSceneParams.gInstanceTransforms[light_instance_index].transform_point(r * local_normal);
+					ls.normal = normalize(gSceneParams.gInstanceTransforms[light_instance_index].transform_vector(local_normal));
 					ls.to_light = ls.position - ref_pos;
 					ls.dist = length(ls.to_light);
 					ls.to_light /= ls.dist;
 				} else {
 					const float3 center = float3(
-						gInstanceTransforms[light_instance_index].m[0][3],
-						gInstanceTransforms[light_instance_index].m[1][3],
-						gInstanceTransforms[light_instance_index].m[2][3]);
+						gSceneParams.gInstanceTransforms[light_instance_index].m[0][3],
+						gSceneParams.gInstanceTransforms[light_instance_index].m[1][3],
+						gSceneParams.gInstanceTransforms[light_instance_index].m[2][3]);
 					float3 to_center = center - ref_pos;
 					const float dist = length(to_center);
 					to_center /= dist;
@@ -113,7 +113,7 @@ void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const flo
 					ls.dist = length(ls.to_light);
 					ls.to_light /= ls.dist;
 
-					const float3 local_normal = gInstanceInverseTransforms[light_instance_index].transform_vector(ls.normal);
+					const float3 local_normal = gSceneParams.gInstanceInverseTransforms[light_instance_index].transform_vector(ls.normal);
 					uv = cartesian_to_spherical_uv(local_normal);
 				}
 
@@ -126,7 +126,7 @@ void sample_point_on_light(out LightSampleRecord ls, const float4 rnd, const flo
 				const float2 bary = float2(1 - a, a*rnd.y);
 
 				ShadingData sd;
-				make_triangle_shading_data(sd, instance, gInstanceTransforms[light_instance_index], prim_index, bary);
+				make_triangle_shading_data(sd, instance, gSceneParams.gInstanceTransforms[light_instance_index], prim_index, bary);
 				uv = sd.uv;
 
 				ls.position = sd.position;
@@ -165,7 +165,7 @@ Real point_on_light_pdf(const IntersectionVertex _isect, out bool pdf_area_measu
 		pdf_area_measure = _isect.shape_pdf_area_measure;
 		Real pdf = _isect.shape_pdf;
 		if (gSampleLightPower)
-			pdf *= dist1d_pdf(gDistributions, gLightDistributionPDF, gInstances[_isect.instance_index()].light_index());
+			pdf *= dist1d_pdf(gSceneParams.gDistributions, gLightDistributionPDF, gSceneParams.gInstances[_isect.instance_index()].light_index());
 		else
 			pdf /= gLightCount;
 		if (gHasEnvironment) pdf *= 1 - gEnvironmentSampleProbability;

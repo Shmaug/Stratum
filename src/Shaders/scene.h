@@ -83,65 +83,14 @@ struct PackedVertexData {
 	float u;
 	float3 normal;
 	float v;
-	float4 tangent;
-
 	inline float2 uv() { return float2(u, v); }
-};
-
-struct RayDifferentialFull {
-	float3 origin_dx, origin_dy;
-	float3 direction_dx, direction_dy;
-#ifdef __HLSL__
 	SLANG_MUTATING
-	inline void transfer(const float hit_t) {
-		origin_dx += hit_t;
-		origin_dy += hit_t;
+	inline void set(const float3 p, const float3 n, const float2 uv) {
+		position = p;
+		u = uv[0];
+		normal = n;
+		v= uv[1];
 	}
-	SLANG_MUTATING
-	inline void transfer(const float3 center, const float radius, const float hit_t) {
-		const float2 tx = ray_sphere(origin_dx, direction_dx, center, radius);
-		origin_dx += direction_dx * (tx.x > 0 ? tx.x : tx.y > 0 ? tx.y : hit_t);
-		const float2 ty = ray_sphere(origin_dy, direction_dy, center, radius);
-		origin_dy += direction_dy * (ty.x > 0 ? ty.x : ty.y > 0 ? ty.y : hit_t);
-	}
-	SLANG_MUTATING
-	inline void transfer(const float3 center, const float3 normal) {
-		origin_dx += ray_plane(origin_dx - center, direction_dx, normal);
-		origin_dy += ray_plane(origin_dy - center, direction_dy, normal);
-	}
-	SLANG_MUTATING
-	inline void reflect_(const float3 n) {
-		direction_dx = reflect(direction_dx, n);
-		direction_dy = reflect(direction_dy, n);
-	}
-	SLANG_MUTATING
-	inline void refract_(const float3 n, const float eta) {
-		direction_dx = refract(direction_dx, n, eta);
-		direction_dy = refract(direction_dy, n, eta);
-	}
-#endif
-};
-struct RayDifferential {
-	float radius;
-	float spread;
-#ifdef __HLSL__
-	SLANG_MUTATING
-	inline void transfer(const float t) {
-		radius += spread*t;
-	}
-	SLANG_MUTATING
-	inline void reflect(const float mean_curvature, const float roughness) {
-		const float spec_spread = spread + 2 * mean_curvature * radius;
-		const float diff_spread = 0.2;
-		spread = max(0, lerp(spec_spread, diff_spread, roughness));
-	}
-	SLANG_MUTATING
-	inline void refract(const float mean_curvature, const float roughness, const float eta) {
-		const float spec_spread = (spread + 2 * mean_curvature * radius) / eta;
-		const float diff_spread = 0.2;
-		spread = max(0, lerp(spec_spread, diff_spread, roughness));
-	}
-#endif
 };
 
 struct ViewData {
@@ -165,18 +114,17 @@ struct ViewData {
 struct VisibilityInfo {
 	uint instance_primitive_index;
 	uint packed_normal;
-	uint packed_z;
-	uint packed_dz;
 
 	inline uint instance_index()  { return BF_GET(instance_primitive_index, 0, 16); }
 	inline uint primitive_index() { return BF_GET(instance_primitive_index, 16, 16); }
-
 #ifdef __HLSL__
 	inline float3 normal()   { return unpack_normal_octahedron(packed_normal); }
-	inline float z()         { return f16tof32(packed_z); }
-	inline float prev_z()    { return f16tof32(packed_z>>16); }
-	inline float2 dz_dxy()   { return unpack_f16_2(packed_dz); }
 #endif
+};
+struct DepthInfo {
+	float z;
+	float prev_z;
+	float2 dz_dxy;
 };
 
 #ifdef __HLSL__

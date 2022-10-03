@@ -544,7 +544,7 @@ inline vk::AccessFlags guess_access_flags(vk::ImageLayout layout) {
 }
 
 inline auto format_bytes(size_t bytes) {
-	const char* units[] { "B", "KB", "MB", "GB", "TB" };
+	const char* units[] { "B", "KiB", "MiB", "GiB", "TiB" };
 	uint32_t i = 0;
 	while (bytes > 1024 && i < ranges::size(units)-1) {
 		bytes /= 1024;

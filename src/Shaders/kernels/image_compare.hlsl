@@ -16,23 +16,22 @@ void main(uint3 index : SV_DispatchThreadID) {
 	gImage1.GetDimensions(resolution.x, resolution.y);
 	if (any(index.xy >= resolution)) return;
 
-	float error = 0;
 	const float3 c1 = gImage1[index.xy].rgb;
 	const float3 c2 = gImage2[index.xy].rgb;
+
+	float error = 0;
 	switch (gMode) {
-	case (uint)ErrorMode::eMSELuminance:
-		error = pow2(luminance(c1) - luminance(c2));
+	case (uint)CompareMetric::eSMAPE:
+		error = dot(1, abs(c1 - c2) / (abs(c1) + abs(c2)));
 		break;
-	case (uint)ErrorMode::eMSERGB:
+	case (uint)CompareMetric::eMSE:
 		error = dot(1, pow2(c1 - c2));
 		break;
-	case (uint)ErrorMode::eAverageLuminance:
-		error = (luminance(c1) - luminance(c2)) / (resolution.x*resolution.y);
-		break;
-	case (uint)ErrorMode::eAverageRGB:
-		error = dot(1, c1 - c2) / (resolution.x*resolution.y*3);
+	case (uint)CompareMetric::eAverage:
+		error = dot(1, c1 - c2);
 		break;
 	}
+	error /= 3*resolution.x*resolution.y;
 
 	error = WaveActiveSum(error);
 

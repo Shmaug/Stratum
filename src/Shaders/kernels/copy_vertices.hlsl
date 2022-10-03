@@ -14,7 +14,7 @@ struct PushConstants {
 	uint gCount;
 	uint gPositionStride;
 	uint gNormalStride;
-	uint gTangentStride;
+	//uint gTangentStride;
 	uint gTexcoordStride;
 };
 
@@ -29,11 +29,10 @@ SLANG_SHADER("compute")
 void main(uint3 index : SV_DispatchThreadId) {
 	if (index.x >= gPushConstants.gCount) return;
 	PackedVertexData v;
-	float2 uv = gPushConstants.gTexcoordStride > 0 ? gTexcoords.Load<float2>(index.x*gPushConstants.gTexcoordStride) : 0;
-	v.position = gPositions.Load<float3>(index.x*gPushConstants.gPositionStride);
-	v.u = uv.x;
-	v.normal = gNormals.Load<float3>(index.x*gPushConstants.gNormalStride);
-	v.v = uv.y;
-	v.tangent = gPushConstants.gTangentStride > 0 ? gTangents.Load<float4>(index.x*gPushConstants.gTangentStride) : 0;
+	v.set(
+		gPositions.Load<float3>(index.x*gPushConstants.gPositionStride),
+		gNormals.Load<float3>(index.x*gPushConstants.gNormalStride),
+		//gPushConstants.gTangentStride > 0 ? gTangents.Load<float4>(index.x*gPushConstants.gTangentStride) : 0,
+		gPushConstants.gTexcoordStride > 0 ? gTexcoords.Load<float2>(index.x*gPushConstants.gTexcoordStride) : 0 );
 	gVertices[index.x] = v;
 }
